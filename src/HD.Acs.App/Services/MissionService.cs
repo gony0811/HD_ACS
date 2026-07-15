@@ -1,0 +1,215 @@
+using System.Text.Json;
+using HD.Acs.Core.Abstractions;
+using HD.Acs.Core.Domain;
+using HD.Acs.Data;
+using HD.Acs.Data.Entities;
+using HD.Acs.Vda5050;
+using Microsoft.EntityFrameworkCore;
+
+namespace HD.Acs.App.Services;
+
+/// <summary>
+/// 시나리오 실행/미션 릴리즈 — 층 단위 미션 분할 [GRAPH_DATA_MODEL 8.4].
+/// Order는 전체 Base 선릴리즈 [ADR-002], 릴리즈 가드: 미션 층 == 로봇 보고 층 [Q9].
+/// </summary>
+public sealed class MissionService
+{
+    private readonly AcsDbContext _db;
+    private readonly Vda5050MasterClient _vda;
+    private readonly OrderBuilder _orderBuilder = new();
+    private readonly ILogger<MissionService> _log;
+
+    public MissionService(AcsDbContext db, Vda5050MasterClient vda, ILogger<MissionService> log)
+    {
+        _db = db; _vda = vda; _log = log;
+    }
+
+    /// <summary>시나리오 → 층별 미션 시퀀스로 분해하여 Run 생성, 첫 미션 릴리즈 시도</summary>
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
+    {
+        var scenario = await _db.Scenarios
+            .Include(s => s.Points.OrderBy(p => p.Seq)).ThenInclude(p => p.Tasks.OrderBy(t => t.Seq))
+            .FirstAsync(s => s.ScenarioId == scenarioId, ct);
+
+        var nodeMapIds = await _db.Nodes.AsNoTracking()
+            .Where(n => scenario.Points.Select(p => p.NodeId).Contains(n.NodeId))
+            .ToDictionaryAsync(n => n.NodeId, n => n.MapId, ct);
+
+        var run = new ScenarioRunEntity
+        {
+            RunId = Guid.NewGuid(),
+            ScenarioId = scenario.ScenarioId,
+            ScenarioVer = scenario.Version,
+            RobotId = robotId,
+            State = "RUNNING",
+            StartedAt = DateTimeOffset.UtcNow
+        };
+
+        // 연속한 동일 층 지점들을 하나의 미션으로 묶는다 (한 미션 = 한 층)
+        var seq = 0;
+        string? currentMap = null;
+        foreach (var point in scenario.Points)
+        {
+            var mapId = nodeMapIds[point.NodeId];
+            if (mapId != currentMap)
+            {
+                run.Missions.Add(new MissionEntity
+                {
+                    MissionId = Guid.NewGuid(), RunId = run.RunId, Seq = seq++,
+                    MapId = mapId, RobotId = robotId,
+                    OrderId = Guid.NewGuid().ToString(), State = nameof(MissionState.Created)
+                });
+                currentMap = mapId;
+            }
+        }
+
+        _db.ScenarioRuns.Add(run);
+        await _db.SaveChangesAsync(ct);
+
+        await TryReleaseNextMissionAsync(run.RunId, ct);
+        return run.RunId;
+    }
+
+    /// <summary>
+    /// 다음 CREATED 미션 릴리즈. 층 검증 게이트: 로봇 보고 mapId == 미션 mapId 일 때만.
+    /// 불일치 시 Run을 WAITING_FLOOR_TRANSFER로 두고 작업자 수동 절차를 기다린다 [Q9].
+    /// </summary>
+    public async Task<bool> TryReleaseNextMissionAsync(Guid runId, CancellationToken ct = default)
+    {
+        var run = await _db.ScenarioRuns.Include(r => r.Missions.OrderBy(m => m.Seq))
+            .FirstAsync(r => r.RunId == runId, ct);
+        var next = run.Missions.FirstOrDefault(m => m.State == nameof(MissionState.Created));
+        if (next == null)
+        {
+            run.State = "COMPLETED"; run.EndedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        var ctx = await _db.RobotContexts.FindAsync(new object[] { run.RobotId }, ct);
+        if (ctx?.ReportedMapId != next.MapId)
+        {
+            run.State = "WAITING_FLOOR_TRANSFER";     // 릴리즈 가드 — 수동 층 전환 대기
+            await _db.SaveChangesAsync(ct);
+            _log.LogInformation("Run {Run}: 층 전환 대기 (로봇={Reported}, 미션={Required})",
+                runId, ctx?.ReportedMapId, next.MapId);
+            return false;
+        }
+
+        await ReleaseMissionAsync(next, ct);
+        run.State = "RUNNING";
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private async Task ReleaseMissionAsync(MissionEntity mission, CancellationToken ct)
+    {
+        var robot = await _db.Robots.AsNoTrackingWithIdentityResolution()
+            .FirstAsync(r => r.RobotId == mission.RobotId, ct);
+        var run = await _db.ScenarioRuns.AsNoTracking().FirstAsync(r => r.RunId == mission.RunId, ct);
+
+        // 이 미션(층)에 속한 검사 지점만 추출
+        var points = await (
+            from p in _db.InspectionPoints.AsNoTracking().Include(p => p.Tasks.OrderBy(t => t.Seq))
+            join n in _db.Nodes.AsNoTracking() on p.NodeId equals n.NodeId
+            where p.ScenarioId == run.ScenarioId && n.MapId == mission.MapId
+            orderby p.Seq
+            select p).ToListAsync(ct);
+
+        var graph = await GraphLoader.LoadAsync(_db, mission.MapId, ct);
+        var ctx = await _db.RobotContexts.AsNoTracking().FirstAsync(c => c.RobotId == mission.RobotId, ct);
+        var startNodeId = FindNearestNode(graph, ctx) ?? points[0].NodeId;
+
+        // PlannedPoint 변환 — actionId를 여기서 발급·보존 (state 대조 키)
+        var planned = new List<PlannedPoint>();
+        var actionRows = new List<OrderActionEntity>();
+        foreach (var p in points)
+        {
+            var actions = new List<PlannedAction>();
+            foreach (var t in p.Tasks)
+            {
+                var actionId = Guid.NewGuid();
+                var parameters = new Dictionary<string, object?>();
+                if (t.JobRef != null) parameters["jobRef"] = t.JobRef;
+                if (t.Position != null) parameters["position"] = JsonSerializer.Deserialize<object>(t.Position);
+                if (t.Params != null) parameters["params"] = JsonSerializer.Deserialize<object>(t.Params);
+
+                actions.Add(new PlannedAction(actionId, t.ActionType, "HARD", parameters));
+                actionRows.Add(new OrderActionEntity
+                {
+                    ActionId = actionId, MissionId = mission.MissionId, TaskId = t.TaskId,
+                    ActionType = t.ActionType, BlockingType = "HARD",
+                    Params = t.Position   // 위치 파라미터를 이력 대조 키로 보존 [ADR-004]
+                });
+            }
+            planned.Add(new PlannedPoint(p.NodeId, actions));
+        }
+
+        var order = _orderBuilder.Build(mission.OrderId, mission.OrderUpdateId, startNodeId, planned, graph);
+
+        // Order 스냅샷 저장 (짝수=노드, 홀수=엣지)
+        foreach (var n in order.Nodes)
+        {
+            _db.OrderNodes.Add(new OrderNodeEntity
+            {
+                MissionId = mission.MissionId, SequenceId = n.SequenceId, NodeId = n.NodeId,
+                X = n.NodePosition!.X, Y = n.NodePosition.Y, Theta = n.NodePosition.Theta
+            });
+            foreach (var a in n.Actions)
+            {
+                var row = actionRows.First(r => r.ActionId == Guid.Parse(a.ActionId));
+                row.NodeSequenceId = n.SequenceId;
+            }
+        }
+        foreach (var e in order.Edges)
+            _db.OrderEdges.Add(new OrderEdgeEntity
+            {
+                MissionId = mission.MissionId, SequenceId = e.SequenceId,
+                EdgeId = e.EdgeId, StartNodeId = e.StartNodeId, EndNodeId = e.EndNodeId
+            });
+        _db.OrderActions.AddRange(actionRows);
+
+        await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+
+        mission.State = nameof(MissionState.Released);
+        mission.StartedAt = DateTimeOffset.UtcNow;
+        _db.TransitionLogs.Add(new TransitionLogEntity
+        {
+            MissionId = mission.MissionId,
+            FromState = nameof(MissionState.Created), ToState = nameof(MissionState.Released),
+            Trigger = nameof(MissionTrigger.Release)
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>작업자 수동 층(존) 변경 [Q9] — 감사 로그 + initPosition 전송</summary>
+    public async Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
+        double x, double y, double theta, CancellationToken ct = default)
+    {
+        var ctx = await _db.RobotContexts.FindAsync(new object[] { robotId }, ct)
+                  ?? _db.RobotContexts.Add(new RobotContextEntity { RobotId = robotId }).Entity;
+        ctx.ManualMapId = mapId;
+        ctx.ManualUpdatedBy = userId;
+        ctx.ManualUpdatedAt = DateTimeOffset.UtcNow;
+
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = userId, Action = "MANUAL_ZONE_CHANGE", Target = robotId,
+            Detail = JsonSerializer.Serialize(new { mapId, x, y, theta })
+        });
+        await _db.SaveChangesAsync(ct);
+
+        var robot = await _db.Robots.AsNoTracking().FirstAsync(r => r.RobotId == robotId, ct);
+        await _vda.InitPositionAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber),
+            mapId, x, y, theta, ct);
+        // 이후 로봇 state의 agvPosition.mapId 확인 → TryReleaseNextMissionAsync가 게이트 통과
+    }
+
+    private static string? FindNearestNode(Core.Graph.MapGraph graph, RobotContextEntity ctx)
+    {
+        if (ctx.ReportedX is not double rx || ctx.ReportedY is not double ry) return null;
+        return graph.Nodes.Values
+            .OrderBy(n => Math.Pow(n.X - rx, 2) + Math.Pow(n.Y - ry, 2))
+            .FirstOrDefault()?.NodeId;
+    }
+}

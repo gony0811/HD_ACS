@@ -1,0 +1,105 @@
+namespace HD.Acs.Data.Entities;
+
+// ref 스키마 — 마스터 데이터 (db/schema.sql 대응)
+
+public class MapEntity
+{
+    public string MapId { get; set; } = "";       // 'CT1-L1' (층 = 맵)
+    public string TankId { get; set; } = "";
+    public int Level { get; set; }                // 1(바닥)~4
+    public string Name { get; set; } = "";
+    public int Version { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+}
+
+public class NodeEntity
+{
+    public string NodeId { get; set; } = "";
+    public string MapId { get; set; } = "";
+    public string? Name { get; set; }
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double? Theta { get; set; }
+    public double? AllowedDevXy { get; set; }
+    public double? AllowedDevTheta { get; set; }
+    public string NodeType { get; set; } = "WAYPOINT";
+    public string? Metadata { get; set; }         // jsonb
+}
+
+public class EdgeEntity
+{
+    public string EdgeId { get; set; } = "";
+    public string MapId { get; set; } = "";
+    public string StartNodeId { get; set; } = "";
+    public string EndNodeId { get; set; } = "";
+    public bool Bidirectional { get; set; } = true;
+    public string EdgeType { get; set; } = "TRAVEL";  // TRAVEL | MANUAL_TRANSFER
+    public double? MaxSpeed { get; set; }
+    public double? Length { get; set; }
+    public string? Metadata { get; set; }
+}
+
+public class ZoneEntity
+{
+    public string ZoneId { get; set; } = "";
+    public string MapId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string ZoneType { get; set; } = "AREA";    // FLOOR | AREA | ELEVATOR_CELL | RESTRICTED
+    public string? Geometry { get; set; }             // jsonb
+}
+
+public class ZoneMemberEntity
+{
+    public string ZoneId { get; set; } = "";
+    public string NodeId { get; set; } = "";
+}
+
+public class ActionCatalogEntity
+{
+    public string ActionType { get; set; } = "";
+    public string Scope { get; set; } = "NODE";       // NODE | EDGE | INSTANT
+    public string BlockingType { get; set; } = "HARD";
+    public string? ParamSchema { get; set; }          // jsonb
+    public string? Description { get; set; }
+}
+
+public class ScenarioEntity
+{
+    public Guid ScenarioId { get; set; }
+    public string Name { get; set; } = "";
+    public int Version { get; set; }
+    public string TankId { get; set; } = "";
+    public string Policy { get; set; } = "{}";        // jsonb — 재시도/스킵 정책 외부화 [ADR-010]
+    public string Status { get; set; } = "DRAFT";
+    public List<InspectionPointEntity> Points { get; set; } = new();
+}
+
+public class InspectionPointEntity
+{
+    public Guid PointId { get; set; }
+    public Guid ScenarioId { get; set; }
+    public int Seq { get; set; }
+    public string NodeId { get; set; } = "";          // 층은 node.map_id로 결정
+    public List<InspectionTaskEntity> Tasks { get; set; } = new();
+}
+
+public class InspectionTaskEntity
+{
+    public Guid TaskId { get; set; }
+    public Guid PointId { get; set; }
+    public int Seq { get; set; }
+    public string ActionType { get; set; } = "";
+    public string? JobRef { get; set; }               // HD_AMR 검사 작업 식별자 [ADR-001]
+    public string? Position { get; set; }             // jsonb {tank,level,wall_code,x,y,z} [ADR-004]
+    public string? Params { get; set; }               // jsonb opaque
+}
+
+public class RobotEntity
+{
+    public string RobotId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Manufacturer { get; set; } = "";    // VDA5050 토픽 요소
+    public string SerialNumber { get; set; } = "";
+    public string VdaVersion { get; set; } = "2.0";
+    public bool IsActive { get; set; } = true;
+}

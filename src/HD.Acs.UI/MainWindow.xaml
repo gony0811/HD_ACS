@@ -1,0 +1,26 @@
+<Window x:Class="HD.Acs.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HD_ACS - LNG 화물창 용접검사로봇 관제" Width="1280" Height="800">
+    <DockPanel>
+        <StatusBar DockPanel.Dock="Bottom">
+            <TextBlock x:Name="ConnStatus" Text="서버 연결 대기…" />
+        </StatusBar>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <!-- TODO: 좌측 = 화물창 3D 뷰 + 전개도(층 선택 L1~L4, TANK_WALL_LAYOUT 레이아웃) -->
+            <Border Grid.Column="0" Margin="8" BorderBrush="Gray" BorderThickness="1">
+                <TextBlock Text="3D / 전개도 뷰 (Q5: 렌더링 라이브러리 확정 후 구현)"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <!-- TODO: 우측 = 로봇 상태, 미션 진행률, 알람, 수동 층 변경(Operator 권한) -->
+            <Border Grid.Column="1" Margin="8" BorderBrush="Gray" BorderThickness="1">
+                <TextBlock Text="로봇 상태 / 미션 / 알람 패널"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>
