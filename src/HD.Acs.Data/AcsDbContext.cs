@@ -49,7 +49,10 @@ public class AcsDbContext : DbContext
             e.HasKey(x => new { x.MapId, x.MapVersion }); });
 
         mb.Entity<MapCalibrationPointEntity>(e => { e.ToTable("map_calibration_point", "ref");
-            e.HasKey(x => x.Id); e.HasIndex(x => new { x.MapId, x.MapVersion }); });
+            e.HasKey(x => x.Id); e.HasIndex(x => new { x.MapId, x.MapVersion });
+            // snake_case 컨벤션은 DrawingXM→drawing_xm 으로 만들지만 DDL은 drawing_x_m (단위 접미사 _m 분리) → 명시 오버라이드
+            e.Property(x => x.DrawingXM).HasColumnName("drawing_x_m");
+            e.Property(x => x.DrawingYM).HasColumnName("drawing_y_m"); });
 
         mb.Entity<NodeEntity>(e => { e.ToTable("node", "ref"); e.HasKey(x => x.NodeId);
             e.HasIndex(x => x.MapId);

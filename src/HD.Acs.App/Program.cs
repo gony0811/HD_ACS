@@ -16,7 +16,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
 builder.Services.AddDbContext<AcsDbContext>(o =>
-    o.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Default"))
+     .UseSnakeCaseNamingConvention());   // 속성(PascalCase) → 컬럼(snake_case) 매핑 [db/schema.sql 네이밍 C안]
 
 builder.Services.AddSingleton(sp => new Vda5050MasterClient(
     builder.Configuration["Acs:Mqtt:Host"] ?? "localhost",
