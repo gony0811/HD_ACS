@@ -1,0 +1,78 @@
+<UserControl x:Class="HD.Acs.UI.Views.TankView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+             xmlns:helix="http://helix-toolkit.org/wpf"
+             xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure">
+    <UserControl.Resources>
+        <conv:NormalizedToCanvasConverter x:Key="NormToCanvas" />
+    </UserControl.Resources>
+    <DockPanel>
+        <!-- 층 선택 L1~L4 + 로봇 위치 -->
+        <Border DockPanel.Dock="Top" Padding="8" Background="#ECF0F1">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="층" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <telerik:RadComboBox Width="90" ItemsSource="{Binding Floors}" DisplayMemberPath="Level"
+                                     SelectedItem="{Binding SelectedFloor, Mode=TwoWay}" />
+                <TextBlock Margin="16,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotMapId, StringFormat='로봇 층: {0}'}" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotX, StringFormat='X: {0:F2}', FallbackValue='X: -'}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotY, StringFormat='Y: {0:F2}', FallbackValue='Y: -'}" />
+            </StackPanel>
+        </Border>
+
+        <telerik:RadTabControl>
+            <telerik:RadTabItem Header="3D 뷰">
+                <helix:HelixViewport3D x:Name="Viewport" ZoomExtentsWhenLoaded="True"
+                                       ShowCoordinateSystem="True" Background="#1B2631">
+                    <helix:SunLight />
+                    <helix:GridLinesVisual3D Width="20" Length="20" MajorDistance="2" MinorDistance="1"
+                                             Thickness="0.02" Fill="#5D6D7E" />
+                    <!-- 화물창 셸 placeholder (팔각 단면 대체 박스) — 실제 CAD 메시는 Q6 후속 -->
+                    <helix:BoxVisual3D Center="0,0,2" Length="12" Width="12" Height="4"
+                                       Fill="#3498DB" />
+                    <!-- 로봇 마커 (코드비하인드에서 위치 갱신) -->
+                    <helix:SphereVisual3D x:Name="RobotMarker" Center="0,0,0.4" Radius="0.4" Fill="#E74C3C" />
+                </helix:HelixViewport3D>
+            </telerik:RadTabItem>
+
+            <telerik:RadTabItem Header="전개도">
+                <Viewbox Stretch="Uniform" Margin="12">
+                    <Canvas Width="400" Height="400" Background="#FBFCFC">
+                        <!-- 중앙 A · 방사형 8벽면 · 외곽 F -->
+                        <ItemsControl ItemsSource="{Binding Walls}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas Width="400" Height="400" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Canvas.Left"
+                                            Value="{Binding NormX, Converter={StaticResource NormToCanvas}, ConverterParameter='400|72'}" />
+                                    <Setter Property="Canvas.Top"
+                                            Value="{Binding NormY, Converter={StaticResource NormToCanvas}, ConverterParameter='400|56'}" />
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="72" Height="56" CornerRadius="4"
+                                            Background="#D6EAF8" BorderBrush="#2E86C1" BorderThickness="1">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="16"
+                                                       HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Name}" FontSize="9" Foreground="#566573"
+                                                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="66" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Canvas>
+                </Viewbox>
+            </telerik:RadTabItem>
+        </telerik:RadTabControl>
+    </DockPanel>
+</UserControl>

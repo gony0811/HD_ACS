@@ -69,6 +69,34 @@ CREATE TABLE ref.zone_member (          -- NA_R_LINK_ZONE 대응
   PRIMARY KEY (zone_id, node_id)
 );
 
+-- ─────────────── 도면→맵 캘리브레이션 (ref) [PHASE2 WP-1 · T_W_D] ───────────────
+-- 층별 도면 좌표 → AMR SLAM 맵 좌표 강체변환. 맵버전과 바인딩되어 맵 재생성 시 자동 무효.
+CREATE TABLE ref.map_calibration (
+  map_id        text NOT NULL,               -- ref.map.map_id
+  map_version   int  NOT NULL,               -- ref.map.version 과 일치할 때만 유효 [§2.5]
+  tx            double precision NOT NULL,    -- 평행이동 X [m]
+  ty            double precision NOT NULL,    -- 평행이동 Y [m]
+  yaw_rad       double precision NOT NULL,    -- 회전 [rad], 맵 X축 기준 CCW
+  rms_m         double precision NOT NULL,    -- 등록 잔차 RMS [m]
+  point_count   int NOT NULL,                 -- 사용된 대응쌍 수
+  registered_by text,
+  registered_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (map_id, map_version)
+);
+
+CREATE TABLE ref.map_calibration_point (     -- 캡처된 기준점 대응쌍 (감사·재계산용 보존)
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  map_id        text NOT NULL,
+  map_version   int  NOT NULL,
+  drawing_x_m   double precision NOT NULL,    -- 도면 좌표 (m로 정규화하여 저장)
+  drawing_y_m   double precision NOT NULL,
+  map_x         double precision NOT NULL,    -- 캡처 시점 robot_context.reported_x
+  map_y         double precision NOT NULL,
+  captured_at   timestamptz NOT NULL DEFAULT now(),
+  captured_by   text
+);
+CREATE INDEX ix_map_calib_point ON ref.map_calibration_point (map_id, map_version);
+
 -- ═══════════════════════ ② 액션 카탈로그 (ref) [Q1] ═══════════════════════
 
 CREATE TABLE ref.action_catalog (

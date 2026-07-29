@@ -205,7 +205,7 @@
 | Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |
-| Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ⬜ WPF 확정에 따라 후보 평가만 남음 |
+| Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ✅ 해소 — **HelixToolkit.Wpf** 확정 (HD.Acs.UI에 도입). UI 컨트롤 스위트는 Telerik UI for WPF(Fluent 테마), 전개도는 Canvas 기반 2D. UI DI는 백엔드와 일관되게 MS.DI(Generic Host) 사용 |
 | Q5′ | UI 프레임워크 재검토 | ADR-005, 009 | ✅ 해소 — 3D 요구 우선, WPF 확정 |
 | Q6 | 화물창 맵 데이터 소스 | ADR-008 | ⬜ CAD/도면 기반 vs SLAM 맵 기반 |
 | Q7 | 안전 요구사항 명세 (관제 정지의 위상) | ADR-007 | ⬜ 하드웨어 E-Stop 체계와의 관계 문서화 |

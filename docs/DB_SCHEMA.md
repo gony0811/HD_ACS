@@ -4,7 +4,7 @@
 > 네이밍 [C안]: PostgreSQL 스키마(namespace)로 계층 구분 + snake_case
 > `ref`(마스터) / `run`(런타임) / `hist`(이력) / `alarm`(알람) / `sys`(시스템) — NAMUGA의 NA_{계층}_ 개념을 스키마로 승계
 
-## 테이블 전체 목록 (22 테이블 + 2 뷰)
+## 테이블 전체 목록 (24 테이블 + 2 뷰)
 
 | 계층 | 테이블 | 역할 | 근거 |
 |---|---|---|---|
@@ -12,6 +12,8 @@
 | | ref.node | 정차/경유 노드 (좌표, 허용편차, ELEVATOR 포함) | VDA 5050 |
 | | ref.edge | 주행 간선 (TRAVEL / MANUAL_TRANSFER) | Q9 수동 이송 |
 | | ref.zone / ref.zone_member | 층·구역 계층 (FLOOR/AREA/RESTRICTED…) | 4층 슬라이스 |
+| **ref 캘리브레이션** | ref.map_calibration | 층별 도면→맵 강체변환 T_W_D (맵버전 바인딩) | PHASE2 WP-1 |
+| | ref.map_calibration_point | 기준점 대응쌍 (감사·재계산 보존) | PHASE2 WP-1 |
 | **ref 액션** | ref.action_catalog | HD_AMR과 협의된 액션 계약 | Q1 |
 | **ref 시나리오** | ref.scenario | 검사 시나리오 (정책 jsonb 외부화) | ADR-010 |
 | | ref.inspection_point | 검사 지점 → 노드 참조 (층 자동 결정) | |

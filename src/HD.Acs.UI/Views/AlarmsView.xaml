@@ -1,0 +1,29 @@
+<UserControl x:Class="HD.Acs.UI.Views.AlarmsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+             xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure">
+    <UserControl.Resources>
+        <conv:BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <conv:InverseBooleanToVisibilityConverter x:Key="InvBoolToVis" />
+    </UserControl.Resources>
+    <Grid Margin="10">
+        <telerik:RadGridView ItemsSource="{Binding Alarms}"
+                             Visibility="{Binding HasAlarms, Converter={StaticResource BoolToVis}}"
+                             AutoGenerateColumns="False" IsReadOnly="True"
+                             RowIndicatorVisibility="Collapsed">
+            <telerik:RadGridView.Columns>
+                <telerik:GridViewDataColumn Header="심각도" DataMemberBinding="{Binding Severity}" Width="80" />
+                <telerik:GridViewDataColumn Header="코드" DataMemberBinding="{Binding AlarmCode}" Width="110" />
+                <telerik:GridViewDataColumn Header="로봇" DataMemberBinding="{Binding RobotId}" Width="90" />
+                <telerik:GridViewDataColumn Header="내용" DataMemberBinding="{Binding Title}" Width="*" />
+                <telerik:GridViewDataColumn Header="발생시각" DataMemberBinding="{Binding RaisedAt}" Width="150" />
+            </telerik:RadGridView.Columns>
+        </telerik:RadGridView>
+
+        <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="Gray" MaxWidth="280" TextAlignment="Center"
+                   Visibility="{Binding HasAlarms, Converter={StaticResource InvBoolToVis}}" />
+    </Grid>
+</UserControl>

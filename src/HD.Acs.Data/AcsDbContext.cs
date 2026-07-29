@@ -13,6 +13,8 @@ public class AcsDbContext : DbContext
 
     // ref
     public DbSet<MapEntity> Maps => Set<MapEntity>();
+    public DbSet<MapCalibrationEntity> MapCalibrations => Set<MapCalibrationEntity>();
+    public DbSet<MapCalibrationPointEntity> MapCalibrationPoints => Set<MapCalibrationPointEntity>();
     public DbSet<NodeEntity> Nodes => Set<NodeEntity>();
     public DbSet<EdgeEntity> Edges => Set<EdgeEntity>();
     public DbSet<ZoneEntity> Zones => Set<ZoneEntity>();
@@ -42,6 +44,12 @@ public class AcsDbContext : DbContext
         // ═══ ref ═══
         mb.Entity<MapEntity>(e => { e.ToTable("map", "ref"); e.HasKey(x => x.MapId);
             e.HasIndex(x => new { x.TankId, x.Level, x.Version }).IsUnique(); });
+
+        mb.Entity<MapCalibrationEntity>(e => { e.ToTable("map_calibration", "ref");
+            e.HasKey(x => new { x.MapId, x.MapVersion }); });
+
+        mb.Entity<MapCalibrationPointEntity>(e => { e.ToTable("map_calibration_point", "ref");
+            e.HasKey(x => x.Id); e.HasIndex(x => new { x.MapId, x.MapVersion }); });
 
         mb.Entity<NodeEntity>(e => { e.ToTable("node", "ref"); e.HasKey(x => x.NodeId);
             e.HasIndex(x => x.MapId);

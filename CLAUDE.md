@@ -94,7 +94,7 @@ HD_ACS/
 │   ├── INSPECTION_SCENARIO.md # 검사 시나리오 모델/상태 머신
 │   ├── TANK_WALL_LAYOUT.md    # 화물창 전개도 구성·벽면 naming rule (위치 주소 체계 기준)
 │   ├── GRAPH_DATA_MODEL.md    # 그래프 자료구조·DB 설계 (VDA 5050 Order 생성 기반)
-│   ├── DB_SCHEMA.md           # DB 스키마 카탈로그 (22테이블+2뷰, ERD)
+│   ├── DB_SCHEMA.md           # DB 스키마 카탈로그 (24테이블+2뷰, ERD)
 │   └── GLOSSARY.md            # 용어 정의
 ├── db/
 │   └── schema.sql             # 통합 DDL (PostgreSQL — ref/run/hist/alarm/sys 스키마 + snake_case)
@@ -104,7 +104,12 @@ HD_ACS/
     ├── HD.Acs.Vda5050/        # VDA 5050 메시지·마스터 MQTT 클라이언트·OrderBuilder
     ├── HD.Acs.App/            # ASP.NET Core 호스트 — REST + SignalR + VDA 브릿지 [ADR-011]
     ├── HD.Acs.Simulator/      # VDA 5050 로봇(HD_AMR) 시뮬레이터
-    └── HD.Acs.UI/             # WPF 운영 앱 (net8.0-windows, 3D/전개도 TODO)
+    └── HD.Acs.UI/             # WPF 운영 앱 (Telerik UI for WPF·Fluent + HelixToolkit 3D, MVVM/Generic Host DI)
+        ├── Models/                # 백엔드 페이로드 미러 DTO
+        ├── Services/              # IAcsApiClient(REST) · IMonitoringClient(SignalR) · TankLayout
+        ├── ViewModels/            # Shell + 로봇상태/미션/알람/수동층변경/Tank (CommunityToolkit.Mvvm)
+        ├── Views/                 # UserControl (Telerik 컨트롤) · TankView(3D+전개도)
+        └── MainWindow.xaml        # RadDocking 셸 (좌: 화물창 뷰, 우: 운영 패널)
 ```
 
 ## Claude 작업 가이드라인
@@ -137,3 +142,5 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 - 2026-07-15: DB 네이밍 C안 확정 — PostgreSQL 스키마 네임스페이스(ref/run/hist/alarm/sys) + snake_case로 전환, DDL 구문 검증 완료
 - 2026-07-15: 프로세스 구조 확정(ADR-011) — 단일 프로세스 모놀리스, NAMUGA식 슈퍼바이저/이중화 미도입 (robot-is-truth로 서버 장애 영향 최소화, 무상태 앱으로 추후 active-standby 전환 가능)
 - 2026-07-15: 솔루션 골격 코드 생성 — 6개 프로젝트(Core/Data/Vda5050/App/Simulator/UI), 상태머신·그래프·Order 빌더·state 대조·층 검증 게이트·수동 존 변경·비상정지 구현. 폐쇄 샌드박스로 NuGet 복원 불가하여 패키지 무관 파일만 컴파일 검증(0 errors), 전체 빌드는 로컬 확인 필요
+- 2026-07-29: HD.Acs.UI 본구현 — Telerik UI for WPF 2025.3.813(Fluent 테마) + HelixToolkit.Wpf 3.1.2 3D 도입(Q5 해소). MVVM(CommunityToolkit) + Generic Host DI(백엔드와 일관되게 MS.DI), REST/SignalR 계약 레이어(IAcsApiClient/IMonitoringClient — 기존 code-behind SignalR 이관), RadDocking 셸(좌: 3D+전개도, 우: 로봇상태/미션/알람/수동층변경), 비상정지 툴바. 미구현 백엔드 API(알람·이력 등)는 방어적 빈 상태로 처리. Telerik은 전용 NuGet 피드(nuget.telerik.com) 자격증명 필요. 루트 nuget.config는 두 소스만 등록(packageSourceMapping은 두지 않음 — Telerik.Licensing=nuget.org 공개 / MediaFoundation=Telerik 피드 전용으로 나뉘어 매핑이 복원을 깨뜨림). 전체 솔루션(6개 프로젝트) 빌드 검증 완료(0 error). 겸사로 기존 App/Program.cs 비상정지 감사로그 네임스페이스 오타(Data.Entities→HD.Acs.Data.Entities) 수정
+- 2026-07-30: PHASE2 WP-1 map calibration 구현(docs/spec_phase2_acs.md) — 층별 도면→맵 강체변환 T_W_D. ref.map_calibration(_point) 스키마·엔티티, HD.Acs.Core/Geometry/DrawingTransform.cs(2D 강체 최소자승 Solve, 잔차 RMS/Max), calibration REST API 5개(기준점 캡처 409 가드·solve RMS 경고·맵버전 유효성 404·감사로그 CALIBRATION_CAPTURE), appsettings Acs:Calibration:RmsWarnM. 신규 HD.Acs.Core.Tests(xUnit) — DrawingTransform 8 테스트 통과. 전체 솔루션 빌드 0 error. API/DB E2E는 PostgreSQL 필요로 수동 검증 대기. WP-2~5(seam 슬라이싱·payload·시뮬레이터·UI)는 후속

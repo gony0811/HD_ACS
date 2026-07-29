@@ -12,6 +12,34 @@ public class MapEntity
     public bool IsActive { get; set; } = true;
 }
 
+// 도면→맵 캘리브레이션 [PHASE2 WP-1 · T_W_D] — 맵버전 바인딩(map_version == ref.map.version일 때만 유효)
+public class MapCalibrationEntity
+{
+    public string MapId { get; set; } = "";
+    public int MapVersion { get; set; }
+    public double Tx { get; set; }                    // 평행이동 X [m]
+    public double Ty { get; set; }                    // 평행이동 Y [m]
+    public double YawRad { get; set; }                // 회전 [rad], 맵 X축 기준 CCW
+    public double RmsM { get; set; }                  // 등록 잔차 RMS [m]
+    public int PointCount { get; set; }
+    public string? RegisteredBy { get; set; }
+    public DateTimeOffset RegisteredAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+// 캡처된 기준점 대응쌍 (감사·재계산용 보존)
+public class MapCalibrationPointEntity
+{
+    public Guid Id { get; set; }
+    public string MapId { get; set; } = "";
+    public int MapVersion { get; set; }
+    public double DrawingXM { get; set; }             // 도면 좌표 (m로 정규화 저장)
+    public double DrawingYM { get; set; }
+    public double MapX { get; set; }                  // 캡처 시점 RobotContext.ReportedX
+    public double MapY { get; set; }
+    public DateTimeOffset CapturedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? CapturedBy { get; set; }
+}
+
 public class NodeEntity
 {
     public string NodeId { get; set; } = "";

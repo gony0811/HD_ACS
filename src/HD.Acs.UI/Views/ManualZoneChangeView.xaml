@@ -1,0 +1,88 @@
+<UserControl x:Class="HD.Acs.UI.Views.ManualZoneChangeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+             xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure">
+    <UserControl.Resources>
+        <conv:BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+    <StackPanel Margin="10">
+        <TextBlock Text="작업자 수동 층(존) 변경 · Operator 권한 [Q9]" FontWeight="Bold" Margin="0,0,0,2" />
+        <TextBlock Text="엘리베이터로 로봇을 이동시킨 뒤 현재 층을 지정합니다. 감사 로그에 기록됩니다."
+                   TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,10" />
+
+        <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="로봇" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <telerik:RadComboBox Grid.Column="1" ItemsSource="{Binding RobotIds}"
+                                 SelectedItem="{Binding SelectedRobotId, Mode=TwoWay}" />
+        </Grid>
+
+        <!-- 수동 지정 vs 로봇 보고 나란히 대조 -->
+        <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="8" Margin="0,4,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="수동 지정 층" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="로봇 보고 층" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding ManualMapId}" FontSize="16" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ReportedMapId}" FontSize="16" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding ManualUpdatedBy, StringFormat='by {0}'}"
+                           Foreground="Gray" FontSize="11" />
+            </Grid>
+        </Border>
+
+        <Border Background="#FCF3CF" BorderBrush="#F1C40F" BorderThickness="1" CornerRadius="3" Padding="6"
+                Margin="0,0,0,8" Visibility="{Binding IsMismatch, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="{Binding MismatchWarning}" TextWrapping="Wrap" Foreground="#7D6608" />
+        </Border>
+
+        <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="지정 층" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <telerik:RadComboBox Grid.Column="1" ItemsSource="{Binding Floors}"
+                                 DisplayMemberPath="Level"
+                                 SelectedItem="{Binding SelectedFloor, Mode=TwoWay}" />
+        </Grid>
+
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                <TextBlock Text="X" />
+                <telerik:RadNumericUpDown Value="{Binding X, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="2,0">
+                <TextBlock Text="Y" />
+                <telerik:RadNumericUpDown Value="{Binding Y, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Margin="4,0,0,0">
+                <TextBlock Text="Theta" />
+                <telerik:RadNumericUpDown Value="{Binding Theta, Mode=TwoWay}" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal">
+            <telerik:RadButton Content="층 지정 적용" Command="{Binding ApplyZoneChangeCommand}" Margin="0,0,6,0" />
+            <telerik:RadButton Content="새로고침" Command="{Binding RefreshContextCommand}" />
+        </StackPanel>
+
+        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" Margin="0,8,0,0" />
+    </StackPanel>
+</UserControl>
