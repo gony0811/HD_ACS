@@ -107,6 +107,12 @@ CREATE TABLE ref.action_catalog (
   description   text
 );
 
+-- 액션 카탈로그 시드 [PHASE2] — inspection_task.action_type FK 충족용.
+-- startWeldInspection: 단일 용접라인 구간 자동 검사 (param_schema는 WP-3에서 확정)
+INSERT INTO ref.action_catalog (action_type, scope, blocking_type, param_schema, description)
+VALUES ('startWeldInspection', 'NODE', 'HARD', NULL, '단일 용접라인 구간 자동 검사 [WP-2 시드]')
+ON CONFLICT (action_type) DO NOTHING;
+
 -- ═══════════════════════════ ③ 시나리오 (ref) ═══════════════════════════
 
 CREATE TABLE ref.scenario (
@@ -137,6 +143,23 @@ CREATE TABLE ref.inspection_task (
   params      jsonb,     -- opaque — HD_AMR이 해석
   UNIQUE (point_id, seq)
 );
+
+-- ─────────────── 용접선 (ref) [PHASE2 WP-2] ───────────────
+-- 사람이 등록하는 유일한 입력. 도면 좌표로 저장하고 SeamSlicer가 스테이션/TASK로 전개한다.
+CREATE TABLE ref.weld_seam (
+  seam_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tank_id        text NOT NULL,
+  level          int  NOT NULL,                     -- 층 (tank+level → ref.map.map_id)
+  wall_code      text NOT NULL,                     -- 'W03' [TANK_WALL_LAYOUT]
+  seam_type      text NOT NULL DEFAULT 'LINE',      -- LINE | POLYLINE
+  path_drawing   jsonb NOT NULL,                    -- [[x,y,z],...] m, 도면 좌표. LINE이면 2점
+  normal_drawing jsonb NOT NULL,                    -- [nx,ny,nz] 벽면 법선 (도면 좌표계)
+  section_dxf_id text NOT NULL,                      -- 단면 DXF 참조 (원문 미저장 [WP-1 §1.3])
+  profile_id     text NOT NULL,                      -- 검사 프로파일 참조
+  created_by     text,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_weld_seam_map ON ref.weld_seam (tank_id, level);
 
 -- ═══════════════════════════ 로봇 마스터 (ref) ═══════════════════════════
 

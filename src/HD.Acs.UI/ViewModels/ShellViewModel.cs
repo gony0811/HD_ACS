@@ -20,6 +20,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public MissionViewModel Mission { get; }
     public AlarmsViewModel Alarms { get; }
     public ManualZoneChangeViewModel ManualZoneChange { get; }
+    public CalibrationViewModel Calibration { get; }
     public TankViewModel Tank { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
@@ -32,6 +33,7 @@ public sealed partial class ShellViewModel : ObservableObject
         MissionViewModel mission,
         AlarmsViewModel alarms,
         ManualZoneChangeViewModel manualZoneChange,
+        CalibrationViewModel calibration,
         TankViewModel tank)
     {
         _monitoring = monitoring;
@@ -41,6 +43,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Mission = mission;
         Alarms = alarms;
         ManualZoneChange = manualZoneChange;
+        Calibration = calibration;
         Tank = tank;
 
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);
@@ -59,7 +62,8 @@ public sealed partial class ShellViewModel : ObservableObject
         await Task.WhenAll(
             RobotStatus.LoadAsync(),
             Mission.LoadAsync(),
-            ManualZoneChange.LoadAsync());
+            ManualZoneChange.LoadAsync(),
+            Calibration.LoadAsync());
     }
 
     private bool CanEmergencyStop() => RobotStatus.SelectedRobot is not null;

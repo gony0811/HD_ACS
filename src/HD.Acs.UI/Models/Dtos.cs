@@ -82,6 +82,40 @@ public sealed record MissionDto(
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt);
 
+/// <summary>GET /api/maps/{mapId}/calibration/points 항목 — ref.map_calibration_point [PHASE2 WP-1].</summary>
+public sealed record CalibrationPointDto(
+    Guid Id,
+    string MapId,
+    int MapVersion,
+    double DrawingXM,
+    double DrawingYM,
+    double MapX,
+    double MapY,
+    DateTimeOffset CapturedAt,
+    string? CapturedBy);
+
+/// <summary>POST /api/maps/{mapId}/calibration/solve 응답. Warning은 RMS 임계 초과 시.</summary>
+public sealed record CalibrationSolveResultDto(
+    double Tx,
+    double Ty,
+    double YawRad,
+    double RmsM,
+    double MaxResidualM,
+    int PointCount,
+    string? Warning);
+
+/// <summary>GET /api/maps/{mapId}/calibration — 현재 유효 T_W_D (ref.map_calibration).</summary>
+public sealed record MapCalibrationDto(
+    string MapId,
+    int MapVersion,
+    double Tx,
+    double Ty,
+    double YawRad,
+    double RmsM,
+    int PointCount,
+    string? RegisteredBy,
+    DateTimeOffset RegisteredAt);
+
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
 public sealed record AlarmDto(

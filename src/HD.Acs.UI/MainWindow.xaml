@@ -50,6 +50,9 @@
                     <telerik:RadPane Header="수동 층 변경" CanUserClose="False">
                         <views:ManualZoneChangeView DataContext="{Binding ManualZoneChange}" />
                     </telerik:RadPane>
+                    <telerik:RadPane Header="캘리브레이션(T_W_D)" CanUserClose="False">
+                        <views:CalibrationView DataContext="{Binding Calibration}" />
+                    </telerik:RadPane>
                     <telerik:RadPane Header="알람" CanUserClose="False">
                         <views:AlarmsView DataContext="{Binding Alarms}" />
                     </telerik:RadPane>

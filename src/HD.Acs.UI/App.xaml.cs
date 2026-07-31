@@ -44,6 +44,7 @@ public partial class App : Application
         builder.Services.AddSingleton<MissionViewModel>();
         builder.Services.AddSingleton<AlarmsViewModel>();
         builder.Services.AddSingleton<ManualZoneChangeViewModel>();
+        builder.Services.AddSingleton<CalibrationViewModel>();
         builder.Services.AddSingleton<TankViewModel>();
 
         builder.Services.AddSingleton<MainWindow>();

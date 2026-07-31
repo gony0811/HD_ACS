@@ -122,6 +122,22 @@ public class InspectionTaskEntity
     public string? Params { get; set; }               // jsonb opaque
 }
 
+// 용접선 [PHASE2 WP-2] — 사람이 등록하는 유일한 입력(도면 좌표). SeamSlicer가 스테이션/TASK로 전개.
+public class WeldSeamEntity
+{
+    public Guid SeamId { get; set; }
+    public string TankId { get; set; } = "";
+    public int Level { get; set; }
+    public string WallCode { get; set; } = "";
+    public string SeamType { get; set; } = "LINE";      // LINE | POLYLINE
+    public string PathDrawing { get; set; } = "[]";     // jsonb [[x,y,z],...] m, 도면 좌표
+    public string NormalDrawing { get; set; } = "[]";   // jsonb [nx,ny,nz] 벽면 법선(도면 좌표계)
+    public string SectionDxfId { get; set; } = "";      // 단면 DXF 참조 (원문 미저장)
+    public string ProfileId { get; set; } = "";         // 검사 프로파일 참조
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public class RobotEntity
 {
     public string RobotId { get; set; } = "";

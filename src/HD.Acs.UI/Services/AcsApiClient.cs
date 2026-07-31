@@ -69,6 +69,60 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
+    public async Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
+        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/maps/{mapId}/calibration/points",
+            new { DrawingX = drawingX, DrawingY = drawingY, Unit = unit, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 404/409의 {error} 메시지를 예외로 노출
+        return (await resp.Content.ReadFromJsonAsync<CalibrationPointDto>(ct))!;
+    }
+
+    public async Task<IReadOnlyList<CalibrationPointDto>> GetCalibrationPointsAsync(string mapId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/maps/{mapId}/calibration/points", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return new List<CalibrationPointDto>();
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<CalibrationPointDto>>(ct) ?? new();
+    }
+
+    public async Task DeleteCalibrationPointAsync(string mapId, Guid pointId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/maps/{mapId}/calibration/points/{pointId}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"/api/maps/{mapId}/calibration/solve", content: null, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 404/400(<2점)의 {error} 메시지를 예외로 노출
+        return (await resp.Content.ReadFromJsonAsync<CalibrationSolveResultDto>(ct))!;
+    }
+
+    public async Task<MapCalibrationDto?> GetCalibrationAsync(string mapId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/maps/{mapId}/calibration", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<MapCalibrationDto>(ct);
+    }
+
+    /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
+    private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        if (resp.IsSuccessStatusCode) return;
+        string? message = null;
+        try
+        {
+            var err = await resp.Content.ReadFromJsonAsync<ErrorBody>(ct);
+            message = err?.Error;
+        }
+        catch (Exception) { /* 본문이 JSON이 아니면 상태코드로 폴백 */ }
+        throw new HttpRequestException(message ?? $"요청 실패 ({(int)resp.StatusCode})");
+    }
+
     private sealed record StartRunResult(Guid RunId);
     private sealed record ReleaseResult(bool Released);
+    private sealed record ErrorBody(string? Error);
 }

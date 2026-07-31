@@ -24,6 +24,7 @@ public class AcsDbContext : DbContext
     public DbSet<InspectionPointEntity> InspectionPoints => Set<InspectionPointEntity>();
     public DbSet<InspectionTaskEntity> InspectionTasks => Set<InspectionTaskEntity>();
     public DbSet<RobotEntity> Robots => Set<RobotEntity>();
+    public DbSet<WeldSeamEntity> WeldSeams => Set<WeldSeamEntity>();
     // run
     public DbSet<ScenarioRunEntity> ScenarioRuns => Set<ScenarioRunEntity>();
     public DbSet<MissionEntity> Missions => Set<MissionEntity>();
@@ -92,6 +93,11 @@ public class AcsDbContext : DbContext
 
         mb.Entity<RobotEntity>(e => { e.ToTable("robot", "ref"); e.HasKey(x => x.RobotId);
             e.HasIndex(x => new { x.Manufacturer, x.SerialNumber }).IsUnique(); });
+
+        mb.Entity<WeldSeamEntity>(e => { e.ToTable("weld_seam", "ref"); e.HasKey(x => x.SeamId);
+            e.HasIndex(x => new { x.TankId, x.Level });
+            e.Property(x => x.PathDrawing).HasColumnType("jsonb");
+            e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
 
         // ═══ run ═══
         mb.Entity<ScenarioRunEntity>(e => { e.ToTable("scenario_run", "run");

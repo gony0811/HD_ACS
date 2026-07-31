@@ -55,9 +55,14 @@ client.ApplicationMessageReceivedAsync += async e =>
             Console.WriteLine($"[SIM] instantAction: {a.ActionType}");
             if (a.ActionType == "initPosition")
             {
-                var newMap = a.ActionParameters.First(p => p.Key == "mapId").Value?.ToString() ?? mapId;
-                state.AgvPosition!.MapId = newMap;
-                Console.WriteLine($"[SIM] 재측위 완료 → mapId={newMap} (수동 층 전환 [Q9])");
+                // 재측위: mapId + x/y/theta 반영 (수동 층 변경 UI가 좌표까지 보냄 [Q9])
+                state.AgvPosition!.MapId = ParamStr(a.ActionParameters, "mapId") ?? state.AgvPosition.MapId;
+                state.AgvPosition.X = ParamNum(a.ActionParameters, "x") ?? state.AgvPosition.X;
+                state.AgvPosition.Y = ParamNum(a.ActionParameters, "y") ?? state.AgvPosition.Y;
+                state.AgvPosition.Theta = ParamNum(a.ActionParameters, "theta") ?? state.AgvPosition.Theta;
+                state.AgvPosition.PositionInitialized = true;
+                Console.WriteLine($"[SIM] 재측위 완료 → mapId={state.AgvPosition.MapId} " +
+                                  $"pos=({state.AgvPosition.X:F3},{state.AgvPosition.Y:F3})");
                 await PublishStateAsync();
             }
             if (a.ActionType == "emergencyStop")
@@ -127,6 +132,31 @@ async Task PublishStateAsync()
     state.HeaderId = ++headerId;
     state.Timestamp = DateTimeOffset.UtcNow.ToString("O");
     await PublishAsync(stateTopic, state);
+}
+
+// initPosition actionParameters 안전 파싱 — Value는 object(역직렬화 시 JsonElement)일 수 있음
+static string? ParamStr(IEnumerable<ActionParameter> ps, string key)
+{
+    var v = ps.FirstOrDefault(p => p.Key == key)?.Value;
+    return v switch
+    {
+        null => null,
+        JsonElement je => je.ValueKind == JsonValueKind.String ? je.GetString() : je.ToString(),
+        _ => v.ToString()
+    };
+}
+
+static double? ParamNum(IEnumerable<ActionParameter> ps, string key)
+{
+    var v = ps.FirstOrDefault(p => p.Key == key)?.Value;
+    return v switch
+    {
+        null => null,
+        JsonElement je when je.ValueKind == JsonValueKind.Number => je.GetDouble(),
+        JsonElement je when je.ValueKind == JsonValueKind.String && double.TryParse(je.GetString(), out var d) => d,
+        double d => d,
+        _ => double.TryParse(v.ToString(), out var d) ? d : null
+    };
 }
 
 async Task PublishAsync<T>(string topic, T payload, bool retain = false)

@@ -13,6 +13,6 @@ public enum MissionTrigger
     PauseRequested, Resumed, AbortRequested
 }
 
-public enum NodeType { Waypoint, InspectionStop, Elevator, Charging, Parking }
+public enum NodeType { Waypoint, InspectionStop, Elevator, Charging, Parking, Station }
 public enum EdgeType { Travel, ManualTransfer }
 public enum VdaActionStatus { Waiting, Initializing, Running, Finished, Failed }

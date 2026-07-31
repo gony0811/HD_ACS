@@ -32,6 +32,7 @@ public static class GraphLoader
         "ELEVATOR" => NodeType.Elevator,
         "CHARGING" => NodeType.Charging,
         "PARKING" => NodeType.Parking,
+        "STATION" => NodeType.Station,
         _ => NodeType.Waypoint
     };
 }

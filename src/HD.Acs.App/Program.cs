@@ -13,6 +13,10 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Kestrel 리스닝 포트 = Acs:Api:ListenPort (기본 5100). UI(REST/SignalR)가 http://localhost:5100 로 붙는다.
+// 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
+builder.WebHost.UseUrls($"http://localhost:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5100)}");
+
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
 builder.Services.AddDbContext<AcsDbContext>(o =>
@@ -25,6 +29,7 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
+builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddHostedService<VdaBridgeService>();
 builder.Services.AddSignalR();
 
@@ -44,6 +49,25 @@ app.MapGet("/api/robots/{robotId}/context", async (string robotId, AcsDbContext 
 app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()
         .Select(s => new { s.ScenarioId, s.Name, s.Version, s.TankId, s.Status }).ToListAsync()));
+
+// 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2]. 유효 T_W_D 없으면 400.
+app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-seams",
+    async (Guid scenarioId, GenerateFromSeamsRequest? req, SeamPlanningService planning) =>
+{
+    try
+    {
+        var r = await planning.GenerateAsync(scenarioId, req?.SeamIds, req?.UserId);
+        return Results.Ok(new { stations = r.Stations, tasks = r.Tasks, skipped = r.Skipped });
+    }
+    catch (SeamPlanningService.CalibrationMissingException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+});
 
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }));
@@ -177,3 +201,4 @@ public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
+public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);

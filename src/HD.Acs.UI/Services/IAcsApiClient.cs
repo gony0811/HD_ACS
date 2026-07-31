@@ -21,6 +21,14 @@ public interface IAcsApiClient
         double x, double y, double theta, CancellationToken ct = default);
     Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default);
 
+    // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
+    Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
+        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default);
+    Task<IReadOnlyList<CalibrationPointDto>> GetCalibrationPointsAsync(string mapId, CancellationToken ct = default);
+    Task DeleteCalibrationPointAsync(string mapId, Guid pointId, CancellationToken ct = default);
+    Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default);
+    Task<MapCalibrationDto?> GetCalibrationAsync(string mapId, CancellationToken ct = default);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

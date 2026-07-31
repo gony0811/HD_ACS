@@ -2,11 +2,11 @@
   "profiles": {
     "HD.Acs.App": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "applicationUrl": "https://localhost:64140;http://localhost:64141"
+      "applicationUrl": "http://localhost:5100"
     }
   }
 }
