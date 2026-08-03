@@ -1,6 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HD.Acs.Core.Abstractions;
 using HD.Acs.Core.Domain;
+using HD.Acs.Core.Geometry;
+using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
@@ -120,6 +123,23 @@ public sealed class MissionService
         var ctx = await _db.RobotContexts.AsNoTracking().FirstAsync(c => c.RobotId == mission.RobotId, ct);
         var startNodeId = FindNearestNode(graph, ctx) ?? points[0].NodeId;
 
+        // startWeldInspection 이 있으면 릴리즈 시점 유효 T_W_D(맵버전 일치)를 선해결 — 없거나 버전 불일치면
+        // 릴리즈 거부 [WP-3 §4.2/§2.5]. param_schema 는 발행 직전 검증용으로 1회 로드.
+        DrawingTransform? weldTransform = null;
+        string? weldSchema = null;
+        if (points.Any(p => p.Tasks.Any(t => t.ActionType == "startWeldInspection")))
+        {
+            var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mission.MapId, ct)
+                      ?? throw new CalibrationInvalidException($"map '{mission.MapId}' 없음 — 릴리즈 불가.");
+            var cal = await _db.MapCalibrations.AsNoTracking()
+                .Where(c => c.MapId == mission.MapId)
+                .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
+            weldTransform = WeldInspectionPayload.ResolveTransform(
+                map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+            weldSchema = (await _db.ActionCatalog.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
+        }
+
         // PlannedPoint 변환 — actionId를 여기서 발급·보존 (state 대조 키)
         var planned = new List<PlannedPoint>();
         var actionRows = new List<OrderActionEntity>();
@@ -130,16 +150,42 @@ public sealed class MissionService
             {
                 var actionId = Guid.NewGuid();
                 var parameters = new Dictionary<string, object?>();
-                if (t.JobRef != null) parameters["jobRef"] = t.JobRef;
-                if (t.Position != null) parameters["position"] = JsonSerializer.Deserialize<object>(t.Position);
-                if (t.Params != null) parameters["params"] = JsonSerializer.Deserialize<object>(t.Params);
+                string? historyPos = t.Position;   // OrderAction.Params 이력 [ADR-004]
+
+                if (t.ActionType == "startWeldInspection")
+                {
+                    // 도면 좌표 → 유효 T_W_D 적용한 월드 position + 발행 직전 스키마 검증 [WP-3 §4.2]
+                    var d = ParseWeldDrawing(t.Position);
+                    var worldPos = WeldInspectionPayload.BuildPosition(weldTransform!, d);
+                    var paramsNode = t.Params is null ? null : JsonNode.Parse(t.Params);
+                    var actionParams = WeldInspectionPayload.BuildActionParameters(t.JobRef ?? "", worldPos, paramsNode);
+
+                    var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
+                    if (violations.Count > 0)
+                    {
+                        _log.LogWarning("릴리즈 중단 — mission {Mission} / {Job} payload 스키마 위반: {V}",
+                            mission.MissionId, t.JobRef, string.Join("; ", violations));
+                        throw new WeldPayloadSchemaException(violations);
+                    }
+
+                    parameters["jobRef"] = t.JobRef;
+                    parameters["position"] = actionParams["position"]!.DeepClone();
+                    parameters["params"] = actionParams["params"]!.DeepClone();
+                    historyPos = worldPos.ToJsonString();   // 실제 발행한 월드 좌표 보존
+                }
+                else
+                {
+                    if (t.JobRef != null) parameters["jobRef"] = t.JobRef;
+                    if (t.Position != null) parameters["position"] = JsonSerializer.Deserialize<object>(t.Position);
+                    if (t.Params != null) parameters["params"] = JsonSerializer.Deserialize<object>(t.Params);
+                }
 
                 actions.Add(new PlannedAction(actionId, t.ActionType, "HARD", parameters));
                 actionRows.Add(new OrderActionEntity
                 {
                     ActionId = actionId, MissionId = mission.MissionId, TaskId = t.TaskId,
                     ActionType = t.ActionType, BlockingType = "HARD",
-                    Params = t.Position   // 위치 파라미터를 이력 대조 키로 보존 [ADR-004]
+                    Params = historyPos
                 });
             }
             planned.Add(new PlannedPoint(p.NodeId, actions));
@@ -203,6 +249,23 @@ public sealed class MissionService
         await _vda.InitPositionAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber),
             mapId, x, y, theta, ct);
         // 이후 로봇 state의 agvPosition.mapId 확인 → TryReleaseNextMissionAsync가 게이트 통과
+    }
+
+    /// <summary>Task.Position(WP-2 도면 jsonb) → WeldDrawingData. seam/normal 벡터·wall_code 추출.</summary>
+    private static WeldDrawingData ParseWeldDrawing(string? positionJson)
+    {
+        if (positionJson is null)
+            throw new WeldPayloadSchemaException(new[] { "Task.Position 이 비어 있음(도면 좌표 없음)." });
+        var pos = JsonNode.Parse(positionJson)!.AsObject();
+        static double[] Vec(JsonObject o, string key) =>
+            o[key]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
+        return new WeldDrawingData(
+            pos["tank"]!.GetValue<string>(),
+            pos["level"]!.GetValue<int>(),
+            pos["wall_code"]!.GetValue<string>(),
+            Vec(pos, "seamStartDrawing"),
+            Vec(pos, "seamEndDrawing"),
+            Vec(pos, "wallNormalDrawing"));
     }
 
     private static string? FindNearestNode(Core.Graph.MapGraph graph, RobotContextEntity ctx)

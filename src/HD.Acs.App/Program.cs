@@ -2,6 +2,7 @@ using System.Text.Json;
 using HD.Acs.App.Hubs;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
+using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
@@ -123,10 +124,18 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, 
     Results.Ok(await planning.GetStationsAsync(scenarioId)));
 
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
-    Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }));
+{
+    try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }); }
+    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
+    { return Results.BadRequest(new { error = ex.Message }); }
+});
 
 app.MapPost("/api/runs/{runId:guid}/release-next", async (Guid runId, MissionService missions) =>
-    Results.Ok(new { released = await missions.TryReleaseNextMissionAsync(runId) }));
+{
+    try { return Results.Ok(new { released = await missions.TryReleaseNextMissionAsync(runId) }); }
+    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
+    { return Results.BadRequest(new { error = ex.Message }); }
+});
 
 app.MapGet("/api/runs/{runId:guid}", async (Guid runId, AcsDbContext db) =>
     await db.ScenarioRuns.AsNoTracking().Include(r => r.Missions.OrderBy(m => m.Seq))

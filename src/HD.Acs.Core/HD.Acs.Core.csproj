@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Stateless" Version="5.15.0" />
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
   </ItemGroup>
 </Project>

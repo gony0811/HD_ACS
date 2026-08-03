@@ -26,6 +26,13 @@ public sealed record DrawingTransform(double Tx, double Ty, double YawRad)
     /// <summary>도면 좌표계 방향(yaw) → 맵 좌표계 방향. yaw 합성 후 (−π, π]로 정규화.</summary>
     public double DrawingYawToMap(double drawingYaw) => NormalizeAngle(drawingYaw + YawRad);
 
+    /// <summary>방향(법선) 벡터 회전 — 평행이동 없이 R(yaw)만 적용. R·v [PHASE2 §4.2 wallNormalW].</summary>
+    public (double X, double Y) RotateDirection(double x, double y)
+    {
+        var (cos, sin) = (Math.Cos(YawRad), Math.Sin(YawRad));
+        return (cos * x - sin * y, sin * x + cos * y);
+    }
+
     /// <summary>
     /// 대응쌍 최소자승 (2D 강체, 스케일 없음) [§2.3]. 2쌍 미만이면 예외.
     /// 반환: 변환 T + 잔차 RMS + 최대 잔차.
