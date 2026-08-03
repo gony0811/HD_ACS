@@ -69,6 +69,59 @@ app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-seams",
     }
 });
 
+// 최소 시나리오 생성 [PHASE2 WP-5b]
+app.MapPost("/api/scenarios", async (CreateScenarioRequest req, AcsDbContext db) =>
+{
+    var s = new HD.Acs.Data.Entities.ScenarioEntity
+    {
+        ScenarioId = Guid.NewGuid(), Name = req.Name, Version = 1,
+        TankId = req.TankId, Policy = "{}", Status = "DRAFT"
+    };
+    db.Scenarios.Add(s);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { scenarioId = s.ScenarioId });
+});
+
+// WeldSeam 등록/목록/삭제 [PHASE2 WP-5b] — 사람이 등록하는 유일한 입력(도면 좌표)
+app.MapPost("/api/seams", async (CreateSeamRequest req, AcsDbContext db) =>
+{
+    var seam = new HD.Acs.Data.Entities.WeldSeamEntity
+    {
+        SeamId = Guid.NewGuid(), TankId = req.TankId, Level = req.Level, WallCode = req.WallCode,
+        SeamType = req.SeamType ?? "LINE",
+        PathDrawing = JsonSerializer.Serialize(req.PathDrawing),
+        NormalDrawing = JsonSerializer.Serialize(req.NormalDrawing),
+        SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "",
+        CreatedBy = req.UserId
+    };
+    db.WeldSeams.Add(seam);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { seamId = seam.SeamId });
+});
+
+app.MapGet("/api/seams", async (string? tankId, int? level, AcsDbContext db) =>
+{
+    var q = db.WeldSeams.AsNoTracking().AsQueryable();
+    if (tankId is not null) q = q.Where(w => w.TankId == tankId);
+    if (level is not null) q = q.Where(w => w.Level == level);
+    return Results.Ok(await q.OrderBy(w => w.WallCode)
+        .Select(w => new { w.SeamId, w.TankId, w.Level, w.WallCode, w.SeamType, w.SectionDxfId, w.ProfileId })
+        .ToListAsync());
+});
+
+app.MapDelete("/api/seams/{seamId:guid}", async (Guid seamId, AcsDbContext db) =>
+{
+    var seam = await db.WeldSeams.FindAsync(seamId);
+    if (seam is null) return Results.NotFound();
+    db.WeldSeams.Remove(seam);
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
+// 생성된 스테이션/TASK 조회 (전개도 렌더 데이터 소스) [PHASE2 WP-5b]
+app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, SeamPlanningService planning) =>
+    Results.Ok(await planning.GetStationsAsync(scenarioId)));
+
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }));
 
@@ -202,3 +255,6 @@ public sealed record ZoneChangeRequest(string MapId, string UserId, double X, do
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
+public sealed record CreateScenarioRequest(string Name, string TankId);
+public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
+    double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);

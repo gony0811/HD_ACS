@@ -108,6 +108,51 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<MapCalibrationDto>(ct);
     }
 
+    // ── 슬라이싱/TASK (전개도) [PHASE2 WP-5b] ──────────
+    public async Task<Guid> CreateScenarioAsync(string name, string tankId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/scenarios", new { Name = name, TankId = tankId }, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.ScenarioId ?? Guid.Empty;
+    }
+
+    public async Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
+        double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
+        string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/seams", new
+        {
+            TankId = tankId, Level = level, WallCode = wallCode, SeamType = seamType,
+            PathDrawing = pathDrawing, NormalDrawing = normalDrawing,
+            SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.SeamId ?? Guid.Empty;
+    }
+
+    public async Task<IReadOnlyList<SeamDto>> GetSeamsAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/seams?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
+        return await _http.GetFromJsonAsync<List<SeamDto>>(url, ct) ?? new();
+    }
+
+    public async Task DeleteSeamAsync(Guid seamId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/seams/{seamId}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"/api/scenarios/{scenarioId}/generate-from-seams", content: null, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(유효 T_W_D 없음) 서버 메시지 노출
+        var r = await resp.Content.ReadFromJsonAsync<GenerateResult>(ct);
+        return (r?.Stations ?? 0, r?.Tasks ?? 0);
+    }
+
+    public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
@@ -125,4 +170,6 @@ public sealed class AcsApiClient : IAcsApiClient
     private sealed record StartRunResult(Guid RunId);
     private sealed record ReleaseResult(bool Released);
     private sealed record ErrorBody(string? Error);
+    private sealed record IdResult(Guid ScenarioId, Guid SeamId);
+    private sealed record GenerateResult(int Stations, int Tasks);
 }

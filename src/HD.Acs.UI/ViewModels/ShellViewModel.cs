@@ -21,6 +21,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public AlarmsViewModel Alarms { get; }
     public ManualZoneChangeViewModel ManualZoneChange { get; }
     public CalibrationViewModel Calibration { get; }
+    public SlicingViewModel Slicing { get; }
     public TankViewModel Tank { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
@@ -34,6 +35,7 @@ public sealed partial class ShellViewModel : ObservableObject
         AlarmsViewModel alarms,
         ManualZoneChangeViewModel manualZoneChange,
         CalibrationViewModel calibration,
+        SlicingViewModel slicing,
         TankViewModel tank)
     {
         _monitoring = monitoring;
@@ -44,6 +46,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Alarms = alarms;
         ManualZoneChange = manualZoneChange;
         Calibration = calibration;
+        Slicing = slicing;
         Tank = tank;
 
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);
@@ -63,7 +66,8 @@ public sealed partial class ShellViewModel : ObservableObject
             RobotStatus.LoadAsync(),
             Mission.LoadAsync(),
             ManualZoneChange.LoadAsync(),
-            Calibration.LoadAsync());
+            Calibration.LoadAsync(),
+            Slicing.LoadAsync());
     }
 
     private bool CanEmergencyStop() => RobotStatus.SelectedRobot is not null;

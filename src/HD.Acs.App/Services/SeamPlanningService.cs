@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HD.Acs.Core.Geometry;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
@@ -164,6 +165,68 @@ public sealed class SeamPlanningService
             scenarioId, stations.Count, taskCount, skipped.Count);
         return new GenerateResult(stations.Count, taskCount, skipped);
     }
+
+    // ── 전개도 렌더용 조회 [PHASE2 WP-5b] ──
+    public sealed record PoseView(double X, double Y, double Theta);
+    public sealed record TaskView(int SeqInGroup, string SeamType, string? JobRef, string AnchorGroupId,
+        double[] SeamStartDrawing, double[] SeamEndDrawing, double[] WallNormalDrawing);
+    public sealed record StationView(string AnchorGroupId, string WallCode, int Level,
+        PoseView StationDrawing, PoseView StationMap, IReadOnlyList<TaskView> Tasks);
+
+    /// <summary>시나리오의 생성된 스테이션/TASK를 도면·맵 좌표와 함께 반환(전개도 렌더용). Position/Params jsonb 파싱.</summary>
+    public async Task<IReadOnlyList<StationView>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var points = await _db.InspectionPoints.AsNoTracking()
+            .Include(p => p.Tasks.OrderBy(t => t.Seq))
+            .Where(p => p.ScenarioId == scenarioId)
+            .OrderBy(p => p.Seq).ToListAsync(ct);
+        if (points.Count == 0) return Array.Empty<StationView>();
+
+        var nodeIds = points.Select(p => p.NodeId).ToList();
+        var nodes = await _db.Nodes.AsNoTracking().Where(n => nodeIds.Contains(n.NodeId))
+            .ToDictionaryAsync(n => n.NodeId, ct);
+
+        var opt = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var result = new List<StationView>(points.Count);
+        foreach (var p in points)
+        {
+            string wall = ""; int level = 0; var stDraw = new PoseView(0, 0, 0);
+            var tasks = new List<TaskView>(p.Tasks.Count);
+            foreach (var t in p.Tasks)
+            {
+                var pos = t.Position is null ? null : JsonSerializer.Deserialize<PosJson>(t.Position, opt);
+                var par = t.Params is null ? null : JsonSerializer.Deserialize<ParJson>(t.Params, opt);
+                if (wall.Length == 0 && pos is not null)
+                {
+                    wall = pos.WallCode ?? "";
+                    level = pos.Level;
+                    if (pos.StationDrawing is { } sd) stDraw = new PoseView(sd.X, sd.Y, sd.Theta);
+                }
+                tasks.Add(new TaskView(
+                    par?.SeqInGroup ?? t.Seq,
+                    par?.SeamType ?? "",
+                    t.JobRef,
+                    par?.AnchorGroupId ?? p.NodeId,
+                    pos?.SeamStartDrawing ?? new double[3],
+                    pos?.SeamEndDrawing ?? new double[3],
+                    pos?.WallNormalDrawing ?? new double[3]));
+            }
+            var node = nodes.GetValueOrDefault(p.NodeId);
+            var stMap = node is null ? new PoseView(0, 0, 0) : new PoseView(node.X, node.Y, node.Theta ?? 0);
+            result.Add(new StationView(p.NodeId, wall, level, stDraw, stMap, tasks));
+        }
+        return result;
+    }
+
+    private sealed record PoseJson(double X, double Y, double Theta);
+    private sealed record PosJson(
+        [property: JsonPropertyName("wall_code")] string? WallCode,
+        int Level,
+        double[]? SeamStartDrawing,
+        double[]? SeamEndDrawing,
+        double[]? WallNormalDrawing,
+        PoseJson? StationDrawing);
+    private sealed record ParJson(string? SeamType, string? AnchorGroupId, int SeqInGroup);
 
     /// <summary>같은 맵의 기존 비-STATION 노드 중 최근접에 양방향 TRAVEL 엣지 생성 (get-or-create).</summary>
     private async Task ConnectNearestAsync(string stationNodeId, string mapId, double mx, double my, CancellationToken ct)

@@ -29,6 +29,16 @@ public interface IAcsApiClient
     Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default);
     Task<MapCalibrationDto?> GetCalibrationAsync(string mapId, CancellationToken ct = default);
 
+    // ── 슬라이싱/TASK (전개도) [PHASE2 WP-5b] ──────────
+    Task<Guid> CreateScenarioAsync(string name, string tankId, CancellationToken ct = default);
+    Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
+        double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
+        string userId, CancellationToken ct = default);
+    Task<IReadOnlyList<SeamDto>> GetSeamsAsync(string tankId, int? level = null, CancellationToken ct = default);
+    Task DeleteSeamAsync(Guid seamId, CancellationToken ct = default);
+    Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
+    Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

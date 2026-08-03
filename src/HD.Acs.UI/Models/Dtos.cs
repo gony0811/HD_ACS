@@ -116,6 +116,38 @@ public sealed record MapCalibrationDto(
     string? RegisteredBy,
     DateTimeOffset RegisteredAt);
 
+/// <summary>GET /api/seams 항목 — ref.weld_seam (도면 좌표 원본은 제외한 관리용 투영) [PHASE2 WP-5b].</summary>
+public sealed record SeamDto(
+    Guid SeamId,
+    string TankId,
+    int Level,
+    string WallCode,
+    string SeamType,
+    string SectionDxfId,
+    string ProfileId);
+
+/// <summary>도면/맵 pose (x,y,theta).</summary>
+public sealed record PoseDto(double X, double Y, double Theta);
+
+/// <summary>GET /api/scenarios/{id}/stations 의 TASK — 전개도 렌더용(도면 좌표) [PHASE2 WP-5b].</summary>
+public sealed record SlicedTaskDto(
+    int SeqInGroup,
+    string SeamType,
+    string? JobRef,
+    string AnchorGroupId,
+    double[] SeamStartDrawing,
+    double[] SeamEndDrawing,
+    double[] WallNormalDrawing);
+
+/// <summary>GET /api/scenarios/{id}/stations 의 스테이션(anchorGroup) [PHASE2 WP-5b].</summary>
+public sealed record SlicedStationDto(
+    string AnchorGroupId,
+    string WallCode,
+    int Level,
+    PoseDto StationDrawing,
+    PoseDto StationMap,
+    List<SlicedTaskDto> Tasks);
+
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
 public sealed record AlarmDto(

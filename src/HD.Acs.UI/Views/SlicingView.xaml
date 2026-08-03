@@ -1,0 +1,177 @@
+<UserControl x:Class="HD.Acs.UI.Views.SlicingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
+    <UserControl.Resources>
+        <Style TargetType="TextBlock" x:Key="FieldLabel">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style TargetType="telerik:RadNumericUpDown">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Width" Value="92" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="400" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ── 좌: 컨트롤/폼 ── -->
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
+            <StackPanel>
+                <!-- 시나리오 -->
+                <TextBlock Text="시나리오" FontWeight="Bold" Margin="0,0,0,4" />
+                <telerik:RadComboBox ItemsSource="{Binding Scenarios}" DisplayMemberPath="Name"
+                                     SelectedItem="{Binding SelectedScenario, Mode=TwoWay}"
+                                     MinWidth="160" MinHeight="28" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBox Width="200" MinHeight="28" VerticalContentAlignment="Center"
+                             Text="{Binding NewScenarioName, Mode=TwoWay}" />
+                    <telerik:RadButton Content="시나리오 생성" Margin="6,0,0,0" MinHeight="28"
+                                       Command="{Binding CreateScenarioCommand}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <telerik:RadButton Content="슬라이싱 실행" MinHeight="30" MinWidth="110"
+                                       Command="{Binding GenerateCommand}" Margin="0,0,6,0" />
+                    <telerik:RadButton Content="새로고침" MinHeight="30" Command="{Binding RefreshCommand}" />
+                </StackPanel>
+
+                <!-- seam 등록 폼 (라벨 + 입력 2열) -->
+                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="seam 등록 (도면 좌표 m · LINE)"
+                                   FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="층(Level)" Style="{StaticResource FieldLabel}" />
+                        <telerik:RadNumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding SeamLevel, Mode=TwoWay}" Margin="0,0,0,6" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="벽면(wall_code)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SeamWall, Mode=TwoWay}"
+                                 Width="120" MinHeight="28" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,0,0,6" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="시작 (X, Y)" Style="{StaticResource FieldLabel}" />
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                            <telerik:RadNumericUpDown Value="{Binding StartX, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding StartY, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="끝 (X, Y)" Style="{StaticResource FieldLabel}" />
+                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                            <telerik:RadNumericUpDown Value="{Binding EndX, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding EndY, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="법선 (X, Y)" Style="{StaticResource FieldLabel}" />
+                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                            <telerik:RadNumericUpDown Value="{Binding NormalX, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding NormalY, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <telerik:RadButton Grid.Row="6" Grid.Column="1" Content="seam 등록" HorizontalAlignment="Left"
+                                           MinHeight="30" MinWidth="110" Command="{Binding RegisterSeamCommand}" />
+                    </Grid>
+                </Border>
+
+                <!-- seam 목록 -->
+                <TextBlock Text="등록된 seam" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <telerik:RadGridView ItemsSource="{Binding Seams}" AutoGenerateColumns="False"
+                                     IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="120" MaxHeight="200" Margin="0,0,0,10">
+                    <telerik:RadGridView.Columns>
+                        <telerik:GridViewDataColumn Header="Lv" DataMemberBinding="{Binding Level}" Width="44" />
+                        <telerik:GridViewDataColumn Header="벽면" DataMemberBinding="{Binding WallCode}" Width="70" />
+                        <telerik:GridViewDataColumn Header="타입" DataMemberBinding="{Binding SeamType}" Width="70" />
+                        <telerik:GridViewDataColumn Header="DXF" DataMemberBinding="{Binding SectionDxfId}" Width="*" />
+                        <telerik:GridViewColumn Header="" Width="Auto">
+                            <telerik:GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <telerik:RadButton Content="삭제" Padding="8,1"
+                                        Command="{Binding DataContext.DeleteSeamCommand, RelativeSource={RelativeSource AncestorType=telerik:RadGridView}}"
+                                        CommandParameter="{Binding}" />
+                                </DataTemplate>
+                            </telerik:GridViewColumn.CellTemplate>
+                        </telerik:GridViewColumn>
+                    </telerik:RadGridView.Columns>
+                </telerik:RadGridView>
+
+                <!-- 벽면 선택 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="벽면 전개도" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <telerik:RadComboBox MinWidth="120" MinHeight="28" ItemsSource="{Binding Walls}"
+                                         SelectedItem="{Binding SelectedWall, Mode=TwoWay}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ── 우: 전개도 캔버스 ── -->
+        <Border Grid.Column="1" BorderBrush="#AEB6BF" BorderThickness="1" Background="#FBFCFC">
+            <Viewbox Stretch="Uniform" Margin="8">
+                <Canvas Width="600" Height="600">
+                    <!-- 스테이션(anchorGroup) 반투명 박스 -->
+                    <ItemsControl ItemsSource="{Binding StationShapes}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Width="{Binding Width}" Height="{Binding Height}">
+                                    <Rectangle RadiusX="4" RadiusY="4" Fill="#332E86C1" Stroke="#2E86C1" StrokeThickness="1" />
+                                    <TextBlock Text="{Binding Label}" FontSize="9" Foreground="#1B4F72"
+                                               Margin="3,1,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <!-- TASK 선분 + 방향 마커 + seqInGroup/정렬 배지 -->
+                    <ItemsControl ItemsSource="{Binding TaskShapes}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Canvas>
+                                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}"
+                                          Stroke="#E67E22" StrokeThickness="2.5" />
+                                    <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}"
+                                             Width="8" Height="8" Fill="#CA6F1E" />
+                                    <Border Canvas.Left="{Binding MidX}" Canvas.Top="{Binding MidY}"
+                                            Background="#FEF9E7" BorderBrush="#B7950B" BorderThickness="1" CornerRadius="2" Padding="2,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding BadgeText}" FontSize="9" FontWeight="Bold" Foreground="#7D6608" />
+                                            <TextBlock Text="{Binding AlignText}" FontSize="8" Foreground="#7D6608" Margin="3,0,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </Canvas>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Canvas>
+            </Viewbox>
+        </Border>
+    </Grid>
+</UserControl>
