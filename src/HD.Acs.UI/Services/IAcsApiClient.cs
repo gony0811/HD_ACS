@@ -39,6 +39,18 @@ public interface IAcsApiClient
     Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
     Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
 
+    // ── 영역(Area) LAYER [PHASE2 개정] ──────────
+    Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
+        double minX, double minY, double maxX, double maxY, double[] normal,
+        double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
+    Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, int? level = null, string? wallCode = null, CancellationToken ct = default);
+    Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
+    Task<int> CreateAreaTaskAsync(Guid areaId, double[] seamStart, double[] seamEnd,
+        string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default);
+    Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
+    Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
+    Task<(int Stations, int Tasks)> GenerateFromAreasAsync(Guid scenarioId, CancellationToken ct = default);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

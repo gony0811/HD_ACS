@@ -25,6 +25,8 @@ public class AcsDbContext : DbContext
     public DbSet<InspectionTaskEntity> InspectionTasks => Set<InspectionTaskEntity>();
     public DbSet<RobotEntity> Robots => Set<RobotEntity>();
     public DbSet<WeldSeamEntity> WeldSeams => Set<WeldSeamEntity>();
+    public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
+    public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
     // run
     public DbSet<ScenarioRunEntity> ScenarioRuns => Set<ScenarioRunEntity>();
     public DbSet<MissionEntity> Missions => Set<MissionEntity>();
@@ -98,6 +100,16 @@ public class AcsDbContext : DbContext
             e.HasIndex(x => new { x.TankId, x.Level });
             e.Property(x => x.PathDrawing).HasColumnType("jsonb");
             e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
+
+        mb.Entity<InspectionAreaEntity>(e => { e.ToTable("inspection_area", "ref"); e.HasKey(x => x.AreaId);
+            e.HasIndex(x => new { x.TankId, x.Level, x.WallCode, x.Name }).IsUnique();
+            e.Property(x => x.NormalDrawing).HasColumnType("jsonb");
+            e.HasMany(x => x.Tasks).WithOne().HasForeignKey(t => t.AreaId).OnDelete(DeleteBehavior.Cascade); });
+
+        mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);
+            e.HasIndex(x => new { x.AreaId, x.Seq }).IsUnique();
+            e.Property(x => x.SeamStart).HasColumnType("jsonb");
+            e.Property(x => x.SeamEnd).HasColumnType("jsonb"); });
 
         // ═══ run ═══
         mb.Entity<ScenarioRunEntity>(e => { e.ToTable("scenario_run", "run");

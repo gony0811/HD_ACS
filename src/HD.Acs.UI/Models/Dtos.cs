@@ -148,6 +148,35 @@ public sealed record SlicedStationDto(
     PoseDto StationMap,
     List<SlicedTaskDto> Tasks);
 
+/// <summary>GET /api/areas 항목 — ref.inspection_area (유효 정차 pose 포함) [PHASE2 개정].</summary>
+public sealed record AreaDto(
+    Guid AreaId,
+    string TankId,
+    int Level,
+    string WallCode,
+    string Name,
+    double MinX,
+    double MinY,
+    double MaxX,
+    double MaxY,
+    double[] Normal,
+    double StationX,
+    double StationY,
+    double StationTheta,
+    bool IsOverride,
+    int SortOrder,
+    int TaskCount);
+
+/// <summary>GET /api/areas/{id}/tasks 항목 — ref.area_task [PHASE2 개정].</summary>
+public sealed record AreaTaskDto(
+    Guid TaskId,
+    int Seq,
+    double[] SeamStart,
+    double[] SeamEnd,
+    string SeamType,
+    string SectionDxfId,
+    string ProfileId);
+
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
 public sealed record AlarmDto(

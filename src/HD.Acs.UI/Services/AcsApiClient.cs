@@ -153,6 +153,64 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
+    // ── 영역(Area) LAYER [PHASE2 개정] ──────────
+    public async Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
+        double minX, double minY, double maxX, double maxY, double[] normal,
+        double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/areas", new
+        {
+            TankId = tankId, Level = level, WallCode = wallCode, Name = name,
+            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY, NormalDrawing = normal,
+            StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 오류 400 메시지 노출
+        return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.AreaId ?? Guid.Empty;
+    }
+
+    public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, int? level = null, string? wallCode = null, CancellationToken ct = default)
+    {
+        var url = $"/api/areas?tankId={Uri.EscapeDataString(tankId)}"
+                  + (level is int l ? $"&level={l}" : "")
+                  + (wallCode is not null ? $"&wallCode={Uri.EscapeDataString(wallCode)}" : "");
+        return await _http.GetFromJsonAsync<List<AreaDto>>(url, ct) ?? new();
+    }
+
+    public async Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/areas/{areaId}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<int> CreateAreaTaskAsync(Guid areaId, double[] seamStart, double[] seamEnd,
+        string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
+        {
+            SeamStart = seamStart, SeamEnd = seamEnd, SeamType = seamType,
+            SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
+        return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
+    }
+
+    public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/areas/{areaId}/tasks", ct) ?? new();
+
+    public async Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/area-tasks/{taskId}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<(int Stations, int Tasks)> GenerateFromAreasAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"/api/scenarios/{scenarioId}/generate-from-areas", content: null, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400 유효 T_W_D 없음 메시지 노출
+        var r = await resp.Content.ReadFromJsonAsync<GenerateResult>(ct);
+        return (r?.Stations ?? 0, r?.Tasks ?? 0);
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
@@ -170,6 +228,7 @@ public sealed class AcsApiClient : IAcsApiClient
     private sealed record StartRunResult(Guid RunId);
     private sealed record ReleaseResult(bool Released);
     private sealed record ErrorBody(string? Error);
-    private sealed record IdResult(Guid ScenarioId, Guid SeamId);
+    private sealed record IdResult(Guid ScenarioId, Guid SeamId, Guid AreaId);
+    private sealed record AreaTaskResult(Guid TaskId, int Seq);
     private sealed record GenerateResult(int Stations, int Tasks);
 }

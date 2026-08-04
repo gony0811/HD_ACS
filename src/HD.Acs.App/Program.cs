@@ -31,6 +31,7 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<SeamPlanningService>();
+builder.Services.AddScoped<AreaPlanningService>();
 builder.Services.AddHostedService<VdaBridgeService>();
 builder.Services.AddSignalR();
 
@@ -51,7 +52,85 @@ app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()
         .Select(s => new { s.ScenarioId, s.Name, s.Version, s.TankId, s.Status }).ToListAsync()));
 
-// 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2]. 유효 T_W_D 없으면 400.
+// ── 영역(Area) LAYER + 수동 검사 작업 [PHASE2 개정] — 자동 슬라이싱 대체 ──
+app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
+{
+    if (req.MinX >= req.MaxX || req.MinY >= req.MaxY)
+        return Results.BadRequest(new { error = "영역 경계가 올바르지 않습니다 (minX<maxX, minY<maxY)." });
+    var area = new HD.Acs.Data.Entities.InspectionAreaEntity
+    {
+        AreaId = Guid.NewGuid(), TankId = req.TankId, Level = req.Level, WallCode = req.WallCode, Name = req.Name,
+        MinX = req.MinX, MinY = req.MinY, MaxX = req.MaxX, MaxY = req.MaxY,
+        NormalDrawing = JsonSerializer.Serialize(req.NormalDrawing),
+        StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
+        SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
+    };
+    db.InspectionAreas.Add(area);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { areaId = area.AreaId });
+});
+
+app.MapGet("/api/areas", async (string? tankId, int? level, string? wallCode, AreaPlanningService area) =>
+    Results.Ok(await area.GetAreasAsync(tankId ?? "CT1", level, wallCode)));
+
+app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, AcsDbContext db) =>
+{
+    var a = await db.InspectionAreas.FindAsync(areaId);
+    if (a is null) return Results.NotFound();
+    db.InspectionAreas.Remove(a);   // area_task CASCADE
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
+app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTaskRequest req, AcsDbContext db) =>
+{
+    var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
+    if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    bool InBounds(double[] p) => p.Length >= 2 &&
+        HD.Acs.Core.Planning.AreaGeometry.InBounds(p[0], p[1], a.MinX, a.MinY, a.MaxX, a.MaxY);
+    if (!InBounds(req.SeamStart) || !InBounds(req.SeamEnd))
+        return Results.BadRequest(new { error = "시작/끝점이 영역 경계를 벗어났습니다." });
+    int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
+    var task = new HD.Acs.Data.Entities.AreaTaskEntity
+    {
+        TaskId = Guid.NewGuid(), AreaId = areaId, Seq = seq,
+        SeamStart = JsonSerializer.Serialize(req.SeamStart), SeamEnd = JsonSerializer.Serialize(req.SeamEnd),
+        SeamType = req.SeamType ?? "LINE", SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "",
+        CreatedBy = req.UserId
+    };
+    db.AreaTasks.Add(task);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { taskId = task.TaskId, seq });
+});
+
+app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AreaPlanningService area) =>
+    Results.Ok(await area.GetAreaTasksAsync(areaId)));
+
+app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext db) =>
+{
+    var t = await db.AreaTasks.FindAsync(taskId);
+    if (t is null) return Results.NotFound();
+    db.AreaTasks.Remove(t);
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
+// 영역/작업 → 스테이션/TASK 생성. 유효 T_W_D 없으면 400.
+app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-areas",
+    async (Guid scenarioId, GenerateFromAreasRequest? req, AreaPlanningService area) =>
+{
+    try
+    {
+        var r = await area.GenerateAsync(scenarioId, req?.AreaIds, req?.UserId);
+        return Results.Ok(new { stations = r.Stations, tasks = r.Tasks, skipped = r.Skipped });
+    }
+    catch (SeamPlanningService.CalibrationMissingException ex)
+    { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
+    catch (InvalidOperationException ex)
+    { return Results.NotFound(new { error = ex.Message }); }
+});
+
+// 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2, DORMANT — 운영 워크플로우 제외]. 유효 T_W_D 없으면 400.
 app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-seams",
     async (Guid scenarioId, GenerateFromSeamsRequest? req, SeamPlanningService planning) =>
 {
@@ -267,3 +346,9 @@ public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
+public sealed record CreateAreaRequest(string TankId, int Level, string WallCode, string Name,
+    double MinX, double MinY, double MaxX, double MaxY, double[] NormalDrawing,
+    double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId);
+public sealed record CreateAreaTaskRequest(int? Seq, double[] SeamStart, double[] SeamEnd,
+    string? SeamType, string? SectionDxfId, string? ProfileId, string? UserId);
+public sealed record GenerateFromAreasRequest(Guid[]? AreaIds, string? UserId);

@@ -138,6 +138,43 @@ public class WeldSeamEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+// 영역(Area) LAYER [PHASE2 개정] — 운영자 수동 정의. 영역 1개 = STATION 1개 = anchorGroup 1개.
+public class InspectionAreaEntity
+{
+    public Guid AreaId { get; set; }
+    public string TankId { get; set; } = "";
+    public int Level { get; set; }
+    public string WallCode { get; set; } = "";
+    public string Name { get; set; } = "";
+    public double MinX { get; set; }
+    public double MinY { get; set; }
+    public double MaxX { get; set; }
+    public double MaxY { get; set; }
+    public string NormalDrawing { get; set; } = "[]";  // jsonb [nx,ny,nz]
+    public double? StationX { get; set; }               // 정차 오버라이드 (NULL=디폴트)
+    public double? StationY { get; set; }
+    public double? StationTheta { get; set; }
+    public int SortOrder { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<AreaTaskEntity> Tasks { get; set; } = new();
+}
+
+// 검사 작업 [PHASE2 개정] — 영역 내 수동 정의. 작업 1개 = TASK 1개.
+public class AreaTaskEntity
+{
+    public Guid TaskId { get; set; }
+    public Guid AreaId { get; set; }
+    public int Seq { get; set; }                        // 영역 내 실행 순서 → seqInGroup
+    public string SeamStart { get; set; } = "[]";       // jsonb [x,y,z]
+    public string SeamEnd { get; set; } = "[]";         // jsonb [x,y,z]
+    public string SeamType { get; set; } = "LINE";
+    public string SectionDxfId { get; set; } = "";
+    public string ProfileId { get; set; } = "";
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public class RobotEntity
 {
     public string RobotId { get; set; } = "";

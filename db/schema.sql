@@ -205,6 +205,46 @@ CREATE TABLE ref.weld_seam (
 );
 CREATE INDEX ix_weld_seam_map ON ref.weld_seam (tank_id, level);
 
+-- ─────────────── 영역(Area) LAYER + 수동 검사 작업 (ref) [PHASE2 개정 2026-08-04] ───────────────
+-- 자동 슬라이싱(weld_seam/SeamSlicer) 대체. 운영자가 영역과 그 안의 검사 작업을 수동 정의한다.
+-- 영역 1개 = STATION 노드 1개 = anchorGroup 1개, 작업 1개 = TASK 1개 (불변식 유지).
+CREATE TABLE ref.inspection_area (
+  area_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tank_id        text NOT NULL,
+  level          int  NOT NULL,
+  wall_code      text NOT NULL,                     -- 상위 LAYER [TANK_WALL_LAYOUT]
+  name           text NOT NULL,                     -- 예: 'A01' (tank-level-wall 내 유일)
+  min_x          double precision NOT NULL,         -- 도면 좌표(m) 사각 영역
+  min_y          double precision NOT NULL,
+  max_x          double precision NOT NULL,
+  max_y          double precision NOT NULL,
+  normal_drawing jsonb NOT NULL,                    -- [nx,ny,nz] 벽면 법선 (wallNormalW 원천)
+  station_x      double precision,                  -- 정차 pose 수동 오버라이드 (NULL=디폴트: 영역 중앙)
+  station_y      double precision,
+  station_theta  double precision,                  -- NULL=디폴트: −법선 방향(벽면 바라봄)
+  sort_order     int NOT NULL DEFAULT 0,            -- 방문 순서 (level→wall→sort_order→name)
+  created_by     text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tank_id, level, wall_code, name),
+  CHECK (min_x < max_x AND min_y < max_y)
+);
+CREATE INDEX ix_inspection_area_map ON ref.inspection_area (tank_id, level, wall_code);
+
+CREATE TABLE ref.area_task (
+  task_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  area_id        uuid NOT NULL REFERENCES ref.inspection_area ON DELETE CASCADE,
+  seq            int  NOT NULL,                     -- 영역 내 실행 순서(1..N → seqInGroup)
+  seam_start     jsonb NOT NULL,                    -- [x,y,z] 도면 좌표
+  seam_end       jsonb NOT NULL,                    -- [x,y,z]
+  seam_type      text NOT NULL DEFAULT 'LINE',      -- LINE | POLYLINE
+  section_dxf_id text NOT NULL DEFAULT '',
+  profile_id     text NOT NULL DEFAULT '',
+  created_by     text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (area_id, seq)
+);
+CREATE INDEX ix_area_task_area ON ref.area_task (area_id);
+
 -- ═══════════════════════════ 로봇 마스터 (ref) ═══════════════════════════
 
 CREATE TABLE ref.robot (
