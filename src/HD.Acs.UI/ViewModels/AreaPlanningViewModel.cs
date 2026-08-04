@@ -26,6 +26,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private const double Margin = 28;
 
     public ObservableCollection<ScenarioSummaryDto> Scenarios { get; } = new();
+    public ObservableCollection<WallDto> WallDefs { get; } = new();   // 등록된 벽면(법선 소유) [Wall 법선 승격]
     public ObservableCollection<AreaDto> Areas { get; } = new();
     public ObservableCollection<AreaTaskDto> AreaTasks { get; } = new();
     public ObservableCollection<string> Walls { get; } = new();
@@ -41,16 +42,20 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private string? _statusMessage;
     [ObservableProperty] private string _newScenarioName = "검사 시나리오";
 
-    // 영역 등록 입력
+    // 벽면 등록 입력 [Wall 법선 승격] — 법선은 벽면 단위 1회 정의(영역이 상속)
+    [ObservableProperty] private string _wallCodeInput = "SM";
+    [ObservableProperty] private string _wallNameInput = "";
+    [ObservableProperty] private double _wallNormalX = 1;
+    [ObservableProperty] private double _wallNormalY;
+
+    // 영역 등록 입력 (법선 없음 — 소속 벽면에서 상속)
     [ObservableProperty] private int _areaLevel = 2;
-    [ObservableProperty] private string _areaWall = "W03";
+    [ObservableProperty] private string _areaWall = "SM";
     [ObservableProperty] private string _areaName = "A01";
     [ObservableProperty] private double _minX;
     [ObservableProperty] private double _minY = -0.5;
     [ObservableProperty] private double _maxX = 1.0;
     [ObservableProperty] private double _maxY = 0.5;
-    [ObservableProperty] private double _normalX;
-    [ObservableProperty] private double _normalY = -1;
 
     // 검사 작업 등록 입력 (선택 영역)
     [ObservableProperty] private double _startX;
@@ -101,6 +106,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         try
         {
+            WallDefs.Clear();
+            foreach (var w in await _api.GetWallsAsync(TankId)) WallDefs.Add(w);
             Areas.Clear();
             foreach (var a in await _api.GetAreasAsync(TankId)) Areas.Add(a);
             Walls.Clear();
@@ -111,18 +118,66 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"영역 조회 실패: {ex.Message}"; }
     }
 
+    // 벽면 등록 [Wall 법선 승격] — 법선의 소유자. 영역은 여기서 정의한 법선을 상속.
+    [RelayCommand]
+    private async Task RegisterWallAsync()
+    {
+        if (string.IsNullOrWhiteSpace(WallCodeInput))
+        {
+            StatusMessage = "벽면 코드를 입력하세요.";
+            return;
+        }
+        if (WallNormalX == 0 && WallNormalY == 0)   // nz=0 고정 → xy 0이면 영벡터(방향 정의 불가)
+        {
+            StatusMessage = "벽면 법선(nx,ny)을 지정하세요 — 벽에서 내부(로봇 쪽)로 향하는 방향, (0,0) 불가.";
+            return;
+        }
+        try
+        {
+            await _api.CreateWallAsync(TankId, WallCodeInput, WallNameInput,
+                new[] { WallNormalX, WallNormalY, 0.0 }, _operatorId);
+            StatusMessage = $"벽면 등록: {WallCodeInput} 법선({WallNormalX},{WallNormalY})";
+            await RefreshAreasAsync();
+        }
+        catch (Exception ex) { StatusMessage = $"벽면 등록 실패: {ex.Message}"; }
+    }
+
+    [RelayCommand]
+    private async Task DeleteWallAsync(WallDto? wall)
+    {
+        if (wall is null) return;
+        try { await _api.DeleteWallAsync(wall.TankId, wall.WallCode); StatusMessage = "벽면 삭제됨."; await RefreshAreasAsync(); }
+        catch (Exception ex) { StatusMessage = $"벽면 삭제 실패: {ex.Message}"; }  // 참조 영역 존재 409
+    }
+
     [RelayCommand]
     private async Task RegisterAreaAsync()
     {
+        // 도면 좌표 입력 규약 사전검증 [TANK_WALL_LAYOUT §6] — 라운드트립 전 즉시 안내. 서버(400/409)가 최종 판정.
+        if (MinX >= MaxX || MinY >= MaxY)
+        {
+            StatusMessage = "영역 경계가 올바르지 않습니다: min < max (X·Y) 이어야 합니다.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(AreaWall))   // 법선은 벽면에서 상속 → 등록된 벽면 선택 필요
+        {
+            StatusMessage = "벽면을 선택하세요(법선은 벽면에서 상속). 먼저 벽면을 등록하세요.";
+            return;
+        }
+        // 동일 벽면(층·벽면) 내 영역 이름 중복 즉시 안내 — 서버 409가 최종 판정.
+        if (Areas.Any(a => a.Level == AreaLevel && a.WallCode == AreaWall && a.Name == AreaName))
+        {
+            StatusMessage = $"이미 등록된 영역입니다: L{AreaLevel}/{AreaWall}/{AreaName}";
+            return;
+        }
         try
         {
             await _api.CreateAreaAsync(TankId, AreaLevel, AreaWall, AreaName,
-                MinX, MinY, MaxX, MaxY, new[] { NormalX, NormalY, 0.0 },
-                null, null, null, _operatorId);
+                MinX, MinY, MaxX, MaxY, null, null, null, _operatorId);
             StatusMessage = $"영역 등록: {AreaWall}/{AreaName} [{MinX},{MinY}]–[{MaxX},{MaxY}]";
             await RefreshAreasAsync();
         }
-        catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }  // 경계 400 등
+        catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }  // 경계 400·미등록벽면 400·중복 409 등
     }
 
     [RelayCommand]

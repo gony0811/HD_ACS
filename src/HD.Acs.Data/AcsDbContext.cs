@@ -25,6 +25,7 @@ public class AcsDbContext : DbContext
     public DbSet<InspectionTaskEntity> InspectionTasks => Set<InspectionTaskEntity>();
     public DbSet<RobotEntity> Robots => Set<RobotEntity>();
     public DbSet<WeldSeamEntity> WeldSeams => Set<WeldSeamEntity>();
+    public DbSet<WallEntity> Walls => Set<WallEntity>();
     public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
     public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
     // run
@@ -101,9 +102,12 @@ public class AcsDbContext : DbContext
             e.Property(x => x.PathDrawing).HasColumnType("jsonb");
             e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
 
+        mb.Entity<WallEntity>(e => { e.ToTable("wall", "ref"); e.HasKey(x => new { x.TankId, x.WallCode });
+            e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
+
         mb.Entity<InspectionAreaEntity>(e => { e.ToTable("inspection_area", "ref"); e.HasKey(x => x.AreaId);
             e.HasIndex(x => new { x.TankId, x.Level, x.WallCode, x.Name }).IsUnique();
-            e.Property(x => x.NormalDrawing).HasColumnType("jsonb");
+            e.HasOne<WallEntity>().WithMany().HasForeignKey(x => new { x.TankId, x.WallCode });
             e.HasMany(x => x.Tasks).WithOne().HasForeignKey(t => t.AreaId).OnDelete(DeleteBehavior.Cascade); });
 
         mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);

@@ -33,8 +33,11 @@
                         <telerik:RadPane Header="화물창 3D / 전개도" CanUserClose="False" CanFloat="False">
                             <views:TankView DataContext="{Binding Tank}" />
                         </telerik:RadPane>
-                        <telerik:RadPane Header="영역/검사작업" CanUserClose="False" CanFloat="False">
-                            <views:AreaPlanningView DataContext="{Binding AreaPlanning}" />
+                        <telerik:RadPane Header="영역·작업 관리" CanUserClose="False" CanFloat="False">
+                            <views:AreaManagementView DataContext="{Binding AreaPlanning}" />
+                        </telerik:RadPane>
+                        <telerik:RadPane Header="영역 전개도" CanUserClose="False" CanFloat="False">
+                            <views:AreaLayoutView DataContext="{Binding AreaPlanning}" />
                         </telerik:RadPane>
                     </telerik:RadPaneGroup>
                 </telerik:RadSplitContainer>

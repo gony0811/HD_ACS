@@ -205,20 +205,33 @@ CREATE TABLE ref.weld_seam (
 );
 CREATE INDEX ix_weld_seam_map ON ref.weld_seam (tank_id, level);
 
+-- ─────────────── 벽면(Wall) LAYER (ref) [Wall 법선 승격 2026-08-05] ───────────────
+-- 법선은 영역이 아니라 벽면의 물리적 속성(같은 벽면의 모든 영역이 공유). 탱크 단위 정의(전 층 동일 방향).
+-- 값은 순수 데이터 — 도면 프레임 법선을 벽면당 1회 입력(하드코딩 방향 규약 없음) [TANK_WALL_LAYOUT §6].
+CREATE TABLE ref.wall (
+  tank_id        text NOT NULL,
+  wall_code      text NOT NULL,                     -- 통제 어휘 [TANK_WALL_LAYOUT §2] 예: 'SM','PM','A'
+  name           text NOT NULL DEFAULT '',
+  normal_drawing jsonb NOT NULL,                    -- [nx,ny,nz] 도면 프레임 벽면 법선 (영역이 상속, wallNormalW 원천)
+  created_by     text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tank_id, wall_code)
+);
+
 -- ─────────────── 영역(Area) LAYER + 수동 검사 작업 (ref) [PHASE2 개정 2026-08-04] ───────────────
 -- 자동 슬라이싱(weld_seam/SeamSlicer) 대체. 운영자가 영역과 그 안의 검사 작업을 수동 정의한다.
 -- 영역 1개 = STATION 노드 1개 = anchorGroup 1개, 작업 1개 = TASK 1개 (불변식 유지).
+-- 법선은 소속 벽면(ref.wall)에서 상속 — 영역은 법선을 저장하지 않는다 [Wall 법선 승격].
 CREATE TABLE ref.inspection_area (
   area_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tank_id        text NOT NULL,
   level          int  NOT NULL,
-  wall_code      text NOT NULL,                     -- 상위 LAYER [TANK_WALL_LAYOUT]
+  wall_code      text NOT NULL,                     -- 상위 LAYER [TANK_WALL_LAYOUT], 법선 상속원
   name           text NOT NULL,                     -- 예: 'A01' (tank-level-wall 내 유일)
   min_x          double precision NOT NULL,         -- 도면 좌표(m) 사각 영역
   min_y          double precision NOT NULL,
   max_x          double precision NOT NULL,
   max_y          double precision NOT NULL,
-  normal_drawing jsonb NOT NULL,                    -- [nx,ny,nz] 벽면 법선 (wallNormalW 원천)
   station_x      double precision,                  -- 정차 pose 수동 오버라이드 (NULL=디폴트: 영역 중앙)
   station_y      double precision,
   station_theta  double precision,                  -- NULL=디폴트: −법선 방향(벽면 바라봄)
@@ -226,7 +239,8 @@ CREATE TABLE ref.inspection_area (
   created_by     text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tank_id, level, wall_code, name),
-  CHECK (min_x < max_x AND min_y < max_y)
+  CHECK (min_x < max_x AND min_y < max_y),
+  FOREIGN KEY (tank_id, wall_code) REFERENCES ref.wall (tank_id, wall_code)
 );
 CREATE INDEX ix_inspection_area_map ON ref.inspection_area (tank_id, level, wall_code);
 

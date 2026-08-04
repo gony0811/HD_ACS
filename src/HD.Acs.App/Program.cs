@@ -52,16 +52,70 @@ app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()
         .Select(s => new { s.ScenarioId, s.Name, s.Version, s.TankId, s.Status }).ToListAsync()));
 
+// ── 벽면(Wall) LAYER [Wall 법선 승격] — 법선의 소유자. 영역은 소속 벽면에서 법선 상속 ──
+app.MapPost("/api/walls", async (CreateWallRequest req, AcsDbContext db) =>
+{
+    var n = req.Normal ?? Array.Empty<double>();
+    if (n.Length < 2 || (n[0] == 0 && n[1] == 0))
+        return Results.BadRequest(new { error = "벽면 법선(nx,ny)을 지정하세요 — 벽에서 내부로 향하는 방향, (0,0) 불가." });
+    var wall = await db.Walls.FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
+    if (wall is null)
+    {
+        wall = new HD.Acs.Data.Entities.WallEntity { TankId = req.TankId, WallCode = req.WallCode };
+        db.Walls.Add(wall);
+    }
+    wall.Name = req.Name ?? "";
+    wall.NormalDrawing = JsonSerializer.Serialize(n);
+    wall.CreatedBy = req.UserId;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { tankId = wall.TankId, wallCode = wall.WallCode });
+});
+
+app.MapGet("/api/walls", async (string? tankId, AcsDbContext db) =>
+{
+    var walls = await db.Walls.AsNoTracking()
+        .Where(w => w.TankId == (tankId ?? "CT1")).OrderBy(w => w.WallCode).ToListAsync();
+    return Results.Ok(walls.Select(w => new
+    {
+        w.TankId, w.WallCode, w.Name,
+        Normal = JsonSerializer.Deserialize<double[]>(w.NormalDrawing) ?? Array.Empty<double>()
+    }));
+});
+
+app.MapDelete("/api/walls/{tankId}/{wallCode}", async (string tankId, string wallCode, AcsDbContext db) =>
+{
+    var wall = await db.Walls.FirstOrDefaultAsync(w => w.TankId == tankId && w.WallCode == wallCode);
+    if (wall is null) return Results.NotFound();
+    bool used = await db.InspectionAreas.AsNoTracking().AnyAsync(a => a.TankId == tankId && a.WallCode == wallCode);
+    if (used)
+        return Results.Conflict(new { error = $"벽면 {tankId}/{wallCode}을(를) 참조하는 영역이 있어 삭제할 수 없습니다." });
+    db.Walls.Remove(wall);
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
 // ── 영역(Area) LAYER + 수동 검사 작업 [PHASE2 개정] — 자동 슬라이싱 대체 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
 {
     if (req.MinX >= req.MaxX || req.MinY >= req.MaxY)
         return Results.BadRequest(new { error = "영역 경계가 올바르지 않습니다 (minX<maxX, minY<maxY)." });
+    // 법선은 소속 벽면에서 상속 — 등록된 벽면(ref.wall)이어야 함 [Wall 법선 승격]
+    bool wallExists = await db.Walls.AsNoTracking()
+        .AnyAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
+    if (!wallExists)
+        return Results.BadRequest(new { error =
+            $"등록된 벽면이 아닙니다: {req.TankId}/{req.WallCode}. 먼저 벽면(법선)을 등록하세요." });
+    // 동일 (tank, level, wall) 내 영역 이름 중복 금지 [벽면 내 유일] — 층 간 벽면 중복은 허용
+    bool dup = await db.InspectionAreas.AsNoTracking().AnyAsync(x =>
+        x.TankId == req.TankId && x.Level == req.Level &&
+        x.WallCode == req.WallCode && x.Name == req.Name);
+    if (dup)
+        return Results.Conflict(new { error =
+            $"동일 벽면(L{req.Level}/{req.WallCode}) 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
         AreaId = Guid.NewGuid(), TankId = req.TankId, Level = req.Level, WallCode = req.WallCode, Name = req.Name,
         MinX = req.MinX, MinY = req.MinY, MaxX = req.MaxX, MaxY = req.MaxY,
-        NormalDrawing = JsonSerializer.Serialize(req.NormalDrawing),
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
@@ -346,8 +400,9 @@ public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
+public sealed record CreateWallRequest(string TankId, string WallCode, string? Name, double[] Normal, string? UserId);
 public sealed record CreateAreaRequest(string TankId, int Level, string WallCode, string Name,
-    double MinX, double MinY, double MaxX, double MaxY, double[] NormalDrawing,
+    double MinX, double MinY, double MaxX, double MaxY,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId);
 public sealed record CreateAreaTaskRequest(int? Seq, double[] SeamStart, double[] SeamEnd,
     string? SeamType, string? SectionDxfId, string? ProfileId, string? UserId);

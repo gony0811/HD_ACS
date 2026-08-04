@@ -148,6 +148,13 @@ public sealed record SlicedStationDto(
     PoseDto StationMap,
     List<SlicedTaskDto> Tasks);
 
+/// <summary>GET /api/walls 항목 — ref.wall (법선 소유자, 영역이 상속) [Wall 법선 승격].</summary>
+public sealed record WallDto(
+    string TankId,
+    string WallCode,
+    string Name,
+    double[] Normal);
+
 /// <summary>GET /api/areas 항목 — ref.inspection_area (유효 정차 pose 포함) [PHASE2 개정].</summary>
 public sealed record AreaDto(
     Guid AreaId,

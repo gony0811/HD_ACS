@@ -4,7 +4,7 @@
 > 네이밍 [C안]: PostgreSQL 스키마(namespace)로 계층 구분 + snake_case
 > `ref`(마스터) / `run`(런타임) / `hist`(이력) / `alarm`(알람) / `sys`(시스템) — NAMUGA의 NA_{계층}_ 개념을 스키마로 승계
 
-## 테이블 전체 목록 (24 테이블 + 2 뷰)
+## 테이블 전체 목록 (28 테이블 + 2 뷰)
 
 | 계층 | 테이블 | 역할 | 근거 |
 |---|---|---|---|
@@ -18,6 +18,10 @@
 | **ref 시나리오** | ref.scenario | 검사 시나리오 (정책 jsonb 외부화) | ADR-010 |
 | | ref.inspection_point | 검사 지점 → 노드 참조 (층 자동 결정) | |
 | | ref.inspection_task | 검사 작업 참조 (job_ref + position + opaque params) | ADR-001/004 |
+| **ref 벽면** | ref.wall | 벽면 = 법선 소유자 (tank_id, wall_code) 탱크 공유. 영역이 법선 상속 [TANK_WALL_LAYOUT §6.3] | Wall 법선 승격 |
+| **ref 영역** | ref.inspection_area | 검사 영역 = STATION 1개 = anchorGroup 1개 (도면 좌표 사각형; 법선은 ref.wall에서 상속, FK). 입력 좌표 규약은 [TANK_WALL_LAYOUT §6](TANK_WALL_LAYOUT.md) | PHASE2 개정 |
+| | ref.area_task | 영역 내 검사 작업 (seam 시작/끝 도면 좌표, 영역 내 순서 seq) | PHASE2 개정 |
+| | ref.weld_seam | 도면 seam 자동 슬라이싱 원천 (WP-2, **dormant** — 운영 워크플로우 제외) | PHASE2 |
 | **ref 로봇** | ref.robot | 로봇 마스터 (manufacturer/serialNumber = MQTT 토픽 요소) | ADR-003 |
 | **run 런타임** | run.scenario_run | 시나리오 실행 = 층 미션 시퀀스 (WAITING_FLOOR_TRANSFER) | 8.4절 |
 | | run.mission | 층 단위 미션 (orderId/orderUpdateId, 상태머신) | ADR-010 |

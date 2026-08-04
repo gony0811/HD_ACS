@@ -153,18 +153,39 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
-    // ── 영역(Area) LAYER [PHASE2 개정] ──────────
+    // ── 벽면(Wall) LAYER [Wall 법선 승격] — 법선 소유자, 영역이 상속 ──────────
+    public async Task CreateWallAsync(string tankId, string wallCode, string name, double[] normal,
+        string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/walls", new
+        {
+            TankId = tankId, WallCode = wallCode, Name = name, Normal = normal, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 영법선 400 등 메시지 노출
+    }
+
+    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<WallDto>>($"/api/walls?tankId={Uri.EscapeDataString(tankId)}", ct) ?? new();
+
+    public async Task DeleteWallAsync(string tankId, string wallCode, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync(
+            $"/api/walls/{Uri.EscapeDataString(tankId)}/{Uri.EscapeDataString(wallCode)}", ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 참조 영역 존재 시 409 메시지 노출
+    }
+
+    // ── 영역(Area) LAYER [PHASE2 개정] — 법선은 벽면에서 상속(입력 없음) ──────────
     public async Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
-        double minX, double minY, double maxX, double maxY, double[] normal,
+        double minX, double minY, double maxX, double maxY,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
             TankId = tankId, Level = level, WallCode = wallCode, Name = name,
-            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY, NormalDrawing = normal,
+            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId
         }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 오류 400 메시지 노출
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 400·미등록 벽면 400·중복 409 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.AreaId ?? Guid.Empty;
     }
 

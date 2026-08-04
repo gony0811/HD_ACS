@@ -46,13 +46,18 @@ public sealed class AreaPlanningService
         double standoffMm = _config.GetValue("Acs:Area:StandoffMm", 400.0);
         double workingMm = _config.GetValue("Acs:Area:WorkingDistanceMm", standoffMm);
 
-        // 유효 영역만(작업 ≥1, 법선 파싱 성공)
+        // 벽면 법선(도면 프레임) 로드 — 영역은 소속 벽면(ref.wall)에서 법선을 상속 [Wall 법선 승격]
+        var wallNormals = (await _db.Walls.AsNoTracking()
+                .Where(w => w.TankId == scenario.TankId).ToListAsync(ct))
+            .ToDictionary(w => w.WallCode, w => ParseVec3(w.NormalDrawing));
+
+        // 유효 영역만(작업 ≥1, 벽면 법선 존재)
         var valid = new List<(InspectionAreaEntity Area, double[] Normal)>();
         foreach (var a in areas)
         {
-            var normal = ParseVec3(a.NormalDrawing);
             if (a.Tasks.Count == 0) { skipped.Add($"area {a.Name}: 검사 작업 없음"); continue; }
-            if (normal is null) { skipped.Add($"area {a.Name}: 법선 파싱 실패"); continue; }
+            if (!wallNormals.TryGetValue(a.WallCode, out var normal) || normal is null)
+            { skipped.Add($"area {a.Name}: 벽면 '{a.WallCode}' 법선 없음"); continue; }
             valid.Add((a, normal));
         }
 
@@ -165,11 +170,14 @@ public sealed class AreaPlanningService
         if (level is not null) q = q.Where(a => a.Level == level);
         if (wallCode is not null) q = q.Where(a => a.WallCode == wallCode);
         var areas = await q.ToListAsync(ct);
+        var wallNormals = (await _db.Walls.AsNoTracking()
+                .Where(w => w.TankId == tankId).ToListAsync(ct))
+            .ToDictionary(w => w.WallCode, w => ParseVec3(w.NormalDrawing) ?? new[] { 0.0, 1.0, 0.0 });
         return areas
             .OrderBy(a => a.Level).ThenBy(a => a.WallCode).ThenBy(a => a.SortOrder).ThenBy(a => a.Name)
             .Select(a =>
             {
-                var normal = ParseVec3(a.NormalDrawing) ?? new[] { 0.0, 1.0, 0.0 };
+                var normal = wallNormals.TryGetValue(a.WallCode, out var n) ? n : new[] { 0.0, 1.0, 0.0 };
                 var (sx, sy, st) = EffectiveStationDrawing(a, normal);
                 bool over = a.StationX is not null || a.StationY is not null || a.StationTheta is not null;
                 return new AreaView(a.AreaId, a.TankId, a.Level, a.WallCode, a.Name,

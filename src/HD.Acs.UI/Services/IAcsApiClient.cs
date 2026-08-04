@@ -39,9 +39,15 @@ public interface IAcsApiClient
     Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
     Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
 
-    // ── 영역(Area) LAYER [PHASE2 개정] ──────────
+    // ── 벽면(Wall) LAYER [Wall 법선 승격] — 법선 소유자, 영역이 상속 ──────────
+    Task CreateWallAsync(string tankId, string wallCode, string name, double[] normal,
+        string userId, CancellationToken ct = default);
+    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default);
+    Task DeleteWallAsync(string tankId, string wallCode, CancellationToken ct = default);
+
+    // ── 영역(Area) LAYER [PHASE2 개정] — 법선은 벽면에서 상속(입력 없음) ──────────
     Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
-        double minX, double minY, double maxX, double maxY, double[] normal,
+        double minX, double minY, double maxX, double maxY,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, int? level = null, string? wallCode = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);

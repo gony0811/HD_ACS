@@ -138,7 +138,19 @@ public class WeldSeamEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+// 벽면(Wall) LAYER [Wall 법선 승격] — 법선의 소유자. (tank_id, wall_code) 탱크 단위. 영역이 상속.
+public class WallEntity
+{
+    public string TankId { get; set; } = "";
+    public string WallCode { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string NormalDrawing { get; set; } = "[]";   // jsonb [nx,ny,nz] 도면 프레임 법선
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 // 영역(Area) LAYER [PHASE2 개정] — 운영자 수동 정의. 영역 1개 = STATION 1개 = anchorGroup 1개.
+// 법선은 소속 벽면(WallEntity)에서 상속 — 영역은 법선을 저장하지 않는다 [Wall 법선 승격].
 public class InspectionAreaEntity
 {
     public Guid AreaId { get; set; }
@@ -150,7 +162,6 @@ public class InspectionAreaEntity
     public double MinY { get; set; }
     public double MaxX { get; set; }
     public double MaxY { get; set; }
-    public string NormalDrawing { get; set; } = "[]";  // jsonb [nx,ny,nz]
     public double? StationX { get; set; }               // 정차 오버라이드 (NULL=디폴트)
     public double? StationY { get; set; }
     public double? StationTheta { get; set; }
