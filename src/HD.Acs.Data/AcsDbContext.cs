@@ -102,18 +102,17 @@ public class AcsDbContext : DbContext
             e.Property(x => x.PathDrawing).HasColumnType("jsonb");
             e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
 
-        mb.Entity<WallEntity>(e => { e.ToTable("wall", "ref"); e.HasKey(x => new { x.TankId, x.WallCode });
-            e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
+        mb.Entity<WallEntity>(e => { e.ToTable("wall", "ref"); e.HasKey(x => new { x.TankId, x.Level, x.WallCode }); });
 
         mb.Entity<InspectionAreaEntity>(e => { e.ToTable("inspection_area", "ref"); e.HasKey(x => x.AreaId);
             e.HasIndex(x => new { x.TankId, x.Level, x.WallCode, x.Name }).IsUnique();
-            e.HasOne<WallEntity>().WithMany().HasForeignKey(x => new { x.TankId, x.WallCode });
+            e.HasOne<WallEntity>().WithMany().HasForeignKey(x => new { x.TankId, x.Level, x.WallCode });
             e.HasMany(x => x.Tasks).WithOne().HasForeignKey(t => t.AreaId).OnDelete(DeleteBehavior.Cascade); });
 
         mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);
             e.HasIndex(x => new { x.AreaId, x.Seq }).IsUnique();
-            e.Property(x => x.SeamStart).HasColumnType("jsonb");
-            e.Property(x => x.SeamEnd).HasColumnType("jsonb"); });
+            e.Property(x => x.StartDrawing).HasColumnType("jsonb");
+            e.Property(x => x.EndDrawing).HasColumnType("jsonb"); });
 
         // ═══ run ═══
         mb.Entity<ScenarioRunEntity>(e => { e.ToTable("scenario_run", "run");

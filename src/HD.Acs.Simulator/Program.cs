@@ -277,7 +277,7 @@ static class WeldInspectionParams
         if (position == null) violations.Add("position");
         else
         {
-            foreach (var key in new[] { "seamStartW", "seamEndW", "wallNormalW" })
+            foreach (var key in new[] { "seamStartW", "seamEndW" })   // [SPEC v2: wallNormalW 제거]
                 if (!IsVec3(position.Value, key)) violations.Add($"position.{key}");
             if (!position.Value.TryGetProperty("drawingPos", out var dp) || dp.ValueKind != JsonValueKind.Object)
                 violations.Add("position.drawingPos");

@@ -39,11 +39,11 @@ public interface IAcsApiClient
     Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
     Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
 
-    // ── 벽면(Wall) LAYER [Wall 법선 승격] — 법선 소유자, 영역이 상속 ──────────
-    Task CreateWallAsync(string tankId, string wallCode, string name, double[] normal,
+    // ── 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리·티칭 키 (정차각 저장 안 함) ──────────
+    Task CreateWallAsync(string tankId, int level, string wallCode, string? description,
         string userId, CancellationToken ct = default);
-    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default);
-    Task DeleteWallAsync(string tankId, string wallCode, CancellationToken ct = default);
+    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);
+    Task DeleteWallAsync(string tankId, int level, string wallCode, CancellationToken ct = default);
 
     // ── 영역(Area) LAYER [PHASE2 개정] — 법선은 벽면에서 상속(입력 없음) ──────────
     Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,

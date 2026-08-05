@@ -46,22 +46,26 @@ public sealed class AreaPlanningService
         double standoffMm = _config.GetValue("Acs:Area:StandoffMm", 400.0);
         double workingMm = _config.GetValue("Acs:Area:WorkingDistanceMm", standoffMm);
 
-        // 벽면 법선(도면 프레임) 로드 — 영역은 소속 벽면(ref.wall)에서 법선을 상속 [Wall 법선 승격]
-        var wallNormals = (await _db.Walls.AsNoTracking()
-                .Where(w => w.TankId == scenario.TankId).ToListAsync(ct))
-            .ToDictionary(w => w.WallCode, w => ParseVec3(w.NormalDrawing));
-
-        // 유효 영역만(작업 ≥1, 벽면 법선 존재)
-        var valid = new List<(InspectionAreaEntity Area, double[] Normal)>();
+        // 유효 영역: 작업 ≥1 (작업 0개만 skipped). 정차각은 seam 기하에서 자동 산출 [정차각 자동화]
+        //   정차 위치 = station_x/y ?? 영역 중앙, 정차각 = station_theta ?? atan2(정차→seam 중심)
+        //   degenerate(정차 위치≈seam 중심)는 조용한 스킵이 아니라 명시적 실패(reasons)
+        var valid = new List<(InspectionAreaEntity Area, double Sx, double Sy, double Theta)>();
+        var thetaMissing = new List<string>();
         foreach (var a in areas)
         {
             if (a.Tasks.Count == 0) { skipped.Add($"area {a.Name}: 검사 작업 없음"); continue; }
-            if (!wallNormals.TryGetValue(a.WallCode, out var normal) || normal is null)
-            { skipped.Add($"area {a.Name}: 벽면 '{a.WallCode}' 법선 없음"); continue; }
-            valid.Add((a, normal));
+            var (cx, cy) = AreaGeometry.AreaCenter(a.MinX, a.MinY, a.MaxX, a.MaxY);
+            double sx = a.StationX ?? cx, sy = a.StationY ?? cy;
+            var targets = a.Tasks
+                .SelectMany(t => new[] { ParseVec3(t.StartDrawing), ParseVec3(t.EndDrawing) })
+                .Where(p => p is not null).Select(p => p!).ToList();
+            double? theta = a.StationTheta ?? AreaGeometry.FacingYawToward(sx, sy, targets);
+            if (theta is null)
+            { thetaMissing.Add($"area {a.Name}: 정차각 자동 산출 불가 (정차 위치와 seam 중심이 일치) — station_theta 지정 또는 영역을 벽쪽으로 확장"); continue; }
+            valid.Add((a, sx, sy, theta.Value));
         }
 
-        // 층별 유효 T_W_D 사전 검증 (§2.5 승계) — 하나라도 없으면 아무것도 만들지 않음
+        // 층별 유효 T_W_D 사전 검증 (§2.5 승계). 정차각·T_W_D 결함은 모두 모아 한 번에 400 (조용한 생성 금지)
         var levels = valid.Select(v => v.Area.Level).Distinct().ToList();
         var calibByLevel = new Dictionary<int, (string MapId, DrawingTransform T)>();
         var missing = new List<string>();
@@ -75,8 +79,8 @@ public sealed class AreaPlanningService
             if (cal is null) { missing.Add($"L{level}({map.MapId} v{map.Version}): 유효 T_W_D 없음"); continue; }
             calibByLevel[level] = (map.MapId, new DrawingTransform(cal.Tx, cal.Ty, cal.YawRad));
         }
-        if (missing.Count > 0)
-            throw new SeamPlanningService.CalibrationMissingException(missing);
+        if (missing.Count > 0 || thetaMissing.Count > 0)
+            throw new SeamPlanningService.CalibrationMissingException(missing.Concat(thetaMissing).ToList());
 
         // 재실행 안전
         var existingPoints = await _db.InspectionPoints.Where(p => p.ScenarioId == scenarioId).ToListAsync(ct);
@@ -85,25 +89,24 @@ public sealed class AreaPlanningService
         // Phase 1: STATION 노드 선확정 (edge/point FK 삽입 순서 보장)
         var stationPos = new Dictionary<Guid, (string NodeId, string MapId, double Mx, double My,
             double SdX, double SdY, double SdTheta)>();
-        foreach (var (a, normal) in valid)
+        foreach (var (a, sx, sy, theta) in valid)
         {
             var (mapId, tWd) = calibByLevel[a.Level];
-            var (sdx, sdy, sdTheta) = EffectiveStationDrawing(a, normal);
-            var (mx, my) = tWd.DrawingToMap(sdx, sdy);
-            double mTheta = tWd.DrawingYawToMap(sdTheta);
+            var (mx, my) = tWd.DrawingToMap(sx, sy);
+            double mTheta = tWd.DrawingYawToMap(theta);
             string nodeId = $"{a.TankId}-L{a.Level}-{a.WallCode}-{a.Name}";
 
             var node = await _db.Nodes.FirstOrDefaultAsync(n => n.NodeId == nodeId, ct);
             if (node is null) { node = new NodeEntity { NodeId = nodeId }; _db.Nodes.Add(node); }
             node.MapId = mapId; node.Name = nodeId; node.X = mx; node.Y = my; node.Theta = mTheta;
             node.NodeType = "STATION"; node.AllowedDevXy = StationDevXy; node.AllowedDevTheta = StationDevTheta;
-            stationPos[a.AreaId] = (nodeId, mapId, mx, my, sdx, sdy, sdTheta);
+            stationPos[a.AreaId] = (nodeId, mapId, mx, my, sx, sy, theta);
         }
         await _db.SaveChangesAsync(ct);
 
         // Phase 2: 엣지 연결 + InspectionPoint/Task 생성
         int pointSeq = 0, taskCount = 0;
-        foreach (var (a, normal) in valid)
+        foreach (var (a, _, _, _) in valid)
         {
             var sp = stationPos[a.AreaId];
             await ConnectNearestAsync(sp.NodeId, sp.MapId, sp.Mx, sp.My, ct);
@@ -114,14 +117,13 @@ public sealed class AreaPlanningService
             };
             foreach (var t in a.Tasks)
             {
-                var start = ParseVec3(t.SeamStart) ?? new double[3];
-                var end = ParseVec3(t.SeamEnd) ?? new double[3];
+                var start = ParseVec3(t.StartDrawing) ?? new double[3];
+                var end = ParseVec3(t.EndDrawing) ?? new double[3];
                 var position = new
                 {
                     tank = a.TankId, level = a.Level, wall_code = a.WallCode,
                     seamStartDrawing = start,
                     seamEndDrawing = end,
-                    wallNormalDrawing = normal,
                     stationDrawing = new { x = sp.SdX, y = sp.SdY, theta = sp.SdTheta },
                     areaBounds = new { minX = a.MinX, minY = a.MinY, maxX = a.MaxX, maxY = a.MaxY }
                 };
@@ -158,9 +160,9 @@ public sealed class AreaPlanningService
 
     // ── 조회(UI 렌더) ──
     public sealed record AreaView(Guid AreaId, string TankId, int Level, string WallCode, string Name,
-        double MinX, double MinY, double MaxX, double MaxY, double[] Normal,
+        double MinX, double MinY, double MaxX, double MaxY,
         double StationX, double StationY, double StationTheta, bool IsOverride, int SortOrder, int TaskCount);
-    public sealed record AreaTaskView(Guid TaskId, int Seq, double[] SeamStart, double[] SeamEnd,
+    public sealed record AreaTaskView(Guid TaskId, int Seq, string? Name, double[] SeamStart, double[] SeamEnd,
         string SeamType, string SectionDxfId, string ProfileId);
 
     public async Task<IReadOnlyList<AreaView>> GetAreasAsync(string tankId, int? level, string? wallCode,
@@ -170,18 +172,20 @@ public sealed class AreaPlanningService
         if (level is not null) q = q.Where(a => a.Level == level);
         if (wallCode is not null) q = q.Where(a => a.WallCode == wallCode);
         var areas = await q.ToListAsync(ct);
-        var wallNormals = (await _db.Walls.AsNoTracking()
-                .Where(w => w.TankId == tankId).ToListAsync(ct))
-            .ToDictionary(w => w.WallCode, w => ParseVec3(w.NormalDrawing) ?? new[] { 0.0, 1.0, 0.0 });
         return areas
             .OrderBy(a => a.Level).ThenBy(a => a.WallCode).ThenBy(a => a.SortOrder).ThenBy(a => a.Name)
             .Select(a =>
             {
-                var normal = wallNormals.TryGetValue(a.WallCode, out var n) ? n : new[] { 0.0, 1.0, 0.0 };
-                var (sx, sy, st) = EffectiveStationDrawing(a, normal);
+                // 읽기용 정차 pose — 위치=오버라이드/중앙, 각도=station_theta ?? seam 자동(불명 시 0) [정차각 자동화]
+                var (cx, cy) = AreaGeometry.AreaCenter(a.MinX, a.MinY, a.MaxX, a.MaxY);
+                double sx = a.StationX ?? cx, sy = a.StationY ?? cy;
+                var targets = a.Tasks
+                    .SelectMany(t => new[] { ParseVec3(t.StartDrawing), ParseVec3(t.EndDrawing) })
+                    .Where(p => p is not null).Select(p => p!).ToList();
+                double st = a.StationTheta ?? AreaGeometry.FacingYawToward(sx, sy, targets) ?? 0.0;
                 bool over = a.StationX is not null || a.StationY is not null || a.StationTheta is not null;
                 return new AreaView(a.AreaId, a.TankId, a.Level, a.WallCode, a.Name,
-                    a.MinX, a.MinY, a.MaxX, a.MaxY, normal, sx, sy, st, over, a.SortOrder, a.Tasks.Count);
+                    a.MinX, a.MinY, a.MaxX, a.MaxY, sx, sy, st, over, a.SortOrder, a.Tasks.Count);
             }).ToList();
     }
 
@@ -189,16 +193,9 @@ public sealed class AreaPlanningService
     {
         var tasks = await _db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId)
             .OrderBy(t => t.Seq).ToListAsync(ct);
-        return tasks.Select(t => new AreaTaskView(t.TaskId, t.Seq,
-            ParseVec3(t.SeamStart) ?? new double[3], ParseVec3(t.SeamEnd) ?? new double[3],
+        return tasks.Select(t => new AreaTaskView(t.TaskId, t.Seq, t.Name,
+            ParseVec3(t.StartDrawing) ?? new double[3], ParseVec3(t.EndDrawing) ?? new double[3],
             t.SeamType, t.SectionDxfId, t.ProfileId)).ToList();
-    }
-
-    /// <summary>정차 도면 pose — 오버라이드 우선, 미지정은 디폴트(영역 중앙 + −법선).</summary>
-    private static (double X, double Y, double Theta) EffectiveStationDrawing(InspectionAreaEntity a, double[] normal)
-    {
-        var (dx, dy, dTheta) = AreaGeometry.DefaultStationPose(a.MinX, a.MinY, a.MaxX, a.MaxY, normal[0], normal[1]);
-        return (a.StationX ?? dx, a.StationY ?? dy, a.StationTheta ?? dTheta);
     }
 
     /// <summary>같은 맵의 기존 비-STATION 노드 중 최근접에 양방향 TRAVEL 엣지 (get-or-create).</summary>

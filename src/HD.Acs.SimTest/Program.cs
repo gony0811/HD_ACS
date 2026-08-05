@@ -12,7 +12,7 @@ using MQTTnet.Protocol;
 // 시나리오:
 //  S1 golden-anchor : ST03(1 TASK) → ST04(2 TASK 동일 anchorGroup)
 //                     기대: A1=FULL, A2=FULL, A3=SHARED, 모두 FINISHED
-//  S2 invalid-param : wallNormalW·anchorGroupId 누락 → FAILED reason=PARAM(...)
+//  S2 invalid-param : seamStartW·anchorGroupId 누락 → FAILED reason=PARAM(...) [SPEC v2: 법선 제거]
 //  S3 fail-injection: SIM_FAIL_ACTION_IDS 대상 → FAILED reason=INJECTED
 //
 // 사용: dotnet run -- [brokerHost] [manufacturer] [serialNumber]
@@ -80,9 +80,8 @@ var failures = new List<string>();
         ActionParameters =
         {
             new ActionParameter { Key = "jobRef", Value = "JOB-BAD-1" },
-            // position: wallNormalW 누락
+            // position: seamStartW 누락 [SPEC v2: wallNormalW 계약 제거 → 다른 필수 필드로 누락 재현]
             new ActionParameter { Key = "position", Value = new {
-                seamStartW = new[] { 12.51, 5.98, 1.42 },
                 seamEndW   = new[] { 13.31, 5.98, 1.42 },
                 drawingPos = new { tank = "CT1", level = 2, wall_code = "W03", x = 3.12, y = 0.0, z = 1.42 } } },
             // params: anchorGroupId 누락
@@ -98,7 +97,7 @@ var failures = new List<string>();
     };
     var r = await RunScenarioAsync("S2 invalid-param", order, new[] { a4 });
     Expect(r, a4, "FAILED", "reason=PARAM", "S2: 필수 필드 누락은 PARAM 실패여야 함");
-    ExpectContains(r, a4, "wallNormalW",   "S2: 위반 목록에 position.wallNormalW 포함");
+    ExpectContains(r, a4, "seamStartW",    "S2: 위반 목록에 position.seamStartW 포함");
     ExpectContains(r, a4, "anchorGroupId", "S2: 위반 목록에 params.anchorGroupId 포함");
 }
 
@@ -202,7 +201,6 @@ static VdaAction Inspection(string actionId, string jobRef, string anchorGroupId
         new ActionParameter { Key = "position", Value = new {
             seamStartW  = new[] { 12.510, 5.980, 1.420 },
             seamEndW    = new[] { 13.310, 5.980, 1.420 },
-            wallNormalW = new[] { 0.0, -1.0, 0.0 },
             drawingPos  = new { tank = "CT1", level = 2, wall_code = "W03", x = 3.120, y = 0.0, z = 1.420 } } },
         new ActionParameter { Key = "params", Value = new {
             seamType = "LINE", sectionDxfId = "DXF-CORR-T12",

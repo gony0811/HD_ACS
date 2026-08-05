@@ -55,28 +55,25 @@
 
                 <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="12" Margin="0,0,0,10">
                     <StackPanel>
-                        <TextBlock Text="① 벽면 등록 (법선 — 벽면 단위 1회)" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock Text="① 벽면 등록 (레지스트리 — 코드·설명)" FontWeight="SemiBold" Margin="0,0,0,4" />
                         <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="법선은 벽면의 속성이라 벽면당 한 번만 정의합니다(영역이 상속). 벽에서 화물창 내부(로봇 쪽)로 향하는 방향, (0,0) 불가. nz는 0(수직벽) 고정." />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="벽면코드" Style="{StaticResource Lbl}" ToolTip="벽면 코드 [TANK_WALL_LAYOUT §2] 예: SM, PM, A" />
+                                   Text="벽면은 코드·설명만 등록합니다(층별). 정차각(벽 바라봄)은 영역·작업 seam 기하에서 자동 산출되므로 입력하지 않습니다. wall_code는 HD_AMR 티칭 조회 키입니다." />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Lv" Style="{StaticResource Lbl}" ToolTip="검사 층(1=바닥~4). 벽면은 층별로 정의." />
+                            <telerik:RadNumericUpDown Width="70" Value="{Binding WallLevel, Mode=TwoWay}" />
+                            <TextBlock Text="벽면코드" Style="{StaticResource Lbl}" Margin="10,0,8,0" ToolTip="벽면 코드 [TANK_WALL_LAYOUT §2] 예: SM, PM, A" />
                             <TextBox Width="80" Text="{Binding WallCodeInput, Mode=TwoWay}" />
-                            <TextBlock Text="이름" Style="{StaticResource Lbl}" Margin="10,0,8,0" />
-                            <TextBox Width="120" Text="{Binding WallNameInput, Mode=TwoWay}" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10"
-                                    ToolTip="벽면 법선 방향 (도면 좌표). 벽에서 내부(로봇 쪽)로 나오는 방향 — 로봇은 −법선을 바라봄. (0,0) 불가.">
-                            <TextBlock Text="법선(X,Y)" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Value="{Binding WallNormalX, Mode=TwoWay}" Margin="0,0,6,0" />
-                            <telerik:RadNumericUpDown Value="{Binding WallNormalY, Mode=TwoWay}" />
+                            <TextBlock Text="설명" Style="{StaticResource Lbl}" Margin="10,0,8,0" />
+                            <TextBox Width="120" Text="{Binding WallDescription, Mode=TwoWay}" />
                         </StackPanel>
                         <telerik:RadButton Content="벽면 등록" HorizontalAlignment="Left" MinWidth="120" Command="{Binding RegisterWallCommand}" />
                         <TextBlock Text="등록된 벽면" FontWeight="SemiBold" Margin="0,10,0,4" />
                         <telerik:RadGridView ItemsSource="{Binding WallDefs}" AutoGenerateColumns="False" IsReadOnly="True"
                                              RowIndicatorVisibility="Collapsed" MinHeight="90">
                             <telerik:RadGridView.Columns>
-                                <telerik:GridViewDataColumn Header="벽면" DataMemberBinding="{Binding WallCode}" Width="80" />
-                                <telerik:GridViewDataColumn Header="이름" DataMemberBinding="{Binding Name}" Width="*" />
+                                <telerik:GridViewDataColumn Header="Lv" DataMemberBinding="{Binding Level}" Width="44" />
+                                <telerik:GridViewDataColumn Header="벽면" DataMemberBinding="{Binding WallCode}" Width="70" />
+                                <telerik:GridViewDataColumn Header="설명" DataMemberBinding="{Binding Description}" Width="*" />
                                 <telerik:GridViewColumn Header="" Width="Auto">
                                     <telerik:GridViewColumn.CellTemplate>
                                         <DataTemplate>
@@ -95,7 +92,7 @@
                     <StackPanel>
                         <TextBlock Text="② 영역 등록 (도면 좌표 m)" FontWeight="SemiBold" Margin="0,0,0,4" />
                         <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="해당 층 도면 좌표(m). min=좌하단·max=우상단(작업 seam을 모두 포함), 사각형 중앙이 기본 정차 위치. 법선은 선택한 벽면에서 상속(별도 입력 없음)." />
+                                   Text="해당 층 도면 좌표(m). min=좌하단·max=우상단. 사각형 중앙이 기본 정차 위치이고 정차각은 '중앙→seam 중심' 방향으로 자동 산출되므로, seam이 중앙이 아니라 벽쪽에 오도록 영역을 그리세요(정차 지점과 seam을 모두 포함). 안 되면 station_theta 수동 지정." />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="Lv" Style="{StaticResource Lbl}" ToolTip="검사 층(1=바닥~4). 벽면은 층별로 중복 가능." />
                             <telerik:RadNumericUpDown Width="90" Value="{Binding AreaLevel, Mode=TwoWay}" />

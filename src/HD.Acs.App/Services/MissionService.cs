@@ -251,7 +251,7 @@ public sealed class MissionService
         // 이후 로봇 state의 agvPosition.mapId 확인 → TryReleaseNextMissionAsync가 게이트 통과
     }
 
-    /// <summary>Task.Position(WP-2 도면 jsonb) → WeldDrawingData. seam/normal 벡터·wall_code 추출.</summary>
+    /// <summary>Task.Position(도면 jsonb) → WeldDrawingData. seam 벡터·wall_code 추출. [SPEC v2: 법선 제거]</summary>
     private static WeldDrawingData ParseWeldDrawing(string? positionJson)
     {
         if (positionJson is null)
@@ -264,8 +264,7 @@ public sealed class MissionService
             pos["level"]!.GetValue<int>(),
             pos["wall_code"]!.GetValue<string>(),
             Vec(pos, "seamStartDrawing"),
-            Vec(pos, "seamEndDrawing"),
-            Vec(pos, "wallNormalDrawing"));
+            Vec(pos, "seamEndDrawing"));
     }
 
     private static string? FindNearestNode(Core.Graph.MapGraph graph, RobotContextEntity ctx)

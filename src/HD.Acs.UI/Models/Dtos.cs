@@ -148,12 +148,12 @@ public sealed record SlicedStationDto(
     PoseDto StationMap,
     List<SlicedTaskDto> Tasks);
 
-/// <summary>GET /api/walls 항목 — ref.wall (법선 소유자, 영역이 상속) [Wall 법선 승격].</summary>
+/// <summary>GET /api/walls 항목 — ref.wall (벽면 레지스트리·티칭 키; 정차각은 저장 안 함) [정차각 자동화].</summary>
 public sealed record WallDto(
     string TankId,
+    int Level,
     string WallCode,
-    string Name,
-    double[] Normal);
+    string? Description);
 
 /// <summary>GET /api/areas 항목 — ref.inspection_area (유효 정차 pose 포함) [PHASE2 개정].</summary>
 public sealed record AreaDto(
@@ -166,7 +166,6 @@ public sealed record AreaDto(
     double MinY,
     double MaxX,
     double MaxY,
-    double[] Normal,
     double StationX,
     double StationY,
     double StationTheta,
@@ -178,6 +177,7 @@ public sealed record AreaDto(
 public sealed record AreaTaskDto(
     Guid TaskId,
     int Seq,
+    string? Name,
     double[] SeamStart,
     double[] SeamEnd,
     string SeamType,

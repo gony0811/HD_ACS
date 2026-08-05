@@ -6,21 +6,38 @@ namespace HD.Acs.Core.Tests;
 /// <summary>영역(Area) 기하 단위 테스트 [PHASE2 개정].</summary>
 public class AreaGeometryTests
 {
-    /// <summary>디폴트 정차 pose = 영역 중앙 + heading atan2(−ny,−nx)(벽면 바라봄).</summary>
+    /// <summary>영역 중앙 계산. [정차각 자동화]</summary>
     [Fact]
-    public void DefaultStationPose_CenterAndFacingWall()
+    public void AreaCenter_ReturnsRectangleMidpoint()
     {
-        // 영역 [3,-0.5]-[4,0.5], 법선 (0,-1) → 중앙 (3.5,0), heading atan2(1,0)=π/2
-        var (x, y, theta) = AreaGeometry.DefaultStationPose(3.0, -0.5, 4.0, 0.5, 0, -1);
-        Assert.Equal(3.5, x, 6);
-        Assert.Equal(0.0, y, 6);
-        Assert.Equal(Math.PI / 2, theta, 6);
+        var (cx, cy) = AreaGeometry.AreaCenter(3.0, -0.5, 4.0, 0.5);
+        Assert.Equal(3.5, cx, 6);
+        Assert.Equal(0.0, cy, 6);
+    }
 
-        // 법선 (1,0) → 벽면(−x) 방향 heading = ±π (동일 각), 중앙 (1,1)
-        var (x2, y2, t2) = AreaGeometry.DefaultStationPose(0, 0, 2, 2, 1, 0);
-        Assert.Equal(1.0, x2, 6);
-        Assert.Equal(1.0, y2, 6);
-        Assert.Equal(Math.PI, Math.Abs(t2), 6);
+    /// <summary>정차각 자동 = 정차 위치 → seam 점 중심 방향(도면 yaw). 다중 seam은 평균. [정차각 자동화]</summary>
+    [Fact]
+    public void FacingYawToward_PointsToSeamCentroid()
+    {
+        // 정차 (3.5, 0), seam 점들이 +y쪽(벽) → 중심 (3.5, 0.4) → yaw = atan2(0.4, 0) = π/2
+        var yaw = AreaGeometry.FacingYawToward(3.5, 0.0,
+            new List<double[]> { new[] { 3.2, 0.4, 1.4 }, new[] { 3.8, 0.4, 1.4 } });
+        Assert.NotNull(yaw);
+        Assert.Equal(Math.PI / 2, yaw!.Value, 6);
+
+        // seam이 +x쪽 → yaw = 0
+        var yaw2 = AreaGeometry.FacingYawToward(0.0, 0.0, new List<double[]> { new[] { 1.0, 0.0, 0.0 } });
+        Assert.Equal(0.0, yaw2!.Value, 6);
+    }
+
+    /// <summary>정차 위치와 seam 중심이 일치하면 방향 불명 → null(degenerate). [정차각 자동화]</summary>
+    [Fact]
+    public void FacingYawToward_ReturnsNullWhenDegenerate()
+    {
+        var yaw = AreaGeometry.FacingYawToward(3.5, 0.0,
+            new List<double[]> { new[] { 3.5, 0.0, 1.4 } });
+        Assert.Null(yaw);
+        Assert.Null(AreaGeometry.FacingYawToward(0, 0, new List<double[]>()));   // 타깃 없음
     }
 
     /// <summary>경계 판정 — 내부/경계는 true, 밖은 false.</summary>

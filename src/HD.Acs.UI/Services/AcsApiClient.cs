@@ -153,24 +153,27 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
-    // ── 벽면(Wall) LAYER [Wall 법선 승격] — 법선 소유자, 영역이 상속 ──────────
-    public async Task CreateWallAsync(string tankId, string wallCode, string name, double[] normal,
+    // ── 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리·티칭 키 (정차각 저장 안 함) ──────────
+    public async Task CreateWallAsync(string tankId, int level, string wallCode, string? description,
         string userId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/walls", new
         {
-            TankId = tankId, WallCode = wallCode, Name = name, Normal = normal, UserId = userId
+            TankId = tankId, Level = level, WallCode = wallCode, Description = description, UserId = userId
         }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 영법선 400 등 메시지 노출
+        await EnsureSuccessOrThrowAsync(resp, ct);
     }
 
-    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<WallDto>>($"/api/walls?tankId={Uri.EscapeDataString(tankId)}", ct) ?? new();
+    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/walls?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
+        return await _http.GetFromJsonAsync<List<WallDto>>(url, ct) ?? new();
+    }
 
-    public async Task DeleteWallAsync(string tankId, string wallCode, CancellationToken ct = default)
+    public async Task DeleteWallAsync(string tankId, int level, string wallCode, CancellationToken ct = default)
     {
         var resp = await _http.DeleteAsync(
-            $"/api/walls/{Uri.EscapeDataString(tankId)}/{Uri.EscapeDataString(wallCode)}", ct);
+            $"/api/walls/{Uri.EscapeDataString(tankId)}/{level}/{Uri.EscapeDataString(wallCode)}", ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 참조 영역 존재 시 409 메시지 노출
     }
 

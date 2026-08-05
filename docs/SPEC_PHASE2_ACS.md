@@ -223,11 +223,10 @@ param_schema (JSON Schema draft-07, 문자열로 저장):
     "jobRef":  { "type": "string" },
     "position": {
       "type": "object",
-      "required": ["seamStartW", "seamEndW", "wallNormalW", "drawingPos"],
+      "required": ["seamStartW", "seamEndW", "drawingPos"],
       "properties": {
         "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
         "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-        "wallNormalW": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
         "drawingPos":  { "type": "object",
           "required": ["tank", "level", "wall_code", "x", "y", "z"],
           "properties": {
@@ -260,7 +259,7 @@ param_schema (JSON Schema draft-07, 문자열로 저장):
 기존 jobRef/position/params 조립부를 다음과 같이 확정한다:
 - `position.seamStartW/EndW`: Task 저장된 도면 좌표에 **릴리즈 시점의 유효 T_W_D 적용**
   (x,y 변환·z 통과, m 단위). 유효 T_W_D 없으면 릴리즈 실패 처리(§2.5).
-- `position.wallNormalW`: 법선 벡터에 yaw 회전만 적용(z 성분 통과), 단위벡터 정규화.
+- ~~`position.wallNormalW`~~ **제거됨 [SPEC v2]** — 툴 자세는 HD_AMR이 `wall_code` 키 티칭으로 결정. ACS는 위치·정차각만 책임.
 - `params`: Task.Params 원형 + anchorGroupId/seqInGroup (WP-2가 저장한 값).
 - 발행 직전 param_schema로 **JSON Schema 검증** — 실패 시 릴리즈 중단·알람 로그.
   (검증 라이브러리: `JsonSchema.Net` 권장, 없으면 필수 필드 수동 검증으로 대체)
@@ -328,7 +327,6 @@ param_schema (JSON Schema draft-07, 문자열로 저장):
     { "key": "position", "value": {
         "seamStartW": [12.510, 5.980, 1.420],
         "seamEndW":   [13.310, 5.980, 1.420],
-        "wallNormalW": [0.0, -1.0, 0.0],
         "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "W03",
                         "x": 3.120, "y": 0.0, "z": 1.420 } } },
     { "key": "params", "value": {

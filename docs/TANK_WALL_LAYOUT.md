@@ -70,35 +70,33 @@ LNG 멤브레인 화물창은 팔각형 단면 구조이며, 전개도는 **후�
 
 ## 5. 미결 확인 사항
 - SM 해칭 표기의 의미
-- ~~벽면 로컬 좌표계의 원점/축 방향 정의~~ → **해소(§6): 입력은 벽면-로컬이 아니라 층 도면(drawing) 프레임 기준이며, T_W_D로 맵(월드)으로 변환한다.** 벽면별 로컬 좌표계는 별도 도입하지 않음. 법선은 `ref.wall` 벽면 단위 데이터로 정의(§6.3), `wall_code`는 `ref.wall` 키로 통제. CAD 도면 좌표 축 규약(선체 기준 등) 자체의 확정은 여전히 열려 있으며, 확정 시 벽면 법선 값 시드/검증에 반영
+- ~~벽면 로컬 좌표계의 원점/축 방향 정의~~ → **해소(§6): 입력은 벽면-로컬이 아니라 층 도면(drawing) 프레임 기준이며, T_W_D로 맵(월드)으로 변환한다.** 벽면별 로컬 좌표계는 별도 도입하지 않음. 정차각은 seam 기하에서 자동 산출(§6.3), `wall_code`는 `ref.wall` 키로 통제(레지스트리·티칭 키). 툴 자세용 법선은 ACS에 없음(HD_AMR 티칭). CAD 도면 좌표 축 규약(선체 기준 등) 자체의 확정은 여전히 열려 있음
 - 다중 화물창 선박의 tank_id 표기 규칙 (CT1/CT2... 또는 No.1/No.2...)
 - 층 표기 규칙 (L1~L4 vs 다른 사내 표기) 및 층 경계 높이 정의
 - 엘리베이터 설치 위치(층별 탑승 지점)와 제어 인터페이스 [Q9]
 
-## 6. 벽면·영역 입력 좌표 규약
+## 6. 벽면·영역 입력 규약 [정차각 자동화]
 
-계층: **Floor(층) → Wall(벽면) → Area(영역)**. 법선은 **벽면(Wall)의 속성**이고, 영역은 소속 벽면에서 이를 **상속**한다. 영역 1개 = STATION 1개 = anchorGroup 1개 (`ref.inspection_area`), 벽면은 `ref.wall` [DB_SCHEMA](DB_SCHEMA.md).
+계층: **Floor(층) → Wall(벽면) → Area(영역)**. 벽면(`ref.wall (tank_id, level, wall_code)`)은 **레지스트리 + HD_AMR 티칭 키**일 뿐 정차각을 저장하지 않는다. **정차각은 영역·작업 seam 기하에서 자동 산출**된다. 영역 1개 = STATION 1개 = anchorGroup 1개 (`ref.inspection_area`) [DB_SCHEMA](DB_SCHEMA.md).
+
+> **ACS는 법선을 다루지 않는다.** 툴(코봇) 접근 자세는 HD_AMR이 `wall_code` 키 티칭 데이터로 결정한다. ACS는 **위치(seamStartW/EndW)와 정차각만** 책임진다. payload에 `wallNormalW`는 없다.
 
 ### 6.1 공통 — 좌표계·단위
-- `min/max`(영역)와 `법선`(벽면) 모두 **도면(drawing) 좌표계**, 단위는 **미터(m)** 이다. (벽면-로컬 좌표가 아님 — §5 참조)
-- 이 도면 프레임은 **맵 캘리브레이션(T_W_D) 기준점을 캡처한 바로 그 프레임**이다. 릴리즈 시 `DrawingTransform.DrawingToMap`(층별 2D 강체변환, 스케일 없음)이 도면 좌표를 맵(월드) 좌표로 변환한다.
-  - 소스: `HD.Acs.Core/Geometry/DrawingTransform.cs`, `HD.Acs.App/Services/AreaPlanningService.cs`
+- `min/max`(영역, m)와 seam 점(작업, m) 모두 **해당 층 도면(drawing) 좌표계** 기준이다. (벽면-로컬 좌표 아님 — §5)
+- 도면 프레임은 **맵 캘리브레이션(T_W_D) 기준점 프레임**이다. 릴리즈 시 `DrawingTransform.DrawingToMap`(위치)·`DrawingYawToMap`(각도)이 맵(월드) 좌표로 변환한다.
+  - 소스: `HD.Acs.Core/Geometry/DrawingTransform.cs`·`AreaGeometry.cs`, `HD.Acs.App/Services/AreaPlanningService.cs`
 
 ### 6.2 min(x,y) / max(x,y) — 영역 사각형 (축정렬 AABB)
-- 도면 평면상의 **축정렬 직사각형**. `min` = 좌하단 모서리, `max` = 우상단 모서리.
-- 제약: **`minX < maxX` 이고 `minY < maxY`** (DB `CHECK` + API 400).
-- 세 가지 용도로 소비되므로 그에 맞춰 위치·크기를 잡는다:
-  1. **디폴트 AMR 정차 위치** = 사각형 중앙 `((minX+maxX)/2, (minY+maxY)/2)`. 정차 pose를 오버라이드하지 않으면 이 중앙점에 로봇이 선다. (`AreaGeometry.DefaultStationPose`)
-  2. **작업(seam) 포함 경계** — 이 영역에 등록하는 모든 검사 작업의 seam 시작/끝점이 사각형 **내부에 있어야** 한다. 벗어나면 작업 등록 시 API 400. (`AreaGeometry.InBounds`)
-  3. payload의 `position.areaBounds`로 그대로 전달된다.
+- 도면 평면상의 **축정렬 직사각형**. `min` = 좌하단, `max` = 우상단. 제약 **`minX < maxX`·`minY < maxY`**(DB `CHECK` + API 400).
+- 용도: ① **디폴트 정차 위치** = 사각형 중앙(오버라이드 없으면)  ② 모든 작업 seam 시작/끝점이 사각형 **내부**여야 함(위반 시 API 400, `AreaGeometry.InBounds`)  ③ payload `position.areaBounds`.
 
-### 6.3 법선(nx, ny) — 벽면(Wall) 단위 정의, 영역이 상속 [Wall 법선 승격]
-- 법선은 **벽면의 물리적 속성**(같은 벽면의 모든 영역이 공유)이므로 **벽면당 1회** 정의한다. 저장 단위 = `ref.wall (tank_id, wall_code)` **탱크 공유**(전 층 동일 방향). 영역은 법선을 저장하지 않고 소속 벽면에서 상속한다 — 영역 등록 시 법선 입력이 없다.
-- 값은 **순수 데이터**: 도면 프레임 법선을 엔지니어가 벽면당 입력한다. `wall_code`→방향을 하드코딩하는 규약 테이블은 두지 않는다(§5 CAD 좌표 규약 미확정, 현장 종속).
-- **방향 규칙(중요):** 정차 자세가 **−법선 방향을 바라본다**(`theta = atan2(-ny, -nx)`, "벽면을 바라봄"). 따라서 법선은 **벽면에서 화물창 내부(로봇이 서는 쪽)로, 벽에서 바깥으로 나오는** 방향으로 입력한다. 반대로 넣으면 로봇이 벽을 등진다.
-  - 예) 법선 `(0, -1)` → 정차 theta = `atan2(1, 0) = +π/2(≈1.571)`. 즉 벽은 +y쪽, 법선은 −y(내부)로 향하고 로봇은 +y(벽)를 바라본다. — SPEC_PHASE2 부록 A 골든 픽스처(`wallNormalW:[0,-1,0]`, node `theta:1.571`)와 일치.
-- **방향 vs 부호·크기:** 정차·법선에 쓰이는 것은 **방향(각도)뿐**이다. 크기는 릴리즈 시 3D 단위로 자동 정규화되어 `position.wallNormalW`가 된다(`WeldInspectionPayload.BuildPosition`). 벽이 도면 축과 나란하면 "0이 아닌 성분의 부호"만으로 충분하지만, 비스듬한 벽은 `nx:ny` 비율(각도)로 방향을 맞춰야 한다. **영벡터 `(0,0)`은 불가**(API 400).
-- **정차와 무관한 것:** seam(용접라인) 각도와 챔퍼 수직 기울기(`nz`)는 **AMR 정차 pose에 영향을 주지 않는다**(정차각은 법선 XY만 사용). 챔퍼 접근각·코봇 툴 자세는 HD_AMR의 티칭 책임이다(관제 경계 원칙). `nz`는 payload `wallNormalW`의 3D 성분으로 HD_AMR에 전달될 뿐이며, HD_AMR이 이를 쓰는지는 액션 계약(Q1) 사안이다. UI 폼은 `nz=0` 고정.
+### 6.3 정차각 — seam 기하에서 자동 산출 (수동 입력 없음)
+- **원리:** seam(용접선) 점은 벽 표면 위에 있으므로, **정차 위치에서 영역 내 seam 점들의 중심으로 향하는 방향**이 곧 "벽을 바라봄"이다.
+  `theta = atan2(seamCentroid_y − stationY, seamCentroid_x − stationX)` (도면 기준, 이후 `DrawingYawToMap`). (`AreaGeometry.FacingYawToward`)
+- **정차 위치**: `station_x/y`(오버라이드) ?? 영역 중앙(`AreaGeometry.AreaCenter`).
+- **정차각**: `station_theta`(영역 수동 오버라이드) **??** 위 자동 산출값. **degenerate**(정차 위치 ≈ seam 중심 → 방향 불명)면 **생성 시 명시적 실패**(reasons 목록으로 400, T_W_D 부재와 동일. 조용한 기본값 금지).
+- **배치 규율(중요):** 자동 산출이 성립하려면 영역을 **"정차 지점(바닥) ↔ seam(벽)"을 모두 포함**하도록 그려, seam이 사각형 **중앙이 아니라 벽쪽 가장자리**에 오게 한다(그래야 중앙→seam이 벽 방향). 불가하면 `station_theta`(또는 `station_x/y`)로 수동 지정.
+- **정차와 무관한 것:** 벽면 코드·티칭은 코봇 접근각용(HD_AMR 책임). ACS 정차각은 위 기하만으로 정해진다.
 
 ### 6.4 한 줄 요약
-법선은 **벽면당 1회**(도면 좌표, 벽→내부 방향, `(0,0)` 불가)로 정의하고, 영역은 이를 상속한다. 영역은 *그 층 도면 좌표(m)* 의 `min/max` 축정렬 사각형만 입력하며 — 검사할 seam을 모두 감싸고 중앙이 로봇 정차점이 된다.
+벽면은 코드·설명만 등록(레지스트리·티칭 키)한다. 영역은 도면 좌표(m)의 `min/max` 축정렬 사각형과 작업 seam만 입력하며 — **정차각은 "정차 위치 → seam 중심" 방향으로 자동 산출**된다(seam을 벽쪽에 두도록 영역을 그릴 것). 방향 수동 지정이 필요하면 `station_theta`.

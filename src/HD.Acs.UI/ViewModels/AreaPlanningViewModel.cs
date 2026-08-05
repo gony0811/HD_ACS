@@ -42,11 +42,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private string? _statusMessage;
     [ObservableProperty] private string _newScenarioName = "검사 시나리오";
 
-    // 벽면 등록 입력 [Wall 법선 승격] — 법선은 벽면 단위 1회 정의(영역이 상속)
+    // 벽면 등록 입력 [정차각 자동화] — 벽면 레지스트리(코드·설명). 정차각은 seam 기하에서 자동 산출(입력 없음)
+    [ObservableProperty] private int _wallLevel = 2;
     [ObservableProperty] private string _wallCodeInput = "SM";
-    [ObservableProperty] private string _wallNameInput = "";
-    [ObservableProperty] private double _wallNormalX = 1;
-    [ObservableProperty] private double _wallNormalY;
+    [ObservableProperty] private string _wallDescription = "";
 
     // 영역 등록 입력 (법선 없음 — 소속 벽면에서 상속)
     [ObservableProperty] private int _areaLevel = 2;
@@ -118,7 +117,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"영역 조회 실패: {ex.Message}"; }
     }
 
-    // 벽면 등록 [Wall 법선 승격] — 법선의 소유자. 영역은 여기서 정의한 법선을 상속.
+    // 벽면 등록 [정차각 자동화] — 벽면 레지스트리(코드·설명). 정차각은 영역·작업 seam 기하에서 자동 산출.
     [RelayCommand]
     private async Task RegisterWallAsync()
     {
@@ -127,16 +126,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             StatusMessage = "벽면 코드를 입력하세요.";
             return;
         }
-        if (WallNormalX == 0 && WallNormalY == 0)   // nz=0 고정 → xy 0이면 영벡터(방향 정의 불가)
-        {
-            StatusMessage = "벽면 법선(nx,ny)을 지정하세요 — 벽에서 내부(로봇 쪽)로 향하는 방향, (0,0) 불가.";
-            return;
-        }
         try
         {
-            await _api.CreateWallAsync(TankId, WallCodeInput, WallNameInput,
-                new[] { WallNormalX, WallNormalY, 0.0 }, _operatorId);
-            StatusMessage = $"벽면 등록: {WallCodeInput} 법선({WallNormalX},{WallNormalY})";
+            await _api.CreateWallAsync(TankId, WallLevel, WallCodeInput,
+                string.IsNullOrWhiteSpace(WallDescription) ? null : WallDescription, _operatorId);
+            StatusMessage = $"벽면 등록: L{WallLevel}/{WallCodeInput}";
             await RefreshAreasAsync();
         }
         catch (Exception ex) { StatusMessage = $"벽면 등록 실패: {ex.Message}"; }
@@ -146,7 +140,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private async Task DeleteWallAsync(WallDto? wall)
     {
         if (wall is null) return;
-        try { await _api.DeleteWallAsync(wall.TankId, wall.WallCode); StatusMessage = "벽면 삭제됨."; await RefreshAreasAsync(); }
+        try { await _api.DeleteWallAsync(wall.TankId, wall.Level, wall.WallCode); StatusMessage = "벽면 삭제됨."; await RefreshAreasAsync(); }
         catch (Exception ex) { StatusMessage = $"벽면 삭제 실패: {ex.Message}"; }  // 참조 영역 존재 409
     }
 

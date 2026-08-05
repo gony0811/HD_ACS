@@ -4,14 +4,13 @@ using Json.Schema;
 
 namespace HD.Acs.Core.Planning;
 
-/// <summary>릴리즈 시점 도면 데이터(Task.Position에서 파싱). 각 벡터는 [x,y,z] (m).</summary>
+/// <summary>릴리즈 시점 도면 데이터(Task.Position에서 파싱). 각 벡터는 [x,y,z] (m). [SPEC v2: 법선 제거]</summary>
 public sealed record WeldDrawingData(
     string Tank,
     int Level,
     string WallCode,
     double[] SeamStart,
-    double[] SeamEnd,
-    double[] WallNormal);
+    double[] SeamEnd);
 
 /// <summary>유효 T_W_D 부재/맵버전 불일치 — 릴리즈 거부 [PHASE2 §2.5].</summary>
 public sealed class CalibrationInvalidException(string message) : Exception(message);
@@ -41,23 +40,16 @@ public static class WeldInspectionPayload
         return new DrawingTransform(tx, ty, yawRad);
     }
 
-    /// <summary>도면 좌표 → 월드 position(JsonObject, §4.1 키명). x,y는 T_W_D 적용·z 통과, 법선은 yaw 회전+정규화.</summary>
+    /// <summary>도면 좌표 → 월드 position(JsonObject, §4.1 키명). x,y는 T_W_D 적용·z 통과. [SPEC v2: 법선 제거]</summary>
     public static JsonObject BuildPosition(DrawingTransform t, WeldDrawingData d)
     {
         var (sx, sy) = t.DrawingToMap(d.SeamStart[0], d.SeamStart[1]);
         var (ex, ey) = t.DrawingToMap(d.SeamEnd[0], d.SeamEnd[1]);
 
-        // 법선: yaw 회전만 + z 통과 → 3D 단위 정규화
-        var (rnx, rny) = t.RotateDirection(d.WallNormal[0], d.WallNormal[1]);
-        double rnz = d.WallNormal[2];
-        double norm = Math.Sqrt(rnx * rnx + rny * rny + rnz * rnz);
-        if (norm > 1e-12) { rnx /= norm; rny /= norm; rnz /= norm; }
-
         return new JsonObject
         {
             ["seamStartW"] = Vec(sx, sy, d.SeamStart[2]),
             ["seamEndW"] = Vec(ex, ey, d.SeamEnd[2]),
-            ["wallNormalW"] = Vec(rnx, rny, rnz),
             ["drawingPos"] = new JsonObject
             {
                 ["tank"] = d.Tank,

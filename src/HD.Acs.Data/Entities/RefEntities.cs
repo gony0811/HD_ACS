@@ -138,19 +138,17 @@ public class WeldSeamEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-// 벽면(Wall) LAYER [Wall 법선 승격] — 법선의 소유자. (tank_id, wall_code) 탱크 단위. 영역이 상속.
+// 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리 + HD_AMR 티칭 키. 정차각은 저장하지 않는다.
 public class WallEntity
 {
     public string TankId { get; set; } = "";
+    public int Level { get; set; }
     public string WallCode { get; set; } = "";
-    public string Name { get; set; } = "";
-    public string NormalDrawing { get; set; } = "[]";   // jsonb [nx,ny,nz] 도면 프레임 법선
-    public string? CreatedBy { get; set; }
-    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? Description { get; set; }
 }
 
 // 영역(Area) LAYER [PHASE2 개정] — 운영자 수동 정의. 영역 1개 = STATION 1개 = anchorGroup 1개.
-// 법선은 소속 벽면(WallEntity)에서 상속 — 영역은 법선을 저장하지 않는다 [Wall 법선 승격].
+// 정차각은 정차 위치→작업 seam 중심 방향으로 자동 산출 [정차각 자동화].
 public class InspectionAreaEntity
 {
     public Guid AreaId { get; set; }
@@ -177,8 +175,9 @@ public class AreaTaskEntity
     public Guid TaskId { get; set; }
     public Guid AreaId { get; set; }
     public int Seq { get; set; }                        // 영역 내 실행 순서 → seqInGroup
-    public string SeamStart { get; set; } = "[]";       // jsonb [x,y,z]
-    public string SeamEnd { get; set; } = "[]";         // jsonb [x,y,z]
+    public string? Name { get; set; }                   // 작업 이름(선택)
+    public string StartDrawing { get; set; } = "[]";    // jsonb [x,y,z] 도면 좌표
+    public string EndDrawing { get; set; } = "[]";      // jsonb [x,y,z]
     public string SeamType { get; set; } = "LINE";
     public string SectionDxfId { get; set; } = "";
     public string ProfileId { get; set; } = "";

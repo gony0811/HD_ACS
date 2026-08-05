@@ -17,11 +17,10 @@ public class WeldInspectionPayloadTests
         "jobRef": { "type": "string" },
         "position": {
           "type": "object",
-          "required": ["seamStartW", "seamEndW", "wallNormalW", "drawingPos"],
+          "required": ["seamStartW", "seamEndW", "drawingPos"],
           "properties": {
             "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
             "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-            "wallNormalW": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
             "drawingPos": {
               "type": "object",
               "required": ["tank", "level", "wall_code", "x", "y", "z"],
@@ -55,7 +54,7 @@ public class WeldInspectionPayloadTests
     private static readonly DrawingTransform GoldenTransform = new(9.390, 5.980, 0);
     private static WeldDrawingData GoldenInput() => new(
         "CT1", 2, "W03",
-        new[] { 3.120, 0.0, 1.420 }, new[] { 3.920, 0.0, 1.420 }, new[] { 0.0, -1.0, 0.0 });
+        new[] { 3.120, 0.0, 1.420 }, new[] { 3.920, 0.0, 1.420 });
 
     private static JsonObject GoldenParams() => new()
     {
@@ -68,7 +67,7 @@ public class WeldInspectionPayloadTests
         ["seqInGroup"] = 2,
     };
 
-    /// <summary>BuildPosition 이 부록 A 의 seamStartW/seamEndW/wallNormalW/drawingPos 와 필드 단위 일치.</summary>
+    /// <summary>BuildPosition 이 부록 A 의 seamStartW/seamEndW/drawingPos 와 필드 단위 일치. [SPEC v2: 법선 제거]</summary>
     [Fact]
     public void BuildPosition_MatchesGoldenFixture()
     {
@@ -76,7 +75,7 @@ public class WeldInspectionPayloadTests
 
         AssertVec(pos, "seamStartW", 12.510, 5.980, 1.420);
         AssertVec(pos, "seamEndW", 13.310, 5.980, 1.420);
-        AssertVec(pos, "wallNormalW", 0.0, -1.0, 0.0);
+        Assert.Null(pos["wallNormalW"]);   // [SPEC v2] 법선 계약 제거 — 방출되지 않음
 
         var dp = pos["drawingPos"]!.AsObject();
         Assert.Equal("CT1", dp["tank"]!.GetValue<string>());
@@ -107,7 +106,6 @@ public class WeldInspectionPayloadTests
         {
             ["seamStartW"] = new JsonArray(1, 2, 3),
             // seamEndW 누락
-            ["wallNormalW"] = new JsonArray(0, -1, 0),
             ["drawingPos"] = new JsonObject
             {
                 ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "W03", ["x"] = 0, ["y"] = 0, ["z"] = 0
