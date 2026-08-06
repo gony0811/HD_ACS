@@ -39,23 +39,23 @@ public interface IAcsApiClient
     Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
     Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
 
-    // ── 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리·티칭 키 (정차각 저장 안 함) ──────────
-    Task CreateWallAsync(string tankId, int level, string wallCode, string? description,
-        string userId, CancellationToken ct = default);
-    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);
-    Task DeleteWallAsync(string tankId, int level, string wallCode, CancellationToken ct = default);
+    // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
+    Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId, CancellationToken ct = default);
+    Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default);
+    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default);
 
-    // ── 영역(Area) LAYER [PHASE2 개정] — 법선은 벽면에서 상속(입력 없음) ──────────
-    Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
-        double minX, double minY, double maxX, double maxY,
+    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) ──────────
+    Task<Guid> CreateAreaAsync(string tankId, string wallCode, int level, string name,
+        double uMin, double vMin, double uMax, double vMax,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
-    Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, int? level = null, string? wallCode = null, CancellationToken ct = default);
+    Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
-    Task<int> CreateAreaTaskAsync(Guid areaId, double[] seamStart, double[] seamEnd,
+    Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default);
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
-    Task<(int Stations, int Tasks)> GenerateFromAreasAsync(Guid scenarioId, CancellationToken ct = default);
 
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);

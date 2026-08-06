@@ -204,51 +204,77 @@ CREATE TABLE ref.weld_seam (
 );
 CREATE INDEX ix_weld_seam_map ON ref.weld_seam (tank_id, level);
 
--- ─────────────── 벽면(Wall) LAYER (ref) [정차각 자동화 2026-08-06] ───────────────
--- 벽면 레지스트리 + HD_AMR 티칭 조회 키(wall_code). 영역 FK·"미등록 벽면" 게이트의 상위 LAYER.
--- 정차각은 저장하지 않는다 — 영역·작업 seam 기하에서 자동 산출(정차 위치 → seam 중심 방향) [TANK_WALL_LAYOUT §6].
-CREATE TABLE ref.wall (
-  tank_id     text NOT NULL,
-  level       int  NOT NULL,
-  wall_code   text NOT NULL,                        -- 통제 어휘 [TANK_WALL_LAYOUT §2] 예: 'SM','PM','A'
-  description text,
-  PRIMARY KEY (tank_id, level, wall_code)
+-- ─────────────── 선창 파라메트릭 정의 (ref) [SPEC v3 §2] ───────────────
+-- 팔각 단면(좌우대칭) × 길이 L 프리즘. 등록 시 §3의 10면을 자동 생성한다.
+-- 전역 프레임: 원점=바닥 중심, x=길이, y=폭(+y 좌현), z=상방, 바닥 z=0 (m). 각도는 rad 저장.
+CREATE TABLE ref.tank_geometry (
+  tank_id     text PRIMARY KEY,
+  length_l    double precision NOT NULL,
+  w_floor     double precision NOT NULL,
+  theta_low   double precision NOT NULL,   -- [rad] (API는 deg 입력 허용, 서버 변환)
+  h_low       double precision NOT NULL,
+  h_wall      double precision NOT NULL,
+  theta_up    double precision NOT NULL,
+  h_up        double precision NOT NULL,
+  level_z     jsonb NOT NULL,              -- 층 경계 z 목록, 예 [0,3.2,6.4,9.6]
+  origin_ox   double precision NOT NULL DEFAULT 0,
+  origin_oy   double precision NOT NULL DEFAULT 0,
+  created_by  text,
+  created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- ─────────────── 영역(Area) LAYER + 수동 검사 작업 (ref) [PHASE2 개정 2026-08-04] ───────────────
--- 자동 슬라이싱(weld_seam/SeamSlicer) 대체. 운영자가 영역과 그 안의 검사 작업을 수동 정의한다.
--- 영역 1개 = STATION 노드 1개 = anchorGroup 1개, 작업 1개 = TASK 1개 (불변식 유지).
--- 정차각은 저장하지 않고 정차 위치→작업 seam 중심 방향으로 자동 산출 [정차각 자동화].
-CREATE TABLE ref.inspection_area (
-  area_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tank_id        text NOT NULL,
-  level          int  NOT NULL,
-  wall_code      text NOT NULL,                     -- 상위 LAYER [TANK_WALL_LAYOUT], 정차각 상속원
-  name           text NOT NULL,                     -- 예: 'A01' (tank-level-wall 내 유일)
-  min_x          double precision NOT NULL,         -- 도면 좌표(m) 사각 영역
-  min_y          double precision NOT NULL,
-  max_x          double precision NOT NULL,
-  max_y          double precision NOT NULL,
-  station_x      double precision,                  -- 정차 pose 수동 오버라이드 (NULL=디폴트: 영역 중앙)
-  station_y      double precision,
-  station_theta  double precision,                  -- NULL=디폴트: 정차→seam 중심 방향 자동 산출
-  sort_order     int NOT NULL DEFAULT 0,            -- 방문 순서 (level→wall→sort_order→name)
-  created_by     text,
-  created_at     timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tank_id, level, wall_code, name),
-  CHECK (min_x < max_x AND min_y < max_y),
-  FOREIGN KEY (tank_id, level, wall_code) REFERENCES ref.wall (tank_id, level, wall_code)
+-- ─────────────── 벽면(Wall) LAYER (ref) [SPEC v3 §3: 파라미터에서 자동 생성] ───────────────
+-- 통짜 면 1개 = 행 1개(층 슬라이스 안 함, 층 소속은 영역이 가짐). PK (tank_id, wall_code).
+-- 프레임: origin(P0) + u/v 축(도면 좌표계 단위벡터) → 벽면-로컬 (u,v) 좌표. normal=내부향 단위법선.
+CREATE TABLE ref.wall (
+  tank_id     text NOT NULL REFERENCES ref.tank_geometry(tank_id) ON DELETE CASCADE,
+  wall_code   text NOT NULL,                        -- TANK_WALL_LAYOUT 매핑: B/SL/PL/SM/PM/SU/PU/T/F/A
+  origin      jsonb NOT NULL,                       -- [x,y,z] 벽면-로컬 (0,0)의 도면 좌표
+  u_axis      jsonb NOT NULL,                       -- [x,y,z] +u축 단위벡터
+  v_axis      jsonb NOT NULL,                       -- [x,y,z] +v축 단위벡터(U와 직교)
+  normal      jsonb NOT NULL,                       -- [x,y,z] 내부향 단위 법선
+  u_len       double precision NOT NULL,            -- 면 가로 크기(m)
+  v_len       double precision NOT NULL,            -- 면 세로 크기(m)
+  facing_yaw  double precision,                     -- AMR이 면을 바라보는 도면 yaw [rad]. 바닥/천장(B/T)은 NULL
+  generated   boolean NOT NULL DEFAULT true,
+  description text,
+  PRIMARY KEY (tank_id, wall_code)
 );
-CREATE INDEX ix_inspection_area_map ON ref.inspection_area (tank_id, level, wall_code);
+
+-- ─────────────── 영역·검사 작업 (ref) [SPEC v3 §4: 벽면-로컬 (u,v) 등록] ───────────────
+-- 운영자가 면(ref.wall) 위 로컬 (u,v)로 영역·용접선을 등록. level=AMR 주행 층(mapId 결정).
+CREATE TABLE ref.inspection_area (
+  area_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tank_id       text NOT NULL,
+  wall_code     text NOT NULL,             -- (tank_id, wall_code) → ref.wall
+  level         int  NOT NULL,             -- AMR 주행 층 (mapId 결정)
+  name          text NOT NULL,             -- 'A01' — tank/wall 내 유일
+  u_min         double precision NOT NULL, -- 면 로컬 좌표 (m)
+  v_min         double precision NOT NULL,
+  u_max         double precision NOT NULL,
+  v_max         double precision NOT NULL,
+  station_x     double precision,          -- 정차 수동 오버라이드 (전역 x,y + theta). FL/CL은 필수(§5)
+  station_y     double precision,
+  station_theta double precision,
+  sort_order    int  NOT NULL DEFAULT 0,
+  created_by    text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tank_id, wall_code, name),
+  CHECK (u_min < u_max AND v_min < v_max),
+  FOREIGN KEY (tank_id, wall_code) REFERENCES ref.wall (tank_id, wall_code) ON DELETE CASCADE
+);
+CREATE INDEX ix_inspection_area_wall ON ref.inspection_area (tank_id, wall_code);
 
 CREATE TABLE ref.area_task (
   task_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  area_id        uuid NOT NULL REFERENCES ref.inspection_area ON DELETE CASCADE,
-  seq            int  NOT NULL,                     -- 영역 내 실행 순서(1..N → seqInGroup)
-  name           text,                              -- 작업 이름(선택)
-  seam_type      text NOT NULL DEFAULT 'LINE',      -- LINE | POLYLINE
-  start_drawing  jsonb NOT NULL,                    -- [x,y,z] 도면 좌표 (챔퍼는 z 포함 3D)
-  end_drawing    jsonb NOT NULL,                    -- [x,y,z]
+  area_id        uuid NOT NULL REFERENCES ref.inspection_area(area_id) ON DELETE CASCADE,
+  seq            int  NOT NULL,            -- 영역 내 실행 순서 → seqInGroup
+  name           text,
+  seam_type      text NOT NULL DEFAULT 'LINE',
+  start_u        double precision NOT NULL,  -- 용접선 시작/끝 (면 로컬, m)
+  start_v        double precision NOT NULL,
+  end_u          double precision NOT NULL,
+  end_v          double precision NOT NULL,
   section_dxf_id text NOT NULL DEFAULT '',
   profile_id     text NOT NULL DEFAULT '',
   created_by     text,

@@ -148,41 +148,40 @@ public sealed record SlicedStationDto(
     PoseDto StationMap,
     List<SlicedTaskDto> Tasks);
 
-/// <summary>GET /api/walls 항목 — ref.wall (벽면 레지스트리·티칭 키; 정차각은 저장 안 함) [정차각 자동화].</summary>
+/// <summary>GET /api/tanks/{id}/geometry — 선창 파라미터 + 유도값 [SPEC v3 §2].</summary>
+public sealed record TankGeometryDto(
+    string TankId,
+    double LengthL, double WFloor, double ThetaLowDeg, double HLow,
+    double HWall, double ThetaUpDeg, double HUp,
+    double[]? LevelZ, double OriginOx, double OriginOy,
+    TankDerivedDto Derived);
+public sealed record TankDerivedDto(double WLow, double B, double WUp, double WCeil, double H);
+
+/// <summary>GET /api/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>
 public sealed record WallDto(
     string TankId,
-    int Level,
     string WallCode,
+    double[]? Origin,
+    double[]? UAxis,
+    double[]? VAxis,
+    double[]? Normal,
+    double ULen,
+    double VLen,
+    double? FacingYaw,
+    bool Generated,
     string? Description);
 
-/// <summary>GET /api/areas 항목 — ref.inspection_area (유효 정차 pose 포함) [PHASE2 개정].</summary>
+/// <summary>GET /api/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
 public sealed record AreaDto(
-    Guid AreaId,
-    string TankId,
-    int Level,
-    string WallCode,
-    string Name,
-    double MinX,
-    double MinY,
-    double MaxX,
-    double MaxY,
-    double StationX,
-    double StationY,
-    double StationTheta,
-    bool IsOverride,
-    int SortOrder,
-    int TaskCount);
+    Guid AreaId, string TankId, string WallCode, int Level, string Name,
+    double UMin, double VMin, double UMax, double VMax,
+    double? StationX, double? StationY, double? StationTheta, int SortOrder, int TaskCount);
 
-/// <summary>GET /api/areas/{id}/tasks 항목 — ref.area_task [PHASE2 개정].</summary>
+/// <summary>GET /api/areas/{id}/tasks 항목 — ref.area_task (u,v) [SPEC v3 §4].</summary>
 public sealed record AreaTaskDto(
-    Guid TaskId,
-    int Seq,
-    string? Name,
-    double[] SeamStart,
-    double[] SeamEnd,
-    string SeamType,
-    string SectionDxfId,
-    string ProfileId);
+    Guid TaskId, int Seq, string? Name, string SeamType,
+    double StartU, double StartV, double EndU, double EndV,
+    string SectionDxfId, string ProfileId);
 
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>

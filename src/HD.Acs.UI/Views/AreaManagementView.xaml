@@ -6,21 +6,21 @@
         <Style TargetType="TextBlock" x:Key="Lbl">
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="MinWidth" Value="96" />
+        </Style>
+        <Style TargetType="TextBox" x:Key="TxtField">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style TargetType="telerik:RadNumericUpDown">
             <Setter Property="Height" Value="32" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="Width" Value="130" />
+            <Setter Property="Width" Value="96" />
             <Setter Property="HorizontalAlignment" Value="Left" />
         </Style>
         <Style TargetType="telerik:RadComboBox">
             <Setter Property="Height" Value="32" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="MinHeight" Value="30" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -34,98 +34,143 @@
 
     <Grid Margin="14">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- ── 좌열: 시나리오 + 영역 등록/목록 ── -->
-        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
-            <StackPanel>
-                <TextBlock Text="시나리오" FontWeight="Bold" Margin="0,0,0,4" />
-                <telerik:RadComboBox ItemsSource="{Binding Scenarios}" DisplayMemberPath="Name"
-                                     SelectedItem="{Binding SelectedScenario, Mode=TwoWay}" Margin="0,0,0,6" />
+        <!-- ── 좌: 등록 폼 (선창 → 영역 → 작업) ── -->
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
+            <StackPanel Width="380">
+                <!-- ① 선창 파라미터 -->
+                <TextBlock Text="① 선창 3D 정의 (팔각 단면)" FontWeight="Bold" Margin="0,0,0,4" />
+                <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="치수 입력 → 10면 자동 생성(B/SL/PL/SM/PM/SU/PU/T/F/A). 원점=바닥 중심, x=길이·y=폭(+좌현)·z=상방, 바닥 z=0(m). 각도=수평면 기준(°)." />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Tank" Style="{StaticResource Lbl}" />
+                    <TextBox Width="110" Style="{StaticResource TxtField}" Text="{Binding TankId, Mode=TwoWay}" />
+                </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBox Width="220" Text="{Binding NewScenarioName, Mode=TwoWay}" />
-                    <telerik:RadButton Content="시나리오 생성" Margin="6,0,0,0" Command="{Binding CreateScenarioCommand}" />
+                    <TextBlock Text="L / w_floor" Style="{StaticResource Lbl}" />
+                    <telerik:RadNumericUpDown Value="{Binding LengthL, Mode=TwoWay}" Margin="0,0,6,0" />
+                    <telerik:RadNumericUpDown Value="{Binding WFloor, Mode=TwoWay}" />
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                    <telerik:RadButton Content="미션 생성(generate)" MinWidth="150" Command="{Binding GenerateCommand}" Margin="0,0,6,0" />
-                    <telerik:RadButton Content="새로고침" Command="{Binding RefreshCommand}" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="θ_low° / h_low" Style="{StaticResource Lbl}" />
+                    <telerik:RadNumericUpDown Value="{Binding ThetaLowDeg, Mode=TwoWay}" Margin="0,0,6,0" />
+                    <telerik:RadNumericUpDown Value="{Binding HLow, Mode=TwoWay}" />
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="h_wall" Style="{StaticResource Lbl}" />
+                    <telerik:RadNumericUpDown Value="{Binding HWall, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="θ_up° / h_up" Style="{StaticResource Lbl}" />
+                    <telerik:RadNumericUpDown Value="{Binding ThetaUpDeg, Mode=TwoWay}" Margin="0,0,6,0" />
+                    <telerik:RadNumericUpDown Value="{Binding HUp, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="level_z" Style="{StaticResource Lbl}" ToolTip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
+                    <TextBox Width="200" Style="{StaticResource TxtField}" Text="{Binding LevelZText, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="원점보정 ox,oy" Style="{StaticResource Lbl}" />
+                    <telerik:RadNumericUpDown Value="{Binding OriginOx, Mode=TwoWay}" Margin="0,0,6,0" />
+                    <telerik:RadNumericUpDown Value="{Binding OriginOy, Mode=TwoWay}" />
+                </StackPanel>
+                <telerik:RadButton Content="선창 등록 · 면 생성" HorizontalAlignment="Left" MinWidth="150" Command="{Binding RegisterGeometryCommand}" />
+                <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,6,0,10" Foreground="#2C3E50" FontSize="12" />
 
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="12" Margin="0,0,0,10">
+                <!-- ② 영역 등록 (면 로컬 u,v) -->
+                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
-                        <TextBlock Text="① 벽면 등록 (레지스트리 — 코드·설명)" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="벽면은 코드·설명만 등록합니다(층별). 정차각(벽 바라봄)은 영역·작업 seam 기하에서 자동 산출되므로 입력하지 않습니다. wall_code는 HD_AMR 티칭 조회 키입니다." />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                            <TextBlock Text="Lv" Style="{StaticResource Lbl}" ToolTip="검사 층(1=바닥~4). 벽면은 층별로 정의." />
-                            <telerik:RadNumericUpDown Width="70" Value="{Binding WallLevel, Mode=TwoWay}" />
-                            <TextBlock Text="벽면코드" Style="{StaticResource Lbl}" Margin="10,0,8,0" ToolTip="벽면 코드 [TANK_WALL_LAYOUT §2] 예: SM, PM, A" />
-                            <TextBox Width="80" Text="{Binding WallCodeInput, Mode=TwoWay}" />
-                            <TextBlock Text="설명" Style="{StaticResource Lbl}" Margin="10,0,8,0" />
-                            <TextBox Width="120" Text="{Binding WallDescription, Mode=TwoWay}" />
+                        <TextBlock Text="② 영역 등록 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="면" Style="{StaticResource Lbl}" />
+                            <telerik:RadComboBox Width="90" ItemsSource="{Binding Walls}" DisplayMemberPath="WallCode"
+                                                 SelectedItem="{Binding SelectedWall, Mode=TwoWay}" />
+                            <TextBlock Text="Lv" Style="{StaticResource Lbl}" Margin="10,0,4,0" MinWidth="0" />
+                            <telerik:RadNumericUpDown Width="60" Value="{Binding AreaLevel, Mode=TwoWay}" />
                         </StackPanel>
-                        <telerik:RadButton Content="벽면 등록" HorizontalAlignment="Left" MinWidth="120" Command="{Binding RegisterWallCommand}" />
-                        <TextBlock Text="등록된 벽면" FontWeight="SemiBold" Margin="0,10,0,4" />
-                        <telerik:RadGridView ItemsSource="{Binding WallDefs}" AutoGenerateColumns="False" IsReadOnly="True"
-                                             RowIndicatorVisibility="Collapsed" MinHeight="90">
-                            <telerik:RadGridView.Columns>
-                                <telerik:GridViewDataColumn Header="Lv" DataMemberBinding="{Binding Level}" Width="44" />
-                                <telerik:GridViewDataColumn Header="벽면" DataMemberBinding="{Binding WallCode}" Width="70" />
-                                <telerik:GridViewDataColumn Header="설명" DataMemberBinding="{Binding Description}" Width="*" />
-                                <telerik:GridViewColumn Header="" Width="Auto">
-                                    <telerik:GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <telerik:RadButton Content="삭제" Padding="8,1"
-                                                Command="{Binding DataContext.DeleteWallCommand, RelativeSource={RelativeSource AncestorType=telerik:RadGridView}}"
-                                                CommandParameter="{Binding}" />
-                                        </DataTemplate>
-                                    </telerik:GridViewColumn.CellTemplate>
-                                </telerik:GridViewColumn>
-                            </telerik:RadGridView.Columns>
-                        </telerik:RadGridView>
-                    </StackPanel>
-                </Border>
-
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="12" Margin="0,0,0,10">
-                    <StackPanel>
-                        <TextBlock Text="② 영역 등록 (도면 좌표 m)" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="해당 층 도면 좌표(m). min=좌하단·max=우상단. 사각형 중앙이 기본 정차 위치이고 정차각은 '중앙→seam 중심' 방향으로 자동 산출되므로, seam이 중앙이 아니라 벽쪽에 오도록 영역을 그리세요(정차 지점과 seam을 모두 포함). 안 되면 station_theta 수동 지정." />
+                        <TextBlock Text="{Binding SelectedWallInfo}" Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="이름" Style="{StaticResource Lbl}" />
+                            <TextBox Width="90" Style="{StaticResource TxtField}" Text="{Binding AreaName, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="u,v min" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Value="{Binding UMin, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding VMin, Mode=TwoWay}" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="Lv" Style="{StaticResource Lbl}" ToolTip="검사 층(1=바닥~4). 벽면은 층별로 중복 가능." />
-                            <telerik:RadNumericUpDown Width="90" Value="{Binding AreaLevel, Mode=TwoWay}" />
-                            <TextBlock Text="벽면" Style="{StaticResource Lbl}" Margin="10,0,8,0" ToolTip="등록된 벽면에서 선택 — 법선은 이 벽면에서 상속" />
-                            <telerik:RadComboBox Width="90" ItemsSource="{Binding WallDefs}" DisplayMemberPath="WallCode"
-                                                 SelectedValuePath="WallCode" SelectedValue="{Binding AreaWall, Mode=TwoWay}" />
-                            <TextBlock Text="이름" Style="{StaticResource Lbl}" Margin="10,0,8,0" ToolTip="동일 (층·벽면) 내 유일한 영역 이름. 예: A01" />
-                            <TextBox Width="70" Text="{Binding AreaName, Mode=TwoWay}" />
+                            <TextBlock Text="u,v max" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Value="{Binding UMax, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding VMax, Mode=TwoWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6"
-                                    ToolTip="영역 사각형 좌하단 모서리 (도면 좌표 m). minX &lt; maxX, minY &lt; maxY.">
-                            <TextBlock Text="min(X,Y)" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Value="{Binding MinX, Mode=TwoWay}" Margin="0,0,6,0" />
-                            <telerik:RadNumericUpDown Value="{Binding MinY, Mode=TwoWay}" />
+                        <CheckBox Content="정차 수동 지정 (전역 x,y,θ) — 바닥/천장(B/T) 면은 필수" IsChecked="{Binding StationOverride, Mode=TwoWay}" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
+                            <TextBlock Text="x,y,θ" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="80" Value="{Binding StationX, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="80" Value="{Binding StationY, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="80" Value="{Binding StationTheta, Mode=TwoWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10"
-                                    ToolTip="영역 사각형 우상단 모서리 (도면 좌표 m). 사각형은 이 영역의 모든 seam을 포함해야 하며 중앙이 기본 정차 위치.">
-                            <TextBlock Text="max(X,Y)" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Value="{Binding MaxX, Mode=TwoWay}" Margin="0,0,6,0" />
-                            <telerik:RadNumericUpDown Value="{Binding MaxY, Mode=TwoWay}" />
-                        </StackPanel>
-                        <telerik:RadButton Content="영역 등록" HorizontalAlignment="Left" MinWidth="120" Command="{Binding RegisterAreaCommand}" />
+                        <telerik:RadButton Content="영역 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="영역 목록 (선택 시 우측에서 작업 등록)" FontWeight="SemiBold" Margin="0,0,0,4" />
-                <telerik:RadGridView ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea, Mode=TwoWay}"
-                                     AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="160">
+                <!-- ③ 검사 작업 등록 (선택 영역, 경계 내) -->
+                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="{Binding SelectedArea.Name, StringFormat='③ 검사 작업 등록 — 영역 {0}', FallbackValue='③ 검사 작업 등록 (영역 선택)'}"
+                                   FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="시작 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Value="{Binding StartU, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding StartV, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="끝 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Value="{Binding EndU, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Value="{Binding EndV, Mode=TwoWay}" />
+                        </StackPanel>
+                        <telerik:RadButton Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#C0392B" FontSize="12" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ── 우: 목록 (면 / 영역 / 작업) ── -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                <TextBlock DockPanel.Dock="Top" Text="자동 생성된 면 (10)" FontWeight="Bold" Margin="0,0,0,4" />
+                <telerik:RadGridView ItemsSource="{Binding Walls}" AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed">
                     <telerik:RadGridView.Columns>
-                        <telerik:GridViewDataColumn Header="Lv" DataMemberBinding="{Binding Level}" Width="44" />
-                        <telerik:GridViewDataColumn Header="벽면" DataMemberBinding="{Binding WallCode}" Width="70" />
+                        <telerik:GridViewDataColumn Header="면" DataMemberBinding="{Binding WallCode}" Width="56" />
+                        <telerik:GridViewDataColumn Header="u_len" DataMemberBinding="{Binding ULen, StringFormat=N3}" Width="80" />
+                        <telerik:GridViewDataColumn Header="v_len" DataMemberBinding="{Binding VLen, StringFormat=N3}" Width="80" />
+                        <telerik:GridViewDataColumn Header="facing_yaw" DataMemberBinding="{Binding FacingYaw, StringFormat=N4}" Width="*" />
+                    </telerik:RadGridView.Columns>
+                </telerik:RadGridView>
+            </DockPanel>
+
+            <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                <TextBlock DockPanel.Dock="Top" Text="선택 면 영역 목록 (선택 시 작업 등록)" FontWeight="Bold" Margin="0,0,0,4" />
+                <telerik:RadGridView ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea, Mode=TwoWay}"
+                                     AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed">
+                    <telerik:RadGridView.Columns>
                         <telerik:GridViewDataColumn Header="이름" DataMemberBinding="{Binding Name}" Width="70" />
-                        <telerik:GridViewDataColumn Header="작업수" DataMemberBinding="{Binding TaskCount}" Width="64" />
+                        <telerik:GridViewDataColumn Header="Lv" DataMemberBinding="{Binding Level}" Width="40" />
+                        <telerik:GridViewDataColumn Header="u" DataMemberBinding="{Binding UMin, StringFormat=N2}" Width="60" />
+                        <telerik:GridViewDataColumn Header="~u" DataMemberBinding="{Binding UMax, StringFormat=N2}" Width="60" />
+                        <telerik:GridViewDataColumn Header="v" DataMemberBinding="{Binding VMin, StringFormat=N2}" Width="60" />
+                        <telerik:GridViewDataColumn Header="~v" DataMemberBinding="{Binding VMax, StringFormat=N2}" Width="60" />
+                        <telerik:GridViewDataColumn Header="작업" DataMemberBinding="{Binding TaskCount}" Width="50" />
                         <telerik:GridViewColumn Header="" Width="Auto">
                             <telerik:GridViewColumn.CellTemplate>
                                 <DataTemplate>
@@ -137,39 +182,15 @@
                         </telerik:GridViewColumn>
                     </telerik:RadGridView.Columns>
                 </telerik:RadGridView>
-            </StackPanel>
-        </ScrollViewer>
+            </DockPanel>
 
-        <!-- ── 우열: 검사 작업 등록/목록 ── -->
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="10,0,0,0">
-            <StackPanel>
-                <TextBlock Text="{Binding SelectedArea.Name, StringFormat='선택 영역: {0}', FallbackValue='선택 영역: (없음)'}"
-                           FontWeight="Bold" Margin="0,0,0,6" />
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="12" Margin="0,0,0,10">
-                    <StackPanel>
-                        <TextBlock Text="③ 검사 작업 등록 (선택 영역, 경계 내)" FontWeight="SemiBold" Margin="0,0,0,8" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="시작(X,Y,Z)" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding StartX, Mode=TwoWay}" Margin="0,0,5,0" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding StartY, Mode=TwoWay}" Margin="0,0,5,0" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding StartZ, Mode=TwoWay}" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                            <TextBlock Text="끝(X,Y,Z)" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding EndX, Mode=TwoWay}" Margin="0,0,5,0" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding EndY, Mode=TwoWay}" Margin="0,0,5,0" />
-                            <telerik:RadNumericUpDown Width="96" Value="{Binding EndZ, Mode=TwoWay}" />
-                        </StackPanel>
-                        <telerik:RadButton Content="작업 등록" HorizontalAlignment="Left" MinWidth="120" Command="{Binding RegisterTaskCommand}" />
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Text="선택 영역 작업 목록" FontWeight="SemiBold" Margin="0,0,0,4" />
-                <telerik:RadGridView ItemsSource="{Binding AreaTasks}" AutoGenerateColumns="False"
-                                     IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="200" Margin="0,0,0,8">
+            <DockPanel Grid.Row="2" MinHeight="120">
+                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록" FontWeight="Bold" Margin="0,0,0,4" />
+                <telerik:RadGridView ItemsSource="{Binding AreaTasks}" AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="100">
                     <telerik:RadGridView.Columns>
-                        <telerik:GridViewDataColumn Header="seq" DataMemberBinding="{Binding Seq}" Width="50" />
-                        <telerik:GridViewDataColumn Header="타입" DataMemberBinding="{Binding SeamType}" Width="80" />
+                        <telerik:GridViewDataColumn Header="seq" DataMemberBinding="{Binding Seq}" Width="46" />
+                        <telerik:GridViewDataColumn Header="시작(u,v)" DataMemberBinding="{Binding StartU, StringFormat=N2}" Width="80" />
+                        <telerik:GridViewDataColumn Header="끝(u,v)" DataMemberBinding="{Binding EndU, StringFormat=N2}" Width="80" />
                         <telerik:GridViewColumn Header="" Width="Auto">
                             <telerik:GridViewColumn.CellTemplate>
                                 <DataTemplate>
@@ -181,9 +202,7 @@
                         </telerik:GridViewColumn>
                     </telerik:RadGridView.Columns>
                 </telerik:RadGridView>
-
-                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" Margin="0,4,0,0" />
-            </StackPanel>
-        </ScrollViewer>
+            </DockPanel>
+        </Grid>
     </Grid>
 </UserControl>

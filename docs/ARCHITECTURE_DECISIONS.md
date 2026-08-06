@@ -197,6 +197,31 @@
 
 ---
 
+## ADR-012. 좌표 정의 프레임 — 벽면-로컬 2D 좌표계 검토 및 보류(현행 층 도면 프레임 유지) ✅
+
+**질문**: 영역·검사작업(용접선)을 **벽면-로컬 2D 좌표계**로 정의하도록 바꿔야 하는가?
+(제안: 벽면 등록으로 전체 면·좌표계 정의 → 벽면-로컬 2D로 영역·TASK 정의 → T_W_D로 AMR 이동 → T_A_B로 코봇 이동)
+
+**검토 — 제안의 대부분은 현행 모델에서 이미 실현됨**:
+- 영역(`min/max`)과 검사작업 seam(`[x,y,z]`)은 **이미 동일 프레임(해당 층 도면=floor-plan)** 에서 정의된다.
+- **T_W_D → AMR 정차**: 이미 동작(`station=영역 중앙 → DrawingToMap → 맵 pose`, `AreaPlanningService`).
+- **T_A_B → 코봇 이동**: 시스템 흐름상 맞으나 **HD_AMR의 책임**이다(ACS는 월드좌표 `seamStartW/EndW`까지만 제공, world→코봇 base 변환은 HD_AMR 티칭/온보드). 코드에 `T_A_B` 없음 — 경계 원칙(§6, ADR-001).
+
+**진짜 새로운 것 = 벽면-로컬 2D 프레임** (§5에서 보류했던 항목):
+- 실익: 벽 위 용접선 정의가 자연스러워짐(수직/챔퍼벽) + 3D 정확도. 현행은 top-down 프레임이라 수직벽 seam을 "≈일정 x,y + 변하는 z"로 표현.
+- 전제/필요(현재 없음): ① 벽면별 **3D pose `T_world_wall`**(현 `ref.wall`은 레지스트리뿐) ② 변환 레이어 **2D→3D 확장**(현 T_W_D는 x,y,yaw만, z 통과) ③ 벽면-로컬 영역은 벽 위에 있으므로 **AMR 바닥 정차 투영**(벽 발치+standoff) 별도 필요 — 옛 `SeamSlicer`의 normal+standoff 방식으로 회귀.
+
+**결정** (2026-08-06, 초안): 현행 층 도면 프레임 유지·벽면-로컬 보류. (아래 갱신으로 대체됨)
+
+**갱신** (2026-08-06): **채택으로 전환 — "벽면-로컬 입력 레이어"를 단계적으로 도입**한다.
+- 기반 결정: 벽면 pose는 **수동 입력**(원점+u/v축 또는 CAD 3점), 좌표는 **입력 시 도면 좌표로 변환**(generate/payload/T_W_D 코어 무변경). 벽면 pose = "벽면-로컬 2D(u,v) → 도면 3D[x,y,z]" 매핑.
+- 도입 순서: ① 벽면 pose 기반(`ref.wall`에 origin/u_axis/v_axis + Core 3D 수학 `Vec3`/`WallPose` + 입력 API/UI) → ② AMR 바닥 정차 = 벽면 법선+standoff(`SeamSlicer` 로직 재사용, `FacingYawToward` 대체, 수직벽 정차 문제 해결) → ③ 영역·작업 (u,v) 입력·변환 → ④ generate/payload 통합 → ⑤ UI 전개도·문서.
+- **Phase ① 완료** (2026-08-06): `Vec3`/`WallPose`(LocalToDrawing·Normal·HorizontalNormal·FromThreePoints) + 3D 수학 테스트, `ref.wall` pose 컬럼(비파괴 ADD COLUMN 마이그레이션), `POST/GET /api/walls` pose(3점) 입출력, UI 벽면 등록 pose 입력. 영역·작업·generate·payload는 무변경(② 이후).
+
+**개정 (2026-08-07) — SPEC v3(`docs/SPEC_AREA_TASK_MANUAL.md`)로 구체화**: 벽면 pose를 **수동 입력**에서 **선창 파라메트릭 정의(팔각 단면)에서 자동 생성**으로 전환. §2 `ref.tank_geometry`(치수) → §3 10면 자동생성(`ref.wall` PK `(tank_id, wall_code)`, 프레임+내부향 법선+facing_yaw). Phase① `Vec3`/`WallPose`(=`To3D`) 재사용. **§2+§3(선창 3D 정의) 구현 완료** — 영역/작업(u,v §4)·정차 standoff(§5)·payload u,v(§6)·generate(§7)·전개도 UI(§9)는 후속. Phase① 수동 pose 입력 API/UI는 v3 자동생성으로 대체.
+
+---
+
 ## 미결 질문 목록 (Open Questions)
 
 | # | 항목 | 관련 ADR | 상태/비고 |

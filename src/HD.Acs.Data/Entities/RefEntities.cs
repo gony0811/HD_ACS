@@ -138,29 +138,53 @@ public class WeldSeamEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-// 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리 + HD_AMR 티칭 키. 정차각은 저장하지 않는다.
+// 선창 파라메트릭 정의 [SPEC v3 §2] — 팔각 단면 파라미터. 등록 시 §3 면 자동 생성.
+public class TankGeometryEntity
+{
+    public string TankId { get; set; } = "";
+    public double LengthL { get; set; }
+    public double WFloor { get; set; }
+    public double ThetaLow { get; set; }     // [rad] 저장
+    public double HLow { get; set; }
+    public double HWall { get; set; }
+    public double ThetaUp { get; set; }
+    public double HUp { get; set; }
+    public string LevelZ { get; set; } = "[]";   // jsonb 층 경계 z 목록
+    public double OriginOx { get; set; }
+    public double OriginOy { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+// 벽면(Wall) LAYER [SPEC v3 §3] — 파라미터에서 자동 생성된 면. (tank_id, wall_code) 단위(level 없음, 통짜 면).
 public class WallEntity
 {
     public string TankId { get; set; } = "";
-    public int Level { get; set; }
     public string WallCode { get; set; } = "";
+    public string Origin { get; set; } = "[]";   // jsonb [x,y,z] 벽면-로컬 (0,0)의 도면 좌표
+    public string UAxis { get; set; } = "[]";     // jsonb [x,y,z] +u축 단위벡터
+    public string VAxis { get; set; } = "[]";     // jsonb [x,y,z] +v축 단위벡터(U와 직교)
+    public string Normal { get; set; } = "[]";    // jsonb [x,y,z] 내부향 단위 법선
+    public double ULen { get; set; }              // 면 가로 크기(m)
+    public double VLen { get; set; }              // 면 세로 크기(m)
+    public double? FacingYaw { get; set; }        // AMR이 면을 바라보는 도면 yaw [rad]. B/T는 NULL
+    public bool Generated { get; set; } = true;
     public string? Description { get; set; }
 }
 
-// 영역(Area) LAYER [PHASE2 개정] — 운영자 수동 정의. 영역 1개 = STATION 1개 = anchorGroup 1개.
-// 정차각은 정차 위치→작업 seam 중심 방향으로 자동 산출 [정차각 자동화].
+// 영역(Area) LAYER [SPEC v3 §4] — 면(ref.wall) 위 로컬 (u,v) 사각형. 영역 1개 = STATION 1개 = anchorGroup 1개.
 public class InspectionAreaEntity
 {
     public Guid AreaId { get; set; }
     public string TankId { get; set; } = "";
-    public int Level { get; set; }
     public string WallCode { get; set; } = "";
+    public int Level { get; set; }                      // AMR 주행 층 (mapId 결정)
     public string Name { get; set; } = "";
-    public double MinX { get; set; }
-    public double MinY { get; set; }
-    public double MaxX { get; set; }
-    public double MaxY { get; set; }
-    public double? StationX { get; set; }               // 정차 오버라이드 (NULL=디폴트)
+    public double UMin { get; set; }
+    public double VMin { get; set; }
+    public double UMax { get; set; }
+    public double VMax { get; set; }
+    public double? StationX { get; set; }               // 정차 수동 오버라이드 (전역 x,y + theta). FL/CL 필수(§5)
     public double? StationY { get; set; }
     public double? StationTheta { get; set; }
     public int SortOrder { get; set; }
@@ -169,16 +193,18 @@ public class InspectionAreaEntity
     public List<AreaTaskEntity> Tasks { get; set; } = new();
 }
 
-// 검사 작업 [PHASE2 개정] — 영역 내 수동 정의. 작업 1개 = TASK 1개.
+// 검사 작업 [SPEC v3 §4] — 영역 내 용접선. 시작/끝점은 면 로컬 (u,v). 작업 1개 = TASK 1개.
 public class AreaTaskEntity
 {
     public Guid TaskId { get; set; }
     public Guid AreaId { get; set; }
     public int Seq { get; set; }                        // 영역 내 실행 순서 → seqInGroup
-    public string? Name { get; set; }                   // 작업 이름(선택)
-    public string StartDrawing { get; set; } = "[]";    // jsonb [x,y,z] 도면 좌표
-    public string EndDrawing { get; set; } = "[]";      // jsonb [x,y,z]
+    public string? Name { get; set; }
     public string SeamType { get; set; } = "LINE";
+    public double StartU { get; set; }
+    public double StartV { get; set; }
+    public double EndU { get; set; }
+    public double EndV { get; set; }
     public string SectionDxfId { get; set; } = "";
     public string ProfileId { get; set; } = "";
     public string? CreatedBy { get; set; }

@@ -32,7 +32,7 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<SeamPlanningService>();
-builder.Services.AddScoped<AreaPlanningService>();
+builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
 builder.Services.AddSignalR();
 
@@ -66,64 +66,47 @@ app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()
         .Select(s => new { s.ScenarioId, s.Name, s.Version, s.TankId, s.Status }).ToListAsync()));
 
-// ── 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리 + HD_AMR 티칭 키. 정차각은 seam 기하에서 자동 산출 ──
-app.MapPost("/api/walls", async (CreateWallRequest req, AcsDbContext db) =>
+// ── 선창 파라메트릭 정의 + 면 자동생성 [SPEC v3 §2/§3] ──
+app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeometryRequest req, TankGeometryService svc) =>
 {
-    var wall = await db.Walls.FirstOrDefaultAsync(w =>
-        w.TankId == req.TankId && w.Level == req.Level && w.WallCode == req.WallCode);
-    if (wall is null)
+    var geom = new HD.Acs.Core.Planning.TankGeometry(
+        req.LengthL, req.WFloor, req.ThetaLowDeg * Math.PI / 180.0, req.HLow,
+        req.HWall, req.ThetaUpDeg * Math.PI / 180.0, req.HUp,
+        req.LevelZ ?? Array.Empty<double>(), req.OriginOx ?? 0, req.OriginOy ?? 0);
+    try
     {
-        wall = new HD.Acs.Data.Entities.WallEntity { TankId = req.TankId, Level = req.Level, WallCode = req.WallCode };
-        db.Walls.Add(wall);
+        int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId);
+        return Results.Ok(new { tankId, wallsGenerated = n });
     }
-    wall.Description = req.Description;
-    await db.SaveChangesAsync();
-    return Results.Ok(new { tankId = wall.TankId, level = wall.Level, wallCode = wall.WallCode });
+    catch (TankGeometryService.GeometryInvalidException ex)
+    { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
 });
 
-app.MapGet("/api/walls", async (string? tankId, int? level, AcsDbContext db) =>
-{
-    var q = db.Walls.AsNoTracking().Where(w => w.TankId == (tankId ?? "CT1"));
-    if (level is not null) q = q.Where(w => w.Level == level);
-    return Results.Ok(await q.OrderBy(w => w.Level).ThenBy(w => w.WallCode)
-        .Select(w => new { w.TankId, w.Level, w.WallCode, w.Description }).ToListAsync());
-});
+app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
+    await svc.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound());
 
-app.MapDelete("/api/walls/{tankId}/{level:int}/{wallCode}", async (string tankId, int level, string wallCode, AcsDbContext db) =>
-{
-    var wall = await db.Walls.FirstOrDefaultAsync(w => w.TankId == tankId && w.Level == level && w.WallCode == wallCode);
-    if (wall is null) return Results.NotFound();
-    bool used = await db.InspectionAreas.AsNoTracking()
-        .AnyAsync(a => a.TankId == tankId && a.Level == level && a.WallCode == wallCode);
-    if (used)
-        return Results.Conflict(new { error = $"벽면 {tankId}/L{level}/{wallCode}을(를) 참조하는 영역이 있어 삭제할 수 없습니다." });
-    db.Walls.Remove(wall);
-    await db.SaveChangesAsync();
-    return Results.Ok();
-});
+app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, TankGeometryService svc) =>
+    Results.Ok(await svc.GetWallsAsync(tankId)));
 
-// ── 영역(Area) LAYER + 수동 검사 작업 [PHASE2 개정] — 자동 슬라이싱 대체 ──
+// ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
 {
-    if (req.MinX >= req.MaxX || req.MinY >= req.MaxY)
-        return Results.BadRequest(new { error = "영역 경계가 올바르지 않습니다 (minX<maxX, minY<maxY)." });
-    // 정차각은 소속 벽면에서 상속 — 등록된 벽면(ref.wall)이어야 함 [SPEC v2]
-    bool wallExists = await db.Walls.AsNoTracking()
-        .AnyAsync(w => w.TankId == req.TankId && w.Level == req.Level && w.WallCode == req.WallCode);
-    if (!wallExists)
-        return Results.BadRequest(new { error =
-            $"등록된 벽면이 아닙니다: {req.TankId}/L{req.Level}/{req.WallCode}. 먼저 벽면(정차각)을 등록하세요." });
-    // 동일 (tank, level, wall) 내 영역 이름 중복 금지 [벽면 내 유일] — 층 간 벽면 중복은 허용
-    bool dup = await db.InspectionAreas.AsNoTracking().AnyAsync(x =>
-        x.TankId == req.TankId && x.Level == req.Level &&
-        x.WallCode == req.WallCode && x.Name == req.Name);
+    if (req.UMin >= req.UMax || req.VMin >= req.VMax)
+        return Results.BadRequest(new { error = "영역 경계가 올바르지 않습니다 (u_min<u_max, v_min<v_max)." });
+    var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
+    if (wall is null)
+        return Results.NotFound(new { error = $"면이 없습니다: {req.TankId}/{req.WallCode} (선창 파라미터를 먼저 등록하세요)." });
+    if (!HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMin, req.VMin, 0, 0, wall.ULen, wall.VLen) ||
+        !HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMax, req.VMax, 0, 0, wall.ULen, wall.VLen))
+        return Results.BadRequest(new { error = $"영역이 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
+    bool dup = await db.InspectionAreas.AsNoTracking()
+        .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
-        return Results.Conflict(new { error =
-            $"동일 벽면(L{req.Level}/{req.WallCode}) 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+        return Results.Conflict(new { error = $"면 {req.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
-        AreaId = Guid.NewGuid(), TankId = req.TankId, Level = req.Level, WallCode = req.WallCode, Name = req.Name,
-        MinX = req.MinX, MinY = req.MinY, MaxX = req.MaxX, MaxY = req.MaxY,
+        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = req.Level, Name = req.Name,
+        UMin = req.UMin, VMin = req.VMin, UMax = req.UMax, VMax = req.VMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
@@ -132,8 +115,19 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     return Results.Ok(new { areaId = area.AreaId });
 });
 
-app.MapGet("/api/areas", async (string? tankId, int? level, string? wallCode, AreaPlanningService area) =>
-    Results.Ok(await area.GetAreasAsync(tankId ?? "CT1", level, wallCode)));
+app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
+{
+    var q = db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == (tankId ?? "CT1"));
+    if (wallCode is not null) q = q.Where(a => a.WallCode == wallCode);
+    if (level is not null) q = q.Where(a => a.Level == level);
+    var areas = await q.OrderBy(a => a.WallCode).ThenBy(a => a.SortOrder).ThenBy(a => a.Name).ToListAsync();
+    return Results.Ok(areas.Select(a => new
+    {
+        a.AreaId, a.TankId, a.WallCode, a.Level, a.Name,
+        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.SortOrder,
+        TaskCount = a.Tasks.Count
+    }));
+});
 
 app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, AcsDbContext db) =>
 {
@@ -148,25 +142,29 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
-    bool InBounds(double[] p) => p.Length >= 2 &&
-        HD.Acs.Core.Planning.AreaGeometry.InBounds(p[0], p[1], a.MinX, a.MinY, a.MaxX, a.MaxY);
-    if (!InBounds(req.SeamStart) || !InBounds(req.SeamEnd))
-        return Results.BadRequest(new { error = "시작/끝점이 영역 경계를 벗어났습니다." });
+    bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.InBounds(u, v, a.UMin, a.VMin, a.UMax, a.VMax);
+    if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
+        return Results.BadRequest(new { error = "용접선 시작/끝점이 영역 경계를 벗어났습니다." });
     int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
-        TaskId = Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name,
-        StartDrawing = JsonSerializer.Serialize(req.SeamStart), EndDrawing = JsonSerializer.Serialize(req.SeamEnd),
-        SeamType = req.SeamType ?? "LINE", SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "",
-        CreatedBy = req.UserId
+        TaskId = Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name, SeamType = req.SeamType ?? "LINE",
+        StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
+        SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
     db.AreaTasks.Add(task);
     await db.SaveChangesAsync();
     return Results.Ok(new { taskId = task.TaskId, seq });
 });
 
-app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AreaPlanningService area) =>
-    Results.Ok(await area.GetAreaTasksAsync(areaId)));
+app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
+{
+    var tasks = await db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId).OrderBy(t => t.Seq).ToListAsync();
+    return Results.Ok(tasks.Select(t => new
+    {
+        t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId
+    }));
+});
 
 app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext db) =>
 {
@@ -175,21 +173,6 @@ app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext 
     db.AreaTasks.Remove(t);
     await db.SaveChangesAsync();
     return Results.Ok();
-});
-
-// 영역/작업 → 스테이션/TASK 생성. 유효 T_W_D 없으면 400.
-app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-areas",
-    async (Guid scenarioId, GenerateFromAreasRequest? req, AreaPlanningService area) =>
-{
-    try
-    {
-        var r = await area.GenerateAsync(scenarioId, req?.AreaIds, req?.UserId);
-        return Results.Ok(new { stations = r.Stations, tasks = r.Tasks, skipped = r.Skipped });
-    }
-    catch (SeamPlanningService.CalibrationMissingException ex)
-    { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
-    catch (InvalidOperationException ex)
-    { return Results.NotFound(new { error = ex.Message }); }
 });
 
 // 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2, DORMANT — 운영 워크플로우 제외]. 유효 T_W_D 없으면 400.
@@ -408,10 +391,15 @@ public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
-public sealed record CreateWallRequest(string TankId, int Level, string WallCode, string? Description, string? UserId);
-public sealed record CreateAreaRequest(string TankId, int Level, string WallCode, string Name,
-    double MinX, double MinY, double MaxX, double MaxY,
+// 선창 파라미터 등록 [SPEC v3 §2/§8]. 각도는 deg 입력(서버가 rad 변환).
+public sealed record CreateTankGeometryRequest(
+    double LengthL, double WFloor, double ThetaLowDeg, double HLow,
+    double HWall, double ThetaUpDeg, double HUp,
+    double[]? LevelZ, double? OriginOx, double? OriginOy,
+    double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId);
+// 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v).
+public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
+    double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId);
-public sealed record CreateAreaTaskRequest(int? Seq, string? Name, double[] SeamStart, double[] SeamEnd,
-    string? SeamType, string? SectionDxfId, string? ProfileId, string? UserId);
-public sealed record GenerateFromAreasRequest(Guid[]? AreaIds, string? UserId);
+public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
+    double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);

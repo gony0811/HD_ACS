@@ -153,50 +153,52 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
-    // ── 벽면(Wall) LAYER [정차각 자동화] — 벽면 레지스트리·티칭 키 (정차각 저장 안 함) ──────────
-    public async Task CreateWallAsync(string tankId, int level, string wallCode, string? description,
-        string userId, CancellationToken ct = default)
+    // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
+    public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId, CancellationToken ct = default)
     {
-        var resp = await _http.PostAsJsonAsync("/api/walls", new
+        var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", new
         {
-            TankId = tankId, Level = level, WallCode = wallCode, Description = description, UserId = userId
+            LengthL = lengthL, WFloor = wFloor, ThetaLowDeg = thetaLowDeg, HLow = hLow,
+            HWall = hWall, ThetaUpDeg = thetaUpDeg, HUp = hUp,
+            LevelZ = levelZ, OriginOx = originOx, OriginOy = originOy, UserId = userId
         }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 검증 실패 400 reasons 메시지 노출
+        return (await resp.Content.ReadFromJsonAsync<GeometryResult>(ct))?.WallsGenerated ?? 0;
     }
 
-    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default)
+    public async Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default)
     {
-        var url = $"/api/walls?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
-        return await _http.GetFromJsonAsync<List<WallDto>>(url, ct) ?? new();
+        var resp = await _http.GetAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<TankGeometryDto>(ct);
     }
 
-    public async Task DeleteWallAsync(string tankId, int level, string wallCode, CancellationToken ct = default)
-    {
-        var resp = await _http.DeleteAsync(
-            $"/api/walls/{Uri.EscapeDataString(tankId)}/{level}/{Uri.EscapeDataString(wallCode)}", ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 참조 영역 존재 시 409 메시지 노출
-    }
+    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<WallDto>>($"/api/tanks/{Uri.EscapeDataString(tankId)}/walls", ct) ?? new();
 
-    // ── 영역(Area) LAYER [PHASE2 개정] — 법선은 벽면에서 상속(입력 없음) ──────────
-    public async Task<Guid> CreateAreaAsync(string tankId, int level, string wallCode, string name,
-        double minX, double minY, double maxX, double maxY,
+    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) ──────────
+    public async Task<Guid> CreateAreaAsync(string tankId, string wallCode, int level, string name,
+        double uMin, double vMin, double uMax, double vMax,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
-            TankId = tankId, Level = level, WallCode = wallCode, Name = name,
-            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
+            TankId = tankId, WallCode = wallCode, Level = level, Name = name,
+            UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId
         }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 400·미등록 벽면 400·중복 409 메시지 노출
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·중복 409·면없음 404 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.AreaId ?? Guid.Empty;
     }
 
-    public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, int? level = null, string? wallCode = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)
     {
         var url = $"/api/areas?tankId={Uri.EscapeDataString(tankId)}"
-                  + (level is int l ? $"&level={l}" : "")
-                  + (wallCode is not null ? $"&wallCode={Uri.EscapeDataString(wallCode)}" : "");
+                  + (wallCode is not null ? $"&wallCode={Uri.EscapeDataString(wallCode)}" : "")
+                  + (level is int l ? $"&level={l}" : "");
         return await _http.GetFromJsonAsync<List<AreaDto>>(url, ct) ?? new();
     }
 
@@ -206,13 +208,13 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
-    public async Task<int> CreateAreaTaskAsync(Guid areaId, double[] seamStart, double[] seamEnd,
+    public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
         {
-            SeamStart = seamStart, SeamEnd = seamEnd, SeamType = seamType,
-            SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
+            StartU = startU, StartV = startV, EndU = endU, EndV = endV,
+            SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
@@ -225,14 +227,6 @@ public sealed class AcsApiClient : IAcsApiClient
     {
         var resp = await _http.DeleteAsync($"/api/area-tasks/{taskId}", ct);
         resp.EnsureSuccessStatusCode();
-    }
-
-    public async Task<(int Stations, int Tasks)> GenerateFromAreasAsync(Guid scenarioId, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsync($"/api/scenarios/{scenarioId}/generate-from-areas", content: null, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 400 유효 T_W_D 없음 메시지 노출
-        var r = await resp.Content.ReadFromJsonAsync<GenerateResult>(ct);
-        return (r?.Stations ?? 0, r?.Tasks ?? 0);
     }
 
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
@@ -255,4 +249,5 @@ public sealed class AcsApiClient : IAcsApiClient
     private sealed record IdResult(Guid ScenarioId, Guid SeamId, Guid AreaId);
     private sealed record AreaTaskResult(Guid TaskId, int Seq);
     private sealed record GenerateResult(int Stations, int Tasks);
+    private sealed record GeometryResult(int WallsGenerated);
 }
