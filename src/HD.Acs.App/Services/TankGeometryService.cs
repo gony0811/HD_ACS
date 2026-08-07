@@ -37,6 +37,7 @@ public sealed class TankGeometryService
         g.LengthL = geom.L; g.WFloor = geom.WFloor; g.ThetaLow = geom.ThetaLow; g.HLow = geom.HLow;
         g.HWall = geom.HWall; g.ThetaUp = geom.ThetaUp; g.HUp = geom.HUp;
         g.LevelZ = JsonSerializer.Serialize(geom.LevelZ);
+        g.ReachZMin = geom.ReachZMin; g.ReachZMax = geom.ReachZMax;
         g.OriginOx = geom.Ox; g.OriginOy = geom.Oy; g.CreatedBy = userId;
 
         var existing = await _db.Walls.Where(w => w.TankId == tankId).ToListAsync(ct);
@@ -71,27 +72,57 @@ public sealed class TankGeometryService
             thetaLowDeg = g.ThetaLow * 180.0 / Math.PI, hLow = g.HLow, hWall = g.HWall,
             thetaUpDeg = g.ThetaUp * 180.0 / Math.PI, hUp = g.HUp,
             levelZ = JsonSerializer.Deserialize<double[]>(g.LevelZ),
+            reachZMin = g.ReachZMin, reachZMax = g.ReachZMax,
             originOx = g.OriginOx, originOy = g.OriginOy,
             derived = new { d.WLow, d.B, d.WUp, d.WCeil, d.H }
         };
     }
 
-    public async Task<IReadOnlyList<object>> GetWallsAsync(string tankId, CancellationToken ct = default)
+    /// <summary>
+    /// 면 목록 조회 [SPEC v3.1 §8]. level 지정 시 그 층 도달 밴드와 교차하는 면만 반환하고
+    /// 각 면에 도달 가능 v구간(reachableVBand=[vLo,vHi])을 부착한다. 미지정 시 전체 면.
+    /// </summary>
+    public async Task<IReadOnlyList<object>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default)
     {
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .OrderBy(w => w.WallCode).ToListAsync(ct);
-        return walls.Select(w => (object)new
+
+        LevelBand? band = null;
+        if (level is int lv)
         {
-            w.TankId, w.WallCode,
-            origin = JsonSerializer.Deserialize<double[]>(w.Origin),
-            uAxis = JsonSerializer.Deserialize<double[]>(w.UAxis),
-            vAxis = JsonSerializer.Deserialize<double[]>(w.VAxis),
-            normal = JsonSerializer.Deserialize<double[]>(w.Normal),
-            w.ULen, w.VLen, w.FacingYaw, w.Generated, w.Description
-        }).ToList();
+            var g = await _db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == tankId, ct);
+            if (g is not null)
+                band = ToGeom(g).LevelBandList().FirstOrDefault(b => b.Level == lv);
+        }
+
+        var result = new List<object>();
+        foreach (var w in walls)
+        {
+            var origin = JsonSerializer.Deserialize<double[]>(w.Origin)!;
+            var vAxis = JsonSerializer.Deserialize<double[]>(w.VAxis)!;
+            double[]? reachableVBand = null;
+            if (band is not null)
+            {
+                var vb = LevelBands.ReachableVBand(origin[2], vAxis[2], w.VLen, band);
+                if (vb is null) continue;   // 이 층에서 도달 불가한 면 → 제외
+                reachableVBand = new[] { vb.Value.VLo, vb.Value.VHi };
+            }
+            result.Add(new
+            {
+                w.TankId, w.WallCode,
+                origin,
+                uAxis = JsonSerializer.Deserialize<double[]>(w.UAxis),
+                vAxis,
+                normal = JsonSerializer.Deserialize<double[]>(w.Normal),
+                w.ULen, w.VLen, w.FacingYaw, w.Generated, w.Description,
+                reachableVBand
+            });
+        }
+        return result;
     }
 
     private static TankGeometry ToGeom(TankGeometryEntity g) => new(
         g.LengthL, g.WFloor, g.ThetaLow, g.HLow, g.HWall, g.ThetaUp, g.HUp,
-        JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(), g.OriginOx, g.OriginOy);
+        JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(), g.OriginOx, g.OriginOy,
+        g.ReachZMin, g.ReachZMax);
 }

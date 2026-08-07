@@ -33,8 +33,13 @@ public sealed record GeneratedWall(string WallCode, WallPose Pose, double[] Norm
 public sealed record TankGeometry(
     double L, double WFloor, double ThetaLow, double HLow,
     double HWall, double ThetaUp, double HUp,
-    double[] LevelZ, double Ox = 0, double Oy = 0)
+    double[] LevelZ, double Ox = 0, double Oy = 0,
+    double? ReachZMin = null, double? ReachZMax = null)
 {
+    /// <summary>층 도달 밴드 [SPEC v3.1 §5-A] — level_z·reach_z·H로 산출.</summary>
+    public IReadOnlyList<LevelBand> LevelBandList() =>
+        LevelBands.Compute(LevelZ, ReachZMin, ReachZMax, Derived().H);
+
     public TankDerived Derived()
     {
         double wLow = HLow / Math.Tan(ThetaLow);

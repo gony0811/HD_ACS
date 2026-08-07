@@ -1,17 +1,25 @@
 using System.ComponentModel;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using HD.Acs.UI.Models;
 using HD.Acs.UI.ViewModels;
+using HelixToolkit.Wpf;
 
 namespace HD.Acs.UI.Views;
 
 /// <summary>
-/// 화물창 좌측 뷰. 3D 로봇 마커 위치는 XAML 바인딩이 까다로워 코드비하인드에서 VM 변화에 반응해 갱신한다.
-/// 3D 씬(placeholder 셸)과 전개도는 동일한 벽면 코드/좌표계(TankLayout)를 공유한다.
+/// 화물창 좌측 뷰. 3D 셸(팔각 프리즘)은 지오메트리 API의 실제 10면(WallDto)으로 코드비하인드에서
+/// 메시를 빌드한다(반투명 면 + 모서리 와이어). 선택 층 도달 z-밴드를 강조 오버레이로 그린다.
+/// 로봇 마커 위치도 VM 변화에 반응해 코드비하인드에서 갱신한다.
+/// 3D 씬과 전개도는 동일한 벽면 코드/좌표계(도면 프레임, z-up, m)를 공유한다.
 /// </summary>
 public partial class TankView : UserControl
 {
     private TankViewModel? _vm;
+
+    // 면 두께 강조·z-fighting 회피용 법선 방향 오프셋(m)
+    private const double HighlightOffsetM = 0.02;
 
     public TankView()
     {
@@ -21,11 +29,24 @@ public partial class TankView : UserControl
 
     private void OnDataContextChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e)
     {
-        if (_vm is not null) _vm.PropertyChanged -= OnVmPropertyChanged;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged -= OnVmPropertyChanged;
+            _vm.ViewChanged -= OnViewChanged;
+        }
         _vm = e.NewValue as TankViewModel;
-        if (_vm is not null) _vm.PropertyChanged += OnVmPropertyChanged;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged += OnVmPropertyChanged;
+            _vm.ViewChanged += OnViewChanged;
+        }
         UpdateRobotMarker();
+        Rebuild();
     }
+
+    private void OnViewChanged(object? sender, EventArgs e) => Rebuild();
+
+    private void Rebuild() { BuildShell(); BuildLevelHighlight(); }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -42,5 +63,203 @@ public partial class TankView : UserControl
         double x = _vm.RobotX ?? 0;
         double y = _vm.RobotY ?? 0;
         RobotMarker.Transform = new TranslateTransform3D(x, y, 0);
+    }
+
+    // ── 3D 셸 (반투명 면 + 팔각 모서리 와이어) ──────────────────────────────
+    private void BuildShell()
+    {
+        ShellModel.Children.Clear();
+        if (_vm is null || _vm.ShellWalls.Count == 0) return;
+
+        bool fill = !_vm.IsolateLevel;   // 전체 모드만 반투명 채움(격리 모드는 가림 방지 위해 와이어만)
+        var group = new Model3DGroup();
+        var edges = new LinesVisual3D { Color = Color.FromRgb(0xEA, 0xF2, 0xF8), Thickness = 1.1 };
+
+        foreach (var w in _vm.ShellWalls)
+        {
+            // 마구리(F/A)는 팔각 단면 윤곽(모따기)으로 그린다. 그 외 면은 직사각형.
+            if (BulkheadPolygon(w, 0, _vm.Geometry?.Derived.H ?? 0) is { Count: >= 3 } poly)
+            {
+                if (fill)
+                {
+                    var mat = new DiffuseMaterial(FaceBrush(w.WallCode));
+                    group.Children.Add(new GeometryModel3D(PolygonMesh(poly), mat) { BackMaterial = mat });
+                }
+                AddClosedOutline(edges, poly);
+                continue;
+            }
+
+            if (!TryCorners(w, 0, 0, w.ULen, w.VLen, out var c0, out var c1, out var c2, out var c3)) continue;
+
+            if (fill)
+            {
+                var mat = new DiffuseMaterial(FaceBrush(w.WallCode));
+                group.Children.Add(new GeometryModel3D(Quad(c0, c1, c2, c3), mat) { BackMaterial = mat });
+            }
+
+            // 4변 모서리(닫힌 사각형) — 모든 모드에서 형상 컨텍스트 제공
+            edges.Points.Add(c0); edges.Points.Add(c1);
+            edges.Points.Add(c1); edges.Points.Add(c2);
+            edges.Points.Add(c2); edges.Points.Add(c3);
+            edges.Points.Add(c3); edges.Points.Add(c0);
+        }
+
+        if (group.Children.Count > 0) ShellModel.Children.Add(new ModelVisual3D { Content = group });
+        ShellModel.Children.Add(edges);
+        Viewport.ZoomExtents();
+    }
+
+    // ── 선택 층 도달 z-밴드 강조 (reachableVBand 서브사각형) ─────────────────
+    private void BuildLevelHighlight()
+    {
+        LevelHighlight.Children.Clear();
+        if (_vm is null || _vm.LevelWalls.Count == 0) return;
+
+        // 밝은 골드: 불투명 근접 확산 + 발광(EmissiveMaterial)으로 조명·블렌드 순서와 무관하게 또렷.
+        var fill = new MaterialGroup();
+        fill.Children.Add(new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0xE0, 0xF5, 0xB0, 0x41))));
+        fill.Children.Add(new EmissiveMaterial(new SolidColorBrush(Color.FromArgb(0x66, 0xF1, 0xC4, 0x0F))));
+
+        var group = new Model3DGroup();
+        var outline = new LinesVisual3D { Color = Color.FromRgb(0xF3, 0x9C, 0x12), Thickness = 3.0 };
+
+        foreach (var w in _vm.LevelWalls)
+        {
+            if (w.ReachableVBand is not { Length: 2 } band) continue;
+            double vLo = band[0], vHi = band[1];
+            if (vHi <= vLo) continue;
+            var off = -NormalOffset(w);   // 외부 방향으로 소량 띄워 와이어와의 z-fighting 방지
+
+            // 마구리(F/A)는 팔각 윤곽을 z-밴드로 클리핑한 다각형으로 강조.
+            if (BulkheadPolygon(w, vLo, vHi) is { Count: >= 3 } poly)
+            {
+                for (int i = 0; i < poly.Count; i++) poly[i] += off;
+                group.Children.Add(new GeometryModel3D(PolygonMesh(poly), fill) { BackMaterial = fill });
+                AddClosedOutline(outline, poly);
+                continue;
+            }
+
+            if (!TryCorners(w, 0, vLo, w.ULen, vHi, out var c0, out var c1, out var c2, out var c3)) continue;
+            c0 += off; c1 += off; c2 += off; c3 += off;
+
+            group.Children.Add(new GeometryModel3D(Quad(c0, c1, c2, c3), fill) { BackMaterial = fill });
+
+            outline.Points.Add(c0); outline.Points.Add(c1);
+            outline.Points.Add(c1); outline.Points.Add(c2);
+            outline.Points.Add(c2); outline.Points.Add(c3);
+            outline.Points.Add(c3); outline.Points.Add(c0);
+        }
+
+        LevelHighlight.Children.Add(new ModelVisual3D { Content = group });
+        LevelHighlight.Children.Add(outline);
+    }
+
+    /// <summary>면 로컬 (u,v) 사각형의 4코너를 도면 3D로 계산. Origin/UAxis/VAxis 배열이 없으면 false.</summary>
+    private static bool TryCorners(WallDto w, double uMin, double vMin, double uMax, double vMax,
+        out Point3D c0, out Point3D c1, out Point3D c2, out Point3D c3)
+    {
+        c0 = c1 = c2 = c3 = default;
+        if (w.Origin is not { Length: 3 } o || w.UAxis is not { Length: 3 } ua || w.VAxis is not { Length: 3 } va)
+            return false;
+        var origin = new Point3D(o[0], o[1], o[2]);
+        var u = new Vector3D(ua[0], ua[1], ua[2]);
+        var v = new Vector3D(va[0], va[1], va[2]);
+        Point3D P(double uu, double vv) => origin + u * uu + v * vv;
+        c0 = P(uMin, vMin); c1 = P(uMax, vMin); c2 = P(uMax, vMax); c3 = P(uMin, vMax);
+        return true;
+    }
+
+    /// <summary>4코너 사각형 → MeshGeometry3D(삼각형 2개 + 면 법선). 조명용 법선은 코너에서 산출.</summary>
+    private static MeshGeometry3D Quad(Point3D a, Point3D b, Point3D c, Point3D d)
+    {
+        var m = new MeshGeometry3D();
+        m.Positions.Add(a); m.Positions.Add(b); m.Positions.Add(c); m.Positions.Add(d);
+        var n = Vector3D.CrossProduct(b - a, d - a);
+        if (n.LengthSquared > 1e-18) n.Normalize();
+        for (int i = 0; i < 4; i++) m.Normals.Add(n);
+        m.TriangleIndices.Add(0); m.TriangleIndices.Add(1); m.TriangleIndices.Add(2);
+        m.TriangleIndices.Add(0); m.TriangleIndices.Add(2); m.TriangleIndices.Add(3);
+        return m;
+    }
+
+    private static Vector3D NormalOffset(WallDto w) =>
+        w.Normal is { Length: 3 } n ? new Vector3D(n[0], n[1], n[2]) * HighlightOffsetM : new Vector3D();
+
+    // ── 마구리(F/A) 팔각 단면 윤곽 ──────────────────────────────────────────
+    /// <summary>
+    /// 마구리 면(F/A)을 z∈[zLo,zHi]로 클리핑한 팔각 단면 다각형(도면 3D). F/A가 아니거나
+    /// 지오메트리 미로드면 null → 호출부가 직사각형으로 폴백. 면은 x=const 평면(마구리)이며,
+    /// 반폭 halfWidth(z)로 좌/우 윤곽을 만들어 챔퍼 모서리가 모따기된 형상을 그린다.
+    /// </summary>
+    private List<Point3D>? BulkheadPolygon(WallDto w, double zLo, double zHi)
+    {
+        if (w.WallCode is not ("F" or "A")) return null;
+        if (_vm?.Geometry is not { } g || w.Origin is not { Length: 3 } o) return null;
+        double x = o[0], oy = g.OriginOy, h = g.Derived.H;
+        zLo = Math.Max(0, zLo); zHi = Math.Min(h, zHi);
+        if (zHi <= zLo) return null;
+
+        double zWall = g.HLow + g.HWall;   // 수직벽 상단 z (챔퍼 무릎)
+        var zs = new List<double> { zLo };
+        foreach (var knee in new[] { g.HLow, zWall })
+            if (knee > zLo + 1e-9 && knee < zHi - 1e-9) zs.Add(knee);
+        zs.Add(zHi);
+        zs.Sort();
+
+        var pts = new List<Point3D>(zs.Count * 2);
+        foreach (var z in zs) pts.Add(new Point3D(x, oy + HalfWidth(g, z), z));          // 우현(+y) 아래→위
+        for (int i = zs.Count - 1; i >= 0; i--) pts.Add(new Point3D(x, oy - HalfWidth(g, zs[i]), zs[i])); // 좌현(−y) 위→아래
+        return pts;
+    }
+
+    /// <summary>팔각 단면 반폭 y(z) — 하부챔퍼/수직벽/상부챔퍼 구간별 선형.</summary>
+    private static double HalfWidth(TankGeometryDto g, double z)
+    {
+        double b2 = g.Derived.B / 2, wf2 = g.WFloor / 2, wc2 = g.Derived.WCeil / 2;
+        double hLow = g.HLow, zWall = g.HLow + g.HWall, h = g.Derived.H;
+        if (z <= hLow) return hLow > 1e-9 ? wf2 + (z / hLow) * (b2 - wf2) : b2;           // 하부 챔퍼
+        if (z <= zWall) return b2;                                                         // 수직벽
+        double hUp = h - zWall;
+        return hUp > 1e-9 ? b2 - ((z - zWall) / hUp) * (b2 - wc2) : wc2;                   // 상부 챔퍼
+    }
+
+    /// <summary>볼록 다각형 → MeshGeometry3D(삼각형 팬 + 면 법선).</summary>
+    private static MeshGeometry3D PolygonMesh(IList<Point3D> pts)
+    {
+        var m = new MeshGeometry3D();
+        foreach (var p in pts) m.Positions.Add(p);
+        var n = Vector3D.CrossProduct(pts[1] - pts[0], pts[2] - pts[0]);
+        if (n.LengthSquared > 1e-18) n.Normalize();
+        for (int i = 0; i < pts.Count; i++) m.Normals.Add(n);
+        for (int i = 1; i < pts.Count - 1; i++)
+        {
+            m.TriangleIndices.Add(0); m.TriangleIndices.Add(i); m.TriangleIndices.Add(i + 1);
+        }
+        return m;
+    }
+
+    /// <summary>닫힌 다각형의 변을 LinesVisual3D에 누적(점쌍).</summary>
+    private static void AddClosedOutline(LinesVisual3D lines, IReadOnlyList<Point3D> pts)
+    {
+        for (int i = 0; i < pts.Count; i++)
+        {
+            lines.Points.Add(pts[i]);
+            lines.Points.Add(pts[(i + 1) % pts.Count]);
+        }
+    }
+
+    /// <summary>면 타입별 연한 반투명 색조(바닥/천장/수직벽/챔퍼/마구리).</summary>
+    private static Brush FaceBrush(string code)
+    {
+        var c = code switch
+        {
+            "B" => Color.FromArgb(0x66, 0x2E, 0x86, 0xC1),                        // 바닥 — 진한 파랑
+            "T" => Color.FromArgb(0x55, 0xAE, 0xD6, 0xF1),                        // 천장 — 연한 파랑
+            "SM" or "PM" => Color.FromArgb(0x55, 0x48, 0xC9, 0xB0),               // 수직벽 — 청록
+            "SL" or "PL" or "SU" or "PU" => Color.FromArgb(0x55, 0x5D, 0x6D, 0x7E), // 챔퍼 — 슬레이트
+            "F" or "A" => Color.FromArgb(0x55, 0xD5, 0xA6, 0x7E),                 // 마구리 — 웜그레이
+            _ => Color.FromArgb(0x55, 0x85, 0x92, 0x9E),
+        };
+        return new SolidColorBrush(c);
     }
 }

@@ -150,6 +150,8 @@ public class TankGeometryEntity
     public double ThetaUp { get; set; }
     public double HUp { get; set; }
     public string LevelZ { get; set; } = "[]";   // jsonb 층 경계 z 목록
+    public double? ReachZMin { get; set; }        // (선택, v3.1) 코봇 도달 밴드 하한 상대높이
+    public double? ReachZMax { get; set; }        // (선택, v3.1) 코봇 도달 밴드 상한 상대높이
     public double OriginOx { get; set; }
     public double OriginOy { get; set; }
     public string? CreatedBy { get; set; }

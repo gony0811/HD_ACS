@@ -56,12 +56,14 @@
                     <StackPanel>
                         <TextBlock Text="② 영역 등록 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <TextBlock Text="면" Style="{StaticResource Lbl}" />
+                            <TextBlock Text="층 필터" Style="{StaticResource Lbl}" />
+                            <telerik:RadComboBox Width="100" Height="Auto" ItemsSource="{Binding Levels}" DisplayMemberPath="Label"
+                                                 SelectedItem="{Binding SelectedLevel, Mode=TwoWay}" />
+                            <TextBlock Text="면" Style="{StaticResource Lbl}" Margin="10,0,4,0" MinWidth="0" />
                             <telerik:RadComboBox Width="100" Height="Auto" ItemsSource="{Binding Walls}" DisplayMemberPath="WallCode"
                                                  SelectedItem="{Binding SelectedWall, Mode=TwoWay}" />
-                            <TextBlock Text="Lv" Style="{StaticResource Lbl}" Margin="10,0,4,0" MinWidth="0" />
-                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding AreaLevel, Mode=TwoWay}" />
                         </StackPanel>
+                        <TextBlock Text="층을 고르면 그 층에서 도달 가능한 면만 표시됩니다. 층은 영역 z범위로 서버가 자동 유도합니다." Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding SelectedWallInfo}" Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="이름" Style="{StaticResource Lbl}" />

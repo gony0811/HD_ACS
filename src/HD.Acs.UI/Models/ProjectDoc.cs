@@ -14,7 +14,8 @@ public sealed record ProjectDoc(
 public sealed record GeometryDoc(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
     double HWall, double ThetaUpDeg, double HUp,
-    double[] LevelZ, double OriginOx, double OriginOy);
+    double[] LevelZ, double OriginOx, double OriginOy,
+    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드(선택)
 
 /// <summary>영역 스냅샷 (벽면-로컬 u,v) + 소속 검사 작업.</summary>
 public sealed record AreaDoc(

@@ -156,13 +156,15 @@ public sealed class AcsApiClient : IAcsApiClient
     // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
     public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
-        double originOx, double originOy, string userId, CancellationToken ct = default)
+        double originOx, double originOy, string userId,
+        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", new
         {
             LengthL = lengthL, WFloor = wFloor, ThetaLowDeg = thetaLowDeg, HLow = hLow,
             HWall = hWall, ThetaUpDeg = thetaUpDeg, HUp = hUp,
-            LevelZ = levelZ, OriginOx = originOx, OriginOy = originOy, UserId = userId
+            LevelZ = levelZ, OriginOx = originOx, OriginOy = originOy, UserId = userId,
+            ReachZMin = reachZMin, ReachZMax = reachZMax
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 검증 실패 400 reasons 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<GeometryResult>(ct))?.WallsGenerated ?? 0;
@@ -176,22 +178,26 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<TankGeometryDto>(ct);
     }
 
-    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<WallDto>>($"/api/tanks/{Uri.EscapeDataString(tankId)}/walls", ct) ?? new();
+    public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/tanks/{Uri.EscapeDataString(tankId)}/walls" + (level is int l ? $"?level={l}" : "");
+        return await _http.GetFromJsonAsync<List<WallDto>>(url, ct) ?? new();
+    }
 
-    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) ──────────
-    public async Task<Guid> CreateAreaAsync(string tankId, string wallCode, int level, string name,
+    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v). v3.1: level은 서버가 유도(응답에 유도 층) ──────────
+    public async Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double uMin, double vMin, double uMax, double vMax,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
-            TankId = tankId, WallCode = wallCode, Level = level, Name = name,
+            TankId = tankId, WallCode = wallCode, Name = name,
             UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId
         }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·중복 409·면없음 404 메시지 노출
-        return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.AreaId ?? Guid.Empty;
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
+        var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
+        return (r?.AreaId ?? Guid.Empty, r?.Level ?? 0);
     }
 
     public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)
@@ -246,7 +252,7 @@ public sealed class AcsApiClient : IAcsApiClient
     private sealed record StartRunResult(Guid RunId);
     private sealed record ReleaseResult(bool Released);
     private sealed record ErrorBody(string? Error);
-    private sealed record IdResult(Guid ScenarioId, Guid SeamId, Guid AreaId);
+    private sealed record IdResult(Guid ScenarioId, Guid SeamId, Guid AreaId, int Level);
     private sealed record AreaTaskResult(Guid TaskId, int Seq);
     private sealed record GenerateResult(int Stations, int Tasks);
     private sealed record GeometryResult(int WallsGenerated);

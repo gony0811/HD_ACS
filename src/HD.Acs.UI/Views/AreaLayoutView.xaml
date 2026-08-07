@@ -30,6 +30,24 @@
                         <ScaleTransform x:Name="Zoom" ScaleX="1" ScaleY="1" />
                     </Canvas.LayoutTransform>
                     <Rectangle Width="600" Height="600" Fill="#FDFEFE" Stroke="#D5DBDB" StrokeThickness="1" />
+                    <!-- 선택 층 도달 v구간 하이라이트 (반투명 노랑 밴드) — 영역 박스 뒤에 배치 -->
+                    <ItemsControl ItemsSource="{Binding ReachBands}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Width="{Binding Width}" Height="{Binding Height}">
+                                    <Rectangle Fill="#33F1C40F" Stroke="#F39C12" StrokeThickness="1" StrokeDashArray="2 2" />
+                                    <TextBlock Text="{Binding Label}" FontSize="10" Foreground="#B9770E" Margin="3,1,0,0" VerticalAlignment="Top" HorizontalAlignment="Right" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <ItemsControl ItemsSource="{Binding AreaBoxes}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemContainerStyle>

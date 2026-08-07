@@ -75,7 +75,8 @@ public sealed partial class ShellViewModel : ObservableObject
             Mission.LoadAsync(),
             ManualZoneChange.LoadAsync(),
             Calibration.LoadAsync(),
-            AreaPlanning.LoadAsync());
+            AreaPlanning.LoadAsync(),
+            Tank.LoadAsync());   // 3D 셸(지오메트리 10면) 로드
     }
 
     // ── 파일 메뉴 (프로젝트 파일 .hdacs) ──────────────────────────────
@@ -86,6 +87,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private async Task NewProjectAsync()
     {
         if (!_projectDialog.ShowNewProject()) return;   // 취소/실패 시 파일 미생성
+        await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
         var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
         if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
         await SaveToAsync(path);
@@ -101,7 +103,9 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             var doc = await _project.OpenAsync(path);
             AreaPlanning.TankId = doc.TankId;
+            Tank.TankId = doc.TankId;
             await AreaPlanning.LoadAsync();
+            await Tank.LoadAsync();   // 열린 지오메트리로 3D 셸 갱신
             UpdateTitle();
             ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)}";
         }

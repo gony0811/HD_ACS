@@ -12,6 +12,8 @@ namespace HD.Acs.UI.ViewModels;
 public sealed record AreaBox(double Left, double Top, double Width, double Height, string Label);
 public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge);
 public sealed record StationMarker(double Left, double Top, string Label);
+/// <summary>층 필터 선택 항목 [SPEC v3.1 §9]. Level=1-based, Label="L1".</summary>
+public sealed record LevelOption(int Level, string Label);
 
 /// <summary>
 /// 선창 3D 정의(§2/§3) + 영역·검사 작업 (u,v) 등록(§4) [SPEC v3].
@@ -32,10 +34,12 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     }
 
     public ObservableCollection<WallDto> Walls { get; } = new();
+    public ObservableCollection<LevelOption> Levels { get; } = new();          // 층 필터 목록(level_z 기반)
     public ObservableCollection<AreaDto> Areas { get; } = new();
     public ObservableCollection<AreaTaskDto> AreaTasks { get; } = new();
     public ObservableCollection<AreaBox> AreaBoxes { get; } = new();
     public ObservableCollection<AreaBox> DraftAreas { get; } = new();          // 입력 중 영역 미리보기(점선)
+    public ObservableCollection<AreaBox> ReachBands { get; } = new();          // 선택 층 도달 v구간 하이라이트
     public ObservableCollection<TaskSeg> TaskSegments { get; } = new();
     public ObservableCollection<TaskSeg> DraftSegments { get; } = new();       // 입력 중 용접선 미리보기
     public ObservableCollection<StationMarker> StationMarkers { get; } = new(); // 정차점 = 영역 중심
@@ -52,15 +56,19 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _thetaUpDeg = 45.0;
     [ObservableProperty] private double _hUp = 2.0;
     [ObservableProperty] private string _levelZText = "0, 3.2, 6.4, 9.6";
+    [ObservableProperty] private string _reachZMinText = "";      // 선택 — 코봇 도달 밴드 하한
+    [ObservableProperty] private string _reachZMaxText = "";      // 선택 — 코봇 도달 밴드 상한
     [ObservableProperty] private double _originOx;
     [ObservableProperty] private double _originOy;
     [ObservableProperty] private string _derivedText = "-";
 
-    // ── 영역 등록 입력 (면 로컬 u,v) ──
+    // ── 층 필터 (v3.1 §9 — 선택 층에서 도달 가능한 면만 노출) ──
+    [ObservableProperty] private LevelOption? _selectedLevel;
+
+    // ── 영역 등록 입력 (면 로컬 u,v). level은 서버가 유도 → 입력 없음 ──
     [ObservableProperty] private WallDto? _selectedWall;
     [ObservableProperty] private AreaDto? _selectedArea;
     [ObservableProperty] private string _areaName = "A01";
-    [ObservableProperty] private int _areaLevel = 1;
     [ObservableProperty] private double _uMin;
     [ObservableProperty] private double _vMin;
     [ObservableProperty] private double _uMax = 2.0;
@@ -87,13 +95,20 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var g = await _api.GetTankGeometryAsync(TankId);
             if (g is not null) ApplyGeometry(g);
-            Walls.Clear();
-            foreach (var w in await _api.GetWallsAsync(TankId)) Walls.Add(w);
-            // 면 재생성 후 인스턴스가 바뀌므로 코드로 재바인딩(콤보 stale 방지)
-            SelectedWall = Walls.FirstOrDefault(x => x.WallCode == SelectedWall?.WallCode) ?? Walls.FirstOrDefault();
+            await LoadWallsAsync();
             await RefreshAreasAsync();
         }
         catch (Exception ex) { StatusMessage = $"조회 실패: {ex.Message}"; }
+    }
+
+    /// <summary>선택 층 필터로 면 목록 재적재 [v3.1 §8/§9]. 층 미선택 시 전체 면.</summary>
+    private async Task LoadWallsAsync()
+    {
+        var list = await _api.GetWallsAsync(TankId, SelectedLevel?.Level);
+        Walls.Clear();
+        foreach (var w in list) Walls.Add(w);
+        // 면 재생성/필터 후 인스턴스가 바뀌므로 코드로 재바인딩(콤보 stale 방지)
+        SelectedWall = Walls.FirstOrDefault(x => x.WallCode == SelectedWall?.WallCode) ?? Walls.FirstOrDefault();
     }
 
     [RelayCommand]
@@ -105,10 +120,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         double[] levelZ;
         try { levelZ = ParseLevelZ(LevelZText); }
         catch { StatusMessage = "level_z 형식 오류 — 쉼표로 구분된 숫자 목록 (예: 0, 3.2, 6.4)."; return false; }
+        double? reachMin = ParseOptional(ReachZMinText), reachMax = ParseOptional(ReachZMaxText);
         try
         {
             int n = await _api.RegisterTankGeometryAsync(TankId, LengthL, WFloor, ThetaLowDeg, HLow,
-                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId);
+                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax);
             StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성";
             await LoadAsync();
             return true;
@@ -128,13 +144,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         if (UMin >= UMax || VMin >= VMax) { StatusMessage = "영역 경계: u_min<u_max, v_min<v_max 이어야 합니다."; return; }
         try
         {
-            await _api.CreateAreaAsync(TankId, w.WallCode, AreaLevel, AreaName, UMin, VMin, UMax, VMax,
+            var (_, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, UMin, VMin, UMax, VMax,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
                 _operatorId);
-            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} u[{UMin},{UMax}] v[{VMin},{VMax}]";
+            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} u[{UMin},{UMax}] v[{VMin},{VMax}] → 유도 층 L{level}";
             await RefreshAreasAsync();
         }
-        catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }   // 면범위 400·중복 409
+        catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }   // 면범위·층유도 400·중복 409
     }
 
     [RelayCommand]
@@ -208,7 +224,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>선택 면 (u,v)를 캔버스에 auto-fit(v 뒤집기) 투영 — 영역 박스 · 정차점(영역 중심) · 작업 선분 · 입력 미리보기.</summary>
     private void Project()
     {
-        AreaBoxes.Clear(); DraftAreas.Clear(); TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
+        AreaBoxes.Clear(); DraftAreas.Clear(); ReachBands.Clear(); TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
         if (SelectedWall is not { } w || w.ULen <= 0 || w.VLen <= 0) return;
 
         double scale = CanvasScale(w);
@@ -219,6 +235,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var (rx, by) = Proj(uMax, vMin);
             return new AreaBox(lx, ty, Math.Abs(rx - lx), Math.Abs(by - ty), label);
         }
+
+        // 선택 층 도달 v구간 하이라이트(면 전 폭 × [vLo,vHi]) [v3.1 §9]
+        if (w.ReachableVBand is { Length: 2 } vb && SelectedLevel is { } lvl)
+            ReachBands.Add(Box(0, vb[0], w.ULen, vb[1], $"{lvl.Label} 도달"));
 
         foreach (var a in Areas)
         {
@@ -259,13 +279,36 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         LengthL = g.LengthL; WFloor = g.WFloor; ThetaLowDeg = g.ThetaLowDeg; HLow = g.HLow;
         HWall = g.HWall; ThetaUpDeg = g.ThetaUpDeg; HUp = g.HUp;
         OriginOx = g.OriginOx; OriginOy = g.OriginOy;
+        ReachZMinText = g.ReachZMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
+        ReachZMaxText = g.ReachZMax?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
         if (g.LevelZ is { Length: > 0 })
+        {
             LevelZText = string.Join(", ", g.LevelZ.Select(z => z.ToString("0.###", CultureInfo.InvariantCulture)));
+            // 층 필터 목록 = level_z 길이만큼 L1..LN (기존 선택 층 유지)
+            int keep = SelectedLevel?.Level ?? 1;
+            Levels.Clear();
+            for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, $"L{i}"));
+            SelectedLevel = Levels.FirstOrDefault(x => x.Level == keep) ?? Levels.FirstOrDefault();
+        }
         var d = g.Derived;
         DerivedText = $"B(전폭)={d.B:0.###}  W_ceil(천장폭)={d.WCeil:0.###}  H(전체높이)={d.H:0.###}";
+    }
+
+    partial void OnSelectedLevelChanged(LevelOption? value) => _ = ReloadWallsForLevelAsync();
+
+    /// <summary>층 필터 변경 시 면 목록 재적재 후 전개도 갱신 [v3.1 §9].</summary>
+    private async Task ReloadWallsForLevelAsync()
+    {
+        try { await LoadWallsAsync(); await RefreshAreasAsync(); }
+        catch (Exception ex) { StatusMessage = $"면 조회 실패: {ex.Message}"; }
     }
 
     private static double[] ParseLevelZ(string text) =>
         text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => double.Parse(s, CultureInfo.InvariantCulture)).ToArray();
+
+    /// <summary>빈 문자열 → null, 아니면 파싱(실패 시 null). reach_z 선택 입력용.</summary>
+    private static double? ParseOptional(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
 }

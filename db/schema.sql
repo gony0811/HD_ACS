@@ -217,6 +217,8 @@ CREATE TABLE ref.tank_geometry (
   theta_up    double precision NOT NULL,
   h_up        double precision NOT NULL,
   level_z     jsonb NOT NULL,              -- 층 경계 z 목록, 예 [0,3.2,6.4,9.6]
+  reach_z_min double precision,            -- (선택, v3.1) 코봇 도달 밴드 하한 상대높이. 미지정 시 밴드=층 경계
+  reach_z_max double precision,            -- (선택, v3.1) 코봇 도달 밴드 상한 상대높이
   origin_ox   double precision NOT NULL DEFAULT 0,
   origin_oy   double precision NOT NULL DEFAULT 0,
   created_by  text,
@@ -247,7 +249,7 @@ CREATE TABLE ref.inspection_area (
   area_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tank_id       text NOT NULL,
   wall_code     text NOT NULL,             -- (tank_id, wall_code) → ref.wall
-  level         int  NOT NULL,             -- AMR 주행 층 (mapId 결정)
+  level         int  NOT NULL,             -- AMR 주행 층 (mapId 결정) — v3.1: 서버가 z범위→도달 밴드로 유도·저장(§5-A)
   name          text NOT NULL,             -- 'A01' — tank/wall 내 유일
   u_min         double precision NOT NULL, -- 면 로컬 좌표 (m)
   v_min         double precision NOT NULL,

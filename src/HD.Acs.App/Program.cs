@@ -72,7 +72,8 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
     var geom = new HD.Acs.Core.Planning.TankGeometry(
         req.LengthL, req.WFloor, req.ThetaLowDeg * Math.PI / 180.0, req.HLow,
         req.HWall, req.ThetaUpDeg * Math.PI / 180.0, req.HUp,
-        req.LevelZ ?? Array.Empty<double>(), req.OriginOx ?? 0, req.OriginOy ?? 0);
+        req.LevelZ ?? Array.Empty<double>(), req.OriginOx ?? 0, req.OriginOy ?? 0,
+        req.ReachZMin, req.ReachZMax);
     try
     {
         int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId);
@@ -85,8 +86,8 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
 app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
     await svc.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound());
 
-app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, TankGeometryService svc) =>
-    Results.Ok(await svc.GetWallsAsync(tankId)));
+app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
+    Results.Ok(await svc.GetWallsAsync(tankId, level)));
 
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
@@ -99,20 +100,36 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     if (!HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMin, req.VMin, 0, 0, wall.ULen, wall.VLen) ||
         !HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMax, req.VMax, 0, 0, wall.ULen, wall.VLen))
         return Results.BadRequest(new { error = $"영역이 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
+
+    // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위로 유도한다 ──
+    var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
+    if (g is null)
+        return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {req.TankId} (파라미터를 먼저 등록하세요)." });
+    var geom = new HD.Acs.Core.Planning.TankGeometry(
+        g.LengthL, g.WFloor, g.ThetaLow, g.HLow, g.HWall, g.ThetaUp, g.HUp,
+        System.Text.Json.JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(),
+        g.OriginOx, g.OriginOy, g.ReachZMin, g.ReachZMax);
+    var vAxis = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
+    var origin = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.Origin)!;
+    var (zLo, zHi) = HD.Acs.Core.Planning.LevelBands.AreaZRange(origin[2], vAxis[2], req.VMin, req.VMax);
+    int? derivedLevel = HD.Acs.Core.Planning.LevelBands.Derive(zLo, zHi, geom.LevelBandList(), out var reason);
+    if (derivedLevel is null)
+        return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
+
     bool dup = await db.InspectionAreas.AsNoTracking()
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
         return Results.Conflict(new { error = $"면 {req.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
-        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = req.Level, Name = req.Name,
+        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
         UMin = req.UMin, VMin = req.VMin, UMax = req.UMax, VMax = req.VMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
     db.InspectionAreas.Add(area);
     await db.SaveChangesAsync();
-    return Results.Ok(new { areaId = area.AreaId });
+    return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
 });
 
 app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
@@ -396,8 +413,9 @@ public sealed record CreateTankGeometryRequest(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double? OriginOx, double? OriginOy,
-    double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId);
-// 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v).
+    double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId,
+    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
+// 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v). Level은 v3.1에서 무시(서버가 §5-A로 유도).
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId);

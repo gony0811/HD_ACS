@@ -19,7 +19,7 @@
 | | ref.inspection_point | 검사 지점 → 노드 참조 (층 자동 결정) | |
 | | ref.inspection_task | 검사 작업 참조 (job_ref + position + opaque params) | ADR-001/004 |
 | **ref 벽면** | ref.wall | 벽면 레지스트리 + HD_AMR 티칭 키 (tank_id, level, wall_code, description). 정차각 미저장(seam 기하에서 자동 산출) [TANK_WALL_LAYOUT §6.3] | 정차각 자동화 |
-| **ref 영역** | ref.inspection_area | 검사 영역 = STATION 1개 = anchorGroup 1개 (도면 좌표 사각형; 정차각은 정차 위치→seam 중심 방향으로 자동 산출, ref.wall FK). 입력 규약은 [TANK_WALL_LAYOUT §6](TANK_WALL_LAYOUT.md) | PHASE2 개정 |
+| **ref 영역** | ref.inspection_area | 검사 영역 = STATION 1개 = anchorGroup 1개 (면-로컬 u,v 사각형, ref.wall FK). **level = 서버 유도값**(입력 아님 — 영역 z범위→층 도달 밴드, [SPEC v3.1 §5-A]). 입력 규약은 [TANK_WALL_LAYOUT §6](TANK_WALL_LAYOUT.md) | v3.1 |
 | | ref.area_task | 영역 내 검사 작업 (seam 시작/끝 도면 좌표, 영역 내 순서 seq) | PHASE2 개정 |
 | | ref.weld_seam | 도면 seam 자동 슬라이싱 원천 (WP-2, **dormant** — 운영 워크플로우 제외) | PHASE2 |
 | **ref 로봇** | ref.robot | 로봇 마스터 (manufacturer/serialNumber = MQTT 토픽 요소) | ADR-003 |

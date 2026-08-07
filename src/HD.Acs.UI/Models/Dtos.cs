@@ -154,7 +154,8 @@ public sealed record TankGeometryDto(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double OriginOx, double OriginOy,
-    TankDerivedDto Derived);
+    TankDerivedDto Derived,
+    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
 public sealed record TankDerivedDto(double WLow, double B, double WUp, double WCeil, double H);
 
 /// <summary>GET /api/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>
@@ -169,7 +170,8 @@ public sealed record WallDto(
     double VLen,
     double? FacingYaw,
     bool Generated,
-    string? Description);
+    string? Description,
+    double[]? ReachableVBand = null);   // v3.1 §8: level 필터 조회 시 [vLo,vHi] 도달 v구간
 
 /// <summary>GET /api/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
 public sealed record AreaDto(

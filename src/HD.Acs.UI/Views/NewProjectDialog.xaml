@@ -55,6 +55,12 @@
             <TextBlock Text="level_z" Style="{StaticResource Lbl}" ToolTip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
             <TextBox Width="200" Style="{StaticResource TxtField}" Text="{Binding LevelZText, Mode=TwoWay}" />
         </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="reach_z min,max" Style="{StaticResource Lbl}"
+                       ToolTip="(선택) 플랫폼 기준 코봇 도달 밴드 상대높이. 비우면 밴드=층 경계 그대로." />
+            <TextBox Width="97" Style="{StaticResource TxtField}" Text="{Binding ReachZMinText, Mode=TwoWay}" Margin="0,0,6,0" />
+            <TextBox Width="97" Style="{StaticResource TxtField}" Text="{Binding ReachZMaxText, Mode=TwoWay}" />
+        </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="원점보정 ox,oy" Style="{StaticResource Lbl}" />
             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding OriginOx, Mode=TwoWay}" Margin="0,0,6,0" />

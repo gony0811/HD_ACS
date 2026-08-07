@@ -49,7 +49,7 @@ public sealed class ProjectService : IProjectService
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
-                geom.OriginOx, geom.OriginOy),
+                geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
             areaDocs.ToArray());
 
         await using (var fs = File.Create(path))
@@ -83,11 +83,13 @@ public sealed class ProjectService : IProjectService
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
-            g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId, ct);
+            g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
+            g.ReachZMin, g.ReachZMax, ct);
 
         foreach (var a in doc.Areas)
         {
-            var areaId = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Level, a.Name,
+            // v3.1: level은 서버가 영역 z범위로 유도(저장된 a.Level은 무시). AreaId만 사용.
+            var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, _operatorId, ct);
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,

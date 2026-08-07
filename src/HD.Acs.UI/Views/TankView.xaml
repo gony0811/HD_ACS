@@ -11,9 +11,9 @@
         <!-- 층 선택 L1~L4 + 로봇 위치 -->
         <Border DockPanel.Dock="Top" Padding="8" Background="#ECF0F1">
             <StackPanel Orientation="Horizontal">
-                <TextBlock Text="층" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <telerik:RadComboBox Width="90" ItemsSource="{Binding Floors}" DisplayMemberPath="Level"
-                                     SelectedItem="{Binding SelectedFloor, Mode=TwoWay}" />
+                <TextBlock Text="뷰" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <telerik:RadComboBox Width="90" ItemsSource="{Binding ViewModes}"
+                                     SelectedItem="{Binding SelectedViewMode, Mode=TwoWay}" />
                 <TextBlock Margin="16,0,0,0" VerticalAlignment="Center"
                            Text="{Binding RobotMapId, StringFormat='로봇 층: {0}'}" />
                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
@@ -28,11 +28,12 @@
                 <helix:HelixViewport3D x:Name="Viewport" ZoomExtentsWhenLoaded="True"
                                        ShowCoordinateSystem="True" Background="#1B2631">
                     <helix:SunLight />
-                    <helix:GridLinesVisual3D Width="20" Length="20" MajorDistance="2" MinorDistance="1"
-                                             Thickness="0.02" Fill="#5D6D7E" />
-                    <!-- 화물창 셸 placeholder (팔각 단면 대체 박스) — 실제 CAD 메시는 Q6 후속 -->
-                    <helix:BoxVisual3D Center="0,0,2" Length="12" Width="12" Height="4"
-                                       Fill="#3498DB" />
+                    <helix:GridLinesVisual3D Width="40" Length="40" MajorDistance="5" MinorDistance="1"
+                                             Thickness="0.03" Fill="#5D6D7E" />
+                    <!-- 선창 셸(반투명 면) + 팔각 모서리 와이어 — 코드비하인드에서 지오메트리 10면으로 빌드 -->
+                    <ModelVisual3D x:Name="ShellModel" />
+                    <!-- 선택 층 도달 z-밴드 강조 — 코드비하인드에서 reachableVBand로 빌드 -->
+                    <ModelVisual3D x:Name="LevelHighlight" />
                     <!-- 로봇 마커 (코드비하인드에서 위치 갱신) -->
                     <helix:SphereVisual3D x:Name="RobotMarker" Center="0,0,0.4" Radius="0.4" Fill="#E74C3C" />
                 </helix:HelixViewport3D>

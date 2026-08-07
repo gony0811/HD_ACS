@@ -42,12 +42,14 @@ public interface IAcsApiClient
     // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
     Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
-        double originOx, double originOy, string userId, CancellationToken ct = default);
+        double originOx, double originOy, string userId,
+        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default);
     Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default);
-    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, CancellationToken ct = default);
+    // v3.1 §8: level 지정 시 그 층 도달 가능 면만 + 면별 reachableVBand 반환.
+    Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);
 
-    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) ──────────
-    Task<Guid> CreateAreaAsync(string tankId, string wallCode, int level, string name,
+    // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v). v3.1: level은 서버가 유도(반환값에 유도 층) ──────────
+    Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double uMin, double vMin, double uMax, double vMax,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
