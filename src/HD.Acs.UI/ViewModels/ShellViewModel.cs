@@ -14,7 +14,10 @@ public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IMonitoringClient _monitoring;
     private readonly IAcsApiClient _api;
+    private readonly IProjectService _project;
+    private readonly IProjectDialogService _projectDialog;
     private readonly string _operatorId;
+    private const string BaseTitle = "HD_ACS — LNG 화물창 용접검사로봇 관제";
 
     public RobotStatusViewModel RobotStatus { get; }
     public MissionViewModel Mission { get; }
@@ -25,10 +28,13 @@ public sealed partial class ShellViewModel : ObservableObject
     public TankViewModel Tank { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
+    [ObservableProperty] private string _windowTitle = BaseTitle;
 
     public ShellViewModel(
         IMonitoringClient monitoring,
         IAcsApiClient api,
+        IProjectService project,
+        IProjectDialogService projectDialog,
         IOptions<AcsOptions> options,
         RobotStatusViewModel robotStatus,
         MissionViewModel mission,
@@ -40,6 +46,8 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         _monitoring = monitoring;
         _api = api;
+        _project = project;
+        _projectDialog = projectDialog;
         _operatorId = options.Value.OperatorId;
         RobotStatus = robotStatus;
         Mission = mission;
@@ -69,6 +77,74 @@ public sealed partial class ShellViewModel : ObservableObject
             Calibration.LoadAsync(),
             AreaPlanning.LoadAsync());
     }
+
+    // ── 파일 메뉴 (프로젝트 파일 .hdacs) ──────────────────────────────
+    // 파일 = 현재 선창의 지오메트리·영역·작업 스냅샷. DB가 런타임 truth이며 파일은 내보내기/가져오기.
+
+    /// <summary>새 프로젝트 — 팝업으로 선창/면 등록 → 저장 위치 선택 → 프로젝트 파일 생성.</summary>
+    [RelayCommand]
+    private async Task NewProjectAsync()
+    {
+        if (!_projectDialog.ShowNewProject()) return;   // 취소/실패 시 파일 미생성
+        var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
+        if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
+        await SaveToAsync(path);
+    }
+
+    /// <summary>열기 — 프로젝트 파일을 읽어 DB에 재적재하고 화면을 갱신.</summary>
+    [RelayCommand]
+    private async Task OpenProjectAsync()
+    {
+        var path = _projectDialog.PickOpenPath();
+        if (path is null) return;
+        try
+        {
+            var doc = await _project.OpenAsync(path);
+            AreaPlanning.TankId = doc.TankId;
+            await AreaPlanning.LoadAsync();
+            UpdateTitle();
+            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"프로젝트 열기 실패:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>저장 — 현재 파일에 덮어쓰기(없으면 다른 이름으로 저장).</summary>
+    [RelayCommand]
+    private async Task SaveProjectAsync()
+    {
+        var path = _project.CurrentPath ?? _projectDialog.PickSavePath(AreaPlanning.TankId);
+        if (path is null) return;
+        await SaveToAsync(path);
+    }
+
+    /// <summary>다른 이름으로 저장.</summary>
+    [RelayCommand]
+    private async Task SaveProjectAsAsync()
+    {
+        var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
+        if (path is null) return;
+        await SaveToAsync(path);
+    }
+
+    private async Task SaveToAsync(string path)
+    {
+        try
+        {
+            await _project.SaveAsync(AreaPlanning.TankId, path);
+            UpdateTitle();
+            ConnectionText = $"프로젝트 저장: {System.IO.Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"프로젝트 저장 실패:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void UpdateTitle() =>
+        WindowTitle = _project.CurrentPath is { } p ? $"{BaseTitle} — {System.IO.Path.GetFileName(p)}" : BaseTitle;
 
     private bool CanEmergencyStop() => RobotStatus.SelectedRobot is not null;
 

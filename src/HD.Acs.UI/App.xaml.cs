@@ -38,6 +38,10 @@ public partial class App : Application
         // SignalR 실시간 푸시 (연결 상태 공유 필요 → 싱글턴)
         builder.Services.AddSingleton<IMonitoringClient, MonitoringClient>();
 
+        // 프로젝트 파일(.hdacs) — 스냅샷 입출력 + 새 프로젝트/파일 대화상자
+        builder.Services.AddSingleton<IProjectService, ProjectService>();
+        builder.Services.AddSingleton<IProjectDialogService, ProjectDialogService>();
+
         // ViewModel (라이브 상태 보유 → 싱글턴)
         builder.Services.AddSingleton<ShellViewModel>();
         builder.Services.AddSingleton<RobotStatusViewModel>();

@@ -42,44 +42,14 @@
         <!-- ── 좌: 등록 폼 (선창 → 영역 → 작업) ── -->
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
             <StackPanel Width="450">
-                <!-- ① 선창 파라미터 -->
-                <TextBlock Text="① 선창 3D 정의 (팔각 단면)" FontWeight="Bold" Margin="0,0,0,4" />
-                <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                           Text="치수 입력 → 10면 자동 생성(B/SL/PL/SM/PM/SU/PU/T/F/A). 원점=바닥 중심, x=길이·y=폭(+좌현)·z=상방, 바닥 z=0(m). 각도=수평면 기준(°)." />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                    <TextBlock Text="Tank" Style="{StaticResource Lbl}" />
-                    <TextBox Width="110" Style="{StaticResource TxtField}" Text="{Binding TankId, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBlock Text="L / w_floor" Style="{StaticResource Lbl}" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding LengthL, Mode=TwoWay}" Margin="0,0,6,0" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding WFloor, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBlock Text="θ_low° / h_low" Style="{StaticResource Lbl}" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding ThetaLowDeg, Mode=TwoWay}" Margin="0,0,6,0" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding HLow, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBlock Text="h_wall" Style="{StaticResource Lbl}" />
-                    <telerik:RadNumericUpDown Value="{Binding HWall, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBlock Text="θ_up° / h_up" Style="{StaticResource Lbl}" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding ThetaUpDeg, Mode=TwoWay}" Margin="0,0,6,0" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding HUp, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <TextBlock Text="level_z" Style="{StaticResource Lbl}" ToolTip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
-                    <TextBox Width="200" Style="{StaticResource TxtField}" Text="{Binding LevelZText, Mode=TwoWay}" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="원점보정 ox,oy" Style="{StaticResource Lbl}" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding OriginOx, Mode=TwoWay}" Margin="0,0,6,0" />
-                    <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding OriginOy, Mode=TwoWay}" />
-                </StackPanel>
-                <telerik:RadButton Content="선창 등록 · 면 생성" HorizontalAlignment="Left" MinWidth="150" Command="{Binding RegisterGeometryCommand}" />
-                <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,6,0,10" Foreground="#2C3E50" FontSize="12" />
+                <!-- 선창 정의는 [파일 ▸ 새 프로젝트] 팝업에서 수행 -->
+                <Border Background="#EBF5FB" BorderBrush="#AED6F1" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="{Binding TankId, StringFormat='현재 선창: {0}'}" FontWeight="Bold" Margin="0,0,0,2" />
+                        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Foreground="#2C3E50" FontSize="12" />
+                        <TextBlock Text="선창 3D 정의는 [파일 ▸ 새 프로젝트] 또는 [열기]에서 수행합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    </StackPanel>
+                </Border>
 
                 <!-- ② 영역 등록 (면 로컬 u,v) -->
                 <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">

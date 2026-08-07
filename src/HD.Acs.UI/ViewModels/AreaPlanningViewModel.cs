@@ -97,19 +97,23 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RegisterGeometryAsync()
+    private async Task RegisterGeometryAsync() => await TryRegisterGeometryAsync();
+
+    /// <summary>선창 파라미터 등록(면 자동생성) 후 재로드. 성공 여부 반환 — 새 프로젝트 팝업이 결과를 사용.</summary>
+    public async Task<bool> TryRegisterGeometryAsync()
     {
         double[] levelZ;
         try { levelZ = ParseLevelZ(LevelZText); }
-        catch { StatusMessage = "level_z 형식 오류 — 쉼표로 구분된 숫자 목록 (예: 0, 3.2, 6.4)."; return; }
+        catch { StatusMessage = "level_z 형식 오류 — 쉼표로 구분된 숫자 목록 (예: 0, 3.2, 6.4)."; return false; }
         try
         {
             int n = await _api.RegisterTankGeometryAsync(TankId, LengthL, WFloor, ThetaLowDeg, HLow,
                 HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId);
             StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성";
             await LoadAsync();
+            return true;
         }
-        catch (Exception ex) { StatusMessage = $"등록 실패: {ex.Message}"; }
+        catch (Exception ex) { StatusMessage = $"등록 실패: {ex.Message}"; return false; }
     }
 
     [RelayCommand]
