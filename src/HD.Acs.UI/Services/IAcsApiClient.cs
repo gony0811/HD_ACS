@@ -49,8 +49,9 @@ public interface IAcsApiClient
     Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);
 
     // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v). v3.1: level은 서버가 유도(반환값에 유도 층) ──────────
+    // corners = 임의 4점 사각형 [[u,v]…]. 서버가 bbox 유도.
     Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
-        double uMin, double vMin, double uMax, double vMax,
+        double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);

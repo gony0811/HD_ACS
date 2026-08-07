@@ -34,6 +34,16 @@ public partial class AreaLayoutView : UserControl
         Scroll.ScrollToVerticalOffset(0);
     }
 
+    // 캔버스 클릭 → 면-로컬 (u,v)로 역투영해 영역 코너 순서대로 지정
+    private void PlotCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is ViewModels.AreaPlanningViewModel vm)
+        {
+            var p = e.GetPosition(PlotCanvas);   // 스케일 전 캔버스 좌표(0..600)
+            vm.CanvasClick(p.X, p.Y);
+        }
+    }
+
     private void ZoomIn_Click(object sender, RoutedEventArgs e) => SetScale(_scale * Step);
     private void ZoomOut_Click(object sender, RoutedEventArgs e) => SetScale(_scale / Step);
     private void Fit_Click(object sender, RoutedEventArgs e) => Fit();

@@ -57,6 +57,9 @@ public sealed partial class ShellViewModel : ObservableObject
         AreaPlanning = areaPlanning;
         Tank = tank;
 
+        // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
+        AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
+
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);
         RobotStatus.PropertyChanged += (_, e) =>
         {

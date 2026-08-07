@@ -92,16 +92,25 @@ app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankGe
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
 {
-    if (req.UMin >= req.UMax || req.VMin >= req.VMax)
-        return Results.BadRequest(new { error = "영역 경계가 올바르지 않습니다 (u_min<u_max, v_min<v_max)." });
+    // 코너: 요청의 Corners(임의 4점) 우선, 없으면 UMin/VMin/UMax/VMax 사각형 폴백(하위호환).
+    var corners = (req.Corners is { Length: >= 3 }
+        ? req.Corners
+        : new[] { new[] { req.UMin, req.VMin }, new[] { req.UMax, req.VMin }, new[] { req.UMax, req.VMax }, new[] { req.UMin, req.VMax } })
+        .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
+    if (corners.Count < 3)
+        return Results.BadRequest(new { error = "영역 코너가 3점 미만입니다." });
+
     var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
     if (wall is null)
         return Results.NotFound(new { error = $"면이 없습니다: {req.TankId}/{req.WallCode} (선창 파라미터를 먼저 등록하세요)." });
-    if (!HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMin, req.VMin, 0, 0, wall.ULen, wall.VLen) ||
-        !HD.Acs.Core.Planning.AreaGeometry.InBounds(req.UMax, req.VMax, 0, 0, wall.ULen, wall.VLen))
-        return Results.BadRequest(new { error = $"영역이 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
+    // 전 코너가 면 범위 내인지 검사(대각 2점만 검사하면 회전 사각형이 면 밖으로 나가도 통과됨).
+    if (corners.Any(p => !HD.Acs.Core.Planning.AreaGeometry.InBounds(p[0], p[1], 0, 0, wall.ULen, wall.VLen)))
+        return Results.BadRequest(new { error = $"영역 코너가 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
+    var (uMin, vMin, uMax, vMax) = HD.Acs.Core.Planning.AreaGeometry.Bbox(corners);
+    if (uMax - uMin < 1e-6 || vMax - vMin < 1e-6)
+        return Results.BadRequest(new { error = "영역이 퇴화(면적 0)했습니다 — 유효한 사각형 4점을 입력하세요." });
 
-    // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위로 유도한다 ──
+    // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위(코너 v의 min/max)로 유도한다 ──
     var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
     if (g is null)
         return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {req.TankId} (파라미터를 먼저 등록하세요)." });
@@ -111,7 +120,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         g.OriginOx, g.OriginOy, g.ReachZMin, g.ReachZMax);
     var vAxis = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
     var origin = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.Origin)!;
-    var (zLo, zHi) = HD.Acs.Core.Planning.LevelBands.AreaZRange(origin[2], vAxis[2], req.VMin, req.VMax);
+    var (zLo, zHi) = HD.Acs.Core.Planning.LevelBands.AreaZRange(origin[2], vAxis[2], vMin, vMax);
     int? derivedLevel = HD.Acs.Core.Planning.LevelBands.Derive(zLo, zHi, geom.LevelBandList(), out var reason);
     if (derivedLevel is null)
         return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
@@ -123,7 +132,8 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
         AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
-        UMin = req.UMin, VMin = req.VMin, UMax = req.UMax, VMax = req.VMax,
+        Corners = System.Text.Json.JsonSerializer.Serialize(corners),
+        UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
@@ -141,6 +151,7 @@ app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, Ac
     return Results.Ok(areas.Select(a => new
     {
         a.AreaId, a.TankId, a.WallCode, a.Level, a.Name,
+        corners = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners),
         a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.SortOrder,
         TaskCount = a.Tasks.Count
     }));
@@ -159,9 +170,10 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
-    bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.InBounds(u, v, a.UMin, a.VMin, a.UMax, a.VMax);
+    var poly = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
+    bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
     if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
-        return Results.BadRequest(new { error = "용접선 시작/끝점이 영역 경계를 벗어났습니다." });
+        return Results.BadRequest(new { error = "용접선 시작/끝점이 영역(사각형) 내부가 아닙니다." });
     int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
@@ -416,8 +428,10 @@ public sealed record CreateTankGeometryRequest(
     double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId,
     double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
 // 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v). Level은 v3.1에서 무시(서버가 §5-A로 유도).
+// Corners = 임의 4점 사각형[[u,v]…]. 미지정 시 UMin/VMin/UMax/VMax 로 사각형 폴백(하위호환).
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
-    double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId);
+    double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
+    double[][]? Corners = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);

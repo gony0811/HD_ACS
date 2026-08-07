@@ -49,4 +49,31 @@ public class AreaGeometryTests
         Assert.False(AreaGeometry.InBounds(5.0, 0, 3, -0.5, 4, 0.5));   // x 밖
         Assert.False(AreaGeometry.InBounds(3.5, 1.0, 3, -0.5, 4, 0.5)); // y 밖
     }
+
+    // ── 임의 4점 사각형 기하 ─────────────────────────────
+    private static double[][] Quad() => new[]
+    {
+        new[] { 0.0, 0.0 }, new[] { 4.0, 1.0 }, new[] { 3.0, 4.0 }, new[] { -1.0, 3.0 },   // 회전·비축정렬 사각형
+    };
+
+    [Fact]
+    public void Bbox_And_Centroid()
+    {
+        var (minU, minV, maxU, maxV) = AreaGeometry.Bbox(Quad());
+        Assert.Equal(-1.0, minU, 6); Assert.Equal(0.0, minV, 6);
+        Assert.Equal(4.0, maxU, 6); Assert.Equal(4.0, maxV, 6);
+        var (cu, cv) = AreaGeometry.Centroid(Quad());
+        Assert.Equal(1.5, cu, 6); Assert.Equal(2.0, cv, 6);
+    }
+
+    [Fact]
+    public void PointInPolygon_InsideBoundaryOutside()
+    {
+        var q = Quad();
+        Assert.True(AreaGeometry.PointInPolygon(1.5, 2.0, q));    // 내부(centroid)
+        Assert.True(AreaGeometry.PointInPolygon(0.0, 0.0, q));    // 꼭짓점(경계)
+        Assert.True(AreaGeometry.PointInPolygon(2.0, 0.5, q));    // 변 위(0,0)-(4,1)
+        Assert.False(AreaGeometry.PointInPolygon(4.0, 4.0, q));   // bbox 안이지만 다각형 밖
+        Assert.False(AreaGeometry.PointInPolygon(10.0, 10.0, q)); // 완전 밖
+    }
 }

@@ -22,7 +22,8 @@ public sealed record AreaDoc(
     string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta,
-    TaskDoc[] Tasks);
+    TaskDoc[] Tasks,
+    double[][]? Corners = null);   // 임의 4점 사각형. 구파일(null)=bbox 사각형 폴백
 
 /// <summary>검사 작업 스냅샷 (벽면-로컬 u,v).</summary>
 public sealed record TaskDoc(

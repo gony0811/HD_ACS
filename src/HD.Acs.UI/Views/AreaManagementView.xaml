@@ -69,15 +69,26 @@
                             <TextBlock Text="이름" Style="{StaticResource Lbl}" />
                             <TextBox Width="100" Height="Auto" Style="{StaticResource TxtField}" Text="{Binding AreaName, Mode=TwoWay}" />
                         </StackPanel>
+                        <TextBlock Text="사각형 4점 (면 로컬 u,v) — 숫자 입력 또는 전개도 캔버스를 순서대로 4번 클릭" Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <TextBlock Text="u,v min" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding UMin, Mode=TwoWay}" Margin="0,0,6,0" />
-                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding VMin, Mode=TwoWay}" />
+                            <TextBlock Text="P1 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C1U, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C1V, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="P2 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C2U, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C2V, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="P3 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C3U, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C3V, Mode=TwoWay}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="u,v max" Style="{StaticResource Lbl}" />
-                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding UMax, Mode=TwoWay}" Margin="0,0,6,0" />
-                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding VMax, Mode=TwoWay}" />
+                            <TextBlock Text="P4 u,v" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C4U, Mode=TwoWay}" Margin="0,0,6,0" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C4V, Mode=TwoWay}" />
                         </StackPanel>
                         <CheckBox Content="정차 수동 지정 (전역 x,y,θ) — 바닥/천장(B/T) 면은 필수" IsChecked="{Binding StationOverride, Mode=TwoWay}" Margin="0,0,0,4" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">

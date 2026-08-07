@@ -182,7 +182,8 @@ public class InspectionAreaEntity
     public string WallCode { get; set; } = "";
     public int Level { get; set; }                      // AMR 주행 층 (mapId 결정)
     public string Name { get; set; } = "";
-    public double UMin { get; set; }
+    public string Corners { get; set; } = "[]";         // jsonb [[u1,v1]…[u4,v4]] 임의 4점 사각형
+    public double UMin { get; set; }                    // corners의 bbox (서버 유도)
     public double VMin { get; set; }
     public double UMax { get; set; }
     public double VMax { get; set; }

@@ -14,7 +14,7 @@ namespace HD.Acs.UI.Services;
 public sealed class ProjectService : IProjectService
 {
     public const string Extension = ".hdacs";
-    private const int FormatVersion = 1;
+    private const int FormatVersion = 2;   // v2: 영역 corners(임의 4점). v1(구파일)=bbox 사각형 폴백
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("HDACSPRJ"); // 8 bytes
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -43,7 +43,7 @@ public sealed class ProjectService : IProjectService
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
                 t.SectionDxfId, t.ProfileId)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
-                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs));
+                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners));
         }
 
         var doc = new ProjectDoc(FormatVersion, tankId,
@@ -89,8 +89,13 @@ public sealed class ProjectService : IProjectService
         foreach (var a in doc.Areas)
         {
             // v3.1: level은 서버가 영역 z범위로 유도(저장된 a.Level은 무시). AreaId만 사용.
+            // corners 없으면(구파일) bbox 사각형으로 폴백.
+            var corners = a.Corners ?? new[]
+            {
+                new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
+            };
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, _operatorId, ct);
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, ct);
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);

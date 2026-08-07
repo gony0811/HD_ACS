@@ -14,6 +14,8 @@
                 <TextBlock Text="뷰" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <telerik:RadComboBox Width="90" ItemsSource="{Binding ViewModes}"
                                      SelectedItem="{Binding SelectedViewMode, Mode=TwoWay}" />
+                <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
+                          IsChecked="{Binding ShowOverlays, Mode=TwoWay}" />
                 <TextBlock Margin="16,0,0,0" VerticalAlignment="Center"
                            Text="{Binding RobotMapId, StringFormat='로봇 층: {0}'}" />
                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
@@ -34,45 +36,59 @@
                     <ModelVisual3D x:Name="ShellModel" />
                     <!-- 선택 층 도달 z-밴드 강조 — 코드비하인드에서 reachableVBand로 빌드 -->
                     <ModelVisual3D x:Name="LevelHighlight" />
+                    <!-- 영역·작업(용접선) 오버레이 — 코드비하인드에서 영역/작업 (u,v)로 빌드 -->
+                    <ModelVisual3D x:Name="OverlayModel" />
                     <!-- 로봇 마커 (코드비하인드에서 위치 갱신) -->
                     <helix:SphereVisual3D x:Name="RobotMarker" Center="0,0,0.4" Radius="0.4" Fill="#E74C3C" />
                 </helix:HelixViewport3D>
             </telerik:RadTabItem>
 
             <telerik:RadTabItem Header="전개도">
-                <Viewbox Stretch="Uniform" Margin="12">
-                    <Canvas Width="400" Height="400" Background="#FBFCFC">
-                        <!-- 중앙 A · 방사형 8벽면 · 외곽 F -->
-                        <ItemsControl ItemsSource="{Binding Walls}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <Canvas Width="400" Height="400" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemContainerStyle>
-                                <Style TargetType="ContentPresenter">
-                                    <Setter Property="Canvas.Left"
-                                            Value="{Binding NormX, Converter={StaticResource NormToCanvas}, ConverterParameter='400|72'}" />
-                                    <Setter Property="Canvas.Top"
-                                            Value="{Binding NormY, Converter={StaticResource NormToCanvas}, ConverterParameter='400|56'}" />
-                                </Style>
-                            </ItemsControl.ItemContainerStyle>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Width="72" Height="56" CornerRadius="4"
-                                            Background="#D6EAF8" BorderBrush="#2E86C1" BorderThickness="1">
-                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="16"
-                                                       HorizontalAlignment="Center" />
-                                            <TextBlock Text="{Binding Name}" FontSize="9" Foreground="#566573"
-                                                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="66" />
+                <!-- 면별 2D 도면 그리드 — 각 면 실제 비율 형상(마구리 F/A=팔각) + 영역·작업 오버레이 -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#ECF0F1">
+                    <ItemsControl ItemsSource="{Binding FacePlots}" Margin="8">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="6" Padding="6" BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Background="White">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" Foreground="#2C3E50" />
+                                            <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="#7F8C8D" Margin="8,2,0,0" />
                                         </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Canvas>
-                </Viewbox>
+                                        <Canvas Width="240" Height="150" Background="#FBFCFC">
+                                            <Polygon Points="{Binding Outline}" Fill="#0F2E86C1" Stroke="#5D6D7E" StrokeThickness="1.2" />
+                                            <!-- 영역(4점 폴리곤) -->
+                                            <ItemsControl ItemsSource="{Binding Areas}">
+                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Canvas>
+                                                            <Polygon Points="{Binding Points}" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1" />
+                                                            <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="9" FontWeight="Bold" Foreground="#186A3B" />
+                                                        </Canvas>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <!-- 작업 용접선 -->
+                                            <ItemsControl ItemsSource="{Binding Tasks}">
+                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Canvas>
+                                                            <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="#E67E22" StrokeThickness="2" />
+                                                            <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="6" Height="6" Fill="#CA6F1E" />
+                                                        </Canvas>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Canvas>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </telerik:RadTabItem>
         </telerik:RadTabControl>
     </DockPanel>

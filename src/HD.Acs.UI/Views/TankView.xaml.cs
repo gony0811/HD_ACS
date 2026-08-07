@@ -46,7 +46,7 @@ public partial class TankView : UserControl
 
     private void OnViewChanged(object? sender, EventArgs e) => Rebuild();
 
-    private void Rebuild() { BuildShell(); BuildLevelHighlight(); }
+    private void Rebuild() { BuildShell(); BuildLevelHighlight(); BuildOverlays(); }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -152,6 +152,77 @@ public partial class TankView : UserControl
 
         LevelHighlight.Children.Add(new ModelVisual3D { Content = group });
         LevelHighlight.Children.Add(outline);
+    }
+
+    // ── 영역·작업(용접선) 오버레이 ──────────────────────────────────────────
+    private void BuildOverlays()
+    {
+        OverlayModel.Children.Clear();
+        if (_vm is null || !_vm.ShowOverlays || _vm.Overlays.Count == 0 || _vm.ShellWalls.Count == 0) return;
+
+        int? lvl = _vm.SelectedLevel;   // 전체=null → 모든 영역, L{n}=그 층만
+        var wallByCode = _vm.ShellWalls.GroupBy(w => w.WallCode).ToDictionary(g => g.Key, g => g.First());
+
+        var areaFill = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0x30, 0x27, 0xAE, 0x60)));
+        var areaGroup = new Model3DGroup();
+        var areaLines = new LinesVisual3D { Color = Color.FromRgb(0x1E, 0x8B, 0x4E), Thickness = 2.0 };   // 녹색 영역 외곽
+        var weldLines = new LinesVisual3D { Color = Color.FromRgb(0xE6, 0x7E, 0x22), Thickness = 3.0 };   // 주황 용접선
+        var startPts = new PointsVisual3D { Color = Color.FromRgb(0x27, 0xAE, 0x60), Size = 11 };          // 시작=녹
+        var endPts = new PointsVisual3D { Color = Color.FromRgb(0xC0, 0x39, 0x2B), Size = 11 };            // 끝=빨
+
+        foreach (var ov in _vm.Overlays)
+        {
+            var a = ov.Area;
+            if (lvl is int L && a.Level != L) continue;
+            if (!wallByCode.TryGetValue(a.WallCode, out var wall)) continue;
+
+            var off = -NormalOffset(wall) * 1.5;   // 외부향으로 셸보다 약간 더 띄움(가림 방지)
+
+            // 영역 폴리곤(임의 4점) + 채움 + 이름 라벨. corners 없으면 bbox 사각형 폴백.
+            var corners = a.Corners ?? new[]
+            {
+                new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
+            };
+            var pts3d = new List<Point3D>(corners.Length);
+            foreach (var p in corners)
+                if (p is { Length: >= 2 } && TryPoint(wall, p[0], p[1], out var cp)) pts3d.Add(cp + off);
+            if (pts3d.Count >= 3)
+            {
+                areaGroup.Children.Add(new GeometryModel3D(PolygonMesh(pts3d), areaFill) { BackMaterial = areaFill });
+                AddClosedOutline(areaLines, pts3d);
+                double cx = pts3d.Average(q => q.X), cy = pts3d.Average(q => q.Y), cz = pts3d.Average(q => q.Z);
+                OverlayModel.Children.Add(new BillboardTextVisual3D
+                { Text = a.Name, Position = new Point3D(cx, cy, cz), Foreground = Brushes.White, FontSize = 12 });
+            }
+
+            // 작업 용접선(시작/끝 마커 + seq 라벨)
+            foreach (var t in ov.Tasks)
+            {
+                if (!TryPoint(wall, t.StartU, t.StartV, out var s) || !TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
+                s += off; e += off;
+                weldLines.Points.Add(s); weldLines.Points.Add(e);
+                startPts.Points.Add(s); endPts.Points.Add(e);
+                var mid = new Point3D((s.X + e.X) / 2, (s.Y + e.Y) / 2, (s.Z + e.Z) / 2);
+                OverlayModel.Children.Add(new BillboardTextVisual3D
+                { Text = t.Seq.ToString(), Position = mid, Foreground = Brushes.Wheat, FontSize = 11 });
+            }
+        }
+
+        if (areaGroup.Children.Count > 0) OverlayModel.Children.Add(new ModelVisual3D { Content = areaGroup });
+        OverlayModel.Children.Add(areaLines);
+        OverlayModel.Children.Add(weldLines);
+        OverlayModel.Children.Add(startPts);
+        OverlayModel.Children.Add(endPts);
+    }
+
+    /// <summary>면 로컬 (u,v) → 도면 3D 단일 점. 프레임 배열이 없으면 false.</summary>
+    private static bool TryPoint(WallDto w, double u, double v, out Point3D p)
+    {
+        p = default;
+        if (w.Origin is not { Length: 3 } o || w.UAxis is not { Length: 3 } ua || w.VAxis is not { Length: 3 } va)
+            return false;
+        p = new Point3D(o[0], o[1], o[2]) + new Vector3D(ua[0], ua[1], ua[2]) * u + new Vector3D(va[0], va[1], va[2]) * v;
+        return true;
     }
 
     /// <summary>면 로컬 (u,v) 사각형의 4코너를 도면 3D로 계산. Origin/UAxis/VAxis 배열이 없으면 false.</summary>

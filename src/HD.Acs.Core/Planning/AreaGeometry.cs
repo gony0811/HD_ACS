@@ -25,7 +25,60 @@ public static class AreaGeometry
         return Math.Atan2(dy, dx);
     }
 
-    /// <summary>점 (x,y)가 영역 경계 내부(포함)인지.</summary>
+    /// <summary>점 (x,y)가 영역 경계 내부(포함)인지 (축정렬 AABB).</summary>
     public static bool InBounds(double x, double y, double minX, double minY, double maxX, double maxY) =>
         x >= minX && x <= maxX && y >= minY && y <= maxY;
+
+    // ── 임의 다각형(영역 = 4점 사각형) 기하 ──────────────────────────────
+    /// <summary>다각형 경계 상자(min/max). 점 배열 각 원소는 [u,v].</summary>
+    public static (double MinU, double MinV, double MaxU, double MaxV) Bbox(IReadOnlyList<double[]> poly)
+    {
+        double minU = double.MaxValue, minV = double.MaxValue, maxU = double.MinValue, maxV = double.MinValue;
+        foreach (var p in poly)
+        {
+            if (p is null || p.Length < 2) continue;
+            if (p[0] < minU) minU = p[0]; if (p[0] > maxU) maxU = p[0];
+            if (p[1] < minV) minV = p[1]; if (p[1] > maxV) maxV = p[1];
+        }
+        return (minU, minV, maxU, maxV);
+    }
+
+    /// <summary>다각형 정점 평균(코너 centroid) — 영역 중심(정차 기준).</summary>
+    public static (double U, double V) Centroid(IReadOnlyList<double[]> poly)
+    {
+        double su = 0, sv = 0; int n = 0;
+        foreach (var p in poly)
+        {
+            if (p is null || p.Length < 2) continue;
+            su += p[0]; sv += p[1]; n++;
+        }
+        return n == 0 ? (0, 0) : (su / n, sv / n);
+    }
+
+    /// <summary>점 (x,y)가 다각형 내부(경계 포함)인지 — ray-casting(홀짝) + 변 위 점 포함.</summary>
+    public static bool PointInPolygon(double x, double y, IReadOnlyList<double[]> poly, double eps = 1e-9)
+    {
+        if (poly is null || poly.Count < 3) return false;
+        bool inside = false;
+        int n = poly.Count;
+        for (int i = 0, j = n - 1; i < n; j = i++)
+        {
+            double xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+            // 변 위(경계) 점은 내부로 간주
+            if (OnSegment(x, y, xi, yi, xj, yj, eps)) return true;
+            bool cross = ((yi > y) != (yj > y)) &&
+                         (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (cross) inside = !inside;
+        }
+        return inside;
+    }
+
+    private static bool OnSegment(double px, double py, double ax, double ay, double bx, double by, double eps)
+    {
+        // (px,py)가 선분 AB 위에 있는가: 외적≈0 + 경계상자 내
+        double cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+        if (Math.Abs(cross) > eps * Math.Max(1.0, Math.Abs(bx - ax) + Math.Abs(by - ay))) return false;
+        return px >= Math.Min(ax, bx) - eps && px <= Math.Max(ax, bx) + eps
+            && py >= Math.Min(ay, by) - eps && py <= Math.Max(ay, by) + eps;
+    }
 }

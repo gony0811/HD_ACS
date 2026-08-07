@@ -251,7 +251,8 @@ CREATE TABLE ref.inspection_area (
   wall_code     text NOT NULL,             -- (tank_id, wall_code) → ref.wall
   level         int  NOT NULL,             -- AMR 주행 층 (mapId 결정) — v3.1: 서버가 z범위→도달 밴드로 유도·저장(§5-A)
   name          text NOT NULL,             -- 'A01' — tank/wall 내 유일
-  u_min         double precision NOT NULL, -- 면 로컬 좌표 (m)
+  corners       jsonb NOT NULL,            -- 임의 4점 사각형 [[u1,v1]…[u4,v4]] (면 로컬 m). u/v_min·max=서버 유도 bbox
+  u_min         double precision NOT NULL, -- 면 로컬 좌표 (m) — corners의 bbox(서버 유도)
   v_min         double precision NOT NULL,
   u_max         double precision NOT NULL,
   v_max         double precision NOT NULL,

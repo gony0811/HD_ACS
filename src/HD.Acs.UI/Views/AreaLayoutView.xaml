@@ -25,59 +25,46 @@
         <Border BorderBrush="#AEB6BF" BorderThickness="1" Background="#FBFCFC">
             <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                           Padding="10" PreviewMouseWheel="Scroll_PreviewMouseWheel">
-                <Canvas x:Name="PlotCanvas" Width="600" Height="600" HorizontalAlignment="Left" VerticalAlignment="Top">
+                <Canvas x:Name="PlotCanvas" Width="600" Height="600" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Background="Transparent" MouseLeftButtonDown="PlotCanvas_MouseLeftButtonDown">
                     <Canvas.LayoutTransform>
                         <ScaleTransform x:Name="Zoom" ScaleX="1" ScaleY="1" />
                     </Canvas.LayoutTransform>
                     <Rectangle Width="600" Height="600" Fill="#FDFEFE" Stroke="#D5DBDB" StrokeThickness="1" />
-                    <!-- 선택 층 도달 v구간 하이라이트 (반투명 노랑 밴드) — 영역 박스 뒤에 배치 -->
-                    <ItemsControl ItemsSource="{Binding ReachBands}">
+                    <!-- 면 전체(회색 음영·비활성) — 마구리(F/A)는 팔각, 그 외 직사각형 -->
+                    <Polygon Points="{Binding FaceOutline}" Fill="#33AAB0B7" Stroke="#95A5A6" StrokeThickness="1.2" />
+                    <!-- 선택 층 활성 밴드(밝게) — 그 층 구간만 활성화 -->
+                    <Polygon Points="{Binding ActiveBand}" Fill="#1A2ECC71" Stroke="#27AE60" StrokeThickness="1.4" />
+                    <!-- 타 층 영역(회색·비활성) — 4점 폴리곤 -->
+                    <ItemsControl ItemsSource="{Binding InactiveAreaBoxes}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
-                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Grid Width="{Binding Width}" Height="{Binding Height}">
-                                    <Rectangle Fill="#33F1C40F" Stroke="#F39C12" StrokeThickness="1" StrokeDashArray="2 2" />
-                                    <TextBlock Text="{Binding Label}" FontSize="10" Foreground="#B9770E" Margin="3,1,0,0" VerticalAlignment="Top" HorizontalAlignment="Right" />
-                                </Grid>
+                                <Canvas>
+                                    <Polygon Points="{Binding Points}" Fill="#22808080" Stroke="#88999999" StrokeThickness="1" />
+                                    <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="10" Foreground="#7F8C8D" />
+                                </Canvas>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- 선택 층 영역(활성·녹색) — 4점 폴리곤 -->
                     <ItemsControl ItemsSource="{Binding AreaBoxes}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
-                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Grid Width="{Binding Width}" Height="{Binding Height}">
-                                    <Rectangle RadiusX="3" RadiusY="3" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1.2" />
-                                    <TextBlock Text="{Binding Label}" FontSize="11" FontWeight="Bold" Foreground="#186A3B" Margin="3,1,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" />
-                                </Grid>
+                                <Canvas>
+                                    <Polygon Points="{Binding Points}" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1.2" />
+                                    <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="11" FontWeight="Bold" Foreground="#186A3B" />
+                                </Canvas>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <!-- 입력 중 영역 미리보기 (파란 점선 박스) -->
+                    <!-- 입력 중 영역 미리보기 (파란 점선 폴리곤) -->
                     <ItemsControl ItemsSource="{Binding DraftAreas}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
-                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Rectangle Width="{Binding Width}" Height="{Binding Height}" RadiusX="3" RadiusY="3"
-                                           Fill="#1A2980B9" Stroke="#2980B9" StrokeThickness="1.5" StrokeDashArray="4 3" />
+                                <Polygon Points="{Binding Points}" Fill="#1A2980B9" Stroke="#2980B9" StrokeThickness="1.5" StrokeDashArray="4 3" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

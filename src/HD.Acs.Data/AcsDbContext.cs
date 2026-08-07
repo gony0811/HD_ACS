@@ -114,6 +114,7 @@ public class AcsDbContext : DbContext
 
         mb.Entity<InspectionAreaEntity>(e => { e.ToTable("inspection_area", "ref"); e.HasKey(x => x.AreaId);
             e.HasIndex(x => new { x.TankId, x.WallCode, x.Name }).IsUnique();
+            e.Property(x => x.Corners).HasColumnType("jsonb");
             e.HasOne<WallEntity>().WithMany().HasForeignKey(x => new { x.TankId, x.WallCode });
             e.HasMany(x => x.Tasks).WithOne().HasForeignKey(t => t.AreaId).OnDelete(DeleteBehavior.Cascade); });
 
