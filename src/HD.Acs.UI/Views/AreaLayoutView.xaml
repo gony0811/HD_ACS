@@ -4,15 +4,31 @@
              xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
     <DockPanel Margin="12">
         <Border DockPanel.Dock="Top" Background="#ECF0F1" Padding="10,6" Margin="0,0,0,8" CornerRadius="3">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="{Binding SelectedWallInfo, StringFormat='벽면-로컬 (u,v): {0}'}" FontWeight="Bold" VerticalAlignment="Center" />
-                <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="#566573"
-                           Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 용접선은 좌측 폼에 시작/끝 (u,v)를 입력해 등록(점선=입력 미리보기)." />
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="{Binding SelectedWallInfo, StringFormat='벽면-로컬 (u,v): {0}'}" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="#566573" TextWrapping="Wrap"
+                               Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 입력 중=파란 점선 박스·주황 점선. 휠=확대/축소." />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="ZoomLabel" Text="100%" VerticalAlignment="Center" Margin="0,0,8,0" MinWidth="42" TextAlignment="Right" Foreground="#2C3E50" />
+                    <telerik:RadButton Content="－" Click="ZoomOut_Click" MinWidth="30" Margin="0,0,4,0" ToolTip="축소" />
+                    <telerik:RadButton Content="＋" Click="ZoomIn_Click" MinWidth="30" Margin="0,0,4,0" ToolTip="확대" />
+                    <telerik:RadButton Content="맞춤" Click="Fit_Click" MinWidth="44" ToolTip="전체 보기" />
+                </StackPanel>
+            </Grid>
         </Border>
         <Border BorderBrush="#AEB6BF" BorderThickness="1" Background="#FBFCFC">
-            <Viewbox Stretch="Uniform" Margin="10">
-                <Canvas Width="600" Height="600">
+            <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                          Padding="10" PreviewMouseWheel="Scroll_PreviewMouseWheel">
+                <Canvas x:Name="PlotCanvas" Width="600" Height="600" HorizontalAlignment="Left" VerticalAlignment="Top">
+                    <Canvas.LayoutTransform>
+                        <ScaleTransform x:Name="Zoom" ScaleX="1" ScaleY="1" />
+                    </Canvas.LayoutTransform>
                     <Rectangle Width="600" Height="600" Fill="#FDFEFE" Stroke="#D5DBDB" StrokeThickness="1" />
                     <ItemsControl ItemsSource="{Binding AreaBoxes}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -28,6 +44,22 @@
                                     <Rectangle RadiusX="3" RadiusY="3" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1.2" />
                                     <TextBlock Text="{Binding Label}" FontSize="11" FontWeight="Bold" Foreground="#186A3B" Margin="3,1,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" />
                                 </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <!-- 입력 중 영역 미리보기 (파란 점선 박스) -->
+                    <ItemsControl ItemsSource="{Binding DraftAreas}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                                <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Rectangle Width="{Binding Width}" Height="{Binding Height}" RadiusX="3" RadiusY="3"
+                                           Fill="#1A2980B9" Stroke="#2980B9" StrokeThickness="1.5" StrokeDashArray="4 3" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -73,7 +105,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Canvas>
-            </Viewbox>
+            </ScrollViewer>
         </Border>
     </DockPanel>
 </UserControl>

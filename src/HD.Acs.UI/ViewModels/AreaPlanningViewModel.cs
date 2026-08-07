@@ -35,6 +35,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public ObservableCollection<AreaDto> Areas { get; } = new();
     public ObservableCollection<AreaTaskDto> AreaTasks { get; } = new();
     public ObservableCollection<AreaBox> AreaBoxes { get; } = new();
+    public ObservableCollection<AreaBox> DraftAreas { get; } = new();          // 입력 중 영역 미리보기(점선)
     public ObservableCollection<TaskSeg> TaskSegments { get; } = new();
     public ObservableCollection<TaskSeg> DraftSegments { get; } = new();       // 입력 중 용접선 미리보기
     public ObservableCollection<StationMarker> StationMarkers { get; } = new(); // 정차점 = 영역 중심
@@ -88,7 +89,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             if (g is not null) ApplyGeometry(g);
             Walls.Clear();
             foreach (var w in await _api.GetWallsAsync(TankId)) Walls.Add(w);
-            SelectedWall ??= Walls.FirstOrDefault();
+            // 면 재생성 후 인스턴스가 바뀌므로 코드로 재바인딩(콤보 stale 방지)
+            SelectedWall = Walls.FirstOrDefault(x => x.WallCode == SelectedWall?.WallCode) ?? Walls.FirstOrDefault();
             await RefreshAreasAsync();
         }
         catch (Exception ex) { StatusMessage = $"조회 실패: {ex.Message}"; }
@@ -165,17 +167,22 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
 
     private async Task RefreshAreasAsync()
     {
+        // 조회 먼저 → Clear+Add 원자적(await 사이 없음): 동시 호출이 겹쳐도 중복 방지
+        var list = SelectedWall is { } w
+            ? await _api.GetAreasAsync(TankId, w.WallCode)
+            : (IReadOnlyList<AreaDto>)Array.Empty<AreaDto>();
         Areas.Clear();
-        if (SelectedWall is { } w)
-            foreach (var a in await _api.GetAreasAsync(TankId, w.WallCode)) Areas.Add(a);
+        foreach (var a in list) Areas.Add(a);
         await LoadTasksAndProjectAsync();
     }
 
     private async Task LoadTasksAndProjectAsync()
     {
+        var list = SelectedArea is { } a
+            ? await _api.GetAreaTasksAsync(a.AreaId)
+            : (IReadOnlyList<AreaTaskDto>)Array.Empty<AreaTaskDto>();
         AreaTasks.Clear();
-        if (SelectedArea is { } a)
-            foreach (var t in await _api.GetAreaTasksAsync(a.AreaId)) AreaTasks.Add(t);
+        foreach (var t in list) AreaTasks.Add(t);
         Project();
     }
 
@@ -197,17 +204,21 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>선택 면 (u,v)를 캔버스에 auto-fit(v 뒤집기) 투영 — 영역 박스 · 정차점(영역 중심) · 작업 선분 · 입력 미리보기.</summary>
     private void Project()
     {
-        AreaBoxes.Clear(); TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
+        AreaBoxes.Clear(); DraftAreas.Clear(); TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
         if (SelectedWall is not { } w || w.ULen <= 0 || w.VLen <= 0) return;
 
         double scale = CanvasScale(w);
         (double x, double y) Proj(double u, double v) => (Margin + u * scale, Margin + (w.VLen - v) * scale);
+        AreaBox Box(double uMin, double vMin, double uMax, double vMax, string label)
+        {
+            var (lx, ty) = Proj(uMin, vMax);   // 좌상단(v_max=위)
+            var (rx, by) = Proj(uMax, vMin);
+            return new AreaBox(lx, ty, Math.Abs(rx - lx), Math.Abs(by - ty), label);
+        }
 
         foreach (var a in Areas)
         {
-            var (lx, ty) = Proj(a.UMin, a.VMax);   // 좌상단(v_max=위)
-            var (rx, by) = Proj(a.UMax, a.VMin);
-            AreaBoxes.Add(new AreaBox(lx, ty, Math.Abs(rx - lx), Math.Abs(by - ty), a.Name));
+            AreaBoxes.Add(Box(a.UMin, a.VMin, a.UMax, a.VMax, a.Name));
             var (sx, sy) = Proj((a.UMin + a.UMax) / 2, (a.VMin + a.VMax) / 2);   // 정차점 = 영역 중심
             StationMarkers.Add(new StationMarker(sx - 7, sy - 7, a.Name));
         }
@@ -217,7 +228,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var (x2, y2) = Proj(t.EndU, t.EndV);
             TaskSegments.Add(new TaskSeg(x1, y1, x2, y2, x2 - 4, y2 - 4, (x1 + x2) / 2, (y1 + y2) / 2, t.Seq.ToString()));
         }
-        if (SelectedArea is not null)   // 입력 중 용접선 미리보기(현재 시작/끝)
+        // 입력 중 영역 미리보기(현재 u/v min·max) — 유효 사각형일 때
+        if (UMin < UMax && VMin < VMax)
+            DraftAreas.Add(Box(UMin, VMin, UMax, VMax, AreaName));
+        // 입력 중 용접선 미리보기(현재 시작/끝)
+        if (SelectedArea is not null)
         {
             var (px1, py1) = Proj(StartU, StartV);
             var (px2, py2) = Proj(EndU, EndV);
@@ -225,6 +240,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         }
     }
 
+    partial void OnUMinChanged(double value) => Project();
+    partial void OnVMinChanged(double value) => Project();
+    partial void OnUMaxChanged(double value) => Project();
+    partial void OnVMaxChanged(double value) => Project();
+    partial void OnAreaNameChanged(string value) => Project();
     partial void OnStartUChanged(double value) => Project();
     partial void OnStartVChanged(double value) => Project();
     partial void OnEndUChanged(double value) => Project();
