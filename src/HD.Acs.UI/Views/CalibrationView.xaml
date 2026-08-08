@@ -6,7 +6,7 @@
     <UserControl.Resources>
         <conv:BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
-    <Grid Margin="10">
+    <Grid Margin="10" TextElement.Foreground="{DynamicResource AppTextBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -19,7 +19,7 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,6">
             <TextBlock Text="도면→맵 캘리브레이션 (T_W_D) · Operator" FontWeight="Bold" />
-            <TextBlock TextWrapping="Wrap" Foreground="Gray"
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}"
                        Text="로봇을 도면상 알려진 기준점으로 이동시킨 뒤, 그 점의 도면 좌표를 입력하고 '현재 위치 캡처'를 누르세요. 2~3점 캡처 후 '계산'." />
         </StackPanel>
 
@@ -34,8 +34,8 @@
                                  DisplayMemberPath="Level"
                                  SelectedItem="{Binding SelectedFloor, Mode=TwoWay}" />
         </Grid>
-        <Border Grid.Row="2" BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="6" Margin="0,0,0,8">
-            <TextBlock Text="{Binding ReadinessText}" TextWrapping="Wrap" Foreground="#2C3E50" />
+        <Border Grid.Row="2" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6" Margin="0,0,0,8">
+            <TextBlock Text="{Binding ReadinessText}" TextWrapping="Wrap" Foreground="{DynamicResource AppTextBrush}" />
         </Border>
 
         <!-- 도면 좌표 입력 + 캡처 -->
@@ -88,15 +88,15 @@
                 <telerik:RadButton Content="계산 (solve)" Command="{Binding SolveCommand}" Margin="0,0,6,0" />
                 <telerik:RadButton Content="새로고침" Command="{Binding RefreshCommand}" />
             </StackPanel>
-            <Border Background="#EAF2F8" BorderBrush="#AED6F1" BorderThickness="1" CornerRadius="3" Padding="6">
-                <TextBlock Text="{Binding CalibrationSummary}" TextWrapping="Wrap" Foreground="#1B4F72" />
+            <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6">
+                <TextBlock Text="{Binding CalibrationSummary}" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" />
             </Border>
-            <Border Background="#FCF3CF" BorderBrush="#F1C40F" BorderThickness="1" CornerRadius="3" Padding="6"
+            <Border Background="{DynamicResource AppWarnBgBrush}" BorderBrush="{DynamicResource AppWarnBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6"
                     Margin="0,6,0,0" Visibility="{Binding HasWarning, Converter={StaticResource BoolToVis}}">
-                <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" Foreground="#7D6608" />
+                <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
             </Border>
         </StackPanel>
 
-        <TextBlock Grid.Row="6" Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="6" Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,8,0,0" />
     </Grid>
 </UserControl>

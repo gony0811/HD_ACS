@@ -2,6 +2,13 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- StartupUri 제거: 호스트(App.xaml.cs)가 DI로 MainWindow를 해석·표시한다.
-         Telerik Fluent 테마는 StyleManager.ApplicationTheme로 코드에서 설정. -->
-    <Application.Resources />
+         Telerik Fluent 다크 테마는 StyleManager.ApplicationTheme로 코드에서 설정.
+         비-Telerik 요소용 공용 다크 브러시는 Themes/Brushes.xaml에서 정의·병합. -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/HD.Acs.UI;component/Themes/Brushes.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
 </Application>

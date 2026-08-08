@@ -3,6 +3,10 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
              xmlns:views="clr-namespace:HD.Acs.UI.Views">
+    <!-- ESC: 도면 4점 선택(픽) 모드 해제 (폼·전개도 캔버스 공통 서브트리) -->
+    <UserControl.InputBindings>
+        <KeyBinding Key="Escape" Command="{Binding CancelPickCommand}" />
+    </UserControl.InputBindings>
     <UserControl.Resources>
         <Style TargetType="TextBlock" x:Key="Lbl">
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -33,7 +37,7 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="14">
+    <Grid Margin="14" TextElement.Foreground="{DynamicResource AppTextBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
@@ -43,16 +47,16 @@
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
             <StackPanel Width="450">
                 <!-- 선창 정의는 [파일 ▸ 새 프로젝트] 팝업에서 수행 -->
-                <Border Background="#EBF5FB" BorderBrush="#AED6F1" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
-                    <StackPanel>
+                <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
+                    <StackPanel TextElement.Foreground="{DynamicResource AppInfoFgBrush}">
                         <TextBlock Text="{Binding TankId, StringFormat='현재 선창: {0}'}" FontWeight="Bold" Margin="0,0,0,2" />
-                        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Foreground="#2C3E50" FontSize="12" />
-                        <TextBlock Text="선창 3D 정의는 [파일 ▸ 새 프로젝트] 또는 [열기]에서 수행합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" FontSize="12" />
+                        <TextBlock Text="선창 3D 정의는 [파일 ▸ 새 프로젝트] 또는 [열기]에서 수행합니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>
 
                 <!-- ② 영역 등록 (면 로컬 u,v) -->
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
                         <TextBlock Text="② 영역 등록 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
@@ -63,13 +67,16 @@
                             <telerik:RadComboBox Width="100" Height="Auto" ItemsSource="{Binding Walls}" DisplayMemberPath="WallCode"
                                                  SelectedItem="{Binding SelectedWall, Mode=TwoWay}" />
                         </StackPanel>
-                        <TextBlock Text="층을 고르면 그 층에서 도달 가능한 면만 표시됩니다. 층은 영역 z범위로 서버가 자동 유도합니다." Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding SelectedWallInfo}" Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <TextBlock Text="층을 고르면 그 층에서 도달 가능한 면만 표시됩니다. 층은 영역 z범위로 서버가 자동 유도합니다." Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SelectedWallInfo}" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="이름" Style="{StaticResource Lbl}" />
                             <TextBox Width="100" Height="Auto" Style="{StaticResource TxtField}" Text="{Binding AreaName, Mode=TwoWay}" />
                         </StackPanel>
-                        <TextBlock Text="사각형 4점 (면 로컬 u,v) — 숫자 입력 또는 전개도 캔버스를 순서대로 4번 클릭" Foreground="#7F8C8D" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
+                        <telerik:RadToggleButton Content="도면에서 4점 선택" HorizontalAlignment="Left" MinWidth="130" Margin="0,2,0,4"
+                                                 IsChecked="{Binding PickMode, Mode=TwoWay}"
+                                                 ToolTip="켜면 전개도 커서가 크로스헤어로 바뀌고 클릭으로 P1~P4를 지정합니다. 캔버스 우클릭으로 해제." />
+                        <TextBlock Text="사각형 4점 (면 로컬 u,v) — 숫자 입력 또는 [도면에서 4점 선택] 후 캔버스를 순서대로 4번 클릭(우클릭=해제)" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="P1 u,v" Style="{StaticResource Lbl}" />
                             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C1U, Mode=TwoWay}" Margin="0,0,6,0" />
@@ -102,7 +109,7 @@
                 </Border>
 
                 <!-- ③ 검사 작업 등록 (선택 영역, 경계 내) -->
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10">
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel>
                         <TextBlock Text="{Binding SelectedArea.Name, StringFormat='③ 검사 작업 등록 — 영역 {0}', FallbackValue='③ 검사 작업 등록 (영역 선택)'}"
                                    FontWeight="SemiBold" Margin="0,0,0,6" />
@@ -119,7 +126,7 @@
                         <telerik:RadButton Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
                     </StackPanel>
                 </Border>
-                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#C0392B" FontSize="12" />
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" />
             </StackPanel>
         </ScrollViewer>
 

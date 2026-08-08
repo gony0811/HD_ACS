@@ -34,13 +34,23 @@ public partial class AreaLayoutView : UserControl
         Scroll.ScrollToVerticalOffset(0);
     }
 
-    // 캔버스 클릭 → 면-로컬 (u,v)로 역투영해 영역 코너 순서대로 지정
+    // 좌클릭 → (픽 모드일 때만) 면-로컬 (u,v)로 역투영해 영역 코너 순서대로 지정
     private void PlotCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (DataContext is ViewModels.AreaPlanningViewModel vm)
         {
             var p = e.GetPosition(PlotCanvas);   // 스케일 전 캔버스 좌표(0..600)
-            vm.CanvasClick(p.X, p.Y);
+            vm.CanvasClick(p.X, p.Y);            // VM 내부에서 PickMode가 아니면 무시
+        }
+    }
+
+    // 우클릭 → 픽 모드 해제(커서 원복)
+    private void PlotCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is ViewModels.AreaPlanningViewModel vm && vm.PickMode)
+        {
+            vm.PickMode = false;
+            e.Handled = true;   // 컨텍스트 동작 차단
         }
     }
 

@@ -4,7 +4,8 @@
         xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
         xmlns:views="clr-namespace:HD.Acs.UI.Views"
         Title="{Binding WindowTitle}" Width="1440" Height="900"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppWindowBrush}">
     <DockPanel>
         <!-- 메뉴바: 파일(프로젝트 파일 .hdacs) -->
         <telerik:RadMenu DockPanel.Dock="Top">
@@ -18,9 +19,9 @@
         </telerik:RadMenu>
 
         <!-- 상단 툴바: 미션 제어 + 비상정지 -->
-        <Border DockPanel.Dock="Top" Background="#2C3E50" Padding="10,6">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="10,6">
             <StackPanel Orientation="Horizontal">
-                <TextBlock Text="HD_ACS 관제" Foreground="White" FontSize="16" FontWeight="Bold"
+                <TextBlock Text="HD_ACS 관제" Foreground="{DynamicResource AppOnAccentTextBrush}" FontSize="16" FontWeight="Bold"
                            VerticalAlignment="Center" Margin="0,0,20,0" />
                 <telerik:RadButton Content="미션 시작" Command="{Binding Mission.StartRunCommand}" Margin="0,0,6,0" />
                 <telerik:RadButton Content="다음 층 릴리스" Command="{Binding Mission.ReleaseNextCommand}" Margin="0,0,6,0" />
@@ -31,8 +32,8 @@
 
         <!-- 하단 상태바: 서버 연결 상태 -->
         <telerik:RadBusyIndicator DockPanel.Dock="Bottom" IsBusy="False">
-            <Border Background="#ECF0F1" Padding="10,4">
-                <TextBlock Text="{Binding ConnectionText}" />
+            <Border Background="{DynamicResource AppHeaderBrush}" Padding="10,4">
+                <TextBlock Text="{Binding ConnectionText}" Foreground="{DynamicResource AppTextBrush}" />
             </Border>
         </telerik:RadBusyIndicator>
 

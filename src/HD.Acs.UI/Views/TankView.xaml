@@ -7,9 +7,9 @@
     <UserControl.Resources>
         <conv:NormalizedToCanvasConverter x:Key="NormToCanvas" />
     </UserControl.Resources>
-    <DockPanel>
+    <DockPanel TextElement.Foreground="{DynamicResource AppTextBrush}">
         <!-- 층 선택 L1~L4 + 로봇 위치 -->
-        <Border DockPanel.Dock="Top" Padding="8" Background="#ECF0F1">
+        <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="뷰" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <telerik:RadComboBox Width="90" ItemsSource="{Binding ViewModes}"
@@ -45,18 +45,18 @@
 
             <telerik:RadTabItem Header="전개도">
                 <!-- 면별 2D 도면 그리드 — 각 면 실제 비율 형상(마구리 F/A=팔각) + 영역·작업 오버레이 -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#ECF0F1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource AppWindowBrush}">
                     <ItemsControl ItemsSource="{Binding FacePlots}" Margin="8">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="6" Padding="6" BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Background="White">
+                                <Border Margin="6" Padding="6" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource AppSurfaceBrush}">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" Foreground="#2C3E50" />
-                                            <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="#7F8C8D" Margin="8,2,0,0" />
+                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" />
+                                            <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" Margin="8,2,0,0" />
                                         </StackPanel>
-                                        <Canvas Width="240" Height="150" Background="#FBFCFC">
+                                        <Canvas Width="240" Height="150" Background="{DynamicResource AppCanvasBrush}">
                                             <Polygon Points="{Binding Outline}" Fill="#0F2E86C1" Stroke="#5D6D7E" StrokeThickness="1.2" />
                                             <!-- 영역(4점 폴리곤) -->
                                             <ItemsControl ItemsSource="{Binding Areas}">

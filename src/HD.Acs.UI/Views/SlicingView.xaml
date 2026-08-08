@@ -14,7 +14,7 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="12">
+    <Grid Margin="12" TextElement.Foreground="{DynamicResource AppTextBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="400" />
             <ColumnDefinition Width="*" />
@@ -41,7 +41,7 @@
                 </StackPanel>
 
                 <!-- seam 등록 폼 (라벨 + 입력 2열) -->
-                <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -118,12 +118,12 @@
                                          SelectedItem="{Binding SelectedWall, Mode=TwoWay}" />
                 </StackPanel>
 
-                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" />
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" />
             </StackPanel>
         </ScrollViewer>
 
         <!-- ── 우: 전개도 캔버스 ── -->
-        <Border Grid.Column="1" BorderBrush="#AEB6BF" BorderThickness="1" Background="#FBFCFC">
+        <Border Grid.Column="1" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppCanvasBrush}">
             <Viewbox Stretch="Uniform" Margin="8">
                 <Canvas Width="600" Height="600">
                     <!-- 스테이션(anchorGroup) 반투명 박스 -->

@@ -85,6 +85,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _c3U = 2.0; [ObservableProperty] private double _c3V = 2.0;
     [ObservableProperty] private double _c4U; [ObservableProperty] private double _c4V = 2.0;
     [ObservableProperty] private int _cornerIndex;   // 다음 클릭이 지정할 코너(0~3)
+    [ObservableProperty] private bool _pickMode;     // 도면에서 4점 선택(픽) 모드 — 켜면 캔버스 커서=크로스헤어
     [ObservableProperty] private bool _stationOverride;
     [ObservableProperty] private double _stationX;
     [ObservableProperty] private double _stationY;
@@ -342,10 +343,16 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private static double[][]? OffsetCornersV(double[][]? corners, double dv) =>
         corners?.Select(p => new[] { p[0], p[1] + dv }).ToArray();
 
-    /// <summary>캔버스 클릭(px) → 면-로컬 (u,v, 층-로컬)로 역투영해 현재 코너에 지정하고 다음 코너로.</summary>
+    partial void OnPickModeChanged(bool value) { if (value) CornerIndex = 0; }   // 켜면 P1부터 지정 시작
+
+    /// <summary>픽 모드 해제 — 캔버스 우클릭 또는 ESC 키.</summary>
+    [RelayCommand]
+    private void CancelPick() => PickMode = false;
+
+    /// <summary>캔버스 클릭(px) → 면-로컬 (u,v, 층-로컬)로 역투영해 현재 코너에 지정하고 다음 코너로. 픽 모드에서만.</summary>
     public void CanvasClick(double px, double py)
     {
-        if (SelectedWall is not { } w || _projScale <= 0) return;
+        if (!PickMode || SelectedWall is not { } w || _projScale <= 0) return;
         double u = (px - Margin) / _projScale;
         double v = _projVlen - (py - Margin) / _projScale - VOff;   // 층-로컬 v
         u = Math.Clamp(u, 0, w.ULen);

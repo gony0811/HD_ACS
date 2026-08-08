@@ -7,7 +7,7 @@
         <conv:BooleanToVisibilityConverter x:Key="BoolToVis" />
         <conv:InverseBooleanToVisibilityConverter x:Key="InvBoolToVis" />
     </UserControl.Resources>
-    <Grid Margin="10">
+    <Grid Margin="10" TextElement.Foreground="{DynamicResource AppTextBrush}">
         <telerik:RadGridView ItemsSource="{Binding Alarms}"
                              Visibility="{Binding HasAlarms, Converter={StaticResource BoolToVis}}"
                              AutoGenerateColumns="False" IsReadOnly="True"
@@ -23,7 +23,7 @@
 
         <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Foreground="Gray" MaxWidth="280" TextAlignment="Center"
+                   Foreground="{DynamicResource AppMutedTextBrush}" MaxWidth="280" TextAlignment="Center"
                    Visibility="{Binding HasAlarms, Converter={StaticResource InvBoolToVis}}" />
     </Grid>
 </UserControl>

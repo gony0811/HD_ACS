@@ -1,7 +1,8 @@
 <UserControl x:Class="HD.Acs.UI.Views.RobotStatusView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+             TextElement.Foreground="{DynamicResource AppTextBrush}">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -37,10 +38,10 @@
             <TextBlock Text="{Binding MapId, StringFormat='층(mapId): {0}'}" />
             <TextBlock Text="{Binding Position, StringFormat='위치: {0}'}" />
             <TextBlock Text="{Binding Driving, StringFormat='주행중: {0}'}" />
-            <TextBlock Text="{Binding Errors, StringFormat='오류 수: {0}'}" Foreground="#C0392B" />
+            <TextBlock Text="{Binding Errors, StringFormat='오류 수: {0}'}" Foreground="{DynamicResource AppErrorBrush}" />
         </StackPanel>
 
         <TextBlock Grid.Row="3" Text="{Binding StatusMessage}" TextWrapping="Wrap"
-                   Foreground="#C0392B" Margin="0,8,0,0" />
+                   Foreground="{DynamicResource AppErrorBrush}" Margin="0,8,0,0" />
     </Grid>
 </UserControl>

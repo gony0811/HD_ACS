@@ -21,7 +21,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Telerik 전역 테마 — Fluent (모든 Telerik 컨트롤 생성 이전에 설정)
+        // Telerik 전역 테마 — Fluent 다크 팔레트 (모든 Telerik 컨트롤 생성 이전에 설정).
+        // LoadPreset은 static이며 FluentTheme 생성 전에 호출해야 다크 색상이 반영된다.
+        FluentPalette.LoadPreset(FluentPalette.ColorVariation.Dark);
         StyleManager.ApplicationTheme = new FluentTheme();
 
         var builder = Host.CreateApplicationBuilder();

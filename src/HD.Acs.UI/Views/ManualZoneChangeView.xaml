@@ -6,10 +6,10 @@
     <UserControl.Resources>
         <conv:BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
-    <StackPanel Margin="10">
+    <StackPanel Margin="10" TextElement.Foreground="{DynamicResource AppTextBrush}">
         <TextBlock Text="작업자 수동 층(존) 변경 · Operator 권한 [Q9]" FontWeight="Bold" Margin="0,0,0,2" />
         <TextBlock Text="엘리베이터로 로봇을 이동시킨 뒤 현재 층을 지정합니다. 감사 로그에 기록됩니다."
-                   TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,10" />
+                   TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,10" />
 
         <Grid Margin="0,0,0,6">
             <Grid.ColumnDefinitions>
@@ -22,7 +22,7 @@
         </Grid>
 
         <!-- 수동 지정 vs 로봇 보고 나란히 대조 -->
-        <Border BorderBrush="#BDC3C7" BorderThickness="1" CornerRadius="3" Padding="8" Margin="0,4,0,8">
+        <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="8" Margin="0,4,0,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -38,13 +38,13 @@
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding ManualMapId}" FontSize="16" />
                 <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ReportedMapId}" FontSize="16" />
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding ManualUpdatedBy, StringFormat='by {0}'}"
-                           Foreground="Gray" FontSize="11" />
+                           Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" />
             </Grid>
         </Border>
 
-        <Border Background="#FCF3CF" BorderBrush="#F1C40F" BorderThickness="1" CornerRadius="3" Padding="6"
+        <Border Background="{DynamicResource AppWarnBgBrush}" BorderBrush="{DynamicResource AppWarnBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6"
                 Margin="0,0,0,8" Visibility="{Binding IsMismatch, Converter={StaticResource BoolToVis}}">
-            <TextBlock Text="{Binding MismatchWarning}" TextWrapping="Wrap" Foreground="#7D6608" />
+            <TextBlock Text="{Binding MismatchWarning}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
         </Border>
 
         <Grid Margin="0,0,0,6">
@@ -83,6 +83,6 @@
             <telerik:RadButton Content="새로고침" Command="{Binding RefreshContextCommand}" />
         </StackPanel>
 
-        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#2C3E50" Margin="0,8,0,0" />
+        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,8,0,0" />
     </StackPanel>
 </UserControl>

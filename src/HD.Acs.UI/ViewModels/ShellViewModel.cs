@@ -1,3 +1,5 @@
+using System.IO;
+using System.Net.Http;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -114,9 +116,25 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"프로젝트 열기 실패:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(DescribeProjectFailure("열기", ex), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    /// <summary>
+    /// 프로젝트 열기/저장 실패 원인을 유형별로 구분해 안내 메시지를 만든다.
+    /// .hdacs 열기·저장은 파일 I/O에 더해 관제 서버(REST/DB) 재적재를 수반하므로,
+    /// "파일이 깨졌나?"와 "서버가 안 떴나?"를 사용자가 구분할 수 있어야 한다.
+    /// </summary>
+    private string DescribeProjectFailure(string verb, Exception ex) => ex switch
+    {
+        // 파일 파싱 단계(매직/버전/GZip/JSON) — ProjectService가 InvalidDataException을 던짐
+        InvalidDataException => $"프로젝트 {verb} 실패: 이 프로그램의 프로젝트 파일이 아니거나 손상되었습니다.\n\n{ex.Message}",
+        // DB 재적재 단계 — 관제 서버(:5100)/PostgreSQL 연결 실패
+        HttpRequestException => $"프로젝트 {verb} 실패: 파일은 정상이지만 관제 서버에 연결하지 못했습니다.\n" +
+            "HD.Acs.App(포트 5100)과 PostgreSQL이 실행 중인지 확인한 뒤 다시 시도하세요.\n\n" +
+            $"({ex.Message})",
+        _ => $"프로젝트 {verb} 실패:\n{ex.Message}",
+    };
 
     /// <summary>저장 — 현재 파일에 덮어쓰기(없으면 다른 이름으로 저장).</summary>
     [RelayCommand]
@@ -146,7 +164,7 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"프로젝트 저장 실패:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(DescribeProjectFailure("저장", ex), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

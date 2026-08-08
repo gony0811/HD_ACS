@@ -3,7 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
         Title="새 프로젝트 — 선창 3D 정의" Width="520" SizeToContent="Height"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{DynamicResource AppWindowBrush}"
+        TextElement.Foreground="{DynamicResource AppTextBrush}">
     <Window.Resources>
         <Style TargetType="TextBlock" x:Key="Lbl">
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -25,7 +27,7 @@
 
     <StackPanel Margin="18">
         <TextBlock Text="① 선창 3D 정의 (팔각 단면)" FontWeight="Bold" FontSize="14" Margin="0,0,0,4" />
-        <TextBlock Foreground="#7F8C8D" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,10"
+        <TextBlock Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,10"
                    Text="치수 입력 → 확인 시 10면 자동 생성(B/SL/PL/SM/PM/SU/PU/T/F/A) 후 프로젝트 파일을 만듭니다. 원점=바닥 중심, x=길이·y=폭(+좌현)·z=상방, 바닥 z=0(m). 각도=수평면 기준(°)." />
 
         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
@@ -67,8 +69,8 @@
             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding OriginOy, Mode=TwoWay}" />
         </StackPanel>
 
-        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,2,0,4" Foreground="#2C3E50" FontSize="12" />
-        <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="#C0392B" FontSize="12" Visibility="Collapsed" />
+        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,2,0,4" Foreground="{DynamicResource AppTextBrush}" FontSize="12" />
+        <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" Visibility="Collapsed" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <telerik:RadButton x:Name="OkButton" Content="확인 · 선창 생성" MinWidth="130" MinHeight="32" Margin="0,0,8,0" Click="Ok_Click" />
