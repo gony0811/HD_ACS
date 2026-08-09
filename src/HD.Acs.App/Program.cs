@@ -236,6 +236,19 @@ app.MapPost("/api/scenarios", async (CreateScenarioRequest req, AcsDbContext db)
     return Results.Ok(new { scenarioId = s.ScenarioId });
 });
 
+// 시나리오 삭제 — 하드 삭제 + 가드. 참조하는 실행(run)이 있으면 409로 차단(run.scenario_run은 FK 미설정이라
+// 코드 가드 필수). 없으면 삭제(ref.inspection_point/task는 FK ON DELETE CASCADE).
+app.MapDelete("/api/scenarios/{scenarioId:guid}", async (Guid scenarioId, AcsDbContext db) =>
+{
+    var scenario = await db.Scenarios.FindAsync(scenarioId);
+    if (scenario is null) return Results.NotFound();
+    if (await db.ScenarioRuns.AnyAsync(r => r.ScenarioId == scenarioId))
+        return Results.Conflict(new { error = "이 시나리오를 참조하는 실행 이력(run)이 있어 삭제할 수 없습니다." });
+    db.Scenarios.Remove(scenario);
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
 // WeldSeam 등록/목록/삭제 [PHASE2 WP-5b] — 사람이 등록하는 유일한 입력(도면 좌표)
 app.MapPost("/api/seams", async (CreateSeamRequest req, AcsDbContext db) =>
 {

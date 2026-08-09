@@ -31,6 +31,8 @@ public interface IAcsApiClient
 
     // ── 슬라이싱/TASK (전개도) [PHASE2 WP-5b] ──────────
     Task<Guid> CreateScenarioAsync(string name, string tankId, CancellationToken ct = default);
+    // 참조하는 run이 있으면 서버가 409(메시지 포함)로 거부한다.
+    Task DeleteScenarioAsync(Guid scenarioId, CancellationToken ct = default);
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);

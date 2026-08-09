@@ -3,76 +3,86 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
         xmlns:views="clr-namespace:HD.Acs.UI.Views"
+        xmlns:vm="clr-namespace:HD.Acs.UI.ViewModels"
+        xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure"
         Title="{Binding WindowTitle}" Width="1440" Height="900"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppWindowBrush}">
-    <DockPanel>
-        <!-- 메뉴바: 파일(프로젝트 파일 .hdacs) -->
-        <telerik:RadMenu DockPanel.Dock="Top">
-            <telerik:RadMenuItem Header="파일(_F)">
-                <telerik:RadMenuItem Header="새 프로젝트(_N)…" Command="{Binding NewProjectCommand}" />
-                <telerik:RadMenuItem Header="열기(_O)…" Command="{Binding OpenProjectCommand}" />
-                <telerik:RadMenuItem IsSeparator="True" />
-                <telerik:RadMenuItem Header="저장(_S)" Command="{Binding SaveProjectCommand}" />
-                <telerik:RadMenuItem Header="다른 이름으로 저장(_A)…" Command="{Binding SaveProjectAsCommand}" />
-            </telerik:RadMenuItem>
-        </telerik:RadMenu>
+    <Window.Resources>
+        <conv:EnumToVisibilityConverter x:Key="EnumVis" />
+        <conv:EnumToBooleanConverter x:Key="EnumBool" />
+        <!-- 상단 모드 탭 스타일 -->
+        <Style x:Key="ModeTab" TargetType="telerik:RadToggleButton">
+            <Setter Property="MinWidth" Value="72" />
+            <Setter Property="Padding" Value="14,6" />
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="1,0" />
+        </Style>
+    </Window.Resources>
 
-        <!-- 상단 툴바: 미션 제어 + 비상정지 -->
-        <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="10,6">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="HD_ACS 관제" Foreground="{DynamicResource AppOnAccentTextBrush}" FontSize="16" FontWeight="Bold"
-                           VerticalAlignment="Center" Margin="0,0,20,0" />
-                <telerik:RadButton Content="미션 시작" Command="{Binding Mission.StartRunCommand}" Margin="0,0,6,0" />
-                <telerik:RadButton Content="다음 층 릴리스" Command="{Binding Mission.ReleaseNextCommand}" Margin="0,0,6,0" />
-                <telerik:RadButton Content="■ 비상정지" Command="{Binding EmergencyStopCommand}"
-                                   Background="#C0392B" Foreground="White" FontWeight="Bold" Margin="20,0,0,0" />
-            </StackPanel>
+    <DockPanel>
+        <!-- ── 앱바: 브랜드 · 파일 메뉴 · 모드 탭 · 연결칩 · 비상정지(상시) ── -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="12,7">
+            <DockPanel LastChildFill="True">
+                <Image DockPanel.Dock="Left" VerticalAlignment="Center" Height="26" Margin="0,0,4,0"
+                       Source="/HD.Acs.UI;component/Assets/HHI_white2_ko.png"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       ToolTip="HD_ACS — HD현대중공업 LNG 화물창 검사 관제"
+                       AutomationProperties.Name="HD_ACS" />
+                <telerik:RadMenu DockPanel.Dock="Left" Background="Transparent" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <telerik:RadMenuItem Header="파일(_F)">
+                        <telerik:RadMenuItem Header="새 프로젝트(_N)…" Command="{Binding NewProjectCommand}" />
+                        <telerik:RadMenuItem Header="열기(_O)…" Command="{Binding OpenProjectCommand}" />
+                        <telerik:RadMenuItem IsSeparator="True" />
+                        <telerik:RadMenuItem Header="저장(_S)" Command="{Binding SaveProjectCommand}" />
+                        <telerik:RadMenuItem Header="다른 이름으로 저장(_A)…" Command="{Binding SaveProjectAsCommand}" />
+                    </telerik:RadMenuItem>
+                </telerik:RadMenu>
+
+                <!-- 우측 클러스터: 연결 상태칩 + 비상정지 -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border CornerRadius="20" Padding="10,4" Margin="0,0,10,0"
+                            Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource AppGoodBrush}" VerticalAlignment="Center" Margin="0,0,7,0" />
+                            <TextBlock Text="{Binding ConnectionText}" FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" />
+                        </StackPanel>
+                    </Border>
+                    <telerik:RadButton Content="■ 비상정지" Command="{Binding EmergencyStopCommand}"
+                                       Background="#C0392B" Foreground="White" FontWeight="Bold" Padding="14,6" />
+                </StackPanel>
+
+                <!-- 중앙: 모드 탭 -->
+                <Border HorizontalAlignment="Center" CornerRadius="9" Padding="3" Margin="16,0"
+                        Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal">
+                        <telerik:RadToggleButton Content="운영" Style="{StaticResource ModeTab}"
+                                                 Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Operation}"
+                                                 IsChecked="{Binding CurrentMode, Converter={StaticResource EnumBool}, ConverterParameter=Operation, Mode=OneWay}" />
+                        <telerik:RadToggleButton Content="계획" Style="{StaticResource ModeTab}"
+                                                 Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Planning}"
+                                                 IsChecked="{Binding CurrentMode, Converter={StaticResource EnumBool}, ConverterParameter=Planning, Mode=OneWay}" />
+                        <telerik:RadToggleButton Content="이력" Style="{StaticResource ModeTab}"
+                                                 Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.History}"
+                                                 IsChecked="{Binding CurrentMode, Converter={StaticResource EnumBool}, ConverterParameter=History, Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
+            </DockPanel>
         </Border>
 
-        <!-- 하단 상태바: 서버 연결 상태 -->
+        <!-- ── 하단 상태바 ── -->
         <telerik:RadBusyIndicator DockPanel.Dock="Bottom" IsBusy="False">
-            <Border Background="{DynamicResource AppHeaderBrush}" Padding="10,4">
-                <TextBlock Text="{Binding ConnectionText}" Foreground="{DynamicResource AppTextBrush}" />
+            <Border Background="{DynamicResource AppHeaderBrush}" Padding="12,4">
+                <TextBlock Text="{Binding ConnectionText}" Foreground="{DynamicResource AppTextBrush}" FontSize="12" />
             </Border>
         </telerik:RadBusyIndicator>
 
-        <!-- 본문: 좌측 화물창 뷰(도큐먼트) + 우측 운영 패널(도킹) -->
-        <telerik:RadDocking x:Name="Docking" HasDocumentHost="True">
-            <telerik:RadDocking.DocumentHost>
-                <telerik:RadSplitContainer>
-                    <telerik:RadPaneGroup>
-                        <telerik:RadPane Header="화물창 3D / 전개도" CanUserClose="False" CanFloat="False">
-                            <views:TankView DataContext="{Binding Tank}" />
-                        </telerik:RadPane>
-                        <telerik:RadPane Header="영역·작업 관리 (전개도)" CanUserClose="False" CanFloat="False">
-                            <views:AreaManagementView DataContext="{Binding AreaPlanning}" />
-                        </telerik:RadPane>
-                    </telerik:RadPaneGroup>
-                </telerik:RadSplitContainer>
-            </telerik:RadDocking.DocumentHost>
-
-            <telerik:RadSplitContainer InitialPosition="DockedRight" Width="400">
-                <telerik:RadPaneGroup>
-                    <telerik:RadPane Header="로봇 상태" CanUserClose="False">
-                        <views:RobotStatusView DataContext="{Binding RobotStatus}" />
-                    </telerik:RadPane>
-                    <telerik:RadPane Header="미션" CanUserClose="False">
-                        <views:MissionView DataContext="{Binding Mission}" />
-                    </telerik:RadPane>
-                </telerik:RadPaneGroup>
-                <telerik:RadPaneGroup>
-                    <telerik:RadPane Header="수동 층 변경" CanUserClose="False">
-                        <views:ManualZoneChangeView DataContext="{Binding ManualZoneChange}" />
-                    </telerik:RadPane>
-                    <telerik:RadPane Header="캘리브레이션(T_W_D)" CanUserClose="False">
-                        <views:CalibrationView DataContext="{Binding Calibration}" />
-                    </telerik:RadPane>
-                    <telerik:RadPane Header="알람" CanUserClose="False">
-                        <views:AlarmsView DataContext="{Binding Alarms}" />
-                    </telerik:RadPane>
-                </telerik:RadPaneGroup>
-            </telerik:RadSplitContainer>
-        </telerik:RadDocking>
+        <!-- ── 본문: 모드별 워크스페이스(모두 로드 유지, Visibility 전환) ── -->
+        <Grid>
+            <views:OperationView Visibility="{Binding CurrentMode, Converter={StaticResource EnumVis}, ConverterParameter=Operation}" />
+            <views:PlanningView  Visibility="{Binding CurrentMode, Converter={StaticResource EnumVis}, ConverterParameter=Planning}" />
+            <views:HistoryView   Visibility="{Binding CurrentMode, Converter={StaticResource EnumVis}, ConverterParameter=History}" />
+        </Grid>
     </DockPanel>
 </Window>

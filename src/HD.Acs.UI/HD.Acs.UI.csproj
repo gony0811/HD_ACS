@@ -23,4 +23,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+  <!-- 브랜드 로고 등 이미지 자산(와일드카드 — 파일 추가/교체가 csproj 수정 없이 반영) -->
+  <ItemGroup>
+    <Resource Include="Assets\**\*.png" />
+  </ItemGroup>
 </Project>

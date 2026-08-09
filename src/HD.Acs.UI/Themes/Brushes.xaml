@@ -22,6 +22,11 @@
     <SolidColorBrush x:Key="AppMutedTextBrush"  Color="#9AA0A6" /><!-- 보조/설명 -->
     <SolidColorBrush x:Key="AppOnAccentTextBrush" Color="#FFFFFF" /><!-- 어두운 헤더 위 글씨 -->
 
+    <!-- 액센트(크라이오 시안) · 운영 상태 강조 -->
+    <SolidColorBrush x:Key="AppAccentBrush"     Color="#3AC4DF" />
+    <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#1E3C46" /><!-- 액센트 배경 틴트 -->
+    <SolidColorBrush x:Key="AppGoodBrush"       Color="#47BC6C" />
+
     <!-- 시맨틱 콜아웃 (다크 변형) -->
     <SolidColorBrush x:Key="AppErrorBrush"    Color="#E06C5B" />
 

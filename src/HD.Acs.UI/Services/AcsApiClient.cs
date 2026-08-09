@@ -116,6 +116,12 @@ public sealed class AcsApiClient : IAcsApiClient
         return (await resp.Content.ReadFromJsonAsync<IdResult>(ct))?.ScenarioId ?? Guid.Empty;
     }
 
+    public async Task DeleteScenarioAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/scenarios/{scenarioId}", ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(참조 run 존재)의 {error} 메시지 노출
+    }
+
     public async Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default)

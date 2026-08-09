@@ -24,6 +24,29 @@ public sealed class BooleanToVisibilityConverter : IValueConverter
         value is Visibility.Visible;
 }
 
+/// <summary>enum 값이 ConverterParameter(모드명)와 같으면 Visible, 아니면 Collapsed. 모드 화면 전환용.</summary>
+public sealed class EnumToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+        value?.ToString() == parameter?.ToString() ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}
+
+/// <summary>
+/// enum ↔ bool. 값이 ConverterParameter(모드명)와 같으면 true. ConvertBack은 true일 때만 해당 enum을 반환
+/// (false=다른 버튼 해제이므로 무시) — 모드 탭 ToggleButton IsChecked 양방향 바인딩용.
+/// </summary>
+public sealed class EnumToBooleanConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+        value?.ToString() == parameter?.ToString();
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        value is true && parameter is not null ? Enum.Parse(targetType, parameter.ToString()!) : Binding.DoNothing;
+}
+
 /// <summary>
 /// 정규화 좌표(0~1)를 전개도 Canvas 픽셀로 변환. ConverterParameter="캔버스크기|박스크기"(예: "400|72")로
 /// 박스 중심이 해당 위치에 오도록 Canvas.Left/Top 값을 반환한다.

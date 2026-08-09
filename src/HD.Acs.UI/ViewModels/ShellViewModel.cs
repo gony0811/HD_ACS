@@ -32,6 +32,9 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
 
+    /// <summary>현재 작업 모드(운영/계획/이력). 상단 모드 탭이 양방향 바인딩한다. 기본=운영.</summary>
+    [ObservableProperty] private AppMode _currentMode = AppMode.Operation;
+
     public ShellViewModel(
         IMonitoringClient monitoring,
         IAcsApiClient api,
@@ -70,6 +73,10 @@ public sealed partial class ShellViewModel : ObservableObject
         };
     }
 
+    /// <summary>모드 탭 전환. 탭 버튼이 CommandParameter로 AppMode를 전달한다(토글 해제 방지).</summary>
+    [RelayCommand]
+    private void SetMode(AppMode mode) => CurrentMode = mode;
+
     /// <summary>앱 시작 시 호출 — 실시간 연결 개시 + 각 패널 초기 로드. 서버 미기동이어도 UI는 유지된다.</summary>
     public async Task InitializeAsync()
     {
@@ -82,6 +89,7 @@ public sealed partial class ShellViewModel : ObservableObject
             Calibration.LoadAsync(),
             AreaPlanning.LoadAsync(),
             Tank.LoadAsync());   // 3D 셸(지오메트리 10면) 로드
+        Mission.TankId = AreaPlanning.TankId;   // 시나리오 생성 대상 선창 동기화
     }
 
     // ── 파일 메뉴 (프로젝트 파일 .hdacs) ──────────────────────────────
@@ -92,6 +100,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private async Task NewProjectAsync()
     {
         if (!_projectDialog.ShowNewProject()) return;   // 취소/실패 시 파일 미생성
+        Mission.TankId = AreaPlanning.TankId;            // 시나리오 생성 대상 선창 동기화
         await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
         var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
         if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
@@ -109,6 +118,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var doc = await _project.OpenAsync(path);
             AreaPlanning.TankId = doc.TankId;
             Tank.TankId = doc.TankId;
+            Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
             await AreaPlanning.LoadAsync();
             await Tank.LoadAsync();   // 열린 지오메트리로 3D 셸 갱신
             UpdateTitle();
