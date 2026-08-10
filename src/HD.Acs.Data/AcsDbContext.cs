@@ -36,6 +36,7 @@ public class AcsDbContext : DbContext
     public DbSet<OrderEdgeEntity> OrderEdges => Set<OrderEdgeEntity>();
     public DbSet<OrderActionEntity> OrderActions => Set<OrderActionEntity>();
     public DbSet<RobotContextEntity> RobotContexts => Set<RobotContextEntity>();
+    public DbSet<WorkItemEntity> WorkItems => Set<WorkItemEntity>();
     // hist / alarm / sys
     public DbSet<TransitionLogEntity> TransitionLogs => Set<TransitionLogEntity>();
     public DbSet<InspectionResultEntity> InspectionResults => Set<InspectionResultEntity>();
@@ -144,6 +145,10 @@ public class AcsDbContext : DbContext
 
         mb.Entity<RobotContextEntity>(e => { e.ToTable("robot_context", "run");
             e.HasKey(x => x.RobotId); });
+
+        mb.Entity<WorkItemEntity>(e => { e.ToTable("work_item", "run"); e.HasKey(x => x.WorkItemId);
+            e.HasIndex(x => new { x.RunId, x.MapId, x.Status });
+            e.Property(x => x.Actions).HasColumnType("jsonb"); });
 
         // ═══ hist / alarm / sys ═══
         mb.Entity<TransitionLogEntity>(e => { e.ToTable("transition_log", "hist");

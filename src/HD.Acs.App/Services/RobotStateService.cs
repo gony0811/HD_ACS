@@ -17,11 +17,12 @@ public sealed class RobotStateService
 {
     private readonly AcsDbContext _db;
     private readonly IHubContext<MonitoringHub> _hub;
+    private readonly InspectionDispatcher _dispatcher;
     private readonly ILogger<RobotStateService> _log;
 
-    public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub, ILogger<RobotStateService> log)
+    public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub, InspectionDispatcher dispatcher, ILogger<RobotStateService> log)
     {
-        _db = db; _hub = hub; _log = log;
+        _db = db; _hub = hub; _dispatcher = dispatcher; _log = log;
     }
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
@@ -61,13 +62,25 @@ public sealed class RobotStateService
 
             await FireAsync(mission, MissionTrigger.RobotProgress, ct);
 
-            // 전 액션 종결 + 마지막 노드 도달 → 완료
+            // 전 액션 종결 + 마지막 노드 도달 → 현재 정차 완료
             var remaining = await _db.OrderActions.CountAsync(
                 x => x.MissionId == mission.MissionId && x.Status != "FINISHED" && x.Status != "FAILED", ct);
             var lastSeq = await _db.OrderNodes.Where(n => n.MissionId == mission.MissionId)
                 .MaxAsync(n => (int?)n.SequenceId, ct) ?? 0;
             if (remaining == 0 && state.LastNodeSequenceId >= lastSeq)
-                await FireAsync(mission, MissionTrigger.RobotCompleted, ct);
+            {
+                // 영역 기반(greedy): 이번 정차 완료를 work_item에 반영하고 다음 최근접 배차. 아니면 legacy 완료.
+                bool areaModel = await _db.WorkItems.AnyAsync(w => w.RunId == mission.RunId, ct);
+                if (areaModel)
+                {
+                    await _db.SaveChangesAsync(ct);   // order_action 상태 확정 후 결과 집계
+                    await _dispatcher.HandleStopOutcomeAsync(mission, ct);
+                }
+                else
+                {
+                    await FireAsync(mission, MissionTrigger.RobotCompleted, ct);
+                }
+            }
         }
 
         await _db.SaveChangesAsync(ct);

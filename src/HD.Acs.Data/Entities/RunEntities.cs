@@ -56,12 +56,34 @@ public class OrderActionEntity
     public Guid MissionId { get; set; }
     public int NodeSequenceId { get; set; }
     public Guid? TaskId { get; set; }
+    public Guid? WorkItemId { get; set; }             // greedy 배차 시 소속 작업항목 (완료/실패 집계 키)
     public string ActionType { get; set; } = "";
     public string BlockingType { get; set; } = "HARD";
     public string? Params { get; set; }               // jsonb
     public string Status { get; set; } = "WAITING";
     public string? Result { get; set; }               // jsonb — 촬영 성공/실패 [ADR-004]
     public int Attempts { get; set; }
+}
+
+/// <summary>
+/// 검사 작업 큐 항목 [greedy 최근접 배차]. run 스코프 — 시작 시 선창 영역에서 전개.
+/// 한 항목 = 영역 1개(정차 1곳) + 그 영역의 작업(용접선) 액션들. 좌표는 맵 프레임(로봇 보고와 동일).
+/// </summary>
+public class WorkItemEntity
+{
+    public Guid WorkItemId { get; set; }
+    public Guid RunId { get; set; }
+    public Guid AreaId { get; set; }                  // 원본 ref.inspection_area
+    public string MapId { get; set; } = "";           // 층 (예: CT1-L2) — 큐 필터 키
+    public double X { get; set; }                      // 맵 프레임 정차 x
+    public double Y { get; set; }                      // 맵 프레임 정차 y
+    public double? Theta { get; set; }                 // 맵 프레임 정차각
+    public int Seq { get; set; }                       // 안정 정렬/동률 tiebreak (영역 sort_order)
+    public string Status { get; set; } = "PENDING";    // PENDING | DISPATCHED | DONE | FAILED | SKIPPED
+    public int Attempts { get; set; }
+    public string? Actions { get; set; }               // jsonb — 이 정차의 액션 payload 배열(발행 시 사용)
+    public string? OrderId { get; set; }               // 현재/최근 배차 orderId (state 대조)
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class RobotContextEntity

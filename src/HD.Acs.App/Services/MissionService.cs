@@ -19,24 +19,22 @@ public sealed class MissionService
 {
     private readonly AcsDbContext _db;
     private readonly Vda5050MasterClient _vda;
+    private readonly InspectionDispatcher _dispatcher;
     private readonly OrderBuilder _orderBuilder = new();
     private readonly ILogger<MissionService> _log;
 
-    public MissionService(AcsDbContext db, Vda5050MasterClient vda, ILogger<MissionService> log)
+    public MissionService(AcsDbContext db, Vda5050MasterClient vda, InspectionDispatcher dispatcher, ILogger<MissionService> log)
     {
-        _db = db; _vda = vda; _log = log;
+        _db = db; _vda = vda; _dispatcher = dispatcher; _log = log;
     }
 
-    /// <summary>시나리오 → 층별 미션 시퀀스로 분해하여 Run 생성, 첫 미션 릴리즈 시도</summary>
+    /// <summary>
+    /// 시나리오 → Run 생성. 선창 영역을 작업 큐로 전개(층별 미션 포함)한 뒤 첫 정차를 greedy 최근접 배차.
+    /// 검사 순서는 고정 시퀀스가 아니라 "현재 층 미검사 중 로봇 최근접"으로 동적 결정된다.
+    /// </summary>
     public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
     {
-        var scenario = await _db.Scenarios
-            .Include(s => s.Points.OrderBy(p => p.Seq)).ThenInclude(p => p.Tasks.OrderBy(t => t.Seq))
-            .FirstAsync(s => s.ScenarioId == scenarioId, ct);
-
-        var nodeMapIds = await _db.Nodes.AsNoTracking()
-            .Where(n => scenario.Points.Select(p => p.NodeId).Contains(n.NodeId))
-            .ToDictionaryAsync(n => n.NodeId, n => n.MapId, ct);
+        var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
 
         var run = new ScenarioRunEntity
         {
@@ -47,29 +45,11 @@ public sealed class MissionService
             State = "RUNNING",
             StartedAt = DateTimeOffset.UtcNow
         };
-
-        // 연속한 동일 층 지점들을 하나의 미션으로 묶는다 (한 미션 = 한 층)
-        var seq = 0;
-        string? currentMap = null;
-        foreach (var point in scenario.Points)
-        {
-            var mapId = nodeMapIds[point.NodeId];
-            if (mapId != currentMap)
-            {
-                run.Missions.Add(new MissionEntity
-                {
-                    MissionId = Guid.NewGuid(), RunId = run.RunId, Seq = seq++,
-                    MapId = mapId, RobotId = robotId,
-                    OrderId = Guid.NewGuid().ToString(), State = nameof(MissionState.Created)
-                });
-                currentMap = mapId;
-            }
-        }
-
         _db.ScenarioRuns.Add(run);
+        await _dispatcher.BuildQueueAsync(run, scenario.TankId, ct);   // 영역→작업 큐 + 층별 미션
         await _db.SaveChangesAsync(ct);
 
-        await TryReleaseNextMissionAsync(run.RunId, ct);
+        await _dispatcher.DispatchNextAsync(run.RunId, ct);            // 첫 정차 배차(로봇 층 일치 시)
         return run.RunId;
     }
 
@@ -79,6 +59,13 @@ public sealed class MissionService
     /// </summary>
     public async Task<bool> TryReleaseNextMissionAsync(Guid runId, CancellationToken ct = default)
     {
+        // 영역 기반 run(greedy 배차)은 디스패처가 층 게이트·배차를 담당 — 수동 층 변경 후 재개도 이 경로.
+        if (await _db.WorkItems.AnyAsync(w => w.RunId == runId, ct))
+        {
+            await _dispatcher.DispatchNextAsync(runId, ct);
+            return true;
+        }
+
         var run = await _db.ScenarioRuns.Include(r => r.Missions.OrderBy(m => m.Seq))
             .FirstAsync(r => r.RunId == runId, ct);
         var next = run.Missions.FirstOrDefault(m => m.State == nameof(MissionState.Created));
