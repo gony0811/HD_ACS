@@ -395,7 +395,8 @@ CREATE TABLE hist.transition_log (
 );
 CREATE INDEX ix_translog_mission ON hist.transition_log (mission_id, occurred_at);
 
--- 검사 수행 이력: 검사 S/W와의 대조 키(위치+시각) 보존 [ADR-004, Q2]
+-- 검사 수행 이력: 검사 S/W와의 대조 키 보존 [ADR-004, ADR-013(Q2 해소)]
+-- 대조 규약: 1차 키=job_ref(상관 ID) / 2차 키=position(도면 좌표계)+occurred_at(로봇 클록 UTC)
 CREATE TABLE hist.inspection_result (
   result_id   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id      uuid NOT NULL,
@@ -405,13 +406,15 @@ CREATE TABLE hist.inspection_result (
   robot_id    text NOT NULL,
   node_id     text NOT NULL,
   action_type text NOT NULL,
-  position    jsonb NOT NULL,   -- {tank,level,wall_code,x,y,z} — 검사 S/W 대조 키
+  job_ref     text,             -- 1차 대조 키 (JOB-{tank}-{level}-{wall}-{seam}-{seq}) [ADR-013]
+  position    jsonb NOT NULL,   -- 2차 키: {tank,level,wall_code,x,y,z} — 도면 좌표계(m), seam 시작점
   status      text NOT NULL,    -- SUCCESS | FAILED | SKIPPED
   attempts    int  NOT NULL,
-  occurred_at timestamptz NOT NULL   -- 대조 키 (타임스탬프 규약 Q2)
+  occurred_at timestamptz NOT NULL   -- 2차 키: 종료 state timestamp(로봇 클록, UTC 저장) [ADR-013]
 );
 CREATE INDEX ix_inspresult_time ON hist.inspection_result (occurred_at);
 CREATE INDEX ix_inspresult_run  ON hist.inspection_result (run_id);
+CREATE INDEX ix_inspresult_job  ON hist.inspection_result (job_ref);
 
 -- ═══════════════════════════ ⑥ 알람 (alarm) ═══════════════════════════
 

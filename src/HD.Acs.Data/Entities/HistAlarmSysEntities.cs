@@ -23,10 +23,11 @@ public class InspectionResultEntity
     public string RobotId { get; set; } = "";
     public string NodeId { get; set; } = "";
     public string ActionType { get; set; } = "";
-    public string Position { get; set; } = "{}";      // 검사 S/W 대조 키 [ADR-004, Q2]
+    public string? JobRef { get; set; }               // 1차 대조 키 (JOB-{tank}-{level}-{wall}-{seam}-{seq}) [ADR-013]
+    public string Position { get; set; } = "{}";      // 2차 키: 도면 좌표계 {tank,level,wall_code,x,y,z} [ADR-013]
     public string Status { get; set; } = "";          // SUCCESS | FAILED | SKIPPED
     public int Attempts { get; set; }
-    public DateTimeOffset OccurredAt { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }    // 2차 키: 종료 state timestamp(로봇 클록, UTC) [ADR-013]
 }
 
 public class AlarmSpecEntity

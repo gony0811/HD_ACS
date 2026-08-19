@@ -34,7 +34,8 @@ Mission
  └── PointResult[] / TaskResult[]
       ├── status (SUCCESS / RETRIED / SKIPPED / FAILED)
       ├── attempts, error_code (HD_AMR 보고 기준)
-      └── position, timestamp — 검사 S/W와 대조용 키 [ADR-004, Q2]
+      ├── job_ref — 검사 S/W 1차 대조 키(상관 ID) [ADR-013]
+      └── position(도면 좌표계), timestamp(로봇 클록 UTC) — 2차 대조 키 [ADR-004, ADR-013]
 ```
 
 ## 3. 상태 정의 (Stateless 상태머신 [ADR-010])

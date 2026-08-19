@@ -67,7 +67,9 @@
 **결과**:
 - HD_ACS 데이터 모델은 **검사 수행 이력(위치, 시각, 성공/실패, 시도 횟수)** 중심으로 단순화된다. 이미지 스토리지/파이프라인 설계 부담이 없다.
 - 촬영 명령은 VDA 5050 커스텀 액션으로 정의하고 위치를 액션 파라미터로 전달한다.
-- 검사 S/W의 판정 결과와 ACS 수행 이력의 사후 대조를 위해 **위치+시각 키 정합성**(좌표계·타임스탬프 규약 공유)이 중요하다 (⬜ Q2).
+- 검사 S/W의 판정 결과와 ACS 수행 이력의 사후 대조를 위해 **위치+시각 키 정합성**(좌표계·타임스탬프 규약 공유)이 중요하다.
+
+**개정 (2026-08-19) — Q2 해소**: 검사 S/W 결과 대조 규약(1차 키 `jobRef`, 2차 키 도면 좌표계 위치+로봇 클록 UTC 시각, 오프라인 사후 대조)을 **ADR-013**으로 확정. 본 ADR은 경계(ACS는 이미지·판정 미취급)만 정의하고, 대조 키의 구체 규약은 ADR-013을 따른다.
 
 ---
 
@@ -124,7 +126,7 @@
 **미결 세부**:
 - ⬜ VDA 5050 버전 선택 (2.0 / 2.1)
 - ⬜ 커스텀 액션 카탈로그: 검사 작업 실행(협동로봇 시퀀스), 촬영 트리거(위치 파라미터), 비상정지 — 액션 이름/파라미터/blockingType 정의 (HD_AMR 운영 S/W 측과 협의)
-- ⬜ 맵/좌표계 규약: 화물창 맵 ID, 노드 좌표계와 검사 S/W 좌표계 정합
+- 🔶 맵/좌표계 규약: 화물창 맵 ID·노드(월드/맵) 좌표계는 미결(Q6). **검사 S/W 좌표계 정합은 ADR-013으로 해소** — 대조 키는 맵 버전에 의존하는 월드 좌표가 아니라 **도면 좌표계(Drawing frame)** 로 확정.
 - ⬜ 두절 구간 검사 이력 재전송 방식 (표준 외 확장): state 확장 vs 별도 토픽 vs 로봇 측 업로드
 - ⬜ MQTT 브로커 선정 (Mosquitto, EMQX 등) 및 QoS/폐쇄망 내 보안 정책
 
@@ -222,12 +224,51 @@
 
 ---
 
+## ADR-013. 검사 S/W 결과 대조 규약 (Q2 해소) ✅
+
+**질문**: 검사 S/W의 판정 결과와 ACS의 검사 수행 이력을 **어떤 키·어떤 좌표계·어떤 시각 규약**으로 사후 대조하는가?
+
+**결정** (2026-08-19):
+
+**(1) 대조 모델 — 오프라인 사후 대조(post-hoc reconciliation)**
+- ACS ↔ 검사 S/W 간 **직접 실시간 API는 두지 않는다**(경계 유지 [ADR-001], [ADR-004]). 양측이 **공통 키**를 각자 기록하고, 리포트·분석 단계에서 조인한다.
+- ACS의 유일한 로봇측 상대는 HD_AMR(VDA 5050)이며, 검사 S/W는 HD_AMR이 검사 트리거 시 구동한다.
+
+**(2) 1차 키 = `jobRef` (상관 ID)**
+- ACS가 TASK 릴리즈 시 발급하는 문자열 `JOB-{tank}-{level}-{wall}-{seam}-{seqInGroup}` (예: `JOB-CT1-L2-W03-S07-2`). `startWeldInspection` payload로 HD_AMR에 전달됨([SPEC_PHASE2_ACS.md] §4).
+- **규약**: HD_AMR이 검사 트리거 시 이 `jobRef`를 검사 S/W로 전달하고, 검사 S/W는 자신의 판정 레코드에 `jobRef`를 그대로 부기한다 → **jobRef 완전 일치 조인**이 성립.
+- TASK 1 = actionId 1 = `inspection_result` 1행 = 재시도 1단위([SPEC_PHASE2_ACS.md] §1). `jobRef`는 TASK 식별이며, **동일 TASK의 재시도는 `occurred_at`으로 구분**한다.
+
+**(3) 2차 키(보강·폴백) = 위치 + 시각**
+- **위치 = 도면 좌표계(Drawing frame, D)**: tank별 CAD 도면 좌표, 우수 직교, 단위 **m**, z = 화물창 바닥 기준 높이. 주소 = `(tank, level, wall_code)` ([TANK_WALL_LAYOUT.md] 명명). 값 `x,y,z` = 해당 TASK seam 시작점의 도면 좌표(`ref.area_task.start_drawing` / `ref.weld_seam.path_drawing[0]`와 동일 원본).
+  - **월드/맵 좌표(T_W_D 적용 후 `agvPosition` frame)를 대조 키로 쓰지 않는다** — 맵 버전·재보정에 따라 값이 바뀌기 때문. **도면 좌표는 보정 독립·맵버전 독립**이며 검사 S/W(CAD 기반)와 네이티브로 공유된다.
+- **시각 = 로봇(HD_AMR) 클록 도메인, UTC, ISO 8601 밀리초**: `occurred_at` = 해당 액션의 **종료 상태(FINISHED/FAILED)를 보고한 VDA 5050 `state` 메시지의 `timestamp`**(로봇 클록). `state`에 timestamp가 없으면 ACS 수신 시각으로 폴백하되 그 사실을 알 수 있게 둔다.
+  - 검사 S/W도 HD_AMR이 트리거하므로 **동일 클록 도메인**에 놓인다.
+  - **클록 동기화**: 폐쇄망 전 노드(ACS 서버·HD_AMR·검사 S/W)는 이동식 서버의 **단일 NTP 소스**에 동기([ADR-003] 이동식 서버). 대조 시각 허용 오차 **±2s**.
+
+**(4) 저장(ACS 측)**
+- `hist.inspection_result`에 `job_ref`(1차 키), `position`(도면 좌표 jsonb `{tank,level,wall_code,x,y,z}`), `occurred_at`(timestamptz=UTC) 보존. PostgreSQL `timestamptz`는 UTC로 정규화 저장된다.
+
+**결과 (Consequences)**:
+- **대조 절차(리포트)**: ① `jobRef` 완전 일치 우선 — 동일 jobRef 다중 시도는 `occurred_at` 최근접 매칭. ② `jobRef` 미전달 폴백 — 동일 `(tank,level,wall_code)` AND 도면좌표 거리 ε ≤ **0.05 m** AND |Δt| ≤ **2 s**.
+- 두절 구간 이력 재전송([ADR-008] 미결)이 있어도 `jobRef`/`occurred_at`(로봇 클록)은 보존되어 순서·정합이 유지된다.
+- **경계 재확인**: ACS는 여전히 이미지·측정 원본·판정을 저장/조회하지 않는다([ADR-004]). 본 ADR은 **"키 정합"만** 확정한다.
+
+**협의 확인 필요 항목 (HD_AMR / 검사 S/W 측과)**:
+- ① HD_AMR → 검사 S/W 로의 `jobRef` 전달 경로 확보.
+- ② 폐쇄망 단일 NTP 소스(이동식 서버) 채택.
+- ③ 검사 S/W 결과 export 스키마에 `jobRef` + `timestamp`(UTC) + 도면 좌표 포함.
+
+**미해결로 남기는 것**: 월드/맵 좌표계·맵 ID 규약 자체는 여전히 Q6([ADR-008]) 소관. 본 ADR은 **검사 S/W와의 대조 키를 도면 좌표로 못박는 것**까지만 다룬다.
+
+---
+
 ## 미결 질문 목록 (Open Questions)
 
 | # | 항목 | 관련 ADR | 상태/비고 |
 |---|---|---|---|
 | Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ⬜ HD_AMR 운영 S/W 측과 협의 |
-| Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
+| Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004, **013** | ✅ 해소 — **ADR-013**. 1차 키=`jobRef`, 2차=도면 좌표계 위치+로봇 클록 UTC 시각(±2s), 오프라인 사후 대조. `hist.inspection_result.job_ref` 추가 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |
 | Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ✅ 해소 — **HelixToolkit.Wpf** 확정 (HD.Acs.UI에 도입). UI 컨트롤 스위트는 Telerik UI for WPF(Fluent 테마), 전개도는 Canvas 기반 2D. UI DI는 백엔드와 일관되게 MS.DI(Generic Host) 사용 |

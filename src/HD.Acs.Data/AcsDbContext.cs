@@ -155,6 +155,7 @@ public class AcsDbContext : DbContext
             e.HasKey(x => x.ResultId);
             e.HasIndex(x => x.OccurredAt);
             e.HasIndex(x => x.RunId);
+            e.HasIndex(x => x.JobRef);
             e.Property(x => x.Position).HasColumnType("jsonb"); });
 
         mb.Entity<AlarmSpecEntity>(e => { e.ToTable("spec", "alarm"); e.HasKey(x => x.AlarmCode); });

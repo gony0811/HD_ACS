@@ -29,7 +29,7 @@
 | | run.order_action | 액션 스냅샷 — actionId가 state 대조 키 | robot-is-truth |
 | | run.robot_context | 수동 지정 층 vs 로봇 보고 층 분리 보관 + 최신 상태 캐시 | Q9 검증 게이트 |
 | **hist 이력** | hist.transition_log | 상태머신 전이 이벤트 | ADR-010 |
-| | hist.inspection_result | 검사 수행 이력 — 위치+시각 대조 키 보존 | ADR-004, Q2 |
+| | hist.inspection_result | 검사 수행 이력 — job_ref(1차)+도면좌표 위치+시각(2차) 대조 키 | ADR-004, ADR-013 |
 | **alarm** | alarm.spec / alarm.alarm | 알람 정의/발생(cleared_at NULL=활성) | NAMUGA 승계 |
 | **sys** | sys.app_user | 계정/권한 (ADMIN/OPERATOR/VIEWER, user는 PG 예약어라 app_user) | NAMUGA 승계 |
 | | sys.audit_log | 수동 존 변경·비상정지 등 감사 기록 | Q9 |
@@ -69,5 +69,5 @@ erDiagram
 2. **한 미션 = 한 층(map)** — MANUAL_TRANSFER 엣지는 경로계산·Order 제외, RUN이 층 시퀀스 관리
 3. **actionId·sequenceId를 ACS가 발급·보존** — VDA 5050 state와의 대조 키 (재접속 동기화의 기반)
 4. **수동값/보고값 분리** — run.robot_context의 manual_map_id vs reported_map_id, 릴리즈 가드
-5. **위치+시각 대조 키 보존** — hist.inspection_result.position/occurred_at = 검사 S/W 연계 키 [Q2]
+5. **검사 S/W 대조 키 보존** — hist.inspection_result: job_ref(1차)=상관 ID, position(도면 좌표계)+occurred_at(로봇 클록 UTC)=2차 폴백 [ADR-013, Q2 해소]
 6. EF Core code-first + 마이그레이션 채택, `ToTable("ref.node")`로 네이밍 유지, 폐쇄망 배포 시 SQL export
