@@ -258,15 +258,15 @@ standoff 설정: `Acs:Area:StandoffMm`(기본 400) · `Acs:Area:WorkingDistanceM
 
 ## 10. 수용 기준 (DoD)
 
-> v3.1 층 유도(§2 reach_z·§5-A·§8 walls 필터·§9 UI 층 필터) 구현분 체크(2026-08-07). §6·§7(payload·generate) 등 v3 잔여는 별도.
-
-- [x] 전체 솔루션 빌드 0 error (실행 중 App/UI exe 잠금 회피 위해 별도 출력 디렉터리로 검증)
-- [x] 단위 테스트: 면 생성(10면 프레임 직교·단위·모서리 정합) 등 기존 통과 유지
-- [x] 층 유도 테스트(v3.1): FL→L1만·CL→최상층만·수직벽 v구간별 층 판정·경계 걸침 400·
-      도달 불가 400·reach_z 지정 시 밴드 축소·ε 경계 케이스 (`LevelBandsTests` 11건, 전체 44건 통과)
-- [ ] SimTest 3종 PASS (wallNormalW 제거 반영판) — 본 v3.1 범위 밖(무변경)
-- [ ] E2E(시뮬레이터): geometry 등록 → 면 자동 생성 → 영역/작업 등록 → 생성 → Run — PostgreSQL/시뮬레이터 수동
-- [x] `docs/MANUAL.md` 운영 워크플로우 갱신(층 필터·층 유도), `CLAUDE.md` 변경 이력 추가
+- [ ] 전체 솔루션 빌드 0 error
+- [ ] 단위 테스트: 면 생성(10면 프레임 직교·단위·모서리 정합 — 인접 면 공유 모서리 좌표 일치),
+      파라미터 검증(치수 대조·경계), To3D 왕복, 정차점 산출(수직벽/챔퍼/FL 예외), 기존 WP-1·3 테스트 갱신 통과
+- [ ] 층 유도 테스트(v3.1): FL→0층만·CL→최상층만·수직벽 v구간별 층 판정·경계 걸침 400·
+      도달 불가 400·reach_z 지정 시 밴드 축소·ε 경계 케이스
+- [ ] SimTest 3종 PASS (wallNormalW 제거 반영판)
+- [ ] E2E(시뮬레이터): geometry 등록 → 면 자동 생성 확인 → SW-P에 영역 1(작업 2)·BC-S에 영역 1(작업 1)
+      등록 → 생성 → Run 시작 → anchorGroup FULL/SHARED 판정 및 3건 FINISHED
+- [ ] `docs/MANUAL.md` 운영 워크플로우 갱신(파라미터→영역→작업→생성), `CLAUDE.md` 변경 이력 추가
 
 ## 11. 후속 (본 구현 범위 아님)
 

@@ -1,47 +1,292 @@
-# HD_ACS 운영 매뉴얼 — 파라메트릭 선창 · 영역/검사 작업 (SPEC v3)
+# HD_ACS 사용자 매뉴얼
 
-> 대상: 운영자 · 현장 엔지니어. UI = HD.Acs.UI("영역·작업 관리" 패널).
-> 계층: **선창(파라미터) → 벽면(면 자동생성) → 영역 → 검사 작업** [SPEC v3, docs/SPEC_AREA_TASK_MANUAL.md].
-> 관련: 좌표 규약 [TANK_WALL_LAYOUT], 스키마 [DB_SCHEMA]. **현재 구현: §2+§3(선창 3D 정의). 영역/작업(§4~)은 후속.**
+> **대상 독자**: HD_ACS를 설치·실행·운영하려는 개발자/운영자.
+> **문서 성격**: "어떻게 사용하는가" 중심. 코드 구조·향후 개발 방향은 `DEVELOPMENT_GUIDE.md` 참고.
+> 최종 갱신: 2026-08-03 (커밋 `773441e` — seam 슬라이싱 API + WPF 시각화 기준)
 
-## 0. 사전 준비 (층별 1회)
-1. **맵(층) 등록·활성화** — `ref.map`에 tank/level별 활성 맵.
-2. **도면→맵 캘리브레이션(T_W_D)** — "캘리브레이션" 화면에서 기준점 캡처 후 solve(맵버전 일치). (영역/작업 생성 단계에서 필요 — §4 후속.)
+---
 
-## 1. 선창 3D 정의 — 파라미터 등록 → 면 자동생성 (§2/§3, 구현됨)
-- "① 선창 3D 정의"에서 팔각 단면 치수를 입력 → **선창 등록·면 생성**:
-  `길이 L`, `바닥폭 w_floor`, `하부챔퍼 θ_low(°)·h_low`, `수직벽 h_wall`, `상부챔퍼 θ_up(°)·h_up`, `층경계 level_z`(쉼표 구분 z), `도달밴드 reach_z min,max`(선택), `원점보정 ox,oy`(선택).
-- 전역 프레임: 원점=바닥 중심, x=길이, y=폭(+좌현), z=상방, 바닥 z=0 (m). 각도는 수평면 기준.
-- 등록 시 **10면 자동 생성**: `B`(바닥)/`SL`·`PL`(하부챔퍼)/`SM`·`PM`(수직벽)/`SU`·`PU`(상부챔퍼)/`T`(천장)/`F`·`A`(선수·선미 마구리). 각 면은 프레임(원점+u/v축)·크기(u_len×v_len)·내부향 법선·facing_yaw(바닥/천장 B·T는 없음)를 가진다.
-- 유도값 표시: `B`(전폭)=w_floor+2·h_low/tanθ_low, `W_ceil`(천장폭)=B−2·h_up/tanθ_up, `H`(전체높이)=h_low+h_wall+h_up.
-- **검증 실패 시 400 + 사유**: 천장폭 W_ceil≤0, 각도 (0°,90°) 밖, level_z 비오름차순·최상단≥H, (선택)검증치수 대조 5mm 초과.
-- 치수 변경 시 면이 재생성된다. 우측 "② 자동 생성된 면" 목록으로 프레임/크기/facing_yaw를 눈으로 검증.
+## 1. HD_ACS가 무엇인가 (1분 요약)
 
-## 2. 영역·검사 작업 등록 — 벽면-로컬 (u,v) (§4 + v3.1 §5-A/§9, 구현됨)
-- "② 영역 등록"에서 먼저 **층 필터**(L1~L4 드롭다운)를 고른다. 층을 고르면 그 층에서 **도달 가능한 면만** 면 드롭다운에 노출되고(0층 선택 시 천장 T 미표시), 우측 전개도에 그 층의 **도달 가능 v구간이 노랑 밴드로 하이라이트**된다.
-- 이어 **면 드롭다운**으로 면(wall_code)을 고르고 `이름`(면 내 유일), 경계 `u,v min·max`(면 로컬 m)를 입력 → **영역 등록**.
-  - **층은 입력하지 않는다.** 서버가 영역 z범위(면 프레임의 v→전역 z)를 층 도달 밴드와 대조해 **자동 유도**하며, 등록 성공 시 상태 메시지에 `→ 유도 층 L2`처럼 표시된다 [SPEC v3.1 §5-A].
-  - 층 유도 실패는 400으로 거부: `도달 불가 높이`(어떤 층 밴드에도 안 들어감) · `층 경계에 걸침`(영역을 층별로 분할 필요).
-  - 면 범위 `[0, u_len] × [0, v_len]` 안이어야 함(벗어나면 400 — 선택 면의 u_len/v_len은 폼에 안내). `u_min<u_max·v_min<v_max`. 같은 면 내 이름 중복 409.
-  - **바닥(B)·천장(T) 면**은 정차 수평 방향이 없어 "정차 수동 지정"(전역 x,y,θ)이 필요하다(§5 생성 단계). — 체크박스로 입력.
-- 층 도달 밴드는 `level_z`(층 경계 z)와 선택 파라미터 `reach_z_min/max`(코봇 도달 상대높이)로 결정된다. reach_z 미지정 시 밴드 = 층 경계 그대로. (새 프로젝트 팝업에서 입력.)
-- 영역 목록에서 영역 선택 → 우측 **"영역 전개도" (u,v) 캔버스를 클릭**해 용접선 **시작→끝** 지점을 지정(면 범위로 클램프, 좌측 폼 값과 실시간 동기화·점선 미리보기) → "③ 검사 작업 등록"의 **작업 등록**. 숫자 직접 입력도 가능. 시작/끝점은 영역 경계 내부여야 함(400).
-- 캔버스: 영역=녹색 박스 · **정차점=보라 마커(영역 중심)** · 작업=주황 선분(seq).
+HD_ACS는 **HD현대중공업 LNG 화물창 용접검사로봇의 관제 시스템(Mission Control)** 이다.
+로봇을 직접 제어하지 않는다 — 유일한 통신 상대는 로봇 온보드의 **HD_AMR 통합 운영 S/W**이고,
+인터페이스는 **VDA 5050 over MQTT** 하나뿐이다.
 
-## 3. 정차점 규칙 (확정)
-- **정차점 = 영역 중심**. 생성(§7) 시 정차 위치 = `To3D(면, 영역 중심 u,v)`의 도면 `(x,y)`, 정차 방향 = 면 `facing_yaw`. (이전 "법선+standoff"[§5] 안을 대체.)
-- **천장(T) 면**은 중심이 천장 위 점이라 AMR이 갈 수 없으므로 **정차 수동 지정 필수**(바닥 B는 바닥면이라 중심으로 OK).
+```
+운영자(WPF UI / Web) ──REST+SignalR──▶ HD_ACS 서버 (:5100)
+                                          │ VDA 5050 over MQTT (:1883)
+                                          ▼
+                       HD_AMR (로봇 온보드) — AMR 주행·코봇 검사·장비 제어 전담
+```
 
-## 4~. 미션 생성 (§7, 후속)
-- 생성 시 영역=STATION(anchorGroup)·작업=TASK, 위 정차 규칙 + T_W_D로 도면→맵 변환. payload = `seamStartW/EndW`·`drawingPos(u,v 포함)`·`params`(wallNormalW 없음, 툴 자세는 HD_AMR wall_code 티칭). — **다음 단계.**
+역할 분담을 한 문장으로: **ACS는 "어느 지점에서 어떤 검사를 언제", HD_AMR은 "어떻게".**
+검사 시퀀스·자세 제어·BASE 좌표 계산은 전부 로봇 쪽 책임이며 ACS 코드에 절대 넣지 않는다.
 
-## 6. 문제 해결
+핵심 개념 흐름 (PHASE 2 도면 기반 워크플로우):
+
+```
+용접선(Seam) 등록 ─▶ 슬라이싱 ─▶ 스테이션+TASK 생성 ─▶ 시나리오 ─▶ Run 시작
+  (도면 좌표)      (코봇 리치 단위)  (T_W_D로 맵 좌표 변환)              │
+                                                                     ▼
+                              VDA 5050 Order (노드=정차점, 액션=startWeldInspection)
+```
+
+**TASK 불변식** (모든 데이터·UI·통신의 기준): *TASK 1개 = 용접라인 1개의, 코봇 리치 안 1개 구간.*
+따라서 TASK 1 = actionId 1 = 검사결과 1행 = 재시도 단위 1이다.
+
+---
+
+## 2. 솔루션 구성
+
+`src/HD.Acs.sln` — .NET 8, 프로젝트 8개:
+
+| 프로젝트 | 역할 |
+|---|---|
+| `HD.Acs.Core` | 도메인 — MissionStateMachine(Stateless), MapGraph(층 내 Dijkstra), DrawingTransform(T_W_D), SeamSlicer |
+| `HD.Acs.Core.Tests` | xUnit 단위 테스트 (DrawingTransform, SeamSlicer) |
+| `HD.Acs.Data` | EF Core + Npgsql — ref/run/hist/alarm/sys 스키마 엔티티, GraphLoader |
+| `HD.Acs.Vda5050` | VDA 5050 v2.0 메시지, MQTT 마스터 클라이언트(MQTTnet), OrderBuilder |
+| `HD.Acs.App` | **서버 본체** — ASP.NET Core, REST(:5100) + SignalR + VDA 브릿지, 단일 프로세스 [ADR-011] |
+| `HD.Acs.Simulator` | 가상 HD_AMR — Order 수신→노드 순회→액션 실행/보고. 실장비 없이 E2E 검증용 |
+| `HD.Acs.SimTest` | 시뮬레이터 검증 드라이버 (ACS·DB 없이 마스터 역할 수행, 시나리오 S1~S3) |
+| `HD.Acs.UI` | WPF 운영 앱 (**Windows 전용**, net8.0-windows) — Telerik Fluent + HelixToolkit 3D |
+
+MQTT 토픽 규약: `uagv/v2/{manufacturer}/{serialNumber}/{channel}` (channel = order / instantActions / state / connection / factsheet).
+
+---
+
+## 3. 사전 요구사항
+
+- **.NET 8 SDK**
+- **PostgreSQL 16** — 스키마는 `db/schema.sql` (ref/run/hist/alarm/sys, snake_case)
+- **MQTT 브로커** — 로컬 개발은 Mosquitto가 간단. `docker/docker-compose.yml`은 RabbitMQ(MQTT 플러그인, 1883 포트)도 제공
+- **(UI 빌드 시) Windows + Telerik NuGet 피드 자격증명** — Telerik UI for WPF 2025.3.813은 `nuget.telerik.com` 로그인 필요.
+  루트 `nuget.config`는 nuget.org + Telerik 두 소스만 등록하며 **packageSourceMapping을 추가하지 말 것**
+  (Telerik.Licensing은 nuget.org, MediaFoundation은 Telerik 피드로 나뉘어 있어 매핑이 복원을 깨뜨린 이력 있음)
+- Mac/Linux에서는 UI 프로젝트를 제외하고 빌드한다:
+  `dotnet build src/HD.Acs.App` 처럼 프로젝트 단위로 빌드하거나 sln에서 UI 제외
+
+---
+
+## 4. 설치 및 실행
+
+### 4.1 인프라 기동
+
+**방법 A — Docker Compose** (`docker/` 디렉터리, `.env`에 POSTGRES_USER/PASSWORD/DB, RABBITMQ_USER/PASSWORD 정의):
+
+```bash
+cd docker
+docker compose up -d       # PostgreSQL :5432, RabbitMQ :5672/:15672(관리콘솔)/:1883(MQTT)
+```
+
+**방법 B — 로컬 설치**: PostgreSQL + Mosquitto (`brew install mosquitto` / `apt install mosquitto`).
+
+**DB 스키마 적용** (최초 1회, DB명은 appsettings 기본값 기준 `hdacs`):
+
+```bash
+createdb hdacs
+psql -d hdacs -f db/schema.sql
+```
+
+> `schema.sql`에는 `startWeldInspection` 액션 카탈로그 시드가 포함되어 있다.
+> 주행 그래프(ref.map / ref.node / ref.edge)는 현장 데이터로 별도 입력해야 한다 — 층 1개당 ref.map 1행(`map_id` 예: `CT1-L2`).
+
+### 4.2 서버(App) 실행
+
+```bash
+cd src
+dotnet run --project HD.Acs.App        # http://localhost:5100
+```
+
+`HD.Acs.App/appsettings.json` 주요 설정:
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `ConnectionStrings:Default` | localhost/hdacs/postgres | PostgreSQL 연결 |
+| `Acs:Mqtt:Host/Port` | localhost:1883 | MQTT 브로커 |
+| `Acs:Api:ListenPort` | 5100 | REST/SignalR 포트 |
+| `Acs:Calibration:RmsWarnM` | 0.05 | T_W_D 등록 잔차 RMS 경고 임계(m) |
+| `Acs:Slicer:CobotReachM` | 1.0 | 코봇 리치(m) — 슬라이싱 구간 길이 결정 |
+| `Acs:Slicer:OverlapM` | 0.2 | 구간 겹침(m) |
+| `Acs:Slicer:StandoffM` | 0.4 | 벽면→정차점 법선 오프셋(m) |
+| `Acs:Slicer:MergeDistM` | 0.3 | 이 거리 내 정차점은 같은 스테이션(anchorGroup)으로 병합 |
+| `Acs:Slicer:WorkingDistanceMm` | 400 | payload로 전달하는 워킹 디스턴스 |
+
+### 4.3 시뮬레이터(가상 HD_AMR) 실행
+
+```bash
+cd src
+dotnet run --project HD.Acs.Simulator -- localhost HHI AMR-01 CT1-L1
+#                                        │        │   │      └ 초기 mapId(층)
+#                                        │        │   └ serialNumber
+#                                        │        └ manufacturer
+#                                        └ MQTT 브로커 호스트
+```
+
+환경변수 옵션:
+
+| 변수 | 용도 |
+|---|---|
+| `SIM_FAIL_ACTION_IDS` | 콤마 구분 actionId 목록 — 해당 액션을 FAILED로 보고 (재시도 정책 테스트) |
+| `SIM_TRAVEL_MS` / `SIM_FULL_MS` / `SIM_SHARED_MS` | 주행 / 정렬 포함 검사(①~⑧) / 앵커 공유 검사(⑤~⑦) 소요시간(ms) |
+
+시뮬레이터는 `startWeldInspection` 파라미터를 스키마 기준으로 검증하고(위반 시 FAILED + `FAIL;reason=PARAM(...)`),
+같은 `anchorGroupId`가 연속되고 사이에 주행이 없으면 정렬을 스킵한다(⑤~⑦만 수행).
+FINISHED 시 `resultDescription="OK;anchor=FULL|SHARED;jobRef=..."`로 실행 방식을 보고한다.
+
+### 4.4 자동 검증 (SimTest)
+
+ACS 서버·DB 없이 시뮬레이터만 검증하는 원커맨드 스크립트:
+
+```bash
+cd src
+./run_simtest.sh           # mosquitto 기동 → 시뮬레이터(실패주입+고속타이밍) → 3개 시나리오 검증
+```
+
+시나리오: S1 앵커 공유(FULL/FULL/SHARED 순서 검증) · S2 파라미터 위반 검출 · S3 실패 주입.
+exit code 0 = 전체 통과. 실장비 HD_AMR 구현 시 이 시나리오를 그대로 대조 기준으로 재사용할 수 있다.
+
+### 4.5 WPF UI 실행 (Windows)
+
+```bash
+cd src
+dotnet run --project HD.Acs.UI
+```
+
+셸 구성(RadDocking): 좌측 **화물창 뷰**(3D + 전개도, TankView), 우측 운영 패널 탭 —
+로봇 상태 / 미션 / 알람 / 수동 층 변경 / **캘리브레이션(기준점 캡처)** / **슬라이싱(seam→스테이션 시각화)**.
+상단 툴바에 비상정지 버튼. UI는 REST+SignalR만 사용한다(API-First — 서버에 직접 접근하는 로직 없음).
+
+---
+
+## 5. 운영 워크플로우 (도면 기반 검사 한 사이클)
+
+### 단계 0 — 준비물
+층별 `ref.map` + 주행 그래프(ref.node/edge), 용접선의 **도면 좌표**(벽면 전개 기준),
+단면 DXF ID·검사 프로파일 ID(HD_AMR에 사전 배포된 식별자 — 원문은 전송하지 않음).
+
+### 단계 1 — T_W_D 캘리브레이션 (도면↔맵 좌표 정합, 층마다 1회)
+
+ACS는 SLAM 맵 원본을 갖지 않는다. 필요한 것은 층별 2D 강체변환 `T_W_D = (tx, ty, yaw)`뿐이다.
+
+1. AMR을 도면상 위치를 아는 랜드마크 근처로 이동·정차시킨다 (AMR은 state로 pose를 2초마다 보고 중).
+2. UI **캘리브레이션 패널**(또는 API)에서 해당 지점의 **도면 좌표를 입력하고 "기준점 캡처"** —
+   ACS가 로봇 보고 pose(x,y)를 자동으로 짝지어 저장한다. 로봇이 다른 층(mapId 불일치)이면 409로 거부.
+3. 2~3점 반복 — **점 간 거리를 최대화**할 것(가까운 3점보다 먼 2점이 낫다. 층 대각 양끝 권장).
+   3점째는 잔차 검증용이다.
+4. **Solve** 실행 → tx/ty/yaw + 잔차 RMS 확인. RMS가 `RmsWarnM`(기본 5cm) 초과면 경고 — 오등록 의심.
+
+> **맵버전 바인딩**: T_W_D는 `mapId + ref.map.version`에 묶여 저장된다. SLAM 맵을 재생성(version 증가)하면
+> 기존 T_W_D는 자동 무효(404)가 되며 재등록해야 한다. 일상적인 재측위는 무관.
+
+### 단계 2 — 용접선(Seam) 등록
+
+`POST /api/seams`로 도면 좌표 기준 등록. LINE은 시작·끝 2점, POLYLINE은 폴리라인 점열 + 벽면 법선 + 단면 DXF ID + 프로파일 ID.
+
+### 단계 3 — 시나리오 생성 + 슬라이싱
+
+```
+POST /api/scenarios                          { "name": "...", "tankId": "CT1" }
+POST /api/scenarios/{id}/generate-from-seams { "seamIds": [...], "userId": "..." }
+```
+
+서버가 자동으로: seam을 코봇 리치 단위로 슬라이싱 → 구간 중점 + 법선×standoff에 **스테이션**(정차점) 산출 →
+근접 정차점 병합(같은 `anchorGroupId`) → T_W_D로 맵 좌표 변환 → STATION 노드 생성 + 최근접 주행 노드와 TRAVEL 엣지 연결 →
+InspectionPoint(스테이션) + InspectionTask(TASK) 생성. **유효 T_W_D가 없으면 명시적으로 거부된다(조용한 기본값 없음).**
+
+UI **슬라이싱 패널**에서 시나리오별 스테이션/TASK를 도면·맵 좌표로 시각화해 확인할 수 있다
+(`GET /api/scenarios/{id}/stations`).
+
+### 단계 4 — Run 시작·릴리즈
+
+```
+POST /api/runs                       { "scenarioId": "...", "robotId": "AMR-01" }
+```
+
+시나리오는 **층 단위 미션 시퀀스**로 분해된다(한 미션 = 한 층). 릴리즈 가드: 미션의 층 == 로봇이 보고하는 층(mapId)일 때만
+Order 발행 [Q9]. Order는 두절 내성을 위해 전체 Base 선릴리즈된다 [ADR-002] — 통신이 끊겨도 로봇은 계속 실행한다.
+
+**층 전환(수동 절차)**: 한 층 완료 → `WAITING_FLOOR_TRANSFER` → 작업자가 엘리베이터로 로봇 이송 →
+UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 새 층·위치 지정(initPosition 발행) →
+`POST /api/runs/{runId}/release-next`로 다음 층 미션 릴리즈.
+
+### 단계 5 — 모니터링·예외 대응
+
+- 실시간 현황은 SignalR `/hubs/monitoring` → UI 로봇상태/미션 패널에 푸시.
+- 상태의 진실은 항상 로봇(robot-is-truth): ACS는 state 보고의 lastNodeId/actionStates를 actionId로 대조해 DB를 갱신.
+- 통신 두절 시 connection Last Will로 OFFLINE 표시 — 로봇은 릴리즈된 Order를 계속 실행, 복귀 시 state 기준 재동기화.
+- **비상정지**: UI 툴바 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
+  ⚠️ 이는 기능적 정지이며 안전 규격 정지가 아니다 — 인명 안전은 로봇 측 하드웨어 E-Stop 체계가 담당 [ADR-007].
+
+---
+
+## 6. REST API 레퍼런스 (:5100)
+
+### 로봇
+| 메서드/경로 | 설명 |
+|---|---|
+| `GET /api/robots` | 로봇 목록 |
+| `GET /api/robots/{robotId}/context` | 로봇 컨텍스트 — 보고 pose(ReportedX/Y/Theta), 층(mapId), 온라인 여부 |
+| `POST /api/robots/{robotId}/zone` | 수동 층 변경 — `{ mapId, userId, x, y, theta }` → initPosition |
+| `POST /api/robots/{robotId}/emergency-stop` | 비상정지 — `{ userId }` |
+
+### 캘리브레이션 (T_W_D)
+| 메서드/경로 | 설명 |
+|---|---|
+| `POST /api/maps/{mapId}/calibration/points` | 기준점 캡처 — `{ drawingX, drawingY, unit: "mm"\|"m", userId }`. 로봇 보고 층 ≠ mapId면 409 |
+| `GET /api/maps/{mapId}/calibration/points` | 현재 맵버전의 대응쌍 목록 |
+| `DELETE /api/maps/{mapId}/calibration/points/{id}` | 대응쌍 삭제 |
+| `POST /api/maps/{mapId}/calibration/solve` | 최소자승 계산·저장 → `{ tx, ty, yawRad, rmsM, maxResidualM, pointCount, warning? }` |
+| `GET /api/maps/{mapId}/calibration` | 현재 유효 T_W_D (맵버전 불일치 시 404) |
+
+### 용접선·시나리오
+| 메서드/경로 | 설명 |
+|---|---|
+| `POST /api/seams` | seam 등록 — `{ tankId, level, wallCode, seamType?, pathDrawing: [[x,y,z],...], normalDrawing: [nx,ny,nz], sectionDxfId?, profileId?, userId? }` |
+| `GET /api/seams?tankId=&level=` | seam 목록 |
+| `DELETE /api/seams/{seamId}` | seam 삭제 |
+| `GET /api/scenarios` | 시나리오 목록 |
+| `POST /api/scenarios` | 시나리오 생성 — `{ name, tankId }` |
+| `POST /api/scenarios/{scenarioId}/generate-from-seams` | 슬라이싱 실행 — `{ seamIds?, userId? }` → `{ stations, tasks, skipped }` |
+| `GET /api/scenarios/{scenarioId}/stations` | 생성된 스테이션/TASK 조회 (도면·맵 좌표, 전개도 렌더용) |
+
+### 실행
+| 메서드/경로 | 설명 |
+|---|---|
+| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. 층별 미션 분해 + 첫 미션 릴리즈 시도 |
+| `GET /api/runs/{runId}` | Run/미션 상태 조회 |
+| `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |
+
+### 실시간
+| 경로 | 설명 |
+|---|---|
+| `/hubs/monitoring` (SignalR) | 로봇 상태·미션 진행률·알람 푸시 |
+
+---
+
+## 7. 트러블슈팅
+
 | 증상 | 원인/조치 |
 |---|---|
-| 영역 등록 400 "면이 없습니다" | 해당 선창/벽면 미생성 → 선창 파라미터 먼저 등록(새 프로젝트) |
-| 영역 등록 400 "층 유도 실패 — 도달 불가 높이" | 영역 z가 어떤 층 도달 밴드에도 없음 → v 경계 조정 또는 reach_z 확인 |
-| 영역 등록 400 "층 유도 실패 — 층 경계에 걸침" | 영역이 두 층 경계를 가로지름 → 영역을 층별로 분할 |
-| 영역 등록 409 | 같은 면 내 동일 이름 존재 → 이름 변경 |
-| 작업 등록 400 "경계를 벗어났습니다" | 시작/끝점이 영역 사각형 밖 → 좌표 또는 영역 경계 조정 |
-| 미션 생성 400 "유효 T_W_D 없음" | 해당 층 캘리브레이션 필요(0단계) |
-| 미션 생성 400 "정차각 자동 산출 불가" | 정차 위치와 seam 중심이 일치(seam이 영역 중앙) → 영역을 벽쪽으로 확장해 seam이 가장자리에 오게 하거나 `station_theta` 지정 |
+| 기준점 캡처가 409 | 로봇이 보고하는 mapId ≠ 대상 mapId — 로봇 층 확인 또는 수동 층 변경 먼저 |
+| `GET .../calibration`이 404 | T_W_D 미등록이거나 **맵버전 불일치**(맵 재생성됨) — 재캘리브레이션 |
+| generate-from-seams 실패 | 유효 T_W_D 없음(의도된 명시적 실패) — 단계 1 먼저 수행 |
+| Order가 릴리즈되지 않음 | 릴리즈 가드 — 로봇 보고 층과 미션 층 불일치. 시뮬레이터 4번째 인자(mapId)를 미션 층과 맞출 것 |
+| Mac/Linux 빌드 실패 | HD.Acs.UI는 net8.0-windows — 프로젝트 단위 빌드로 제외 |
+| Telerik 패키지 복원 실패 | nuget.telerik.com 자격증명 필요. `nuget.config`에 packageSourceMapping 넣지 말 것 |
+| solve 결과 RMS 경고 | 기준점 오입력 의심 — 점 목록 확인, 점 간 거리를 벌려 재캡처 |
+
+---
+
+## 8. 더 읽을 문서
+
+| 문서 | 내용 |
+|---|---|
+| `CLAUDE.md` | 프로젝트 총람 + Claude Code 작업 원칙 + 변경 이력 (최우선 참조) |
+| `docs/DEVELOPMENT_GUIDE.md` | 구현 현황·설계 불변식·향후 로드맵 (이 매뉴얼의 자매 문서) |
+| `docs/ARCHITECTURE.md` / `ARCHITECTURE_DECISIONS.md` | 아키텍처와 결정 기록(ADR-001~011), 미결 항목(Q1~Q9) |
+| `docs/INSPECTION_SCENARIO.md` | 시나리오 모델·미션 상태머신·실패 정책 |
+| `docs/GRAPH_DATA_MODEL.md` | 그래프/DB 4계층 설계, 층=맵 모델, Order 빌더 규칙 |
+| `docs/DB_SCHEMA.md` + `db/schema.sql` | DB 스키마 카탈로그(ERD)와 통합 DDL |
+| `src/SPEC_PHASE2_ACS.md` | PHASE 2 구현 사양서 (WP-1~5, 수용 기준, payload golden fixture) |
+| `docs/TANK_WALL_LAYOUT.md` | 화물창 전개도·벽면 naming rule (위치 주소 체계) |
