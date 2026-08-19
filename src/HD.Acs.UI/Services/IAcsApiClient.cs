@@ -13,6 +13,7 @@ public interface IAcsApiClient
     Task<RobotContextDto?> GetRobotContextAsync(string robotId, CancellationToken ct = default);
     Task<IReadOnlyList<ScenarioSummaryDto>> GetScenariosAsync(CancellationToken ct = default);
     Task<ScenarioRunDto?> GetRunAsync(Guid runId, CancellationToken ct = default);
+    Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default);
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);

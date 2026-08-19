@@ -50,8 +50,18 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Margin="12,10,12,6"
-                                       Text="{Binding Mission.ProgressSummary}" FontWeight="700" FontSize="14" />
+                            <StackPanel Grid.Row="0" Margin="12,10,12,6">
+                                <TextBlock Text="{Binding Mission.ProgressSummary}" FontWeight="700" FontSize="14" />
+                                <!-- TASK 단위 진행률 (완료/전체·%) -->
+                                <TextBlock Margin="0,6,0,0" FontSize="12" FontWeight="600"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           Text="{Binding Mission.TaskProgressSummary}" />
+                                <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="1"
+                                             Value="{Binding Mission.TaskProgressFraction, Mode=OneWay}"
+                                             Background="{DynamicResource AppWindowBrush}"
+                                             BorderThickness="0"
+                                             Foreground="{DynamicResource AppAccentBrush}" />
+                            </StackPanel>
                             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="8,0,8,8">
                                 <ItemsControl ItemsSource="{Binding Mission.FloorProgress}">
                                     <ItemsControl.ItemTemplate>

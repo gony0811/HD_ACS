@@ -31,6 +31,7 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
+builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
@@ -307,6 +308,12 @@ app.MapGet("/api/runs/{runId:guid}", async (Guid runId, AcsDbContext db) =>
     await db.ScenarioRuns.AsNoTracking().Include(r => r.Missions.OrderBy(m => m.Seq))
         .FirstOrDefaultAsync(r => r.RunId == runId)
         is { } run ? Results.Ok(run) : Results.NotFound());
+
+// TASK 단위 진행률 (완료/전체·%) — 운영 화면 초기 로드·새로고침용 pull. 실시간은 SignalR "RunProgress".
+app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress, AcsDbContext db) =>
+    await db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RunId == runId)
+        ? Results.Ok(await progress.ComputeRunProgressAsync(runId))
+        : Results.NotFound());
 
 // 작업자 수동 층(존) 변경 [Q9] — Operator 권한 필요 (TODO: 인증 미들웨어)
 app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeRequest req, MissionService missions) =>

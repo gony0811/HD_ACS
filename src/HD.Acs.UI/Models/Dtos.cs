@@ -49,6 +49,22 @@ public sealed record MissionProgressDto(
     Guid MissionId,
     string State);
 
+/// <summary>SignalR "RunProgress" 푸시 / GET /api/runs/{id}/progress — Run 단위 TASK 진행률.
+/// Percent = CompletedTasks / TotalTasks × 100 (종결 기준). Completed = Succeeded + Failed.</summary>
+public sealed record RunProgressDto(
+    Guid RunId,
+    int TotalTasks,
+    int ReleasedTasks,
+    int CompletedTasks,
+    int SucceededTasks,
+    int FailedTasks,
+    int PendingTasks,
+    double Percent)
+{
+    /// <summary>0~1 진행바 값.</summary>
+    public double Fraction => TotalTasks > 0 ? (double)CompletedTasks / TotalTasks : 0.0;
+}
+
 /// <summary>GET /api/scenarios 투영.</summary>
 public sealed record ScenarioSummaryDto(
     Guid ScenarioId,

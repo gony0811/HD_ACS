@@ -17,11 +17,13 @@ public sealed class RobotStateService
 {
     private readonly AcsDbContext _db;
     private readonly IHubContext<MonitoringHub> _hub;
+    private readonly ProgressService _progress;
     private readonly ILogger<RobotStateService> _log;
 
-    public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub, ILogger<RobotStateService> log)
+    public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
+        ProgressService progress, ILogger<RobotStateService> log)
     {
-        _db = db; _hub = hub; _log = log;
+        _db = db; _hub = hub; _progress = progress; _log = log;
     }
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
@@ -76,6 +78,17 @@ public sealed class RobotStateService
             robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY, ctx.BatteryPct,
             state.OrderId, state.LastNodeId, state.Driving, Errors = state.Errors.Count
         }, ct);
+
+        // TASK 단위 진행률 푸시 — SaveChanges 이후(종결 상태 반영분)를 집계해 전파.
+        if (mission != null)
+        {
+            var prog = await _progress.ComputeRunProgressAsync(mission.RunId, ct);
+            await _hub.Clients.All.SendAsync("RunProgress", new
+            {
+                prog.RunId, prog.TotalTasks, prog.ReleasedTasks, prog.CompletedTasks,
+                prog.SucceededTasks, prog.FailedTasks, prog.PendingTasks, prog.Percent
+            }, ct);
+        }
     }
 
     public async Task HandleConnectionAsync(RobotRef robot, Vda5050Connection conn, CancellationToken ct = default)

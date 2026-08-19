@@ -29,13 +29,21 @@ public sealed partial class MissionViewModel : ObservableObject
     [ObservableProperty] private string _newScenarioName = "";
     /// <summary>현재 프로젝트 선창 — 시나리오 생성 대상. Shell이 열기/새 프로젝트 시 동기화.</summary>
     [ObservableProperty] private string _tankId = "CT1";
-    /// <summary>층 진행 요약(예: "2 / 4 층 완료"). 검사점 단위 %는 백엔드 미노출 — 층 단위 coarse 집계.</summary>
+    /// <summary>층 진행 요약(예: "2 / 4 층 완료"). 층 단위 coarse 집계.</summary>
     [ObservableProperty] private string _progressSummary = "실행 중 미션 없음";
+
+    /// <summary>TASK 단위 진행률 스냅샷(완료/전체·%). RunProgress 푸시·초기 pull로 갱신.</summary>
+    [ObservableProperty] private RunProgressDto? _taskProgress;
+    /// <summary>TASK 진행 요약(예: "검사 12 / 40 (30%) · 실패 1").</summary>
+    [ObservableProperty] private string _taskProgressSummary = "검사 TASK 대기 중";
+    /// <summary>TASK 진행바 값(0~1).</summary>
+    [ObservableProperty] private double _taskProgressFraction;
 
     public MissionViewModel(IAcsApiClient api, IMonitoringClient monitoring)
     {
         _api = api;
         monitoring.MissionProgressReceived += OnMissionProgress;
+        monitoring.RunProgressReceived += OnRunProgress;
     }
 
     [RelayCommand]
@@ -152,6 +160,11 @@ public sealed partial class MissionViewModel : ObservableObject
             foreach (var m in run.Missions.OrderBy(m => m.Seq))
                 Missions.Add(m);
         RebuildFloorProgress();
+
+        // TASK 단위 진행률 초기 로드(pull) — 이후 실시간 갱신은 RunProgress 푸시가 담당.
+        try { ApplyTaskProgress(run is null ? null : await _api.GetRunProgressAsync(runId)); }
+        catch { /* 진행률 조회 실패는 화면 흐름을 막지 않음 */ }
+
         ReleaseNextCommand.NotifyCanExecuteChanged();
         RefreshCurrentRunCommand.NotifyCanExecuteChanged();
     }
@@ -165,6 +178,28 @@ public sealed partial class MissionViewModel : ObservableObject
             RebuildFloorProgress();
             return;
         }
+    }
+
+    /// <summary>RunProgress 푸시 — 현재 보고 있는 Run의 것만 반영(다른 Run 노이즈 무시).</summary>
+    private void OnRunProgress(object? sender, RunProgressDto p)
+    {
+        if (CurrentRun is null || p.RunId != CurrentRun.RunId) return;
+        ApplyTaskProgress(p);
+    }
+
+    /// <summary>TASK 진행률 스냅샷을 요약 문자열·진행바 값으로 반영.</summary>
+    private void ApplyTaskProgress(RunProgressDto? p)
+    {
+        TaskProgress = p;
+        if (p is null || p.TotalTasks == 0)
+        {
+            TaskProgressSummary = "검사 TASK 대기 중";
+            TaskProgressFraction = 0;
+            return;
+        }
+        var fail = p.FailedTasks > 0 ? $" · 실패 {p.FailedTasks}" : "";
+        TaskProgressSummary = $"검사 {p.CompletedTasks} / {p.TotalTasks} ({p.Percent:0.#}%){fail}";
+        TaskProgressFraction = p.Fraction;
     }
 
     /// <summary>
