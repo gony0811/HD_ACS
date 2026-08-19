@@ -37,6 +37,14 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<ScenarioRunDto>(ct);
     }
 
+    public async Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/runs/{runId}/progress", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<RunProgressDto>(ct);
+    }
+
     public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/runs",

@@ -29,8 +29,6 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
     builder.Configuration["Acs:Mqtt:Host"] ?? "localhost",
     builder.Configuration.GetValue("Acs:Mqtt:Port", 1883)));
 
-builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD.Acs.Core.Planning.GreedyNearestPolicy>();
-builder.Services.AddScoped<InspectionDispatcher>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<SeamPlanningService>();
@@ -317,7 +315,20 @@ app.MapGet("/api/runs/{runId:guid}/work-items", async (Guid runId, AcsDbContext 
         .Select(w => new { w.WorkItemId, w.AreaId, w.MapId, w.X, w.Y, w.Theta, w.Status, w.Attempts })
         .ToListAsync()));
 
+// TASK 단위 진행률 (완료/전체·%) — 운영 화면 초기 로드·새로고침용 pull. 실시간은 SignalR "RunProgress".
+app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress, AcsDbContext db) =>
+    await db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RunId == runId)
+        ? Results.Ok(await progress.ComputeRunProgressAsync(runId))
+        : Results.NotFound());
+
 // 작업자 수동 층(존) 변경 [Q9] — Operator 권한 필요 (TODO: 인증 미들웨어)
+// 검사 작업 큐 조회 (greedy 배차 상태 — 운영 화면 층 진행/오버레이 소스)
+app.MapGet("/api/runs/{runId:guid}/work-items", async (Guid runId, AcsDbContext db) =>
+    Results.Ok(await db.WorkItems.AsNoTracking().Where(w => w.RunId == runId)
+        .OrderBy(w => w.MapId).ThenBy(w => w.Seq)
+        .Select(w => new { w.WorkItemId, w.AreaId, w.MapId, w.X, w.Y, w.Theta, w.Status, w.Attempts })
+        .ToListAsync()));
+
 app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeRequest req, MissionService missions) =>
 {
     await missions.ManualZoneChangeAsync(robotId, req.MapId, req.UserId, req.X, req.Y, req.Theta);

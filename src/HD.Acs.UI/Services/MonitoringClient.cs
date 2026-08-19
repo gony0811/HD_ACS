@@ -22,6 +22,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
     public event EventHandler<RobotStateDto>? RobotStateReceived;
     public event EventHandler<RobotConnectionDto>? RobotConnectionReceived;
     public event EventHandler<MissionProgressDto>? MissionProgressReceived;
+    public event EventHandler<RunProgressDto>? RunProgressReceived;
     public event EventHandler<AlarmDto>? AlarmRaised;
 
     public MonitoringClient(IOptions<AcsOptions> options, ILogger<MonitoringClient> log)
@@ -39,6 +40,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
         _hub.On<RobotStateDto>("RobotState", p => Raise(RobotStateReceived, p));
         _hub.On<RobotConnectionDto>("RobotConnection", p => Raise(RobotConnectionReceived, p));
         _hub.On<MissionProgressDto>("MissionProgress", p => Raise(MissionProgressReceived, p));
+        _hub.On<RunProgressDto>("RunProgress", p => Raise(RunProgressReceived, p));
         _hub.On<AlarmDto>("AlarmRaised", p => Raise(AlarmRaised, p)); // 미발화여도 무해
 
         _hub.Reconnecting += _ => { SetStatus(HubStatus.Reconnecting); return Task.CompletedTask; };
