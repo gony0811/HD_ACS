@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HD.Acs.App.Hubs;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
@@ -327,6 +328,26 @@ async Task<List<AmrTeachingRow>> LoadAmrTeachingRowsAsync(string tankId, AcsDbCo
 app.MapGet("/api/tanks/{tankId}/amr-teaching-table", async (string tankId, AcsDbContext db) =>
     Results.Ok(await LoadAmrTeachingRowsAsync(tankId, db)));
 
+// 노드에 AMR Job/Task 인덱스 등록(쓰기) — 작업자가 티칭 후 회수한 인덱스를 node.metadata.amr 에 병합.
+// jobIndex/taskIndex 가 null 이면 해당 키 제거(등록 해제). gotoMode 미지정 시 jobIndex 있으면 "INDEX".
+app.MapPut("/api/nodes/{nodeId}/amr-mapping", async (string nodeId, AmrMappingRequest req, AcsDbContext db) =>
+{
+    var node = await db.Nodes.FirstOrDefaultAsync(n => n.NodeId == nodeId);
+    if (node is null) return Results.NotFound(new { error = $"node '{nodeId}' 없음" });
+
+    var root = (string.IsNullOrWhiteSpace(node.Metadata) ? null : JsonNode.Parse(node.Metadata)) as JsonObject ?? new JsonObject();
+    var amr = root["amr"] as JsonObject ?? new JsonObject();
+
+    if (req.JobIndex is int ji) amr["jobIndex"] = ji; else amr.Remove("jobIndex");
+    if (req.TaskIndex is int ti) amr["taskIndex"] = ti; else amr.Remove("taskIndex");
+    amr["gotoMode"] = req.GotoMode ?? (req.JobIndex is not null ? "INDEX" : (amr["gotoMode"]?.GetValue<string>() ?? "INDEX"));
+
+    root["amr"] = amr;
+    node.Metadata = root.ToJsonString();
+    await db.SaveChangesAsync();
+    return Results.Ok(ToAmrTeachingRow(node));
+});
+
 app.MapGet("/api/tanks/{tankId}/amr-teaching-table.csv", async (string tankId, AcsDbContext db) =>
 {
     var rows = await LoadAmrTeachingRowsAsync(tankId, db);
@@ -511,6 +532,8 @@ public sealed record AmrTeachingRow(
     double MapX, double MapY, double ThetaRad, double ThetaDeg,
     double? AllowedDevXy, double? AllowedDevTheta,
     int? AmrJobIndex, string? GotoMode);
+/// <summary>PUT /api/nodes/{nodeId}/amr-mapping — AMR Job/Task 인덱스 등록. null=해제.</summary>
+public sealed record AmrMappingRequest(int? JobIndex, int? TaskIndex, string? GotoMode);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);

@@ -28,6 +28,7 @@
             <TextBox Text="{Binding TankId, UpdateSourceTrigger=PropertyChanged}"
                      Width="120" MinHeight="30" VerticalContentAlignment="Center" />
             <telerik:RadButton Content="조회" Margin="8,0,0,0" Command="{Binding LoadCommand}" />
+            <telerik:RadButton Content="변경 저장" Margin="8,0,0,0" Command="{Binding SaveCommand}" />
             <telerik:RadButton Content="CSV 다운로드" Margin="8,0,0,0" Command="{Binding DownloadCsvCommand}" />
             <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" Margin="16,0,0,0"
                        Foreground="{DynamicResource AppMutedTextBrush}" />
@@ -39,21 +40,22 @@
                              CanUserFreezeColumns="False" ShowGroupPanel="False"
                              RowIndicatorVisibility="Collapsed" FontSize="13">
             <telerik:RadGridView.Columns>
-                <telerik:GridViewDataColumn Header="Node ID" DataMemberBinding="{Binding NodeId}" Width="200" />
-                <telerik:GridViewDataColumn Header="맵(층)" DataMemberBinding="{Binding MapId}" Width="90" />
-                <telerik:GridViewDataColumn Header="이름" DataMemberBinding="{Binding Name}" Width="140" />
-                <telerik:GridViewDataColumn Header="X (m)" DataMemberBinding="{Binding MapX, StringFormat=N4}" Width="90" />
-                <telerik:GridViewDataColumn Header="Y (m)" DataMemberBinding="{Binding MapY, StringFormat=N4}" Width="90" />
-                <telerik:GridViewDataColumn Header="θ (rad)" DataMemberBinding="{Binding ThetaRad, StringFormat=N5}" Width="90" />
-                <telerik:GridViewDataColumn Header="θ (deg)" DataMemberBinding="{Binding ThetaDeg, StringFormat=N2}" Width="90" />
-                <telerik:GridViewDataColumn Header="허용편차 XY" DataMemberBinding="{Binding AllowedDevXy, StringFormat=N3}" Width="90" />
-                <telerik:GridViewDataColumn Header="허용편차 θ" DataMemberBinding="{Binding AllowedDevTheta, StringFormat=N3}" Width="90" />
-                <telerik:GridViewDataColumn Header="AMR Job Index" DataMemberBinding="{Binding AmrJobIndex}" Width="110" />
+                <telerik:GridViewDataColumn Header="Node ID" DataMemberBinding="{Binding NodeId}" Width="200" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="맵(층)" DataMemberBinding="{Binding MapId}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="이름" DataMemberBinding="{Binding Name}" Width="140" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="X (m)" DataMemberBinding="{Binding MapX, StringFormat=N4}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="Y (m)" DataMemberBinding="{Binding MapY, StringFormat=N4}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="θ (rad)" DataMemberBinding="{Binding ThetaRad, StringFormat=N5}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="θ (deg)" DataMemberBinding="{Binding ThetaDeg, StringFormat=N2}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="허용편차 XY" DataMemberBinding="{Binding AllowedDevXy, StringFormat=N3}" Width="90" IsReadOnly="True" />
+                <telerik:GridViewDataColumn Header="허용편차 θ" DataMemberBinding="{Binding AllowedDevTheta, StringFormat=N3}" Width="90" IsReadOnly="True" />
+                <!-- 편집 가능: 티칭 후 회수한 Job 인덱스 입력 → [변경 저장]으로 등록 -->
+                <telerik:GridViewDataColumn Header="AMR Job Index" DataMemberBinding="{Binding JobIndex, Mode=TwoWay}" Width="120" IsReadOnly="False" />
             </telerik:RadGridView.Columns>
         </telerik:RadGridView>
 
         <TextBlock Grid.Row="3" Margin="0,8,0,0" FontSize="11.5"
                    Foreground="{DynamicResource AppMutedTextBrush}"
-                   Text="※ AMR Job Index는 티칭 후 회수·등록되는 값입니다. 미등록 시 공란으로 표시됩니다. CSV는 UTF-8(BOM)로 저장됩니다." />
+                   Text="※ 'AMR Job Index' 셀을 더블클릭해 입력한 뒤 [변경 저장]을 누르세요. 저장 값은 node.metadata에 보존되어 이후 order로 HD_AMR에 전달됩니다. CSV는 UTF-8(BOM)로 저장됩니다." />
     </Grid>
 </UserControl>
