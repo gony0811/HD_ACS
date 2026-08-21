@@ -38,8 +38,8 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 |---|---|---|---|
 | 0 | 기반 계약 (버전·토픽·QoS·좌표·보안) | — | ☑ 확정 (2026-08-21) |
 | 1 | connection & state (생존신호·텔레메트리) | 0 | ☑ 확정 (2026-08-21) |
-| 2 | order 프로토콜 (주행 코어) | 1 | ⧗ 다음 |
-| 3 | action 카탈로그 & 생명주기 | 2 | ☐ |
+| 2 | order 프로토콜 (주행 코어) | 1 | ☑ 확정 (2026-08-21) |
+| 3 | action 카탈로그 & 생명주기 | 2 | ⧗ 다음 |
 | 4 | instantActions & 안전 | 3 | ☐ |
 | 5 | error / factsheet / 진단 | 1–4 | ☐ |
 | 6 | 검증 & 적합성 | 전체 | ☐ |
@@ -92,17 +92,19 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 ---
 
-## Phase 2 — order 프로토콜 ⧗ 다음
+## Phase 2 — order 프로토콜 ☑ 확정 (2026-08-21)
 
-- 2.1 orderId / **orderUpdateId** 증가·중복 처리 규칙
-- 2.2 **stitching**(base 확장) 규칙 — 이어붙임 노드 일치 조건
-- 2.3 **horizon**(released=false) 사용 여부·범위
-- 2.4 node/edge 규격: allowedDeviationXY/Theta, actions 위치(node/edge)
-- 2.5 order 검증·**거부** 규칙(부적합 update → error + 미수용)
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 2.1 | orderId / orderUpdateId | **orderId = 미션(층)당 GUID 고유. orderUpdateId = 0부터 정수 단조증가(업데이트·재시도 시 +1).** AGV 수용 규칙: 수신 > 현재 → 수용 / == 현재 → 중복 무시 / < 현재 → **거부(orderUpdateError)** | ☑ |
+| 2.2 | stitching(base 확장) | **운영 기본 = 층당 단일 order** (층 전환은 수동 → 층 간 stitching 없음). 층 내 갱신은 같은 orderId + orderUpdateId 증가. stitch 시 새 order 첫 노드 = 현재 order 마지막 base 노드(nodeId·sequenceId) **일치 요구**, 이미 통과한 노드는 미재전송 | ☑ |
+| 2.3 | horizon(released=false) | **전체 Base 선릴리즈(released=true), horizon 미사용** [ADR-002 일치]. 대형 층 대비 후속 확장 여지만 남김 | ☑ |
+| 2.4 | node/edge 규격 | 모든 node에 **nodePosition(x,y,theta,mapId) 필수**. 기본 편차 **allowedDeviationXY=0.08 m, allowedDeviationTheta=0.07 rad**(스테이션). **actions는 node에만** 부착(정차 액션), edge는 travel 전용(액션 없음). node seq=짝수 / edge seq=홀수 | ☑ |
+| 2.5 | order 검증·거부 | AGV 검증: orderUpdateId 단조성, 그래프 연속성(edge가 인접 node 연결), seq 홀짝, **새 order 첫 노드가 현재 위치와 편차 내**. 위반 시 **미실행 + error 발행**(errorType ∈ {orderUpdateError, validationError, noRouteError}, errorLevel=WARNING). ACS: 거부 error 수신 시 미션 **Aborted** + 알람 | ☑ |
 
 ---
 
-## Phase 3 — action 카탈로그 & 생명주기 <!-- 대기 -->
+## Phase 3 — action 카탈로그 & 생명주기 ⧗ 다음
 
 - 3.1 actionType 집합 확정(주행/검사 `startWeldInspection`/일시정지/재측위/…)
 - 3.2 각 action의 blockingType(HARD/SOFT/NONE) · **파라미터 스키마**
@@ -158,3 +160,8 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 | 1.3 | state 필드 = 운영 서브셋 (loads/maps/zoneSetId 등 제외) | VDA 필수 + 운영 필요분만, 구현·검증 부담 최소 | 2026-08-21 |
 | 1.3b | nodeStates/edgeStates 포함 | order 진행 추적·stitching/horizon 검증 근거 | 2026-08-21 |
 | 1.4 | 재접속=retained state 동기화, 재측위=positionInitialized 보고 | 두절 복구 시 즉시 최신화, 기존 흐름 유지 | 2026-08-21 |
+| 2.1 | orderId=미션당 GUID, orderUpdateId=0부터 단조증가, 역행 update 거부 | VDA 표준, 중복·역행 방지 | 2026-08-21 |
+| 2.2 | 층당 단일 order, 층 간 stitching 없음(수동 층전환) | 현 미션 분해(층=미션)와 정합, 단순성 | 2026-08-21 |
+| 2.3 | 전체 Base 선릴리즈, horizon 미사용 | ADR-002 일치, 초기 단순화 | 2026-08-21 |
+| 2.4 | node에 position 필수·actions는 node에만, edge=travel, 편차 0.08m/0.07rad | 정차 기반 검사 워크플로우, SPEC_PHASE2 기본값 | 2026-08-21 |
+| 2.5 | AGV 검증 위반 시 미실행+error, ACS는 미션 Aborted+알람 | 잘못된 order의 안전 거부 | 2026-08-21 |
