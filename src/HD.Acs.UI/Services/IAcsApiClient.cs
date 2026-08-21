@@ -41,6 +41,9 @@ public interface IAcsApiClient
     Task DeleteSeamAsync(Guid seamId, CancellationToken ct = default);
     Task<(int Stations, int Tasks)> GenerateFromSeamsAsync(Guid scenarioId, CancellationToken ct = default);
     Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default);
+    Task<IReadOnlyList<AmrTeachingRowDto>> GetAmrTeachingTableAsync(string tankId, CancellationToken ct = default);
+    Task<AmrTeachingRowDto?> SetAmrMappingAsync(string nodeId, int? jobIndex, int? taskIndex = null,
+        string? gotoMode = null, CancellationToken ct = default);
 
     // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
     Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,

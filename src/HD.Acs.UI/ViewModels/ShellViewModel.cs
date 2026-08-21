@@ -28,6 +28,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public CalibrationViewModel Calibration { get; }
     public AreaPlanningViewModel AreaPlanning { get; }
     public TankViewModel Tank { get; }
+    public AmrTeachingViewModel AmrTeaching { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
@@ -47,7 +48,8 @@ public sealed partial class ShellViewModel : ObservableObject
         ManualZoneChangeViewModel manualZoneChange,
         CalibrationViewModel calibration,
         AreaPlanningViewModel areaPlanning,
-        TankViewModel tank)
+        TankViewModel tank,
+        AmrTeachingViewModel amrTeaching)
     {
         _monitoring = monitoring;
         _api = api;
@@ -61,6 +63,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Calibration = calibration;
         AreaPlanning = areaPlanning;
         Tank = tank;
+        AmrTeaching = amrTeaching;
 
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();

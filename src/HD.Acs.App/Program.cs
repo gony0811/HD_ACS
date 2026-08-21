@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HD.Acs.App.Hubs;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
@@ -289,6 +290,85 @@ app.MapDelete("/api/seams/{seamId:guid}", async (Guid seamId, AcsDbContext db) =
 app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, SeamPlanningService planning) =>
     Results.Ok(await planning.GetStationsAsync(scenarioId)));
 
+// ── AMR 티칭 참조 테이블 ──────────────────────────────────────────────
+// TARS-M은 좌표 goto가 없고 사전 티칭 Job/Task 인덱스로 이동한다(VDA5050_SPEC_PLAN 부록 A).
+// ACS가 도면 Area→T_W_D로 산출한 STATION 노드(맵 pose)를 표로 제공해, 작업자가 그 pose로
+// AMR을 수동 티칭한 뒤 Job/Task 인덱스를 회수·등록할 수 있게 한다. mapId=`{tank}-L{level}` 규약.
+static AmrTeachingRow ToAmrTeachingRow(HD.Acs.Data.Entities.NodeEntity n)
+{
+    int? jobIndex = null; string? gotoMode = null;
+    if (!string.IsNullOrWhiteSpace(n.Metadata))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(n.Metadata);
+            if (doc.RootElement.TryGetProperty("amr", out var amr))
+            {
+                if (amr.TryGetProperty("jobIndex", out var ji) && ji.ValueKind == JsonValueKind.Number) jobIndex = ji.GetInt32();
+                if (amr.TryGetProperty("gotoMode", out var gm) && gm.ValueKind == JsonValueKind.String) gotoMode = gm.GetString();
+            }
+        }
+        catch { /* 잘못된 metadata는 무시 */ }
+    }
+    var thetaRad = n.Theta ?? 0;
+    return new AmrTeachingRow(n.NodeId, n.MapId, n.Name ?? "", n.X, n.Y, thetaRad,
+        thetaRad * 180.0 / Math.PI, n.AllowedDevXy, n.AllowedDevTheta, jobIndex, gotoMode);
+}
+
+async Task<List<AmrTeachingRow>> LoadAmrTeachingRowsAsync(string tankId, AcsDbContext db)
+{
+    var prefix = tankId + "-L";
+    var nodes = await db.Nodes.AsNoTracking()
+        .Where(n => n.NodeType == "STATION" && n.MapId.StartsWith(prefix))
+        .OrderBy(n => n.MapId).ThenBy(n => n.NodeId)
+        .ToListAsync();
+    return nodes.Select(ToAmrTeachingRow).ToList();
+}
+
+app.MapGet("/api/tanks/{tankId}/amr-teaching-table", async (string tankId, AcsDbContext db) =>
+    Results.Ok(await LoadAmrTeachingRowsAsync(tankId, db)));
+
+// 노드에 AMR Job/Task 인덱스 등록(쓰기) — 작업자가 티칭 후 회수한 인덱스를 node.metadata.amr 에 병합.
+// jobIndex/taskIndex 가 null 이면 해당 키 제거(등록 해제). gotoMode 미지정 시 jobIndex 있으면 "INDEX".
+app.MapPut("/api/nodes/{nodeId}/amr-mapping", async (string nodeId, AmrMappingRequest req, AcsDbContext db) =>
+{
+    var node = await db.Nodes.FirstOrDefaultAsync(n => n.NodeId == nodeId);
+    if (node is null) return Results.NotFound(new { error = $"node '{nodeId}' 없음" });
+
+    var root = (string.IsNullOrWhiteSpace(node.Metadata) ? null : JsonNode.Parse(node.Metadata)) as JsonObject ?? new JsonObject();
+    var amr = root["amr"] as JsonObject ?? new JsonObject();
+
+    if (req.JobIndex is int ji) amr["jobIndex"] = ji; else amr.Remove("jobIndex");
+    if (req.TaskIndex is int ti) amr["taskIndex"] = ti; else amr.Remove("taskIndex");
+    amr["gotoMode"] = req.GotoMode ?? (req.JobIndex is not null ? "INDEX" : (amr["gotoMode"]?.GetValue<string>() ?? "INDEX"));
+
+    root["amr"] = amr;
+    node.Metadata = root.ToJsonString();
+    await db.SaveChangesAsync();
+    return Results.Ok(ToAmrTeachingRow(node));
+});
+
+app.MapGet("/api/tanks/{tankId}/amr-teaching-table.csv", async (string tankId, AcsDbContext db) =>
+{
+    var rows = await LoadAmrTeachingRowsAsync(tankId, db);
+    static string Csv(string? s)
+    {
+        s ??= "";
+        return s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    }
+    var sb = new System.Text.StringBuilder();
+    sb.Append('﻿'); // UTF-8 BOM — Excel 한글 깨짐 방지
+    sb.AppendLine("node_id,map_id,name,map_x,map_y,theta_rad,theta_deg,allowed_dev_xy,allowed_dev_theta,amr_job_index");
+    foreach (var r in rows)
+        sb.AppendLine(string.Join(',',
+            Csv(r.NodeId), Csv(r.MapId), Csv(r.Name),
+            r.MapX.ToString("0.####"), r.MapY.ToString("0.####"),
+            r.ThetaRad.ToString("0.#####"), r.ThetaDeg.ToString("0.##"),
+            r.AllowedDevXy?.ToString("0.###") ?? "", r.AllowedDevTheta?.ToString("0.###") ?? "",
+            r.AmrJobIndex?.ToString() ?? ""));
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", $"{tankId}_amr_teaching_table.csv");
+});
+
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 {
     try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }); }
@@ -446,6 +526,14 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
 app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
+/// <summary>AMR 티칭 참조 테이블 행 — STATION 노드의 맵 pose + (등록됐다면) AMR Job 인덱스.</summary>
+public sealed record AmrTeachingRow(
+    string NodeId, string MapId, string Name,
+    double MapX, double MapY, double ThetaRad, double ThetaDeg,
+    double? AllowedDevXy, double? AllowedDevTheta,
+    int? AmrJobIndex, string? GotoMode);
+/// <summary>PUT /api/nodes/{nodeId}/amr-mapping — AMR Job/Task 인덱스 등록. null=해제.</summary>
+public sealed record AmrMappingRequest(int? JobIndex, int? TaskIndex, string? GotoMode);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);

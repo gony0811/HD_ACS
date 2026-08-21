@@ -58,5 +58,8 @@
         <telerik:RadTabItem Header="캘리브레이션 (T_W_D)">
             <views:CalibrationView DataContext="{Binding Calibration}" />
         </telerik:RadTabItem>
+        <telerik:RadTabItem Header="AMR 티칭 테이블">
+            <views:AmrTeachingView DataContext="{Binding AmrTeaching}" />
+        </telerik:RadTabItem>
     </telerik:RadTabControl>
 </UserControl>
