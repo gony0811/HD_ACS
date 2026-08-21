@@ -53,6 +53,7 @@ public partial class App : Application
         builder.Services.AddSingleton<CalibrationViewModel>();
         builder.Services.AddSingleton<AreaPlanningViewModel>();
         builder.Services.AddSingleton<TankViewModel>();
+        builder.Services.AddSingleton<AmrTeachingViewModel>();
 
         builder.Services.AddSingleton<MainWindow>();
 

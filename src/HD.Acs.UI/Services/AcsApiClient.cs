@@ -167,6 +167,10 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
+    public async Task<IReadOnlyList<AmrTeachingRowDto>> GetAmrTeachingTableAsync(string tankId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<AmrTeachingRowDto>>(
+            $"/api/tanks/{Uri.EscapeDataString(tankId)}/amr-teaching-table", ct) ?? new();
+
     // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
     public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,

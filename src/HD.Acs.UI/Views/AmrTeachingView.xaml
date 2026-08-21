@@ -1,0 +1,59 @@
+<UserControl x:Class="HD.Acs.UI.Views.AmrTeachingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
+    <UserControl.Resources>
+        <Style TargetType="telerik:RadButton">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="12,4" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="14" TextElement.Foreground="{DynamicResource AppTextBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 안내 -->
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   Text="ACS가 도면 영역→맵(T_W_D)으로 산출한 STATION 정차 pose 목록입니다. 이 pose로 AMR을 수동 티칭한 뒤, 부여된 Job/Task 인덱스를 회수·등록하세요. (TARS-M은 좌표 goto가 없어 사전 티칭 인덱스로 이동)" />
+
+        <!-- 툴바 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="선창" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBox Text="{Binding TankId, UpdateSourceTrigger=PropertyChanged}"
+                     Width="120" MinHeight="30" VerticalContentAlignment="Center" />
+            <telerik:RadButton Content="조회" Margin="8,0,0,0" Command="{Binding LoadCommand}" />
+            <telerik:RadButton Content="CSV 다운로드" Margin="8,0,0,0" Command="{Binding DownloadCsvCommand}" />
+            <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" Margin="16,0,0,0"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+        </StackPanel>
+
+        <!-- 그리드 -->
+        <telerik:RadGridView Grid.Row="2" ItemsSource="{Binding Rows}"
+                             AutoGenerateColumns="False" IsReadOnly="True"
+                             CanUserFreezeColumns="False" ShowGroupPanel="False"
+                             RowIndicatorVisibility="Collapsed" FontSize="13">
+            <telerik:RadGridView.Columns>
+                <telerik:GridViewDataColumn Header="Node ID" DataMemberBinding="{Binding NodeId}" Width="200" />
+                <telerik:GridViewDataColumn Header="맵(층)" DataMemberBinding="{Binding MapId}" Width="90" />
+                <telerik:GridViewDataColumn Header="이름" DataMemberBinding="{Binding Name}" Width="140" />
+                <telerik:GridViewDataColumn Header="X (m)" DataMemberBinding="{Binding MapX, StringFormat=N4}" Width="90" />
+                <telerik:GridViewDataColumn Header="Y (m)" DataMemberBinding="{Binding MapY, StringFormat=N4}" Width="90" />
+                <telerik:GridViewDataColumn Header="θ (rad)" DataMemberBinding="{Binding ThetaRad, StringFormat=N5}" Width="90" />
+                <telerik:GridViewDataColumn Header="θ (deg)" DataMemberBinding="{Binding ThetaDeg, StringFormat=N2}" Width="90" />
+                <telerik:GridViewDataColumn Header="허용편차 XY" DataMemberBinding="{Binding AllowedDevXy, StringFormat=N3}" Width="90" />
+                <telerik:GridViewDataColumn Header="허용편차 θ" DataMemberBinding="{Binding AllowedDevTheta, StringFormat=N3}" Width="90" />
+                <telerik:GridViewDataColumn Header="AMR Job Index" DataMemberBinding="{Binding AmrJobIndex}" Width="110" />
+            </telerik:RadGridView.Columns>
+        </telerik:RadGridView>
+
+        <TextBlock Grid.Row="3" Margin="0,8,0,0" FontSize="11.5"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   Text="※ AMR Job Index는 티칭 후 회수·등록되는 값입니다. 미등록 시 공란으로 표시됩니다. CSV는 UTF-8(BOM)로 저장됩니다." />
+    </Grid>
+</UserControl>

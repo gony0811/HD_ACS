@@ -189,6 +189,14 @@ public sealed record WallDto(
     string? Description,
     double[]? ReachableVBand = null);   // v3.1 §8: level 필터 조회 시 [vLo,vHi] 도달 v구간
 
+/// <summary>GET /api/tanks/{tankId}/amr-teaching-table 항목 — STATION 노드 맵 pose + AMR Job 인덱스.
+/// 작업자가 이 pose로 AMR을 수동 티칭한 뒤 Job/Task 인덱스를 회수·등록하는 참조 테이블.</summary>
+public sealed record AmrTeachingRowDto(
+    string NodeId, string MapId, string Name,
+    double MapX, double MapY, double ThetaRad, double ThetaDeg,
+    double? AllowedDevXy, double? AllowedDevTheta,
+    int? AmrJobIndex, string? GotoMode);
+
 /// <summary>GET /api/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
 public sealed record AreaDto(
     Guid AreaId, string TankId, string WallCode, int Level, string Name,
