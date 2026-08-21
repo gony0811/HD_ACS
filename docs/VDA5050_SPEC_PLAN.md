@@ -39,10 +39,12 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 | 0 | 기반 계약 (버전·토픽·QoS·좌표·보안) | — | ☑ 확정 (2026-08-21) |
 | 1 | connection & state (생존신호·텔레메트리) | 0 | ☑ 확정 (2026-08-21) |
 | 2 | order 프로토콜 (주행 코어) | 1 | ☑ 확정 (2026-08-21) |
-| 3 | action 카탈로그 & 생명주기 | 2 | ⧗ 다음 |
-| 4 | instantActions & 안전 | 3 | ☐ |
-| 5 | error / factsheet / 진단 | 1–4 | ☐ |
-| 6 | 검증 & 적합성 | 전체 | ☐ |
+| 3 | action 카탈로그 & 생명주기 | 2 | ☑ 확정 (2026-08-21) |
+| 4 | instantActions & 안전 | 3 | ☑ 확정 (2026-08-21) |
+| 5 | error / factsheet / 진단 | 1–4 | ☑ 확정 (2026-08-21) |
+| 6 | 검증 & 적합성 | 전체 | ☑ 확정 (2026-08-21) |
+
+> **이행 가능성**: HD_AMR(Modbus-TCP) 수준 검토 결과는 **부록 A** 참조. 물리 AMR(TARS-M)은 VDA5050를 직접 말하지 않으며, **HD_AMR이 VDA5050 어댑터(MQTT↔Modbus)** 역할을 맡는 구조로 이행한다.
 
 ---
 
@@ -104,39 +106,88 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 ---
 
-## Phase 3 — action 카탈로그 & 생명주기 ⧗ 다음
+## Phase 3 — action 카탈로그 & 생명주기 ☑ 확정 (2026-08-21)
 
-- 3.1 actionType 집합 확정(주행/검사 `startWeldInspection`/일시정지/재측위/…)
-- 3.2 각 action의 blockingType(HARD/SOFT/NONE) · **파라미터 스키마**
-- 3.3 actionState 생명주기(WAITING→INITIALIZING→RUNNING→PAUSED→FINISHED/FAILED)
-- 3.4 **resultDescription 계약**(성공/실패 표기, 앵커·jobRef 등)
-- 3.5 기존 `ref.action_catalog`·SPEC_PHASE2와 정합
-
----
-
-## Phase 4 — instantActions & 안전 <!-- 대기 -->
-
-- 4.1 instantActions 집합: cancelOrder · startPause/stopPause · initPosition · (커스텀)emergencyStop
-- 4.2 **operatingMode**(AUTOMATIC/SEMIAUTOMATIC/MANUAL/…) 의미·전이
-- 4.3 **safetyState**(protective stop / emergency stop) 매핑
-- 4.4 층 전환(MANUAL_TRANSFER / WAITING_FLOOR_TRANSFER) 흐름 정합
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 3.1 | actionType 집합 | order 노드 액션 = **`startWeldInspection`**(NODE, HARD) 하나로 시작(확장 가능). 주행은 액션 아님(edge=travel). 부하취급(pick/drop) 미사용 | ☑ |
+| 3.2 | blockingType·파라미터 스키마 | `startWeldInspection` = **HARD**(정차 후 실행, 실행 중 주행 금지). actionParameters = **SPEC_PHASE2 §4.1 param_schema 재사용**(jobRef, position{seamStartW,seamEndW,wallNormalW,drawingPos}, params{seamType,sectionDxfId,inspectionProfileId,standoffMm,anchorGroupId,seqInGroup,…}) | ☑ |
+| 3.3 | actionState 생명주기 | **WAITING → RUNNING → FINISHED \| FAILED**, 일시정지 중 **PAUSED**. INITIALIZING 생략(즉시 RUNNING). AMR은 정차만, 액션 실행은 **HD_AMR이 코봇·비전으로 수행** | ☑ |
+| 3.4 | resultDescription 계약 | 성공 `OK;anchor=FULL\|SHARED;jobRef=<jobRef>` / 실패 `FAIL;reason=<CODE>[;detail=<...>]` (Simulator 관측 계약 공식화) | ☑ |
+| 3.5 | ref.action_catalog 정합 | 기존 시드(`startWeldInspection`, scope=NODE, blocking=HARD, param_schema)와 일치 확인 — 신규 충돌 없음 | ☑ |
 
 ---
 
-## Phase 5 — error / factsheet / 진단 <!-- 대기 -->
+## Phase 4 — instantActions & 안전 ☑ 확정 (2026-08-21)
 
-- 5.1 **errorType 카탈로그**(errorLevel WARNING/FATAL, errorReferences 규격)
-- 5.2 **factsheet**(AGV capability) 채택 여부·필드 범위
-- 5.3 진단/로깅·관측 계약
+| # | 결정 항목 | **확정값** (→ TARS-M Modbus 매핑) | 상태 |
+|---|---|---|---|
+| 4.1 | instantActions 집합 | `cancelOrder`(→RobotStop/ExecutionControl 정지, 어댑터가 order 취소·actionStates 정리) · `startPause`(→ExecutionControl 일시정지=3) · `stopPause`(→시작=2) · `initPosition`(→PoseSearch + 어댑터 mapId 설정) · **커스텀 `emergencyStop`**(→RobotStop=1) | ☑ |
+| 4.2 | operatingMode | 사용값 **{AUTOMATIC(기본), MANUAL(조그/카트: WorkStatus=조그·DrivingMode=카트)}**. SEMIAUTOMATIC/SERVICE/TEACHIN 미사용(예약) | ☑ |
+| 4.3 | safetyState | `eStop` = RobotStop 활성 시 **MANUAL**, 아니면 **NONE**. `fieldViolation` = **false 합성**(레지스터 미노출). **규격 안전정지는 로봇측 하드웨어**[ADR-007] | ☑ |
+| 4.4 | 층 전환 | 기존 **WAITING_FLOOR_TRANSFER + ManualZoneChange + initPosition** 흐름 유지. 어댑터가 현재 층을 보유해 `agvPosition.mapId`로 보고(부록 A 제약) | ☑ |
 
 ---
 
-## Phase 6 — 검증 & 적합성 <!-- 대기 -->
+## Phase 5 — error / factsheet / 진단 ☑ 확정 (2026-08-21)
 
-- 6.1 적합성 기준·체크리스트
-- 6.2 통합 시나리오(층전환·재시도·취소·두절 복구) 테스트
-- 6.3 메시지 스키마 검증 방식(JSON Schema 등)
-- 6.4 **최종 사양서** 작성 + AMR 벤더 공유
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 5.1 | errorType 카탈로그 | 최소 집합 = **`validationError`, `orderError`, `orderUpdateError`, `noRouteError`, `robotError`**(TARS-M ErrorCode 래핑). `errorLevel` ∈ {WARNING, FATAL}. `errorReferences` = [{referenceKey, referenceValue}] (orderId·nodeId·actionId 등). **TARS-M ErrorCode→robotError 매핑표는 벤더 코드목록 필요(공개 항목)** | ☑ |
+| 5.2 | factsheet | **채택하되 범위 최소** — factsheetRequest(instantAction) 또는 접속 시 발행. `protocolFeatures.agvActions` = {startWeldInspection, cancelOrder, startPause, stopPause, initPosition}, typeSpecification·physicalParameters(속도/크기)는 **벤더값 TBD** | ☑ |
+| 5.3 | 진단/로깅 | 기존 Serilog + state `information[]` 활용. 관측 계약(resultDescription)은 §3.4 | ☑ |
+
+---
+
+## Phase 6 — 검증 & 적합성 ☑ 확정 (2026-08-21)
+
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 6.1 | 적합성 기준 | 사용 서브셋 기준 메시지 스키마 준수 + order/state 라운드트립 통과 + 어댑터 에뮬레이션(Simulator) 통과 | ☑ |
+| 6.2 | 통합 시나리오 | 층전환(WAITING_FLOOR_TRANSFER→ManualZone→initPosition), 재시도(orderUpdateId+1), cancelOrder, 두절 복구(LWT→재접속→retained state) 필수 통과 | ☑ |
+| 6.3 | 스키마 검증 | 사용 필드 대상 **JSON Schema(draft-07)** 정의, Simulator·어댑터 테스트에서 검증 | ☑ |
+| 6.4 | 최종 사양서·공유 | `docs/VDA5050_INTERFACE_SPEC`(md/Word) 작성 후 AMR 벤더 공유 — **부록 A 공개 항목(맵ID·에러코드·각도규약) 확인 포함** | ☑ |
+
+---
+
+## 부록 A. HD_AMR(Modbus-TCP) 이행 가능성 검토 (2026-08-21)
+
+**대상 AMR**: 아덴트로봇 **TARS-M** (Modbus-TCP). 소스: `HD_AMR/Communication/AmrRegisterMap.cs`, `Service/AMRService.cs`.
+
+### A.1 구조적 결론
+물리 AMR은 **VDA5050/MQTT를 직접 말하지 않는다**(Modbus 레지스터 장치). 따라서 ACS↔AMR VDA5050는
+**HD_AMR이 VDA5050 어댑터(게이트웨이)** 역할을 맡아 성립한다:
+- 북측: MQTT VDA5050 에이전트(order/instantActions 수신, state/connection 발행)
+- 남측: Modbus-TCP 마스터(폴링·포즈 명령) — `AMRService`로 이미 구현됨
+- 노드 액션(startWeldInspection)은 AMR 기능이 아니라 **HD_AMR이 코봇·비전으로 실행**(기존 시퀀스 재사용)
+
+### A.2 매핑 요약
+
+| VDA5050 요소 | TARS-M 대응 | 판정 |
+|---|---|---|
+| 좌표 m·rad, theta CCW | `SetPoseTargetAsync(x,y,angle)` — **X,Y m, Angle rad** 주석 명시 | ✅ 직접 일치 |
+| agvPosition x/y/theta | Input PoseX/Y/Angle (Float32) | ✅ |
+| driving / paused | WorkStatus=이동중 / RobotState=일시정지 | ✅ |
+| batteryState | BatteryLevel%·ChargingState | ✅ |
+| positionInitialized | MapStatus %(임계) | ✅(임계 결정 필요) |
+| order 그래프·상태머신 | 어댑터가 노드별 PoseTarget으로 분해·관리 | ✅ |
+| pause/resume/cancel/eStop | ExecutionControl / RobotStop | ✅ |
+| **mapId(층)** | **레지스터 미노출** | ⚠ 어댑터/수동 층전환으로 보유 |
+| operatingMode / fieldViolation | 미노출 | ⚠ 합성 |
+| errors | RobotError 코드 | ⚠ 벤더 코드표 필요 |
+
+### A.3 공개(확인 필요) 항목
+1. **맵/층 전환·식별 메커니즘** (mapId 게이트 근거) — 최우선.
+2. TARS-M **ErrorCode 목록** → VDA errorType 매핑.
+3. **각도(RZ) 기준·부호** 규약 (맵 X축 CCW 일치 여부).
+4. operatingMode·fieldViolation·factsheet physical/type 파라미터 벤더값.
+5. 이동 모델: **노드별 PoseTarget 분해(권장)** vs 내장 TaskIndex/JobIndex.
+6. **주의**: AMR 레지스터의 TotalTaskCount/CurrentTaskNumber(내비 Task)는 **ACS 검사 TASK 진행률과 별개** — 혼용 금지.
+
+### A.4 신규 의존성
+- HD_AMR 어댑터에 **MQTT 클라이언트(MQTTnet 등)** 추가 필요(현재 비전=TCP, AMR/코봇=Modbus로 MQTT 없음).
+
+**판정**: 결정된 Phase 0~6 사양은 HD_AMR 어댑터로 **이행 가능**. 물리 AMR 한계(맵ID·일부 안전상태 미노출)는 어댑터 합성 또는 기존 수동 층전환으로 우회되어 **치명적 차단 요소 없음**. 남은 것은 벤더 확인 항목(A.3).
 
 ---
 
@@ -165,3 +216,17 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 | 2.3 | 전체 Base 선릴리즈, horizon 미사용 | ADR-002 일치, 초기 단순화 | 2026-08-21 |
 | 2.4 | node에 position 필수·actions는 node에만, edge=travel, 편차 0.08m/0.07rad | 정차 기반 검사 워크플로우, SPEC_PHASE2 기본값 | 2026-08-21 |
 | 2.5 | AGV 검증 위반 시 미실행+error, ACS는 미션 Aborted+알람 | 잘못된 order의 안전 거부 | 2026-08-21 |
+| 3.1 | order 노드 액션 = startWeldInspection(NODE,HARD) 단일 시작 | 검사 워크플로우, 부하취급 없음 | 2026-08-21 |
+| 3.2 | startWeldInspection param = SPEC_PHASE2 §4.1 스키마 재사용 | 기존 정의와 정합 | 2026-08-21 |
+| 3.3 | actionState = WAITING→RUNNING→FINISHED/FAILED(+PAUSED) | AMR 정차·HD_AMR 액션 실행 구조 | 2026-08-21 |
+| 3.4 | resultDescription = OK;anchor=..;jobRef=.. / FAIL;reason=.. | Simulator 관측 계약 공식화 | 2026-08-21 |
+| 3.5 | ref.action_catalog 기존 시드와 일치 | 충돌 없음 | 2026-08-21 |
+| 4.1 | instantActions = cancelOrder/startPause/stopPause/initPosition/emergencyStop → Modbus 매핑 | TARS-M ExecutionControl·RobotStop·PoseSearch 대응 | 2026-08-21 |
+| 4.2 | operatingMode = {AUTOMATIC, MANUAL} 사용 | 자율주행 기본, 조그/카트=MANUAL | 2026-08-21 |
+| 4.3 | safetyState eStop=RobotStop 매핑, fieldViolation=false 합성 | 레지스터 한계, 규격안전=HW[ADR-007] | 2026-08-21 |
+| 4.4 | 층전환 = 기존 수동(ManualZone)+initPosition 흐름 유지 | mapID 미노출 우회(부록 A) | 2026-08-21 |
+| 5.1 | errorType 최소집합 + robotError(TARS-M 코드 래핑) | 벤더 코드표는 공개 항목 | 2026-08-21 |
+| 5.2 | factsheet 채택(범위 최소, agvActions 명시, physical=벤더 TBD) | 능력 광고 표준 | 2026-08-21 |
+| 5.3 | 진단=Serilog+information[], 관측=resultDescription | 기존 자산 재사용 | 2026-08-21 |
+| 6.1–6.4 | 서브셋 스키마 적합성·통합 시나리오·JSON Schema 검증·최종 사양서 벤더 공유 | 적합성 확보·벤더 확인 | 2026-08-21 |
+| 부록 A | HD_AMR=VDA5050 어댑터로 이행 가능, 벤더 확인 항목 6종 | Modbus-TCP 검토 결과 | 2026-08-21 |
