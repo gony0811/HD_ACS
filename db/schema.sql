@@ -156,6 +156,24 @@ ON CONFLICT (action_type) DO UPDATE SET
   blocking_type = EXCLUDED.blocking_type,
   description   = EXCLUDED.description;
 
+-- cobotHome / homeReturn [VDA5050_ACTION_CATALOG] — coarse 노드 액션(전부 NODE, HARD).
+-- cobotHome: 코봇 안전(홈) 자세 복귀. 파라미터 없음(선택: target=HOME|SAFE).
+-- homeReturn: AMR 도킹/홈 복귀. 파라미터 없음(선택: dockId).
+-- ※ '이동 전 코봇 안전자세' 안전 인터록은 카탈로그 액션이 아니라 어댑터 암묵 강제(ACTION_CATALOG §2.1).
+INSERT INTO ref.action_catalog (action_type, scope, blocking_type, param_schema, description)
+VALUES
+  ('cobotHome', 'NODE', 'HARD',
+   '{ "type": "object", "properties": { "target": { "enum": ["HOME", "SAFE"] } } }',
+   '코봇 안전(홈) 자세 복귀'),
+  ('homeReturn', 'NODE', 'HARD',
+   '{ "type": "object", "properties": { "dockId": { "type": "string" } } }',
+   'AMR 도킹/홈 복귀')
+ON CONFLICT (action_type) DO UPDATE SET
+  param_schema  = EXCLUDED.param_schema,
+  scope         = EXCLUDED.scope,
+  blocking_type = EXCLUDED.blocking_type,
+  description   = EXCLUDED.description;
+
 -- ═══════════════════════════ ③ 시나리오 (ref) ═══════════════════════════
 
 CREATE TABLE ref.scenario (
