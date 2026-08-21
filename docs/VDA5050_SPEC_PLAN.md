@@ -111,11 +111,12 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 | # | 결정 항목 | **확정값** | 상태 |
 |---|---|---|---|
-| 3.1 | actionType 집합 | order 노드 액션 = **`startWeldInspection`**(NODE, HARD) 하나로 시작(확장 가능). 주행은 액션 아님(edge=travel). 부하취급(pick/drop) 미사용 | ☑ |
-| 3.2 | blockingType·파라미터 스키마 | `startWeldInspection` = **HARD**(정차 후 실행, 실행 중 주행 금지). actionParameters = **SPEC_PHASE2 §4.1 param_schema 재사용**(jobRef, position{seamStartW,seamEndW,wallNormalW,drawingPos}, params{seamType,sectionDxfId,inspectionProfileId,standoffMm,anchorGroupId,seqInGroup,…}) | ☑ |
+| 3.1 | actionType 집합 | order 노드 액션 = **`startWeldInspection`·`cobotHome`·`homeReturn`**(전부 NODE, HARD). 주행은 액션 아님(edge=travel). 부하취급(pick/drop) 미사용. **코봇 검사 서브스텝(정렬·용접선추적 등)은 미노출** — startWeldInspection 내부에서 HD_AMR 시퀀스 엔진이 실행. 상세: `VDA5050_ACTION_CATALOG.md` | ☑ |
+| 3.2 | blockingType·파라미터 스키마 | 3종 모두 **HARD**(정차 후 실행, 실행 중 주행 금지). `startWeldInspection` actionParameters = **SPEC_PHASE2 §4.1 param_schema 재사용**. `cobotHome`/`homeReturn` = 파라미터 없음(또는 target/dockId) | ☑ |
 | 3.3 | actionState 생명주기 | **WAITING → RUNNING → FINISHED \| FAILED**, 일시정지 중 **PAUSED**. INITIALIZING 생략(즉시 RUNNING). AMR은 정차만, 액션 실행은 **HD_AMR이 코봇·비전으로 수행** | ☑ |
-| 3.4 | resultDescription 계약 | 성공 `OK;anchor=FULL\|SHARED;jobRef=<jobRef>` / 실패 `FAIL;reason=<CODE>[;detail=<...>]` (Simulator 관측 계약 공식화) | ☑ |
-| 3.5 | ref.action_catalog 정합 | 기존 시드(`startWeldInspection`, scope=NODE, blocking=HARD, param_schema)와 일치 확인 — 신규 충돌 없음 | ☑ |
+| 3.4 | resultDescription 계약 | 성공 `OK;anchor=FULL\|SHARED;jobRef=<jobRef>` / 실패 `FAIL;reason=<CODE>[;detail=<...>]`(예: PARAM·COBOT_HOME·VISION·MOVE_TIMEOUT) | ☑ |
+| 3.5 | ref.action_catalog 정합 | 기존 시드(`startWeldInspection`)에 `cobotHome`·`homeReturn` 추가. scope=NODE, blocking=HARD | ☑ |
+| 3.6 | 안전 인터록 | **이동 전 코봇 안전(홈) 자세 필수** — 어댑터가 모든 주행 전 자동 보장(암묵 강제; HD_AMR `AmrMoveStep.EnsureCobotAtHome` 재사용), 실패 시 이동 미실행+error(safetyInterlock/robotError). HARD 액션 실행 중 주행 금지. 상세: `VDA5050_ACTION_CATALOG.md §2` | ☑ |
 
 ---
 
