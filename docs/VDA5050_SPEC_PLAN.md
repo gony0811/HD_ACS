@@ -37,8 +37,8 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 | Phase | 주제 | 의존 | 상태 |
 |---|---|---|---|
 | 0 | 기반 계약 (버전·토픽·QoS·좌표·보안) | — | ☑ 확정 (2026-08-21) |
-| 1 | connection & state (생존신호·텔레메트리) | 0 | ⧗ 다음 |
-| 2 | order 프로토콜 (주행 코어) | 1 | ☐ |
+| 1 | connection & state (생존신호·텔레메트리) | 0 | ☑ 확정 (2026-08-21) |
+| 2 | order 프로토콜 (주행 코어) | 1 | ⧗ 다음 |
 | 3 | action 카탈로그 & 생명주기 | 2 | ☐ |
 | 4 | instantActions & 안전 | 3 | ☐ |
 | 5 | error / factsheet / 진단 | 1–4 | ☐ |
@@ -67,16 +67,32 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 ---
 
-## Phase 1 — connection & state ⧗ 다음
+## Phase 1 — connection & state ☑ 확정 (2026-08-21)
 
-- 1.1 connection: ONLINE(retained) + **Last Will**(CONNECTIONBROKEN) + OFFLINE(정상종료) 절차
-- 1.2 state 발행 트리거: 변화 시 즉시 + 주기(N초) — N 확정
-- 1.3 state 필수 필드 범위: operatingMode, paused, nodeStates/edgeStates, batteryState, agvPosition, velocity, safetyState, errors, information, driving, distanceSinceLastNode …
-- 1.4 재접속/재측위 후 상태 동기화 규칙
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 1.1 | connection 생명주기 | **ONLINE(retained)** 발행 / MQTT **Last Will = CONNECTIONBROKEN(retained)** / 정상 종료 시 **명시적 OFFLINE(retained)** 발행 후 종료 (의도적 종료 vs 비정상 두절 구분 가능) | ☑ |
+| 1.2 | state 발행 트리거 | **변화 발생 시 즉시 발행 + 주기 heartbeat 2초** | ☑ |
+| 1.3 | state 필드 범위 | **운영 서브셋** (아래 목록). loads·maps·zoneSetId 등 미사용 필드 제외 | ☑ |
+| 1.3b | nodeStates/edgeStates | **포함** — AGV가 아직 통과하지 않은 남은 node/edge 보고 (order 진행 추적·stitching 검증 근거) | ☑ |
+| 1.4 | 재접속·재측위 동기화 | ACS 재구독 시 **retained state로 즉시 동기화** / `initPosition` 후 AGV `agvPosition.positionInitialized=true` 보고로 재측위 확인 | ☑ |
+
+### 1.3 state 운영 서브셋 필드 목록 (확정)
+
+- **헤더**: headerId, timestamp, version, manufacturer, serialNumber
+- **주문 진행**: orderId, orderUpdateId, lastNodeId, lastNodeSequenceId, **nodeStates[]**, **edgeStates[]**, actionStates[]
+- **운행 상태**: driving, paused, operatingMode(AUTOMATIC/SEMIAUTOMATIC/MANUAL/SERVICE/TEACHIN)
+- **위치**: agvPosition {x, y, theta, mapId, positionInitialized} (z 미사용 — Phase 0.5)
+- **전원**: batteryState {batteryCharge, charging}
+- **안전**: safetyState {eStop, fieldViolation}
+- **진단**: errors[], information[]
+- *제외(현 미사용)*: loads[], maps[], zoneSetId, velocity, distanceSinceLastNode, newBaseRequest — 필요 시 후속 확장.
+
+> 참고: 위 확정에 따라 `Vda5050State`/`AgvPosition` 모델 및 Simulator 발행부를 확장한다(구현 단계).
 
 ---
 
-## Phase 2 — order 프로토콜 <!-- 대기 -->
+## Phase 2 — order 프로토콜 ⧗ 다음
 
 - 2.1 orderId / **orderUpdateId** 증가·중복 처리 규칙
 - 2.2 **stitching**(base 확장) 규칙 — 이어붙임 노드 일치 조건
@@ -137,3 +153,8 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 | 0.7 | timestamp ISO8601 UTC(O), headerId 채널별 단조증가 | 현 헤더 구현 일치, VDA 관례 | 2026-08-21 |
 | 0.8 | 보안(TLS/인증)은 브로커 배포 시 확정 | 폐쇄망 전제, 프로토콜 사양과 독립 | 2026-08-21 |
 | 0.9 | 로봇 식별 = ref.robot Manufacturer·SerialNumber | 토픽 요소 소스 단일화 | 2026-08-21 |
+| 1.1 | connection ONLINE/CONNECTIONBROKEN(Last Will)/명시적 OFFLINE, 전부 retained | 의도적 종료와 비정상 두절 구분 | 2026-08-21 |
+| 1.2 | state = 변화 시 즉시 + 2초 heartbeat | 위치 추적 부드러움과 부하의 균형, 현 시뮬레이터 일치 | 2026-08-21 |
+| 1.3 | state 필드 = 운영 서브셋 (loads/maps/zoneSetId 등 제외) | VDA 필수 + 운영 필요분만, 구현·검증 부담 최소 | 2026-08-21 |
+| 1.3b | nodeStates/edgeStates 포함 | order 진행 추적·stitching/horizon 검증 근거 | 2026-08-21 |
+| 1.4 | 재접속=retained state 동기화, 재측위=positionInitialized 보고 | 두절 복구 시 즉시 최신화, 기존 흐름 유지 | 2026-08-21 |
