@@ -36,8 +36,8 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 | Phase | 주제 | 의존 | 상태 |
 |---|---|---|---|
-| 0 | 기반 계약 (버전·토픽·QoS·좌표·보안) | — | ⧗ 진행중 |
-| 1 | connection & state (생존신호·텔레메트리) | 0 | ☐ |
+| 0 | 기반 계약 (버전·토픽·QoS·좌표·보안) | — | ☑ 확정 (2026-08-21) |
+| 1 | connection & state (생존신호·텔레메트리) | 0 | ⧗ 다음 |
 | 2 | order 프로토콜 (주행 코어) | 1 | ☐ |
 | 3 | action 카탈로그 & 생명주기 | 2 | ☐ |
 | 4 | instantActions & 안전 | 3 | ☐ |
@@ -46,27 +46,28 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 ---
 
-## Phase 0 — 기반 계약 <!-- 진행중 -->
+## Phase 0 — 기반 계약 ☑ 확정 (2026-08-21)
 
-전 단계가 의존하는 최상위 규약. 여기 확정 후 좌표/토픽/QoS 재논의를 없앤다.
+전 단계가 의존하는 최상위 규약. 아래 확정값을 이후 단계의 전제로 사용한다.
 
-| # | 결정 항목 | 선택지 | 권장(초안) | 상태 |
-|---|---|---|---|---|
-| 0.1 | 프로토콜 버전 | v2.0.0 고정 / 다버전 | **v2.0.0 고정** (현 구현 일치) | ☐ |
-| 0.2 | 토픽 스킴 | `uagv/v2/{mfr}/{serial}/{ch}` 유지 / 변경 | **유지** (interface prefix=uagv, ver=v2) | ☐ |
-| 0.3 | QoS | 0 / 1 / 2 (채널별) | **QoS 1** 전 채널 (현 state/conn 일치) | ☐ |
-| 0.4 | Retained 정책 | connection·state·order 각각 | **connection=retained, state=retained, order/instantActions=non-retained** | ☐ |
-| 0.5 | 좌표·단위 | m/rad, theta 기준 | **m·rad, theta=맵 X축 기준 CCW, z 미사용(평면)** | ☐ |
-| 0.6 | mapId 의미 | 층=맵 바인딩 규칙 | **mapId = 층(floor) 1:1**, 형식 `{tank}-L{level}` | ☐ |
-| 0.7 | 시각·헤더 | timestamp 포맷·headerId 규칙 | **ISO8601 UTC(`O`), headerId 채널별 단조증가** | ☐ |
-| 0.8 | MQTT 브로커·보안 | 호스트·포트·TLS·인증 | **폐쇄망, TLS/인증은 브로커단(추후 확정)** | ☐ |
-| 0.9 | 로봇 식별 | manufacturer/serialNumber 소스 | **ref.robot(Manufacturer·SerialNumber) = 토픽 요소** | ☐ |
+| # | 결정 항목 | **확정값** | 상태 |
+|---|---|---|---|
+| 0.1 | 프로토콜 버전 | **VDA 5050 v2.0.0 고정** | ☑ |
+| 0.2 | 토픽 스킴 | **`uagv/v2/{manufacturer}/{serialNumber}/{channel}`** (channel = order·instantActions·state·connection[·factsheet]) | ☑ |
+| 0.3 | QoS | **전 채널 QoS 1 (AtLeastOnce)** | ☑ |
+| 0.4 | Retained 정책 | **connection = retained, state = retained, order·instantActions = non-retained** | ☑ |
+| 0.5 | 좌표·단위 | **m · rad, theta = 맵 X축 기준 CCW, z 미사용(2D 평면, z=0)** — position은 x·y·theta | ☑ |
+| 0.6 | mapId 의미 | **mapId = 층(floor) 1:1, 형식 `{tank}-L{level}`** (예: `CT1-L2`) | ☑ |
+| 0.7 | 시각·헤더 | **timestamp = ISO 8601 UTC(`O`), headerId = 채널별 단조증가** | ☑ |
+| 0.8 | MQTT 브로커·보안 | **폐쇄망 전제. TLS/인증(mTLS or user/pass)은 브로커 배포 시점에 확정** (프로토콜 사양은 보안과 독립 진행) | ☑ |
+| 0.9 | 로봇 식별 | **`ref.robot`의 Manufacturer·SerialNumber = 토픽 요소** | ☑ |
 
-**산출물**: 본 문서 Phase 0 절 확정 + `appsettings.json`(Acs:Mqtt, Acs:Vda) 정합.
+**후속 반영(구현 단계에서)**: 0.4 retained 플래그를 `Vda5050MasterClient`/AMR 발행부에 반영,
+`appsettings.json`(Acs:Mqtt, Acs:Vda) 정합. z 미사용에 따라 position 필드는 x·y·theta로 한정.
 
 ---
 
-## Phase 1 — connection & state <!-- 대기 -->
+## Phase 1 — connection & state ⧗ 다음
 
 - 1.1 connection: ONLINE(retained) + **Last Will**(CONNECTIONBROKEN) + OFFLINE(정상종료) 절차
 - 1.2 state 발행 트리거: 변화 시 즉시 + 주기(N초) — N 확정
@@ -127,4 +128,12 @@ action 카탈로그·생명주기 · instantActions 집합 · error 카탈로그
 
 | 항목 | 결정 | 근거 | 일자 |
 |---|---|---|---|
-| — | (아직 없음) | | |
+| 0.1 | VDA 5050 v2.0.0 고정 | 현 구현(Version="2.0.0") 일치, 단일 버전 운용 | 2026-08-21 |
+| 0.2 | 토픽 `uagv/v2/{mfr}/{serial}/{ch}` 유지 | 현 `Vda5050Topics` 일치 | 2026-08-21 |
+| 0.3 | 전 채널 QoS 1 | 현 state/connection 구독 QoS1 일치, 명령 유실 방지 | 2026-08-21 |
+| 0.4 | connection=retained, state=retained, order/instantActions=non-retained | 재접속 시 즉시 최신 상태/생존신호 수신, 명령은 재전달 금지 | 2026-08-21 |
+| 0.5 | m·rad, theta=맵 X축 CCW, z 미사용(2D) | 층별 맵이 2D 평면, 현 데이터 모델 일치 | 2026-08-21 |
+| 0.6 | mapId=`{tank}-L{level}` | 기존 코드·데이터(CT1-L2) 및 tank+level 유도 규칙과 정합 | 2026-08-21 |
+| 0.7 | timestamp ISO8601 UTC(O), headerId 채널별 단조증가 | 현 헤더 구현 일치, VDA 관례 | 2026-08-21 |
+| 0.8 | 보안(TLS/인증)은 브로커 배포 시 확정 | 폐쇄망 전제, 프로토콜 사양과 독립 | 2026-08-21 |
+| 0.9 | 로봇 식별 = ref.robot Manufacturer·SerialNumber | 토픽 요소 소스 단일화 | 2026-08-21 |
