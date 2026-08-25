@@ -31,6 +31,9 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddScoped<MissionService>();
+builder.Services.AddScoped<ProgressService>();
+builder.Services.AddScoped<InspectionDispatcher>();
+builder.Services.AddSingleton<IInspectionOrderingPolicy, GreedyNearestPolicy>();  // 순수 정책(무상태)
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();

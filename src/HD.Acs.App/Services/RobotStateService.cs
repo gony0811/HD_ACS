@@ -21,12 +21,10 @@ public sealed class RobotStateService
     private readonly ProgressService _progress;
     private readonly ILogger<RobotStateService> _log;
 
-    public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub, InspectionDispatcher dispatcher, ILogger<RobotStateService> log)
     public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
-        ProgressService progress, ILogger<RobotStateService> log)
+        InspectionDispatcher dispatcher, ProgressService progress, ILogger<RobotStateService> log)
     {
-        _db = db; _hub = hub; _dispatcher = dispatcher; _log = log;
-        _db = db; _hub = hub; _progress = progress; _log = log;
+        _db = db; _hub = hub; _dispatcher = dispatcher; _progress = progress; _log = log;
     }
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
