@@ -7,6 +7,7 @@ using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
+using HD.Acs.Vda5050.Messages;
 using Microsoft.EntityFrameworkCore;
 
 namespace HD.Acs.App.Services;
@@ -141,24 +142,20 @@ public sealed class MissionService
 
                 if (t.ActionType == "startWeldInspection")
                 {
-                    // 도면 좌표 → 유효 T_W_D 적용한 월드 position + 발행 직전 스키마 검증 [WP-3 §4.2]
+                    // 도면 좌표 → 유효 T_W_D 적용한 맵 좌표 actionParameters + 발행 직전 스키마 검증 [§6 계약]
                     var d = ParseWeldDrawing(t.Position);
-                    var worldPos = WeldInspectionPayload.BuildPosition(weldTransform!, d);
-                    var paramsNode = t.Params is null ? null : JsonNode.Parse(t.Params);
-                    var actionParams = WeldInspectionPayload.BuildActionParameters(t.JobRef ?? "", worldPos, paramsNode);
+                    var actionParams = WeldInspectionPayload.BuildActionParameters(weldTransform!, d);
 
                     var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
                     if (violations.Count > 0)
                     {
-                        _log.LogWarning("릴리즈 중단 — mission {Mission} / {Job} payload 스키마 위반: {V}",
-                            mission.MissionId, t.JobRef, string.Join("; ", violations));
+                        _log.LogWarning("릴리즈 중단 — mission {Mission} / {Wall} payload 스키마 위반: {V}",
+                            mission.MissionId, d.WallCode, string.Join("; ", violations));
                         throw new WeldPayloadSchemaException(violations);
                     }
 
-                    parameters["jobRef"] = t.JobRef;
-                    parameters["position"] = actionParams["position"]!.DeepClone();
-                    parameters["params"] = actionParams["params"]!.DeepClone();
-                    historyPos = worldPos.ToJsonString();   // 실제 발행한 월드 좌표 보존
+                    foreach (var kv in actionParams) parameters[kv.Key] = kv.Value?.DeepClone();   // flat 계약 키 전개
+                    historyPos = actionParams.ToJsonString();   // 실제 발행한 맵 좌표 보존
                 }
                 else
                 {
@@ -215,6 +212,69 @@ public sealed class MissionService
         await _db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// 수동 지점 이동 [2D 평면도 우클릭 "여기로 이동"] — 도면 좌표로 단일 노드 Order 발행.
+    /// 층 게이트: 로봇 보고 mapId == 대상 mapId 일 때만 이동(다른 층이면 FloorMismatchException, 이동 금지).
+    /// 도면→맵 변환: 대상 맵의 유효 T_W_D(맵버전 일치)가 있으면 적용, 없으면 항등(도면≈맵 placeholder — 3D 마커와 동일).
+    /// 경로 계획·자세는 HD_AMR 책임 — ACS는 목표 지점만 전달한다.
+    /// </summary>
+    public async Task<(double MapX, double MapY)> ManualGotoAsync(
+        string robotId, string mapId, double drawingX, double drawingY, double? theta, string userId,
+        CancellationToken ct = default)
+    {
+        var robot = await _db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId, ct)
+                    ?? throw new InvalidOperationException($"robot '{robotId}' 없음.");
+        var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
+
+        // ── 층 게이트: 로봇이 대상 층을 보고 중일 때만 이동 허용 (다른 층이면 이동 금지)
+        var reported = ctx?.ReportedMapId;
+        if (!string.Equals(reported, mapId, StringComparison.OrdinalIgnoreCase))
+            throw new FloorMismatchException(reported, mapId);
+
+        // ── 도면 좌표 → 맵 좌표 (유효 캘리브레이션 있으면 적용)
+        double mapX = drawingX, mapY = drawingY;
+        var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct);
+        if (map is not null)
+        {
+            var cal = await _db.MapCalibrations.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.MapId == mapId && c.MapVersion == map.Version, ct);
+            if (cal is not null)
+                (mapX, mapY) = new DrawingTransform(cal.Tx, cal.Ty, cal.YawRad).DrawingToMap(drawingX, drawingY);
+        }
+
+        double th = theta ?? ctx?.ReportedTheta ?? 0;
+
+        // ── 단일 노드 Order (액션 없음 = 순수 이동). 경로 계획은 HD_AMR.
+        var order = new Vda5050Order
+        {
+            OrderId = $"GOTO-{Guid.NewGuid():N}",
+            OrderUpdateId = 0,
+            Nodes =
+            {
+                new OrderNode
+                {
+                    NodeId = "goto-target",
+                    SequenceId = 0,
+                    Released = true,
+                    NodePosition = new NodePosition { X = mapX, Y = mapY, Theta = th, MapId = mapId }
+                }
+            }
+        };
+        await _vda.PublishOrderAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = userId, Action = "MANUAL_GOTO", Target = robotId,
+            Detail = JsonSerializer.Serialize(new
+            {
+                mapId, drawing = new { x = drawingX, y = drawingY }, map = new { x = mapX, y = mapY }, theta = th
+            })
+        });
+        await _db.SaveChangesAsync(ct);
+        _log.LogInformation("수동 이동 — {Robot} → ({X:F2},{Y:F2}) @ {Map}", robotId, mapX, mapY, mapId);
+        return (mapX, mapY);
+    }
+
     /// <summary>작업자 수동 층(존) 변경 [Q9] — 감사 로그 + initPosition 전송</summary>
     public async Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
         double x, double y, double theta, CancellationToken ct = default)
@@ -260,5 +320,18 @@ public sealed class MissionService
         return graph.Nodes.Values
             .OrderBy(n => Math.Pow(n.X - rx, 2) + Math.Pow(n.Y - ry, 2))
             .FirstOrDefault()?.NodeId;
+    }
+}
+
+/// <summary>수동 이동 층 게이트 위반 — 로봇 보고 층 ≠ 대상 층(이동 금지). 엔드포인트가 409로 매핑.</summary>
+public sealed class FloorMismatchException : Exception
+{
+    public string? ReportedMapId { get; }
+    public string RequestedMapId { get; }
+    public FloorMismatchException(string? reported, string requested)
+        : base($"로봇이 대상 층에 있지 않아 이동할 수 없습니다. (로봇 현재 층: {reported ?? "미보고"} ≠ 대상 층: {requested})")
+    {
+        ReportedMapId = reported;
+        RequestedMapId = requested;
     }
 }

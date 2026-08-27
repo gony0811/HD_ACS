@@ -338,6 +338,20 @@ app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeReque
     return Results.Ok();
 });
 
+// 수동 지점 이동 — 2D 평면도 우클릭 "여기로 이동". 층 불일치 시 이동 금지(409).
+app.MapPost("/api/robots/{robotId}/goto", async (string robotId, GotoRequest req, MissionService missions) =>
+{
+    try
+    {
+        var (mx, my) = await missions.ManualGotoAsync(robotId, req.MapId, req.X, req.Y, req.Theta, req.UserId);
+        return Results.Ok(new { mapX = mx, mapY = my });
+    }
+    catch (FloorMismatchException ex)
+    { return Results.Conflict(new { error = ex.Message, reportedMapId = ex.ReportedMapId, requestedMapId = ex.RequestedMapId }); }
+    catch (InvalidOperationException ex)
+    { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 // 비상정지 — 기능적 정지 (안전 규격 정지는 로봇측 하드웨어 [ADR-007])
 app.MapPost("/api/robots/{robotId}/emergency-stop",
     async (string robotId, EmergencyStopRequest req, AcsDbContext db, Vda5050MasterClient vda) =>
@@ -450,6 +464,7 @@ app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
+public sealed record GotoRequest(string MapId, double X, double Y, double? Theta, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);

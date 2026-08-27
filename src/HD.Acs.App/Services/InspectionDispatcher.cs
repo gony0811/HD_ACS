@@ -101,14 +101,12 @@ public sealed class InspectionDispatcher
                 var startD = pose.LocalToDrawing(t.StartU, t.StartV);
                 var endD = pose.LocalToDrawing(t.EndU, t.EndV);
                 var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD);
-                var worldPos = WeldInspectionPayload.BuildPosition(lv.T, d);
+                var actionParams = WeldInspectionPayload.BuildActionParameters(lv.T, d);   // wallId·seamStart/End·orientation·patternType
                 actionsJson.Add(new JsonObject
                 {
                     ["actionType"] = "startWeldInspection",
-                    ["taskId"] = t.TaskId.ToString(),
-                    ["jobRef"] = t.ProfileId,
-                    ["position"] = worldPos,
-                    ["params"] = new JsonObject(),
+                    ["taskId"] = t.TaskId.ToString(),   // 내부 대조용(AMR 미전송)
+                    ["params"] = actionParams,          // §6 계약 actionParameters(flat)
                 });
             }
 
@@ -196,9 +194,11 @@ public sealed class InspectionDispatcher
             {
                 ActionType = o["actionType"]!.GetValue<string>(), ActionId = actionId.ToString(), BlockingType = "HARD",
             };
-            vda.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = o["jobRef"]?.GetValue<string>() ?? "" });
-            vda.ActionParameters.Add(new ActionParameter { Key = "position", Value = o["position"]?.DeepClone() });
-            vda.ActionParameters.Add(new ActionParameter { Key = "params", Value = o["params"]?.DeepClone() ?? new JsonObject() });
+            // §6 계약: params(flat)의 각 키를 actionParameter로 전개(wallId·seamStart/End·orientation·patternType)
+            var prms = o["params"]?.AsObject();
+            if (prms is not null)
+                foreach (var kv in prms)
+                    vda.ActionParameters.Add(new ActionParameter { Key = kv.Key, Value = kv.Value?.DeepClone() });
             node.Actions.Add(vda);
 
             Guid? taskId = Guid.TryParse(o["taskId"]?.GetValue<string>(), out var tid) ? tid : null;
@@ -206,7 +206,7 @@ public sealed class InspectionDispatcher
             {
                 ActionId = actionId, MissionId = mission.MissionId, WorkItemId = wi.WorkItemId,
                 TaskId = taskId, NodeSequenceId = 0, ActionType = vda.ActionType, BlockingType = "HARD",
-                Params = o["position"]?.ToJsonString(), Status = "WAITING",
+                Params = o["params"]?.ToJsonString(), Status = "WAITING",
             });
         }
 

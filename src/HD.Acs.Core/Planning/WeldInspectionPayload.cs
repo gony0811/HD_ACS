@@ -23,11 +23,15 @@ public sealed class WeldPayloadSchemaException(IReadOnlyList<string> violations)
 }
 
 /// <summary>
-/// startWeldInspection payload 빌드·검증 [PHASE2 WP-3, SPEC §4.1/§4.2].
-/// 도면 좌표 + 유효 T_W_D → 맵(월드) 좌표 position 조립. 순수 함수(테스트 가능).
+/// startWeldInspection actionParameters 빌드·검증 [VDA5050_INTERFACE §6].
+/// 계약(간결): wallId(면 코드) · seamStart/seamEnd(맵 좌표 [x,y,z] m) · orientation(H|V) · patternType(디폴트 LINEAR).
+/// 툴 자세·법선은 AMR이 면 티칭으로 결정하므로 ACS는 위치·방향·도면타입만 전달한다. 순수 함수(테스트 가능).
 /// </summary>
 public static class WeldInspectionPayload
 {
+    /// <summary>검사 도면 타입 기본값(선형).</summary>
+    public const string PatternLinear = "LINEAR";
+
     /// <summary>맵버전 일치 검증 후 T_W_D 반환. calMapVersion==null 또는 !=mapVersion 이면 거부 [§2.5].</summary>
     public static DrawingTransform ResolveTransform(int mapVersion, int? calMapVersion,
         double tx, double ty, double yawRad)
@@ -40,36 +44,35 @@ public static class WeldInspectionPayload
         return new DrawingTransform(tx, ty, yawRad);
     }
 
-    /// <summary>도면 좌표 → 월드 position(JsonObject, §4.1 키명). x,y는 T_W_D 적용·z 통과. [SPEC v2: 법선 제거]</summary>
-    public static JsonObject BuildPosition(DrawingTransform t, WeldDrawingData d)
+    /// <summary>
+    /// startWeldInspection actionParameters(flat) 조립 [§6 계약].
+    /// seamStart/End = 도면 좌표에 T_W_D 적용(x,y)·z 통과한 맵 좌표. orientation은 seam 기하에서 유도(override 가능).
+    /// </summary>
+    public static JsonObject BuildActionParameters(DrawingTransform t, WeldDrawingData d,
+        string patternType = PatternLinear, string? orientation = null)
     {
         var (sx, sy) = t.DrawingToMap(d.SeamStart[0], d.SeamStart[1]);
         var (ex, ey) = t.DrawingToMap(d.SeamEnd[0], d.SeamEnd[1]);
+        var start = new[] { sx, sy, d.SeamStart[2] };
+        var end = new[] { ex, ey, d.SeamEnd[2] };
 
         return new JsonObject
         {
-            ["seamStartW"] = Vec(sx, sy, d.SeamStart[2]),
-            ["seamEndW"] = Vec(ex, ey, d.SeamEnd[2]),
-            ["drawingPos"] = new JsonObject
-            {
-                ["tank"] = d.Tank,
-                ["level"] = d.Level,
-                ["wall_code"] = d.WallCode,
-                ["x"] = d.SeamStart[0],
-                ["y"] = d.SeamStart[1],
-                ["z"] = d.SeamStart[2],
-            }
+            ["wallId"] = d.WallCode,
+            ["seamStart"] = Vec(start[0], start[1], start[2]),
+            ["seamEnd"] = Vec(end[0], end[1], end[2]),
+            ["orientation"] = orientation ?? Orientation(start, end),
+            ["patternType"] = patternType,
         };
     }
 
-    /// <summary>actionParameters 객체 {jobRef, position, params} 조립(스키마 검증·발행 공용).</summary>
-    public static JsonObject BuildActionParameters(string jobRef, JsonObject position, JsonNode? paramsNode) =>
-        new()
-        {
-            ["jobRef"] = jobRef,
-            ["position"] = position.DeepClone(),
-            ["params"] = paramsNode?.DeepClone() ?? new JsonObject(),
-        };
+    /// <summary>seam 기하에서 수평/수직 유도 — 높이 변화(Δz)가 수평 변위보다 크면 "V", 아니면 "H"(프레임 무관).</summary>
+    public static string Orientation(double[] start, double[] end)
+    {
+        double dx = end[0] - start[0], dy = end[1] - start[1], dz = end[2] - start[2];
+        double dxy = Math.Sqrt(dx * dx + dy * dy);
+        return Math.Abs(dz) > dxy ? "V" : "H";
+    }
 
     /// <summary>param_schema(JSON Schema draft-07)로 검증. 위반 목록 반환(빈 목록=통과). 스키마 없으면 검증 생략.</summary>
     public static IReadOnlyList<string> ValidateSchema(string? schemaJson, JsonNode actionParameters)

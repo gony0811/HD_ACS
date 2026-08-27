@@ -107,49 +107,24 @@ CREATE TABLE ref.action_catalog (
   description   text
 );
 
--- 액션 카탈로그 시드 [PHASE2] — inspection_task.action_type FK + 발행 전 payload 검증(WP-3 §4.1).
--- startWeldInspection: 단일 용접라인 구간 자동 검사. param_schema = SPEC §4.1 JSON Schema(draft-07).
+-- 액션 카탈로그 시드 — inspection_task.action_type FK + 발행 전 payload 검증.
+-- startWeldInspection: 단일 용접라인 검사. param_schema = VDA5050_INTERFACE §6 계약(draft-07, flat).
+--   wallId=검사 대상 면 코드(AMR 티칭 자세 키) · seamStart/End=맵 좌표 [x,y,z] m
+--   orientation=수평(H)/수직(V) · patternType=검사 도면 타입(디폴트 LINEAR). 툴 자세·법선은 AMR 책임.
 INSERT INTO ref.action_catalog (action_type, scope, blocking_type, param_schema, description)
 VALUES ('startWeldInspection', 'NODE', 'HARD',
 '{
   "type": "object",
-  "required": ["jobRef", "position", "params"],
+  "required": ["wallId", "seamStart", "seamEnd", "orientation", "patternType"],
   "properties": {
-    "jobRef": { "type": "string" },
-    "position": {
-      "type": "object",
-      "required": ["seamStartW", "seamEndW", "drawingPos"],
-      "properties": {
-        "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-        "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-        "drawingPos": {
-          "type": "object",
-          "required": ["tank", "level", "wall_code", "x", "y", "z"],
-          "properties": {
-            "tank": { "type": "string" }, "level": { "type": "integer" },
-            "wall_code": { "type": "string" },
-            "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
-          }
-        }
-      }
-    },
-    "params": {
-      "type": "object",
-      "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
-      "properties": {
-        "seamType":            { "enum": ["LINE", "POLYLINE"] },
-        "points":              { "type": "array" },
-        "sectionDxfId":        { "type": "string" },
-        "inspectionProfileId": { "type": "string" },
-        "standoffMm":          { "type": "number" },
-        "workingDistanceMm":   { "type": "number" },
-        "anchorGroupId":       { "type": "string" },
-        "seqInGroup":          { "type": "integer", "minimum": 1 }
-      }
-    }
+    "wallId":      { "type": "string" },
+    "seamStart":   { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "seamEnd":     { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "orientation": { "enum": ["H", "V"] },
+    "patternType": { "enum": ["LINEAR"] }
   }
 }',
-        '단일 용접라인 구간 자동 검사 [WP-3]')
+        '단일 용접라인 검사 [VDA5050_INTERFACE §6]')
 ON CONFLICT (action_type) DO UPDATE SET
   param_schema  = EXCLUDED.param_schema,
   scope         = EXCLUDED.scope,

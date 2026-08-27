@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# WP-4 시뮬레이터 E2E 검증 [SPEC_PHASE2_ACS.md §5, §7]
-# 브로커 기동 → 시뮬레이터(실패 주입 설정) 기동 → SimTest 드라이버로 3개 시나리오 검증.
+# WP-4 시뮬레이터 E2E 검증 [SPEC_PHASE2_ACS.md §5, §7] + 통신 프로토콜 두절/재접속 [ADR-002]
+# 브로커 기동 → 시뮬레이터(실패 주입 설정) 기동 → SimTest 드라이버로 6개 시나리오 검증.
+#   S1 앵커공유 · S2 파라미터검증 · S3 실패주입 · S4 conn회수 · S5 두절/재접속 · S6 재동기화
 # 사용: ./run_simtest.sh [brokerHost]   (기본 localhost, 사전 요구: mosquitto, dotnet 8)
 set -euo pipefail
 cd "$(dirname "$0")"

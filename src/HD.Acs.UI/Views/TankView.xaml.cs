@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HD.Acs.UI.Models;
@@ -45,6 +47,20 @@ public partial class TankView : UserControl
     }
 
     private void OnViewChanged(object? sender, EventArgs e) => Rebuild();
+
+    // ── 평면도(2D) 우클릭 "여기로 이동" ──────────────────────────────────────
+    private Point _lastPlanClick;   // PlanCanvas 로컬 좌표(px, 0..900 × 0..520)
+
+    /// <summary>우클릭 지점을 캔버스 로컬 px로 저장(컨텍스트 메뉴가 열리기 전에 기록).</summary>
+    private void OnPlanRightDown(object sender, MouseButtonEventArgs e)
+        => _lastPlanClick = e.GetPosition(PlanCanvas);
+
+    /// <summary>메뉴 "여기로 이동" — 저장된 px를 VM에 넘겨 도면 좌표 역투영 + 이동 명령.</summary>
+    private async void OnPlanGotoClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm is not null)
+            await _vm.GotoHereAsync(_lastPlanClick.X, _lastPlanClick.Y);
+    }
 
     private void Rebuild() { BuildShell(); BuildLevelHighlight(); BuildOverlays(); }
 

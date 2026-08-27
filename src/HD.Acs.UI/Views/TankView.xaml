@@ -6,6 +6,7 @@
              xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure">
     <UserControl.Resources>
         <conv:NormalizedToCanvasConverter x:Key="NormToCanvas" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
     <DockPanel TextElement.Foreground="{DynamicResource AppTextBrush}">
         <!-- 층 선택 L1~L4 + 로봇 위치 -->
@@ -41,6 +42,49 @@
                     <!-- 로봇 마커 (코드비하인드에서 위치 갱신) -->
                     <helix:SphereVisual3D x:Name="RobotMarker" Center="0,0,0.4" Radius="0.4" Fill="#E74C3C" />
                 </helix:HelixViewport3D>
+            </telerik:RadTabItem>
+
+            <telerik:RadTabItem Header="평면도(2D)">
+                <!-- 상면 투영(도면 x-y). 층별 로봇 이동 가능 구역 = 데크 높이 팔각 단면 footprint(초록) + 전폭 엔벨로프(점선). -->
+                <DockPanel Background="{DynamicResource AppWindowBrush}">
+                    <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding PlanCaption}" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding PlanBowLabel}" Margin="16,0,0,0"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="· 우클릭 → 여기로 이동" Margin="16,0,0,0"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding PlanGotoStatus}" Margin="0,4,0,0"
+                                       Foreground="{DynamicResource AppAccentBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <Viewbox Stretch="Uniform" Margin="10">
+                        <Canvas x:Name="PlanCanvas" Width="900" Height="520" Background="{DynamicResource AppCanvasBrush}"
+                                PreviewMouseRightButtonDown="OnPlanRightDown">
+                            <Canvas.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="여기로 이동" Click="OnPlanGotoClick" />
+                                </ContextMenu>
+                            </Canvas.ContextMenu>
+                            <!-- 전폭 엔벨로프(맥락) -->
+                            <Polygon Points="{Binding PlanEnvelope}" Stroke="#5D6D7E" StrokeThickness="1.5"
+                                     StrokeDashArray="4 3" Fill="#0FFFFFFF" />
+                            <!-- 선택 층 이동 가능 구역 -->
+                            <Polygon Points="{Binding PlanReach}" Stroke="#229954" StrokeThickness="2" Fill="#332ECC71" />
+                            <!-- 원점(바닥 중심) 마커 -->
+                            <Ellipse Width="10" Height="10" Fill="#F1C40F" Stroke="#7D6608" StrokeThickness="1"
+                                     Canvas.Left="{Binding PlanOriginX}" Canvas.Top="{Binding PlanOriginY}" />
+                            <!-- 로봇 현재 위치(다른 층이면 흐리게) -->
+                            <Ellipse Width="14" Height="14" Fill="#E74C3C" Stroke="White" StrokeThickness="2"
+                                     Canvas.Left="{Binding PlanRobotX}" Canvas.Top="{Binding PlanRobotY}"
+                                     Opacity="{Binding PlanRobotOpacity}"
+                                     Visibility="{Binding PlanHasRobot, Converter={StaticResource BoolToVis}}" />
+                        </Canvas>
+                    </Viewbox>
+                </DockPanel>
             </telerik:RadTabItem>
 
             <telerik:RadTabItem Header="전개도">

@@ -66,6 +66,129 @@ public sealed partial class TankViewModel : ObservableObject
 
     public bool HasRobotPosition => RobotX is not null && RobotY is not null;
 
+    // ── 평면도(2D): 상면 투영(도면 x-y). 층별 로봇 이동 가능 구역 = 데크 높이의 팔각 단면 footprint ──
+    private const double PlanW = 900, PlanH = 520, PlanMargin = 40;
+
+    /// <summary>전폭 엔벨로프(맥락, 점선) — 상면 L×B 사각형(px).</summary>
+    [ObservableProperty] private PointCollection _planEnvelope = new();
+    /// <summary>선택 층 데크에서 로봇이 이동 가능한 구역(채움) — L×2·HalfWidth(deckZ) 사각형(px).</summary>
+    [ObservableProperty] private PointCollection _planReach = new();
+    [ObservableProperty] private string _planCaption = "선창 미로드 — 프로젝트를 열거나 생성하세요.";
+    [ObservableProperty] private string _planBowLabel = "";
+    [ObservableProperty] private double _planOriginX;
+    [ObservableProperty] private double _planOriginY;
+    [ObservableProperty] private double _planRobotX;
+    [ObservableProperty] private double _planRobotY;
+    [ObservableProperty] private bool _planHasRobot;
+    [ObservableProperty] private double _planRobotOpacity = 1.0;
+
+    /// <summary>운영 바에서 선택한 로봇(ShellViewModel이 Mission.SelectedRobotId를 동기화). 이동 명령 대상.</summary>
+    [ObservableProperty] private string? _selectedRobotId;
+    /// <summary>이동 명령 결과/오류 안내(층 불일치 등).</summary>
+    [ObservableProperty] private string? _planGotoStatus;
+
+    // 상면 투영 파라미터(로봇 마커가 footprint와 동일 변환을 쓰도록 저장)
+    private double _pScale, _pOffX, _pOffY, _pXMin, _pYMax;
+    private bool _planReady;
+
+    /// <summary>선택 층 데크의 상면 이동 구역 + 전폭 엔벨로프를 px로 투영한다(Geometry·SelectedLevel 의존).</summary>
+    private void BuildPlan()
+    {
+        if (Geometry is not { } g)
+        {
+            _planReady = false; PlanHasRobot = false;
+            PlanEnvelope = new(); PlanReach = new();
+            PlanCaption = "선창 정보 없음 — 프로젝트를 열거나 생성하세요."; PlanBowLabel = "";
+            return;
+        }
+
+        double L = g.LengthL, B = g.Derived.B, ox = g.OriginOx, oy = g.OriginOy;
+        double xMin = ox - L / 2, xMax = ox + L / 2, yMin = oy - B / 2, yMax = oy + B / 2;
+        double scale = Math.Min((PlanW - 2 * PlanMargin) / L, (PlanH - 2 * PlanMargin) / B);
+        _pScale = scale;
+        _pOffX = (PlanW - L * scale) / 2;
+        _pOffY = (PlanH - B * scale) / 2;
+        _pXMin = xMin; _pYMax = yMax; _planReady = true;
+
+        System.Windows.Point P(double x, double y) =>
+            new(_pOffX + (x - _pXMin) * scale, _pOffY + (_pYMax - y) * scale);
+
+        PlanEnvelope = new PointCollection { P(xMin, yMin), P(xMax, yMin), P(xMax, yMax), P(xMin, yMax) };
+
+        double hw;
+        if (SelectedLevel is int lv && g.LevelZ is { Length: > 0 } lz && lv - 1 < lz.Length)
+        {
+            double deckZ = lz[lv - 1];
+            hw = HalfWidth(g, deckZ);
+            PlanCaption = $"L{lv} 데크 z={deckZ:0.##} m · 이동 구역 폭 {2 * hw:0.##} × 길이 {L:0.##} m";
+        }
+        else
+        {
+            hw = B / 2;
+            PlanCaption = $"전체 개관 · 전폭 {B:0.##} × 길이 {L:0.##} m (상면 투영)";
+        }
+        PlanReach = new PointCollection { P(xMin, oy - hw), P(xMax, oy - hw), P(xMax, oy + hw), P(xMin, oy + hw) };
+
+        var o = P(ox, oy); PlanOriginX = o.X - 5; PlanOriginY = o.Y - 5;   // 원점 마커(지름 10) 중심 보정
+        PlanBowLabel = "▲ +y 좌현(Port)    ▶ +x 선수(F)";
+        BuildPlanRobot();
+    }
+
+    /// <summary>로봇 상면 마커를 현재 footprint 변환으로 갱신(다른 층이면 흐리게).</summary>
+    private void BuildPlanRobot()
+    {
+        if (!_planReady || RobotX is not double rx || RobotY is not double ry) { PlanHasRobot = false; return; }
+        PlanHasRobot = true;
+        PlanRobotX = _pOffX + (rx - _pXMin) * _pScale - 7;    // 마커(지름 14) 중심 보정
+        PlanRobotY = _pOffY + (_pYMax - ry) * _pScale - 7;
+        PlanRobotOpacity = RobotOnSelectedFloor ? 1.0 : 0.35;
+    }
+
+    /// <summary>
+    /// 2D 평면도 우클릭 "여기로 이동" — 캔버스 px 클릭점을 도면 좌표로 역투영해 선택 로봇에 이동 명령.
+    /// 가드: 층(L{n}) 미선택('전체')·로봇 미선택 시 거부. 서버가 로봇 층 ≠ 대상 층이면 409(이동 금지)로 반려.
+    /// </summary>
+    public async Task GotoHereAsync(double canvasPxX, double canvasPxY)
+    {
+        PlanGotoStatus = null;
+        if (!_planReady) { PlanGotoStatus = "선창 미로드 — 이동할 수 없습니다."; return; }
+        if (SelectedLevel is not int level)
+        {
+            PlanGotoStatus = "층(L1~L4)을 먼저 선택하세요. '전체' 뷰에서는 이동할 수 없습니다.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(SelectedRobotId))
+        {
+            PlanGotoStatus = "이동할 로봇을 먼저 선택하세요(운영 바의 로봇 콤보).";
+            return;
+        }
+
+        // 캔버스 px → 도면 좌표 (BuildPlan 투영의 역변환)
+        double dx = _pXMin + (canvasPxX - _pOffX) / _pScale;
+        double dy = _pYMax - (canvasPxY - _pOffY) / _pScale;
+        string mapId = $"{TankId}-L{level}";
+        try
+        {
+            await _api.GotoAsync(SelectedRobotId!, mapId, dx, dy, null, "operator");
+            PlanGotoStatus = $"이동 명령 전송: {SelectedRobotId} → 도면({dx:0.##}, {dy:0.##}) @ {mapId}";
+        }
+        catch (Exception ex)
+        {
+            PlanGotoStatus = $"이동 불가: {ex.Message}";   // 층 불일치(409) 등 서버 메시지 노출
+        }
+    }
+
+    /// <summary>팔각 단면 반폭 y(z) — 하부챔퍼/수직벽/상부챔퍼 구간별 선형(3D HalfWidth와 동일 정의).</summary>
+    private static double HalfWidth(TankGeometryDto g, double z)
+    {
+        double b2 = g.Derived.B / 2, wf2 = g.WFloor / 2, wc2 = g.Derived.WCeil / 2;
+        double hLow = g.HLow, zWall = g.HLow + g.HWall, h = g.Derived.H;
+        if (z <= hLow) return hLow > 1e-9 ? wf2 + (z / hLow) * (b2 - wf2) : b2;   // 하부 챔퍼
+        if (z <= zWall) return b2;                                               // 수직벽
+        double hUp = h - zWall;
+        return hUp > 1e-9 ? b2 - ((z - zWall) / hUp) * (b2 - wc2) : wc2;         // 상부 챔퍼
+    }
+
     /// <summary>선택 뷰 층에 로봇이 있는지 — 다른 층이면 마커를 흐리게. "전체"면 항상 표시(비교 안 함).</summary>
     public bool RobotOnSelectedFloor =>
         SelectedLevel is null ||
@@ -89,6 +212,7 @@ public sealed partial class TankViewModel : ObservableObject
             var walls = await _api.GetWallsAsync(TankId);
             ShellWalls.Clear();
             foreach (var w in walls) ShellWalls.Add(w);
+            BuildPlan();                   // 평면도(2D) 상면 투영 갱신
             await LoadOverlaysAsync();     // 영역·작업 로드 후 ViewChanged
             await LoadLevelWallsAsync();   // ViewChanged 발생(셸+강조 재빌드)
         }
@@ -99,6 +223,7 @@ public sealed partial class TankViewModel : ObservableObject
             ShellWalls.Clear();
             LevelWalls.Clear();
             Overlays.Clear();
+            BuildPlan();                   // 빈 상태로 평면도 갱신(캡션 안내)
             ViewChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -204,6 +329,7 @@ public sealed partial class TankViewModel : ObservableObject
         RobotMapId = s.ReportedMapId;
         OnPropertyChanged(nameof(HasRobotPosition));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));
+        BuildPlanRobot();   // 평면도(2D) 로봇 마커 갱신
     }
 
     partial void OnSelectedViewModeChanged(string value)
@@ -211,6 +337,7 @@ public sealed partial class TankViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLevel));
         OnPropertyChanged(nameof(IsolateLevel));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));
+        BuildPlan();                 // 평면도(2D) 층별 이동 구역 갱신
         _ = LoadLevelWallsAsync();   // 뷰 모드 변경 시 슬라이스 갱신
     }
 

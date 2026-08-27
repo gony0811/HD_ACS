@@ -21,6 +21,9 @@ public interface IAcsApiClient
     Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
         double x, double y, double theta, CancellationToken ct = default);
     Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default);
+    // 수동 지점 이동(2D 평면도). 층 불일치 시 서버가 409 → 예외로 메시지 노출.
+    Task GotoAsync(string robotId, string mapId, double x, double y, double? theta, string userId,
+        CancellationToken ct = default);
 
     // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,

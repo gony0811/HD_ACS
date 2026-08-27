@@ -121,12 +121,14 @@
 
 **질문**: VDA 5050을 본 프로젝트에 어떻게 구체화(프로파일링)하는가?
 
-**미결 세부**:
-- ⬜ VDA 5050 버전 선택 (2.0 / 2.1)
-- ⬜ 커스텀 액션 카탈로그: 검사 작업 실행(협동로봇 시퀀스), 촬영 트리거(위치 파라미터), 비상정지 — 액션 이름/파라미터/blockingType 정의 (HD_AMR 운영 S/W 측과 협의)
-- ⬜ 맵/좌표계 규약: 화물창 맵 ID, 노드 좌표계와 검사 S/W 좌표계 정합
+> 구현·문서화 진행에 따라 상당 부분 확정됨 → 계약 상세는 `docs/VDA5050_INTERFACE.md`, 검사 액션은 ADR-013.
+
+**세부 상태**:
+- ✅ VDA 5050 버전 = **2.0** (헤더 `version="2.0.0"`, 코드 확정)
+- 🔶 커스텀 액션 카탈로그: `startWeldInspection` **확정**(ADR-013) · `emergencyStop`·`initPosition` 확정. 추가 검사 액션(촬영·측정 등)·`patternType` enum 확장은 AMR과 협의 잔여
+- ⬜ 맵/좌표계 규약: 화물창 맵 ID(`{tank}-L{level}`)·좌표 프레임 최종 정합 (검사 S/W 좌표계)
 - ⬜ 두절 구간 검사 이력 재전송 방식 (표준 외 확장): state 확장 vs 별도 토픽 vs 로봇 측 업로드
-- ⬜ MQTT 브로커 선정 (Mosquitto, EMQX 등) 및 QoS/폐쇄망 내 보안 정책
+- 🔶 MQTT: QoS1·retain·Last Will 확정(ADR-002). 브로커 제품 선정(Mosquitto/EMQX/RabbitMQ)·폐쇄망 보안 정책은 잔여
 
 ---
 
@@ -222,11 +224,35 @@
 
 ---
 
+## ADR-013. 검사 액션 계약(startWeldInspection) 확정 및 정렬 책임 경계 ✅
+
+**질문**: AMR로 전달하는 검사 액션(`startWeldInspection`)의 파라미터는 무엇이며, 같은 정차에서 연속 검사 시 **정렬(anchor) 재사용**은 누가 책임지는가?
+
+**결정** (2026-08-27):
+- 검사 액션 계약을 **flat actionParameters 5필드**로 확정한다 — 상세는 `docs/VDA5050_INTERFACE.md §6`:
+  - `wallId`(검사 대상 **면 코드** = AMR 티칭 자세 선택 키)
+  - `seamStart` · `seamEnd`(용접라인 시작/끝, **맵 좌표 `[x,y,z]` m**; ACS가 도면→맵 T_W_D 변환·z 통과)
+  - `orientation`(**수평 `H` / 수직 `V`**; ACS가 seam 기하에서 유도)
+  - `patternType`(검사 도면 타입, 디폴트 `LINEAR`)
+- **정렬(anchor) 재사용은 AMR 내부 책임**이다. 같은 정차에서 연속 검사 시 정렬을 재사용/공유할지는 AMR이 내부적으로 판단하며, ACS는 앵커 그룹/순서(`anchorGroupId`·`seqInGroup`)를 **전달하지 않고** 각 검사 액션을 독립 발행한다.
+- 툴 자세·법선도 ACS가 보내지 않는다 — AMR이 `wallId` 티칭으로 결정(ADR-001 경계 원칙, SPEC v2 `wallNormal` 계약 제거의 연장).
+
+**근거**:
+- 검사 시퀀스·자세·정렬 최적화는 "어떻게"의 영역 = HD_AMR 책임(ADR-001). ACS는 "어느 면 / 어디서 어디까지 / 방향 / 도면타입"만 전달한다.
+- 이전 ACS측 앵커 그룹 FULL/SHARED 정렬 공유 모델은 로봇 내부 판단을 관제가 대신하던 것 → 경계 위반이라 **은퇴**.
+
+**결과 (Consequences)**:
+- `ref.action_catalog` param_schema 교체(`db/schema.sql` + `db/migrations/2026-08-27_startweld_action_schema.sql`), payload 빌더(`WeldInspectionPayload`)·활성 디스패처·시뮬레이터·SimTest·단위 테스트 동기화(Core.Tests 51 통과).
+- `anchorGroupId`/`seqInGroup`/`sectionDxfId`/`inspectionProfileId`/`standoffMm` 등 구 프로필 파라미터 계약에서 제거.
+- 후속 합의(문서 §6 [협의]): `patternType` enum 확장(곡선·코너), `wallId`↔AMR 티칭 키 규약, 추가 검사 액션 필요 여부. → ADR-008의 커스텀 액션 항목을 부분 해소.
+
+---
+
 ## 미결 질문 목록 (Open Questions)
 
 | # | 항목 | 관련 ADR | 상태/비고 |
 |---|---|---|---|
-| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ⬜ HD_AMR 운영 S/W 측과 협의 |
+| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008, 013 | 🔶 부분 해소 — 버전 2.0·`startWeldInspection` 계약 확정(ADR-013, VDA5050_INTERFACE §6). 추가 액션·enum 확장은 AMR과 협의 잔여 |
 | Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |

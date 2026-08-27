@@ -19,6 +19,15 @@ using MQTTnet.Protocol;
 //  3. 실패 주입: 환경변수 SIM_FAIL_ACTION_IDS(콤마 구분 actionId)에 해당하면
 //     FAILED, resultDescription="FAIL;reason=INJECTED".
 //
+// [통신 프로토콜 E2E 확장 — 두절/재접속/재동기화, ADR-002]
+//  4. 테스트 제어 채널: acs-sim/control/{manufacturer}/{serial} (VDA 5050 외부 — 하네스 전용).
+//     {"cmd":"drop","downMs":1500} 수신 시 소켓을 급단절(Dispose)해
+//     브로커가 Last Will(connection=CONNECTIONBROKEN, retain)을 발행하도록 유도한 뒤,
+//     downMs 후 자동 재접속 → 재구독 → ONLINE(retain) + 현재 state(retain) 재발행.
+//     - state는 retain 발행 → 마스터(ACS)가 재기동/재접속해도 진행 중 Order를 즉시 회수(재동기화).
+//     - 급단절 중이던 Order 실행 태스크는 메모리에서 계속 진행하며 발행만 스킵 →
+//       재접속 후 이어서 완료 state를 발행(연속성 = resume 관측 계약).
+//
 // 사용: dotnet run [brokerHost] [manufacturer] [serialNumber] [mapId]
 
 var broker = args.ElementAtOrDefault(0) ?? "localhost";
@@ -36,11 +45,15 @@ var travelMs = int.TryParse(Environment.GetEnvironmentVariable("SIM_TRAVEL_MS"),
 var fullMs   = int.TryParse(Environment.GetEnvironmentVariable("SIM_FULL_MS"),   out var t2) ? t2 : 1200;
 var sharedMs = int.TryParse(Environment.GetEnvironmentVariable("SIM_SHARED_MS"), out var t3) ? t3 : 400;
 
-var client = new MqttFactory().CreateMqttClient();
+var factory = new MqttFactory();
+var client = factory.CreateMqttClient();
+var connected = false;                                   // 발행 게이트(급단절 창 동안 발행 스킵)
 var connTopic = Vda5050Topics.Connection(robot);
 var stateTopic = Vda5050Topics.State(robot);
+// 하네스 전용 제어 채널 (VDA 5050 아님) — 두절/재접속 시나리오 오케스트레이션
+var controlTopic = $"acs-sim/control/{robot.Manufacturer}/{robot.SerialNumber}";
 
-var options = new MqttClientOptionsBuilder()
+MqttClientOptions BuildOptions() => new MqttClientOptionsBuilder()
     .WithTcpServer(broker)
     .WithClientId($"sim-{robot.SerialNumber}")
     // Last Will: 비정상 종료 시 CONNECTIONBROKEN (두절 감지의 근거 [ADR-002])
@@ -64,9 +77,19 @@ var gate = new SemaphoreSlim(1, 1);
 string? currentAnchorGroup = null;   // 유효한 앵커의 그룹 ID (null = 앵커 없음)
 var movedSinceLastAction = true;     // 직전 액션 이후 주행 발생 여부
 
-client.ApplicationMessageReceivedAsync += async e =>
+async Task OnMessageAsync(MqttApplicationMessageReceivedEventArgs e)
 {
     var payload = e.ApplicationMessage.ConvertPayloadToString();
+    if (e.ApplicationMessage.Topic == controlTopic)
+    {
+        // 하네스 제어 (VDA 5050 아님) — 두절/재접속 오케스트레이션
+        SimControl? cmd = null;
+        try { cmd = JsonSerializer.Deserialize<SimControl>(payload); } catch (JsonException) { }
+        if (cmd?.Cmd == "drop")
+            // 수신 콜백에서 자기 자신을 Dispose하면 데드락 → 별도 태스크로 실행
+            _ = Task.Run(() => DropAndReconnectAsync(cmd.DownMs > 0 ? cmd.DownMs : 1500));
+        return;
+    }
     if (e.ApplicationMessage.Topic.EndsWith("/order"))
     {
         currentOrder = JsonSerializer.Deserialize<Vda5050Order>(payload);
@@ -95,18 +118,50 @@ client.ApplicationMessageReceivedAsync += async e =>
                 Console.WriteLine("[SIM] !! 비상정지 (기능적 정지) !!");
         }
     }
-};
+}
 
-await client.ConnectAsync(options);
-await client.SubscribeAsync(Vda5050Topics.Order(robot), MqttQualityOfServiceLevel.AtLeastOnce);
-await client.SubscribeAsync(Vda5050Topics.InstantActions(robot), MqttQualityOfServiceLevel.AtLeastOnce);
+// (재)접속 + 채널 재구독 + ONLINE/state(retain) 재발행 — 최초 기동과 재접속에서 공용
+async Task ConnectAndAnnounceAsync()
+{
+    client = factory.CreateMqttClient();
+    client.ApplicationMessageReceivedAsync += OnMessageAsync;
+    await client.ConnectAsync(BuildOptions());
+    connected = true;
+    await client.SubscribeAsync(Vda5050Topics.Order(robot), MqttQualityOfServiceLevel.AtLeastOnce);
+    await client.SubscribeAsync(Vda5050Topics.InstantActions(robot), MqttQualityOfServiceLevel.AtLeastOnce);
+    await client.SubscribeAsync(controlTopic, MqttQualityOfServiceLevel.AtLeastOnce);
 
-await PublishAsync(connTopic, new Vda5050Connection
-    { ConnectionState = "ONLINE", Manufacturer = robot.Manufacturer, SerialNumber = robot.SerialNumber }, retain: true);
+    await PublishAsync(connTopic, new Vda5050Connection
+        { ConnectionState = "ONLINE", Manufacturer = robot.Manufacturer, SerialNumber = robot.SerialNumber }, retain: true);
+    await PublishStateAsync();   // 진행 중 Order 포함 현재 state를 retain 발행 → 마스터 재동기화 근거
+}
+
+// 급단절(Last Will 발화) → downMs 후 자동 재접속 [ADR-002]
+async Task DropAndReconnectAsync(int downMs)
+{
+    connected = false;
+    var stale = client;
+    stale.Dispose();   // DISCONNECT 없이 소켓 급단절 → 브로커가 retain된 Last Will(CONNECTIONBROKEN) 발행
+    Console.WriteLine($"[SIM] ✂ 두절 (급단절, {downMs}ms 후 재접속) — Last Will=CONNECTIONBROKEN 기대");
+    await Task.Delay(downMs);
+    try
+    {
+        await ConnectAndAnnounceAsync();
+        Console.WriteLine($"[SIM] ↺ 재접속 완료 — ONLINE + state(order={state.OrderId}) 재동기화 발행");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[SIM] 재접속 실패, 2초 후 재시도: {ex.Message}");
+        await Task.Delay(2000);
+        _ = Task.Run(() => DropAndReconnectAsync(0));
+    }
+}
+
+await ConnectAndAnnounceAsync();
 Console.WriteLine($"[SIM] {robot.SerialNumber} ONLINE (map={mapId}, broker={broker}, " +
-                  $"failInject={failActionIds.Count}건)");
+                  $"failInject={failActionIds.Count}건, control={controlTopic})");
 
-// 주기 state 보고 (2초)
+// 주기 state 보고 (2초) — 급단절 창에서는 PublishAsync가 스킵
 while (true)
 {
     await PublishStateAsync();
@@ -170,8 +225,8 @@ async Task ExecuteActionAsync(VdaAction action)
 
     if (action.ActionType == "startWeldInspection")
     {
-        // ── 2. 파라미터 검증 [WP-4 §5.1 / SPEC §4.1] ──
-        var (ok, violations, jobRef, anchorGroupId, seqInGroup) = WeldInspectionParams.Validate(action);
+        // ── 2. 파라미터 검증 [VDA5050_INTERFACE §6 계약] ──
+        var (ok, violations, wallId, orientation, patternType) = WeldInspectionParams.Validate(action);
         if (!ok)
         {
             Console.WriteLine($"[SIM]   파라미터 위반: {string.Join(", ", violations)}");
@@ -185,19 +240,13 @@ async Task ExecuteActionAsync(VdaAction action)
             return;
         }
 
-        // ── 3. 앵커 공유 판정 [WP-4 §5.2] ──
-        var shared = currentAnchorGroup != null
-                     && currentAnchorGroup == anchorGroupId
-                     && !movedSinceLastAction;
-        var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
-        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label}");
-        await Task.Delay(shared ? sharedMs : fullMs);
+        // ── 3. 검사 수행 (자세·시퀀스는 AMR 티칭 — 여기서는 wallId/orientation만 관측) ──
+        Console.WriteLine($"[SIM]   검사 시작: wall={wallId} · {orientation} · {patternType}");
+        await Task.Delay(fullMs);
 
-        currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
-        movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef}";
-        Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
+        actionState.ResultDescription = $"OK;wall={wallId};orient={orientation};pattern={patternType}";
+        Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({wallId} {orientation})");
     }
     else
     {
@@ -221,7 +270,8 @@ async Task PublishStateAsync()
 {
     state.HeaderId = ++headerId;
     state.Timestamp = DateTimeOffset.UtcNow.ToString("O");
-    await PublishAsync(stateTopic, state);
+    // state를 retain 발행 → 마스터(ACS) 재기동/재접속 시 마지막 상태를 즉시 회수(재동기화 [ADR-002])
+    await PublishAsync(stateTopic, state, retain: true);
 }
 
 // initPosition actionParameters 안전 파싱 — Value는 object(역직렬화 시 JsonElement)일 수 있음
@@ -251,13 +301,22 @@ static double? ParamNum(IEnumerable<ActionParameter> ps, string key)
 
 async Task PublishAsync<T>(string topic, T payload, bool retain = false)
 {
+    if (!connected) return;   // 급단절 창 — 발행 스킵(진행 중 Order 태스크는 계속 진행)
     var msg = new MqttApplicationMessageBuilder()
         .WithTopic(topic)
         .WithPayload(JsonSerializer.Serialize(payload, json))
         .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
         .WithRetainFlag(retain)
         .Build();
-    await client.PublishAsync(msg);
+    try { await client.PublishAsync(msg); }
+    catch (Exception ex) { Console.WriteLine($"[SIM] 발행 실패(두절 추정): {ex.Message}"); }
+}
+
+/// <summary>하네스 제어 메시지 (VDA 5050 외부) — 두절/재접속 오케스트레이션.</summary>
+sealed class SimControl
+{
+    [System.Text.Json.Serialization.JsonPropertyName("cmd")] public string Cmd { get; set; } = "";
+    [System.Text.Json.Serialization.JsonPropertyName("downMs")] public int DownMs { get; set; }
 }
 
 /// <summary>
@@ -266,38 +325,42 @@ async Task PublishAsync<T>(string topic, T payload, bool retain = false)
 /// </summary>
 static class WeldInspectionParams
 {
-    public static (bool Ok, List<string> Violations, string JobRef, string AnchorGroupId, int SeqInGroup)
+    public static (bool Ok, List<string> Violations, string WallId, string Orientation, string PatternType)
         Validate(VdaAction action)
     {
         var violations = new List<string>();
-        var jobRef = GetString(action, "jobRef");
-        if (string.IsNullOrEmpty(jobRef)) violations.Add("jobRef");
 
-        var position = GetObject(action, "position");
-        if (position == null) violations.Add("position");
-        else
-        {
-            foreach (var key in new[] { "seamStartW", "seamEndW" })   // [SPEC v2: wallNormalW 제거]
-                if (!IsVec3(position.Value, key)) violations.Add($"position.{key}");
-            if (!position.Value.TryGetProperty("drawingPos", out var dp) || dp.ValueKind != JsonValueKind.Object)
-                violations.Add("position.drawingPos");
-        }
+        var wallId = GetString(action, "wallId");
+        if (string.IsNullOrEmpty(wallId)) violations.Add("wallId");
 
-        var anchorGroupId = ""; var seqInGroup = 0;
-        var prms = GetObject(action, "params");
-        if (prms == null) violations.Add("params");
-        else
+        if (!IsVec3Param(action, "seamStart")) violations.Add("seamStart");
+        if (!IsVec3Param(action, "seamEnd")) violations.Add("seamEnd");
+
+        var orientation = GetString(action, "orientation");
+        if (orientation is not ("H" or "V")) violations.Add("orientation");
+
+        var patternType = GetString(action, "patternType");
+        if (string.IsNullOrEmpty(patternType)) violations.Add("patternType");
+
+        return (violations.Count == 0, violations, wallId ?? "", orientation ?? "", patternType ?? "");
+    }
+
+    /// <summary>top-level actionParameter 값이 3원소 숫자 배열인지(object/JsonElement/문자열 폴백 수용).</summary>
+    static bool IsVec3Param(VdaAction a, string key)
+    {
+        var v = a.ActionParameters.FirstOrDefault(p => p.Key == key)?.Value;
+        if (v is null) return false;
+        try
         {
-            foreach (var key in new[] { "seamType", "sectionDxfId", "inspectionProfileId", "standoffMm" })
-                if (!prms.Value.TryGetProperty(key, out _)) violations.Add($"params.{key}");
-            if (prms.Value.TryGetProperty("anchorGroupId", out var ag) && ag.ValueKind == JsonValueKind.String)
-                anchorGroupId = ag.GetString() ?? "";
-            else violations.Add("params.anchorGroupId");
-            if (prms.Value.TryGetProperty("seqInGroup", out var sq) && sq.TryGetInt32(out var sqv) && sqv >= 1)
-                seqInGroup = sqv;
-            else violations.Add("params.seqInGroup");
+            JsonElement el = v switch
+            {
+                JsonElement je => je,
+                string s => JsonSerializer.Deserialize<JsonElement>(s),
+                _ => JsonSerializer.SerializeToElement(v),   // 익명 배열(new[]{...}) 등
+            };
+            return el.ValueKind == JsonValueKind.Array && el.GetArrayLength() == 3;
         }
-        return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);
+        catch (JsonException) { return false; }
     }
 
     static string? GetString(VdaAction a, string key)

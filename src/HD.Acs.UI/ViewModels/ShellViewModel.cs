@@ -71,6 +71,13 @@ public sealed partial class ShellViewModel : ObservableObject
             if (e.PropertyName == nameof(RobotStatusViewModel.SelectedRobot))
                 EmergencyStopCommand.NotifyCanExecuteChanged();
         };
+
+        // 운영 바에서 선택한 로봇을 2D 평면도 "여기로 이동" 대상으로 동기화
+        Mission.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MissionViewModel.SelectedRobotId))
+                Tank.SelectedRobotId = Mission.SelectedRobotId;
+        };
     }
 
     /// <summary>모드 탭 전환. 탭 버튼이 CommandParameter로 AppMode를 전달한다(토글 해제 방지).</summary>
@@ -90,6 +97,7 @@ public sealed partial class ShellViewModel : ObservableObject
             AreaPlanning.LoadAsync(),
             Tank.LoadAsync());   // 3D 셸(지오메트리 10면) 로드
         Mission.TankId = AreaPlanning.TankId;   // 시나리오 생성 대상 선창 동기화
+        Tank.SelectedRobotId = Mission.SelectedRobotId;   // 이동 명령 대상 로봇 초기 동기화
     }
 
     // ── 파일 메뉴 (프로젝트 파일 .hdacs) ──────────────────────────────

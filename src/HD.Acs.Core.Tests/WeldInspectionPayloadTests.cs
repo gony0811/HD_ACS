@@ -5,117 +5,78 @@ using Xunit;
 
 namespace HD.Acs.Core.Tests;
 
-/// <summary>WP-3 startWeldInspection payload 빌드·검증 단위 테스트 [SPEC §4.1/§4.2/부록 A].</summary>
+/// <summary>startWeldInspection actionParameters 빌드·검증 단위 테스트 [VDA5050_INTERFACE §6 계약].</summary>
 public class WeldInspectionPayloadTests
 {
-    // SPEC §4.1 param_schema (db/schema.sql 시드와 동일)
+    // §6 param_schema (db/schema.sql 시드와 동일)
     private const string Schema = """
     {
       "type": "object",
-      "required": ["jobRef", "position", "params"],
+      "required": ["wallId", "seamStart", "seamEnd", "orientation", "patternType"],
       "properties": {
-        "jobRef": { "type": "string" },
-        "position": {
-          "type": "object",
-          "required": ["seamStartW", "seamEndW", "drawingPos"],
-          "properties": {
-            "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-            "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-            "drawingPos": {
-              "type": "object",
-              "required": ["tank", "level", "wall_code", "x", "y", "z"],
-              "properties": {
-                "tank": { "type": "string" }, "level": { "type": "integer" },
-                "wall_code": { "type": "string" },
-                "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
-              }
-            }
-          }
-        },
-        "params": {
-          "type": "object",
-          "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
-          "properties": {
-            "seamType":            { "enum": ["LINE", "POLYLINE"] },
-            "points":              { "type": "array" },
-            "sectionDxfId":        { "type": "string" },
-            "inspectionProfileId": { "type": "string" },
-            "standoffMm":          { "type": "number" },
-            "workingDistanceMm":   { "type": "number" },
-            "anchorGroupId":       { "type": "string" },
-            "seqInGroup":          { "type": "integer", "minimum": 1 }
-          }
-        }
+        "wallId":      { "type": "string" },
+        "seamStart":   { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "seamEnd":     { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "orientation": { "enum": ["H", "V"] },
+        "patternType": { "enum": ["LINEAR"] }
       }
     }
     """;
 
-    // 부록 A 를 복원하는 도면 입력 + T_W_D (tx=9.390, ty=5.980, yaw=0)
+    // 도면 입력 + T_W_D (tx=9.390, ty=5.980, yaw=0) → seamStart 맵=(12.510,5.980,1.420), seamEnd=(13.310,5.980,1.420)
     private static readonly DrawingTransform GoldenTransform = new(9.390, 5.980, 0);
     private static WeldDrawingData GoldenInput() => new(
-        "CT1", 2, "W03",
+        "CT1", 2, "SM",
         new[] { 3.120, 0.0, 1.420 }, new[] { 3.920, 0.0, 1.420 });
 
-    private static JsonObject GoldenParams() => new()
-    {
-        ["seamType"] = "LINE",
-        ["sectionDxfId"] = "DXF-CORR-T12",
-        ["inspectionProfileId"] = "INSPECT-STD-01",
-        ["standoffMm"] = 400,
-        ["workingDistanceMm"] = 400,
-        ["anchorGroupId"] = "CT1-L2-W03-ST04",
-        ["seqInGroup"] = 2,
-    };
-
-    /// <summary>BuildPosition 이 부록 A 의 seamStartW/seamEndW/drawingPos 와 필드 단위 일치. [SPEC v2: 법선 제거]</summary>
+    /// <summary>BuildActionParameters 가 §6 계약 필드(wallId·seamStart/End·orientation·patternType)를 맵 좌표로 방출.</summary>
     [Fact]
-    public void BuildPosition_MatchesGoldenFixture()
+    public void BuildActionParameters_MatchesGoldenFixture()
     {
-        var pos = WeldInspectionPayload.BuildPosition(GoldenTransform, GoldenInput());
+        var ap = WeldInspectionPayload.BuildActionParameters(GoldenTransform, GoldenInput());
 
-        AssertVec(pos, "seamStartW", 12.510, 5.980, 1.420);
-        AssertVec(pos, "seamEndW", 13.310, 5.980, 1.420);
-        Assert.Null(pos["wallNormalW"]);   // [SPEC v2] 법선 계약 제거 — 방출되지 않음
-
-        var dp = pos["drawingPos"]!.AsObject();
-        Assert.Equal("CT1", dp["tank"]!.GetValue<string>());
-        Assert.Equal(2, dp["level"]!.GetValue<int>());
-        Assert.Equal("W03", dp["wall_code"]!.GetValue<string>());
-        Assert.Equal(3.120, dp["x"]!.GetValue<double>(), 3);
-        Assert.Equal(0.0, dp["y"]!.GetValue<double>(), 3);
-        Assert.Equal(1.420, dp["z"]!.GetValue<double>(), 3);
+        Assert.Equal("SM", ap["wallId"]!.GetValue<string>());
+        AssertVec(ap, "seamStart", 12.510, 5.980, 1.420);
+        AssertVec(ap, "seamEnd", 13.310, 5.980, 1.420);
+        Assert.Equal("H", ap["orientation"]!.GetValue<string>());        // 수평(Δz=0)
+        Assert.Equal("LINEAR", ap["patternType"]!.GetValue<string>());
     }
 
-    /// <summary>골든 payload 는 §4.1 스키마 검증을 통과한다.</summary>
+    /// <summary>골든 payload 는 §6 스키마 검증을 통과한다.</summary>
     [Fact]
     public void GoldenActionParameters_PassSchema()
     {
-        var pos = WeldInspectionPayload.BuildPosition(GoldenTransform, GoldenInput());
-        var ap = WeldInspectionPayload.BuildActionParameters("JOB-CT1-L2-W03-S07-2", pos, GoldenParams());
+        var ap = WeldInspectionPayload.BuildActionParameters(GoldenTransform, GoldenInput());
 
         var violations = WeldInspectionPayload.ValidateSchema(Schema, ap);
 
         Assert.Empty(violations);
     }
 
-    /// <summary>필수 필드(seamEndW) 누락 시 스키마 검증 실패.</summary>
+    /// <summary>필수 필드(seamStart) 누락 시 스키마 검증 실패.</summary>
     [Fact]
     public void MissingRequiredField_FailsSchema()
     {
-        var pos = new JsonObject
+        var ap = new JsonObject
         {
-            ["seamStartW"] = new JsonArray(1, 2, 3),
-            // seamEndW 누락
-            ["drawingPos"] = new JsonObject
-            {
-                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "W03", ["x"] = 0, ["y"] = 0, ["z"] = 0
-            }
+            ["wallId"] = "SM",
+            // seamStart 누락
+            ["seamEnd"] = new JsonArray(13.310, 5.980, 1.420),
+            ["orientation"] = "H",
+            ["patternType"] = "LINEAR",
         };
-        var ap = WeldInspectionPayload.BuildActionParameters("JOB", pos, GoldenParams());
 
         var violations = WeldInspectionPayload.ValidateSchema(Schema, ap);
 
         Assert.NotEmpty(violations);
+    }
+
+    /// <summary>orientation 유도 — 높이 변화가 크면 V, 수평이면 H.</summary>
+    [Fact]
+    public void Orientation_DerivesFromSeamGeometry()
+    {
+        Assert.Equal("H", WeldInspectionPayload.Orientation(new[] { 0.0, 0, 1 }, new[] { 2.0, 0, 1 }));
+        Assert.Equal("V", WeldInspectionPayload.Orientation(new[] { 0.0, 0, 1 }, new[] { 0.0, 0, 3 }));
     }
 
     /// <summary>맵버전 불일치/부재 시 릴리즈 거부(CalibrationInvalidException), 일치 시 변환 반환 [§2.5].</summary>

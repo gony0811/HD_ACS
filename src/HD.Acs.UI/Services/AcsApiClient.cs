@@ -77,6 +77,14 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task GotoAsync(string robotId, string mapId, double x, double y, double? theta,
+        string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/robots/{robotId}/goto",
+            new { MapId = mapId, X = x, Y = y, Theta = theta, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(층 불일치)/400 {error} 메시지 노출
+    }
+
     // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     public async Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
         double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default)
