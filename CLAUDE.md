@@ -93,6 +93,7 @@ HD_ACS/
 │   ├── ARCHITECTURE_DECISIONS.md # ADR — 아키텍처 결정 기록 (결정/근거/미결 추적)
 │   ├── INSPECTION_SCENARIO.md # 검사 시나리오 모델/상태 머신
 │   ├── TANK_WALL_LAYOUT.md    # 화물창 전개도 구성·벽면 naming rule (위치 주소 체계 기준)
+│   ├── TANK_RENDERING.md      # 선창 도면 렌더링 방법 (3D 셸·전개도·좌표 3단·역투영)
 │   ├── GRAPH_DATA_MODEL.md    # 그래프 자료구조·DB 설계 (VDA 5050 Order 생성 기반)
 │   ├── DB_SCHEMA.md           # DB 스키마 카탈로그 (28테이블+2뷰, ERD)
 │   └── GLOSSARY.md            # 용어 정의
@@ -126,6 +127,7 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 
 ## 변경 이력
 
+- 2026-08-27: 선창 도면 렌더링 방법 문서화 — `docs/TANK_RENDERING.md` 신설. 기하 모델(SPEC §1~§3)과 별개로 **화면에 그리는 방법**만 코드에서 역으로 정리: 좌표 3단(도면 3D→면-로컬(u,v)→캔버스 px)과 (u,v)→3D 식이 `WallPose.LocalToDrawing` 정본 + UI 4곳 복제라는 점, 격벽(F/A) 팔각 반폭 함수가 `TankView.HalfWidth`·`TankViewModel.FaceOutlineUv`·`AreaPlanningViewModel.HalfWidthU` 3중복인 점, 3D 레이어 법선 오프셋 규칙(셸 0 / 층밴드 0.02m / 오버레이 0.03m, 법선 내부향이라 부호 반전), 격리 모드에서 반투명 채움을 생략하는 이유(WPF 3D 반투명 깊이 컬링), 전개도 2종(운영 탭=WrapPanel 면별 격자·셀마다 축척 다름 / 계획 캔버스=선택 면 1개 600px·레이어 z-order), 층-로컬 v 규약(`VOff`/`SliceH`, API 경계에서만 ±변환), 캔버스 역투영식. **확인된 문서↔구현 불일치 3건 기록**: ① 전개도가 ADR-005/TANK_WALL_LAYOUT의 방사형 배치가 아니라 WrapPanel 격자이며 `TankLayout.WallCode.NormX/NormY`는 미바인딩 사문화 ② 3D 로봇 마커가 맵 좌표를 도면 씬에 직접 매핑(T_W_D 역변환 누락, 코드에 placeholder 주석) ③ `A`(선미 격벽) U축이 코드는 +y(우현→좌현)인데 대외 정본 `surface_id_enum.docx`·비전 v3 §5는 좌현→우현 — 후벽 촬영 u 좌우 반전 우려, 3자 동시 개정 필요. 겸사로 `SPEC_AREA_TASK_MANUAL.md` §3 표의 폐기된 잠정 코드(FL/BC-S/SW-P/CL/FW/AW…)를 채택 코드(B/SL/PL/SM/PM/SU/PU/T/F/A)로 교체하고 Surface ID 열·격벽 P0 실값·③ 경고를 추가. 코드 무변경(문서만)
 - 2026-07-15: 프로젝트 개요 초안 작성 (코드 미작성 단계, 기술 스택 TBD)
 - 2026-07-15: 저장소 확인 후 운용 환경(HD현대중공업 LNG 화물창) 및 라이선스(Apache 2.0) 반영
 - 2026-07-15: 아키텍처 핵심 결정 반영 — VDA 5050/온보드 실행, 두절 내성+재접속 동기화, C#/.NET, API-First(WPF+Web+태블릿), 관제 비상정지 (docs/ARCHITECTURE_DECISIONS.md)
