@@ -1,3 +1,4 @@
+using HD.Acs.Core.Geometry;
 using HD.Acs.Core.Planning;
 using Xunit;
 
@@ -6,6 +7,45 @@ namespace HD.Acs.Core.Tests;
 /// <summary>영역(Area) 기하 단위 테스트 [PHASE2 개정].</summary>
 public class AreaGeometryTests
 {
+    /// <summary>standoff 정차점 — 수직벽: 중심 투영에서 내부향 법선 방향으로 standoff만큼 이격. [standoff 정차]</summary>
+    [Fact]
+    public void StationDrawing_OffsetsAlongHorizontalNormal()
+    {
+        // 벽면: origin (10,0,0), U=+x, V=+z (y=0 평면의 수직벽), 내부향 법선 = +y
+        var pose = new WallPose(new[] { 10.0, 0.0, 0.0 }, new[] { 1.0, 0.0, 0.0 }, new[] { 0.0, 0.0, 1.0 });
+        var st = AreaGeometry.StationDrawing(pose, 2.0, 1.5, new[] { 0.0, 1.0, 0.0 }, 0.8);
+
+        Assert.Equal(12.0, st[0], 6);   // x = origin.x + u
+        Assert.Equal(0.8, st[1], 6);    // y = 0 + 법선(+y) × standoff
+        Assert.Equal(1.5, st[2], 6);    // z = v (참고값)
+    }
+
+    /// <summary>기울어진 챔퍼면 법선은 수평 성분만 정규화해 사용 — 이격 거리는 바닥 평면에서 standoff. [standoff 정차]</summary>
+    [Fact]
+    public void StationDrawing_NormalizesTiltedNormalHorizontally()
+    {
+        var pose = new WallPose(new[] { 0.0, 0.0, 0.0 }, new[] { 1.0, 0.0, 0.0 }, new[] { 0.0, -0.7071, 0.7071 });
+        // 챔퍼 법선 (0, 0.7071, 0.7071) → 수평 성분 정규화 = (0,1,0)
+        var st = AreaGeometry.StationDrawing(pose, 0.0, 0.0, new[] { 0.0, 0.7071, 0.7071 }, 1.0);
+
+        Assert.Equal(0.0, st[0], 6);
+        Assert.Equal(1.0, st[1], 6);    // 수평 이격이 정확히 standoff (성분 그대로면 0.7071이 됨)
+    }
+
+    /// <summary>바닥/천장(법선 수직) 또는 standoff≤0 — 이격 없이 중심 투영 폴백. [standoff 정차]</summary>
+    [Fact]
+    public void StationDrawing_FallsBackForVerticalNormalOrZeroStandoff()
+    {
+        var pose = new WallPose(new[] { 0.0, 0.0, 0.0 }, new[] { 1.0, 0.0, 0.0 }, new[] { 0.0, 1.0, 0.0 });
+        var center = pose.LocalToDrawing(3.0, 2.0);
+
+        var floor = AreaGeometry.StationDrawing(pose, 3.0, 2.0, new[] { 0.0, 0.0, 1.0 }, 0.8);   // 바닥 법선 +z
+        Assert.Equal(center, floor);
+
+        var zero = AreaGeometry.StationDrawing(pose, 3.0, 2.0, new[] { 0.0, 1.0, 0.0 }, 0.0);    // standoff 0
+        Assert.Equal(center, zero);
+    }
+
     /// <summary>영역 중앙 계산. [정차각 자동화]</summary>
     [Fact]
     public void AreaCenter_ReturnsRectangleMidpoint()

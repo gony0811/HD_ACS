@@ -1,8 +1,26 @@
+using HD.Acs.Core.Geometry;
+
 namespace HD.Acs.Core.Planning;
 
 /// <summary>영역(Area) 순수 기하 [PHASE2 개정]. 디폴트 정차 pose·경계 판정. 도면 좌표(m).</summary>
 public static class AreaGeometry
 {
+    /// <summary>
+    /// standoff 정차점(도면 좌표) — 영역 중심 (uc,vc)의 3D 투영에서 벽 내부향 법선의 **수평 성분** 방향으로
+    /// standoffM 만큼 이격. 법선 수평 성분이 없는 면(바닥 B/천장 T)은 이격 없이 중심 투영 폴백(오버라이드 권장).
+    /// wallNormal은 ref.wall.normal(내부향 단위 법선, 도면 좌표) — U×V 재계산 대신 DB 값을 신뢰한다.
+    /// 반환은 [x,y,z]이며 정차에는 x,y만 의미(z는 참고).
+    /// </summary>
+    public static double[] StationDrawing(WallPose pose, double uc, double vc, double[] wallNormal, double standoffM)
+    {
+        var center = pose.LocalToDrawing(uc, vc);
+        if (standoffM <= 0 || wallNormal is not { Length: >= 2 }) return center;
+
+        var h = Vec3.Normalize(new[] { wallNormal[0], wallNormal[1], 0.0 });
+        if (h is null) return center;   // 수평 성분 0 — 바닥/천장 폴백
+        return Vec3.Add(center, Vec3.Scale(h, standoffM));
+    }
+
     /// <summary>영역 중앙 (디폴트 정차 위치). [정차각 자동화]</summary>
     public static (double X, double Y) AreaCenter(double minX, double minY, double maxX, double maxY) =>
         ((minX + maxX) / 2.0, (minY + maxY) / 2.0);

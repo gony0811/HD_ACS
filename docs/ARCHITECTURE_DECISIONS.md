@@ -117,16 +117,20 @@
 
 ---
 
-## ADR-008. VDA 5050 프로파일 정의 🔶
+## ADR-008. VDA 5050 프로파일 정의 🔶 → 사양서로 이관
 
 **질문**: VDA 5050을 본 프로젝트에 어떻게 구체화(프로파일링)하는가?
 
-**미결 세부**:
-- ⬜ VDA 5050 버전 선택 (2.0 / 2.1)
-- ⬜ 커스텀 액션 카탈로그: 검사 작업 실행(협동로봇 시퀀스), 촬영 트리거(위치 파라미터), 비상정지 — 액션 이름/파라미터/blockingType 정의 (HD_AMR 운영 S/W 측과 협의)
-- ⬜ 맵/좌표계 규약: 화물창 맵 ID, 노드 좌표계와 검사 S/W 좌표계 정합
-- ⬜ 두절 구간 검사 이력 재전송 방식 (표준 외 확장): state 확장 vs 별도 토픽 vs 로봇 측 업로드
-- ⬜ MQTT 브로커 선정 (Mosquitto, EMQX 등) 및 QoS/폐쇄망 내 보안 정책
+**결정** (2026-08-27): 프로파일 상세는 **`docs/VDA5050_INTERFACE_SPEC.md`** (HD_ACS ↔ HD_AMR 인터페이스 사양서)로 단일화한다. 본 ADR은 결정 요지만 유지하며, 사양서와 다르면 사양서가 우선한다.
+
+**확정 세부**:
+- ✅ **버전 = VDA 5050 2.0** (헤더 `2.0.0`, 토픽 `uagv/v2` — 구현 기준 확정)
+- ✅ 커스텀 액션 카탈로그: `startWeldInspection`(NODE/HARD, param_schema 시드) + instantActions `initPosition`/`emergencyStop` — 사양서 §5/§8
+- ✅ 맵/좌표계 규약: 층=맵(`{tank}-L{n}`), VDA 구간 m/rad, 도면→맵 T_W_D 변환 — 사양서 부록 B
+- ✅ 두절 구간 이력: 최신 state 스냅샷 동기화로 충분(소급 재전송 없음)을 기본 계약으로 — 상세 이력 확장은 사양서 §10 N8 협의
+- ✅ MQTT: Mosquitto(:1883, 폐쇄망 평문), 전 채널 QoS 1, connection만 retain+Last Will — 보안(TLS) 여부는 사양서 §10 N9 협의
+
+**잔여 미결**: HD_AMR 측 회신 대기 항목은 사양서 §10 협의 표(N1~N9)에서 관리한다.
 
 ---
 
@@ -226,7 +230,7 @@
 
 | # | 항목 | 관련 ADR | 상태/비고 |
 |---|---|---|---|
-| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ⬜ HD_AMR 운영 S/W 측과 협의 |
+| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ✅ 해소 — v2.0·startWeldInspection 확정, `VDA5050_INTERFACE_SPEC.md`로 이관 (HD_AMR 회신 대기 항목은 사양서 §10 N1~N9) |
 | Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |

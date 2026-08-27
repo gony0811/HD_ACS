@@ -4,13 +4,18 @@ using Json.Schema;
 
 namespace HD.Acs.Core.Planning;
 
-/// <summary>릴리즈 시점 도면 데이터(Task.Position에서 파싱). 각 벡터는 [x,y,z] (m). [SPEC v2: 법선 제거]</summary>
+/// <summary>
+/// 릴리즈 시점 도면 데이터(Task.Position에서 파싱). 각 벡터는 [x,y,z] (m).
+/// U,V = 작업 시작점의 벽면-로컬 좌표 (drawingPos echo용, VDA5050_INTERFACE_SPEC §8.2). [SPEC v2: 법선 제거]
+/// </summary>
 public sealed record WeldDrawingData(
     string Tank,
     int Level,
     string WallCode,
     double[] SeamStart,
-    double[] SeamEnd);
+    double[] SeamEnd,
+    double U,
+    double V);
 
 /// <summary>유효 T_W_D 부재/맵버전 불일치 — 릴리즈 거부 [PHASE2 §2.5].</summary>
 public sealed class CalibrationInvalidException(string message) : Exception(message);
@@ -55,6 +60,8 @@ public static class WeldInspectionPayload
                 ["tank"] = d.Tank,
                 ["level"] = d.Level,
                 ["wall_code"] = d.WallCode,
+                ["u"] = d.U,
+                ["v"] = d.V,
                 ["x"] = d.SeamStart[0],
                 ["y"] = d.SeamStart[1],
                 ["z"] = d.SeamStart[2],

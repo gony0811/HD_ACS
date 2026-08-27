@@ -55,7 +55,8 @@ public interface IAcsApiClient
     // corners = 임의 4점 사각형 [[u,v]…]. 서버가 bbox 유도.
     Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
-        double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default);
+        double? stationX, double? stationY, double? stationTheta, string userId,
+        double? stationStandoffM = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,

@@ -66,19 +66,18 @@ HD_ACS 저장소 타임라인:
 
 ### 미완료 / 잔여 ⬜ (다음 작업 후보 — 우선순위순)
 
-1. **WP-3 릴리즈 payload 빌드 (SPEC §4.2) — 미구현. 현재 가장 중요한 갭.**
-   지금 `MissionService`는 Task의 Position/Params jsonb를 **그대로**(도면 좌표인 채로) actionParameters에 싣는다.
-   SPEC이 요구하는 것: 릴리즈 시점에 유효 T_W_D를 적용해 `seamStartW/seamEndW`(맵 좌표, z 통과)와
-   `wallNormalW`(yaw 회전+정규화)를 생성하고, `drawingPos`는 이력 대조용 echo로 유지, 발행 직전
-   param_schema(JSON Schema)로 검증(실패 시 릴리즈 중단). golden fixture는 SPEC 부록 A.
-   또한 `ref.action_catalog`의 param_schema가 현재 NULL 시드 — SPEC §4.1의 스키마 문자열로 채울 것.
-2. **E2E 수동 검증 (PostgreSQL 포함)** — SPEC §7 수용 기준의 E2E 4항목(캡처→solve→seam 등록→
-   generate→Run→앵커 공유 실행→FAILED 1건 기록)을 실제 DB로 통과시킨 기록이 아직 없다.
+> (해소됨) ~~WP-3 릴리즈 payload 빌드~~ — 2026-08-04 완성(T_W_D 적용·스키마 검증·시드, wallNormalW는 SPEC v2에서 계약 제거).
+> 2026-08-28 `VDA5050_INTERFACE_SPEC.md` 계약으로 확장 완료: drawingPos u,v, greedy 배차 경로 params 완전 채움+발행 전 검증.
+> (해소됨) ~~E2E (PostgreSQL 포함)~~ — 2026-08-28 **DB 포함 풀 E2E 최초 통과** (영역→run→greedy 단일노드 Order→시뮬레이터 검증
+> 통과→앵커 FULL/SHARED→work_item DONE→run COMPLETED + 실패 주입→재시도 2회→SKIPPED+INSPECTION_SKIPPED 알람).
+> 이 과정에서 잠복 결함 3건 수정: order_node PK 충돌(정차마다 seq=0 재INSERT), alarm.spec 시드 누락(FK 위반),
+> state 핸들러 예외 미격리(MQTT 수신 체인 사망). seam 경로(dormant) 기준 SPEC §7 E2E는 미수행.
 3. **TASK 관리 3-Pane UI (WP-5 본편)** — 트리 / 벽면 전개도 / 상세.
    표현 규칙 확정분: 영역(anchorGroup)=반투명 박스, TASK=선분 오버레이(상태색+방향 화살표+seqInGroup 배지),
    박스 클릭=그룹 선택·선분 클릭=TASK 선택, 영역 상태=자식 집계, 그룹 첫 TASK "정렬 포함"/이후 "정렬 공유" 배지.
-4. **FAILED 정책 엔진** — scenario policy jsonb(재시도 N→스킵→알람) 해석·실행, FAILED 시
-   orderUpdateId+1 재발행. 현재 정책 스키마만 있고 실행기가 없다.
+4. **FAILED 정책 엔진** — 기본 동작(재시도 N회→스킵→알람)은 디스패처에 구현·E2E 검증됨(2026-08-28,
+   재발행은 orderUpdateId+1 대신 **신규 orderId** — VDA5050_INTERFACE_SPEC §4.1 계약). 잔여: scenario policy
+   jsonb 해석(재시도 횟수 등 시나리오별 정책 외부화), errors 유형 코드별 분기(사양서 협의 N6 후).
 5. **이력/리포트·알람 API** — UI가 방어적 빈 상태로 처리 중인 미구현 백엔드(알람 조회, 검사 이력, 리포트).
    inspection_result와 NodeId 조인 정리 포함.
 6. **Tank 3D/전개도 본구현** — TankView는 골격 상태(HelixToolkit 도입만 완료).
@@ -88,7 +87,7 @@ HD_ACS 저장소 타임라인:
 
 | # | 내용 | 상태 |
 |---|---|---|
-| Q1 | 커스텀 액션 카탈로그 | 부분 해소 — `startWeldInspection` 확정·시드됨. param_schema 시드와 HD_AMR 측 최종 협의 잔여 |
+| Q1 | 커스텀 액션 카탈로그 | ✅ 해소 — `VDA5050_INTERFACE_SPEC.md`로 이관(v2.0·startWeldInspection·param_schema u,v 시드). HD_AMR 회신 대기 항목은 사양서 §10 |
 | Q2 | 검사 S/W와 위치/시각 키 규약 | ⬜ 좌표계·타임스탬프 기준 협의 필요 |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker) | ⬜ |
 | Q6 | 화물창 맵 데이터 소스 | 사실상 방향 확정 — 도면 좌표 + T_W_D (ADR 갱신 필요) |

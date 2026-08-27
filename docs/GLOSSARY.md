@@ -5,6 +5,9 @@
 | **HD_ACS** | HD현대중공업 LNG 화물창 용접검사로봇 관제 시스템 (본 프로젝트) |
 | **LNG 화물창 (Cargo Containment System, CCS)** | LNG 운반선의 화물(액화천연가스) 저장 공간. 멤브레인 타입은 주름형 스테인리스 시트 용접 구조 |
 | **HD_AMR** | 로봇 온보드의 통합 운영 S/W — AMR 주행, 협동로봇 검사 시퀀스/자세, 검사장비 제어를 모두 담당. HD_ACS의 유일한 통신 상대 (VDA 5050) |
+| **VDA 5050** | AGV/AMR ↔ 마스터 컨트롤 간 표준 통신 인터페이스 (MQTT + JSON). 본 프로젝트는 v2.0 채택 — order/instantActions/state/connection 채널 사용. 계약 상세는 `VDA5050_INTERFACE_SPEC.md` |
+| **T_W_D** | 도면(Drawing) 좌표 → 맵/월드(World) 좌표 강체변환 — 층별 기준점 캡처로 산출, payload의 seamStartW/EndW 생성에 사용 |
+| **drawingPos** | 검사 액션 payload에 echo되는 도면 좌표 정보(tank/level/wall_code/u/v/x/y/z) — 결과 역추적·티칭 키(wall_code) 용도, 주행에는 미사용 |
 | **멤브레인 (Membrane)** | 화물창 내벽의 얇은 주름형(corrugated) 스테인리스 시트 — 검사 대상 용접부가 위치하며, 바닥 요철의 원인 |
 | **AMR** | Autonomous Mobile Robot. 자율 이동 로봇 — 본 프로젝트에서는 현대 AMR 플랫폼 |
 | **협동로봇 (Cobot)** | AMR 상단에 장착되어 검사 자세를 만드는 다관절 협동 로봇 |

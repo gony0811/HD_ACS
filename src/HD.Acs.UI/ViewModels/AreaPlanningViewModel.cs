@@ -90,6 +90,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _stationX;
     [ObservableProperty] private double _stationY;
     [ObservableProperty] private double _stationTheta;
+    // 정차 이격 [m] — 정차점 = 영역 중심 + 내부향 법선 수평성분 × 이격. null(빈값)=서버 설정 기본(0.8m)
+    [ObservableProperty] private double? _stationStandoffM;
 
     // ── 작업 등록 입력 (면 로컬 u,v) ──
     [ObservableProperty] private double _startU;
@@ -175,7 +177,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var (_, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
-                _operatorId);
+                _operatorId, StationStandoffM);
             StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 L{level}";
             await RefreshAreasAsync();
         }

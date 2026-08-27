@@ -31,6 +31,11 @@ var failActionIds = (Environment.GetEnvironmentVariable("SIM_FAIL_ACTION_IDS") ?
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+// jobRef 기반 실패 주입 — actionId가 배차 시점 발급(GUID)이라 사전 지정 불가한 ACS E2E용
+var failJobRefs = (Environment.GetEnvironmentVariable("SIM_FAIL_JOB_REFS") ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
 // 실행 시간 (ms) — 테스트 고속화를 위해 환경변수로 조절 가능
 var travelMs = int.TryParse(Environment.GetEnvironmentVariable("SIM_TRAVEL_MS"), out var t1) ? t1 : 800;
 var fullMs   = int.TryParse(Environment.GetEnvironmentVariable("SIM_FULL_MS"),   out var t2) ? t2 : 1200;
@@ -54,7 +59,8 @@ var state = new Vda5050State
 {
     Manufacturer = robot.Manufacturer, SerialNumber = robot.SerialNumber,
     AgvPosition = new AgvPosition { MapId = mapId, PositionInitialized = true },
-    BatteryState = new BatteryState { BatteryCharge = 95 }
+    BatteryState = new BatteryState { BatteryCharge = 95 },
+    SafetyState = new SafetyState(),   // 표준 필수 필드 발행 [SPEC §6.3 N4]
 };
 var headerId = 0;
 Vda5050Order? currentOrder = null;
@@ -159,7 +165,9 @@ async Task ExecuteActionAsync(VdaAction action)
     await PublishStateAsync();
 
     // ── 1. 실패 주입 [WP-4 §5.3] ──
-    if (failActionIds.Contains(action.ActionId))
+    if (failActionIds.Contains(action.ActionId)
+        || (failJobRefs.Count > 0 && failJobRefs.Contains(
+                action.ActionParameters.FirstOrDefault(p => p.Key == "jobRef")?.Value?.ToString() ?? "")))
     {
         await Task.Delay(sharedMs);
         Fail(actionState, "INJECTED");
@@ -220,7 +228,7 @@ void Fail(ActionState actionState, string reason)
 async Task PublishStateAsync()
 {
     state.HeaderId = ++headerId;
-    state.Timestamp = DateTimeOffset.UtcNow.ToString("O");
+    state.Timestamp = Vda5050Header.NowIso();   // 밀리초+Z [SPEC §3 N2]
     await PublishAsync(stateTopic, state);
 }
 
@@ -281,6 +289,10 @@ static class WeldInspectionParams
                 if (!IsVec3(position.Value, key)) violations.Add($"position.{key}");
             if (!position.Value.TryGetProperty("drawingPos", out var dp) || dp.ValueKind != JsonValueKind.Object)
                 violations.Add("position.drawingPos");
+            else
+                foreach (var key in new[] { "u", "v" })   // 벽면-로컬 좌표 [VDA5050_INTERFACE_SPEC §8.2]
+                    if (!dp.TryGetProperty(key, out var uv) || uv.ValueKind != JsonValueKind.Number)
+                        violations.Add($"position.drawingPos.{key}");
         }
 
         var anchorGroupId = ""; var seqInGroup = 0;

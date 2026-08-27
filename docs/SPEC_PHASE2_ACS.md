@@ -213,6 +213,9 @@ INSERT INTO ref.action_catalog (action_type, scope, blocking_type, param_schema,
 VALUES ('startWeldInspection', 'NODE', 'HARD', '<아래 JSON Schema>', '단일 용접라인 구간 자동 검사');
 ```
 
+> **[2026-08-27 개정]** payload 계약의 단일 출처는 `VDA5050_INTERFACE_SPEC.md` §8로 이관되었다.
+> `drawingPos`에 **u, v(벽면-로컬 좌표)가 확정 계약으로 추가**되었다 — 현행 구현(`WeldInspectionPayload.cs`·`schema.sql` 시드)은 미반영(구현 반영 대기).
+
 param_schema (JSON Schema draft-07, 문자열로 저장):
 
 ```json
@@ -228,10 +231,11 @@ param_schema (JSON Schema draft-07, 문자열로 저장):
         "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
         "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
         "drawingPos":  { "type": "object",
-          "required": ["tank", "level", "wall_code", "x", "y", "z"],
+          "required": ["tank", "level", "wall_code", "u", "v", "x", "y", "z"],
           "properties": {
             "tank": { "type": "string" }, "level": { "type": "integer" },
             "wall_code": { "type": "string" },
+            "u": { "type": "number" }, "v": { "type": "number" },
             "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } } }
       }
     },
@@ -328,6 +332,7 @@ param_schema (JSON Schema draft-07, 문자열로 저장):
         "seamStartW": [12.510, 5.980, 1.420],
         "seamEndW":   [13.310, 5.980, 1.420],
         "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "W03",
+                        "u": 3.120, "v": 1.420,
                         "x": 3.120, "y": 0.0, "z": 1.420 } } },
     { "key": "params", "value": {
         "seamType": "LINE",

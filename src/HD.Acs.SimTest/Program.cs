@@ -99,6 +99,7 @@ var failures = new List<string>();
     Expect(r, a4, "FAILED", "reason=PARAM", "S2: 필수 필드 누락은 PARAM 실패여야 함");
     ExpectContains(r, a4, "seamStartW",    "S2: 위반 목록에 position.seamStartW 포함");
     ExpectContains(r, a4, "anchorGroupId", "S2: 위반 목록에 params.anchorGroupId 포함");
+    ExpectContains(r, a4, "drawingPos.u",  "S2: 위반 목록에 drawingPos.u 포함 [SPEC §8.2 u,v 필수]");
 }
 
 // ═══ S3: fail-injection — SIM_FAIL_ACTION_IDS 대상 FAILED ═══
@@ -135,7 +136,7 @@ async Task<Dictionary<string, (string Status, string? Result)>> RunScenarioAsync
     Console.WriteLine($"\n[TEST] ▶ {name} 발행 (actions={ids.Length})");
     lock (stateLock) foreach (var id in ids) actionStates.Remove(id);
 
-    order.HeaderId = 1; order.Timestamp = DateTimeOffset.UtcNow.ToString("O");
+    order.HeaderId = 1; order.Timestamp = Vda5050Header.NowIso();
     order.Manufacturer = robot.Manufacturer; order.SerialNumber = robot.SerialNumber;
     await client.PublishAsync(new MqttApplicationMessageBuilder()
         .WithTopic(Vda5050Topics.Order(robot))
@@ -201,7 +202,9 @@ static VdaAction Inspection(string actionId, string jobRef, string anchorGroupId
         new ActionParameter { Key = "position", Value = new {
             seamStartW  = new[] { 12.510, 5.980, 1.420 },
             seamEndW    = new[] { 13.310, 5.980, 1.420 },
-            drawingPos  = new { tank = "CT1", level = 2, wall_code = "W03", x = 3.120, y = 0.0, z = 1.420 } } },
+            drawingPos  = new { tank = "CT1", level = 2, wall_code = "W03",
+                                u = 3.120, v = 1.420,   // 벽면-로컬 [VDA5050_INTERFACE_SPEC §8.4]
+                                x = 3.120, y = 0.0, z = 1.420 } } },
         new ActionParameter { Key = "params", Value = new {
             seamType = "LINE", sectionDxfId = "DXF-CORR-T12",
             inspectionProfileId = "INSPECT-STD-01",

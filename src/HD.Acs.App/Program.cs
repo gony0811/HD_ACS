@@ -131,6 +131,8 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     if (derivedLevel is null)
         return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
 
+    if (req.StationStandoffM is < 0)
+        return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
     bool dup = await db.InspectionAreas.AsNoTracking()
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
@@ -141,6 +143,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         Corners = System.Text.Json.JsonSerializer.Serialize(corners),
         UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
+        StationStandoffM = req.StationStandoffM,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
     db.InspectionAreas.Add(area);
@@ -158,7 +161,7 @@ app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, Ac
     {
         a.AreaId, a.TankId, a.WallCode, a.Level, a.Name,
         corners = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners),
-        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.SortOrder,
+        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM, a.SortOrder,
         TaskCount = a.Tasks.Count
     }));
 });
@@ -464,6 +467,6 @@ public sealed record CreateTankGeometryRequest(
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
-    double[][]? Corners = null);
+    double[][]? Corners = null, double? StationStandoffM = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);

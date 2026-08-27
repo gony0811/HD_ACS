@@ -23,10 +23,11 @@ public class WeldInspectionPayloadTests
             "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
             "drawingPos": {
               "type": "object",
-              "required": ["tank", "level", "wall_code", "x", "y", "z"],
+              "required": ["tank", "level", "wall_code", "u", "v", "x", "y", "z"],
               "properties": {
                 "tank": { "type": "string" }, "level": { "type": "integer" },
                 "wall_code": { "type": "string" },
+                "u": { "type": "number" }, "v": { "type": "number" },
                 "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
               }
             }
@@ -54,7 +55,8 @@ public class WeldInspectionPayloadTests
     private static readonly DrawingTransform GoldenTransform = new(9.390, 5.980, 0);
     private static WeldDrawingData GoldenInput() => new(
         "CT1", 2, "W03",
-        new[] { 3.120, 0.0, 1.420 }, new[] { 3.920, 0.0, 1.420 });
+        new[] { 3.120, 0.0, 1.420 }, new[] { 3.920, 0.0, 1.420 },
+        U: 3.120, V: 1.420);   // 벽면-로컬 u,v [VDA5050_INTERFACE_SPEC §8.4 골든]
 
     private static JsonObject GoldenParams() => new()
     {
@@ -81,6 +83,8 @@ public class WeldInspectionPayloadTests
         Assert.Equal("CT1", dp["tank"]!.GetValue<string>());
         Assert.Equal(2, dp["level"]!.GetValue<int>());
         Assert.Equal("W03", dp["wall_code"]!.GetValue<string>());
+        Assert.Equal(3.120, dp["u"]!.GetValue<double>(), 3);
+        Assert.Equal(1.420, dp["v"]!.GetValue<double>(), 3);
         Assert.Equal(3.120, dp["x"]!.GetValue<double>(), 3);
         Assert.Equal(0.0, dp["y"]!.GetValue<double>(), 3);
         Assert.Equal(1.420, dp["z"]!.GetValue<double>(), 3);
@@ -108,7 +112,8 @@ public class WeldInspectionPayloadTests
             // seamEndW 누락
             ["drawingPos"] = new JsonObject
             {
-                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "W03", ["x"] = 0, ["y"] = 0, ["z"] = 0
+                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "W03",
+                ["u"] = 0, ["v"] = 0, ["x"] = 0, ["y"] = 0, ["z"] = 0
             }
         };
         var ap = WeldInspectionPayload.BuildActionParameters("JOB", pos, GoldenParams());

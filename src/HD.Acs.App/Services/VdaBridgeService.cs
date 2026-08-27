@@ -20,28 +20,43 @@ public sealed class VdaBridgeService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // 핸들러 예외는 메시지 단위로 격리 — 전파 시 MQTT 수신 체인이 죽어 이후 state가 전부 유실된다
         _vda.StateReceived += async (robot, state) =>
         {
-            using var scope = _scopes.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<RobotStateService>()
-                .HandleStateAsync(robot, state, ct);
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<RobotStateService>()
+                    .HandleStateAsync(robot, state, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "state 처리 실패 (robot={Robot}, order={Order}) — 메시지 스킵", robot.RobotId, state.OrderId);
+            }
         };
         _vda.ConnectionReceived += async (robot, conn) =>
         {
-            using var scope = _scopes.CreateScope();
-            var svc = scope.ServiceProvider;
-            await svc.GetRequiredService<RobotStateService>().HandleConnectionAsync(robot, conn, ct);
-
-            // 재접속 동기화 후 층 전환 대기 중이던 Run의 릴리즈 재시도 [ADR-002, Q9]
-            if (conn.ConnectionState == "ONLINE")
+            try
             {
-                var db = svc.GetRequiredService<AcsDbContext>();
-                var waiting = await db.ScenarioRuns
-                    .Where(r => r.RobotId == robot.RobotId && r.State == "WAITING_FLOOR_TRANSFER")
-                    .Select(r => r.RunId).ToListAsync(ct);
-                var missions = svc.GetRequiredService<MissionService>();
-                foreach (var runId in waiting)
-                    await missions.TryReleaseNextMissionAsync(runId, ct);
+                using var scope = _scopes.CreateScope();
+                var svc = scope.ServiceProvider;
+                await svc.GetRequiredService<RobotStateService>().HandleConnectionAsync(robot, conn, ct);
+
+                // 재접속 동기화 후 층 전환 대기 중이던 Run의 릴리즈 재시도 [ADR-002, Q9]
+                if (conn.ConnectionState == "ONLINE")
+                {
+                    var db = svc.GetRequiredService<AcsDbContext>();
+                    var waiting = await db.ScenarioRuns
+                        .Where(r => r.RobotId == robot.RobotId && r.State == "WAITING_FLOOR_TRANSFER")
+                        .Select(r => r.RunId).ToListAsync(ct);
+                    var missions = svc.GetRequiredService<MissionService>();
+                    foreach (var runId in waiting)
+                        await missions.TryReleaseNextMissionAsync(runId, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "connection 처리 실패 (robot={Robot}, state={State}) — 메시지 스킵", robot.RobotId, conn.ConnectionState);
             }
         };
 

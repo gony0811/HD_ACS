@@ -18,7 +18,7 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
     private readonly string _host;
     private readonly int _port;
     private readonly Dictionary<string, RobotRef> _robotsByTopicKey = new();
-    private int _headerId;
+    private readonly Dictionary<string, int> _headerIdByTopic = new();   // 토픽별 단조 증가 [SPEC §3 N1]
 
     public event Func<RobotRef, Vda5050State, Task>? StateReceived;
     public event Func<RobotRef, Vda5050Connection, Task>? ConnectionReceived;
@@ -51,14 +51,16 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
 
     public Task PublishOrderAsync(RobotRef robot, Vda5050Order order, CancellationToken ct = default)
     {
-        Stamp(order, robot);
-        return PublishAsync(Vda5050Topics.Order(robot), order, ct);
+        var topic = Vda5050Topics.Order(robot);
+        Stamp(order, robot, topic);
+        return PublishAsync(topic, order, ct);
     }
 
     public Task PublishInstantActionsAsync(RobotRef robot, Vda5050InstantActions actions, CancellationToken ct = default)
     {
-        Stamp(actions, robot);
-        return PublishAsync(Vda5050Topics.InstantActions(robot), actions, ct);
+        var topic = Vda5050Topics.InstantActions(robot);
+        Stamp(actions, robot, topic);
+        return PublishAsync(topic, actions, ct);
     }
 
     /// <summary>비상정지 — 기능적 정지이며 안전 규격 정지가 아님 [ADR-007]</summary>
@@ -88,10 +90,15 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
             }
         }, ct);
 
-    private void Stamp(Vda5050Header msg, RobotRef robot)
+    private void Stamp(Vda5050Header msg, RobotRef robot, string topic)
     {
-        msg.HeaderId = Interlocked.Increment(ref _headerId);
-        msg.Timestamp = DateTimeOffset.UtcNow.ToString("O");
+        lock (_headerIdByTopic)
+        {
+            _headerIdByTopic.TryGetValue(topic, out var id);
+            msg.HeaderId = ++id;
+            _headerIdByTopic[topic] = id;
+        }
+        msg.Timestamp = Vda5050Header.NowIso();   // 밀리초+Z [SPEC §3 N2]
         msg.Manufacturer = robot.Manufacturer;
         msg.SerialNumber = robot.SerialNumber;
     }

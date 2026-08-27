@@ -251,7 +251,9 @@ public sealed class MissionService
             pos["level"]!.GetValue<int>(),
             pos["wall_code"]!.GetValue<string>(),
             Vec(pos, "seamStartDrawing"),
-            Vec(pos, "seamEndDrawing"));
+            Vec(pos, "seamEndDrawing"),
+            pos["u"]?.GetValue<double>() ?? 0.0,   // dormant seam 경로: Position에 u,v 없으면 0 폴백
+            pos["v"]?.GetValue<double>() ?? 0.0);
     }
 
     private static string? FindNearestNode(Core.Graph.MapGraph graph, RobotContextEntity ctx)

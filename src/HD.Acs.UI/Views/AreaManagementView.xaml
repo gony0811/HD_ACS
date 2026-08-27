@@ -97,6 +97,12 @@
                             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C4U, Mode=TwoWay}" Margin="0,0,6,0" />
                             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding C4V, Mode=TwoWay}" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6"
+                                    ToolTip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(0.8m). 바닥/천장(B/T) 면은 적용 불가 — 수동 지정 사용.">
+                            <TextBlock Text="정차 이격[m]" Style="{StaticResource Lbl}" />
+                            <telerik:RadNumericUpDown Width="100" Height="Auto" Minimum="0" SmallChange="0.1"
+                                                      Value="{Binding StationStandoffM, Mode=TwoWay}" />
+                        </StackPanel>
                         <CheckBox Content="정차 수동 지정 (전역 x,y,θ) — 바닥/천장(B/T) 면은 필수" IsChecked="{Binding StationOverride, Mode=TwoWay}" Margin="0,0,0,4" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
                             <TextBlock Text="x,y,θ" Style="{StaticResource Lbl}" />

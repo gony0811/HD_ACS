@@ -23,13 +23,24 @@ public sealed class InspectionDispatcher
     private readonly IInspectionOrderingPolicy _policy;
     private readonly ILogger<InspectionDispatcher> _log;
     private readonly int _maxRetries;
+    private readonly double _standoffMm;
+    private readonly double _workingDistanceMm;
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IConfiguration config, ILogger<InspectionDispatcher> log)
     {
         _db = db; _vda = vda; _policy = policy; _log = log;
         _maxRetries = config.GetValue("Acs:Dispatch:MaxRetries", 2);
+        _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
+        _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
+        _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
+        _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
+        _allowedDevTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07);
     }
+
+    private readonly double _stationStandoffM;
+    private readonly double _allowedDevXy;
+    private readonly double _allowedDevTheta;
 
     // ── Phase 0: 선창 영역 → 작업 큐 전개 + 층별 미션 생성 ──────────────────────────
     /// <summary>
@@ -52,6 +63,10 @@ public sealed class InspectionDispatcher
 
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
+
+        // 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
+        var weldSchema = (await _db.ActionCatalog.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
 
         // 층별 유효 T_W_D 캐시
         var tWdByLevel = new Dictionary<int, (string MapId, DrawingTransform T)>();
@@ -85,7 +100,9 @@ public sealed class InspectionDispatcher
             var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
             var corners = Json<double[][]>(area.Corners);
             var (uc, vc) = AreaGeometry.Centroid(corners);
-            var stationDrawing = pose.LocalToDrawing(uc, vc);
+            // standoff 정차점: 영역 중심 + 내부향 법선 수평성분 × 이격 (B/T는 수평성분 없음 → 중심 폴백)
+            var standoffM = area.StationStandoffM ?? _stationStandoffM;
+            var stationDrawing = AreaGeometry.StationDrawing(pose, uc, vc, Json<double[]>(wall.Normal), standoffM);
 
             // 정차 맵좌표: 오버라이드(맵 프레임 가정) 우선, 없으면 centroid→도면→T_W_D
             double mx, my;
@@ -94,21 +111,44 @@ public sealed class InspectionDispatcher
             double? mTheta = area.StationTheta
                 ?? (wall.FacingYaw is double fy ? lv.T.DrawingYawToMap(fy) : (double?)null);
 
-            // 액션 payload(정차의 용접선들) 사전 구성 — 발행 시 actionId만 새로 발급
+            // 액션 payload(정차의 용접선들) 사전 구성 — 발행 시 actionId만 새로 발급.
+            // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
+            var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
             var actionsJson = new JsonArray();
             foreach (var t in area.Tasks)
             {
                 var startD = pose.LocalToDrawing(t.StartU, t.StartV);
                 var endD = pose.LocalToDrawing(t.EndU, t.EndV);
-                var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD);
+                var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
                 var worldPos = WeldInspectionPayload.BuildPosition(lv.T, d);
+                var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
+                var taskParams = new JsonObject
+                {
+                    ["seamType"] = t.SeamType,
+                    ["sectionDxfId"] = t.SectionDxfId,
+                    ["inspectionProfileId"] = t.ProfileId,
+                    ["standoffMm"] = _standoffMm,
+                    ["workingDistanceMm"] = _workingDistanceMm,
+                    ["anchorGroupId"] = anchorGroupId,
+                    ["seqInGroup"] = t.Seq,
+                };
+
+                var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
+                var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
+                if (violations.Count > 0)
+                {
+                    _log.LogWarning("Run {Run}: {Job} payload 스키마 위반 — run 시작 중단: {V}",
+                        run.RunId, jobRef, string.Join("; ", violations));
+                    throw new WeldPayloadSchemaException(violations);
+                }
+
                 actionsJson.Add(new JsonObject
                 {
                     ["actionType"] = "startWeldInspection",
                     ["taskId"] = t.TaskId.ToString(),
-                    ["jobRef"] = t.ProfileId,
+                    ["jobRef"] = jobRef,
                     ["position"] = worldPos,
-                    ["params"] = new JsonObject(),
+                    ["params"] = taskParams.DeepClone(),
                 });
             }
 
@@ -182,7 +222,11 @@ public sealed class InspectionDispatcher
         var node = new OrderNode
         {
             NodeId = wi.WorkItemId.ToString(), SequenceId = 0, Released = true,
-            NodePosition = new NodePosition { X = wi.X, Y = wi.Y, Theta = wi.Theta, MapId = wi.MapId },
+            NodePosition = new NodePosition
+            {
+                X = wi.X, Y = wi.Y, Theta = wi.Theta, MapId = wi.MapId,
+                AllowedDeviationXY = _allowedDevXy, AllowedDeviationTheta = _allowedDevTheta,   // [SPEC §4.2]
+            },
         };
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(node);
@@ -210,6 +254,9 @@ public sealed class InspectionDispatcher
             });
         }
 
+        // 미션의 order_node는 "현재 정차" 1건만 유지 — 이전 정차 노드 제거 (PK (mission,seq) 충돌 방지)
+        var staleNodes = await _db.OrderNodes.Where(n => n.MissionId == mission.MissionId).ToListAsync(ct);
+        _db.OrderNodes.RemoveRange(staleNodes);
         _db.OrderNodes.Add(new OrderNodeEntity
         {
             MissionId = mission.MissionId, SequenceId = 0, NodeId = node.NodeId,
@@ -224,8 +271,9 @@ public sealed class InspectionDispatcher
         mission.StartedAt ??= DateTimeOffset.UtcNow;
         run.State = "RUNNING";
 
-        await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+        // 저장을 발행보다 먼저 — 저장 실패 시 로봇에 미기록 Order가 나가는 실행-기록 불일치 방지
         await _db.SaveChangesAsync(ct);
+        await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 

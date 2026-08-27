@@ -43,7 +43,8 @@ public sealed class ProjectService : IProjectService
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
                 t.SectionDxfId, t.ProfileId)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
-                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners));
+                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
+                a.StationStandoffM));
         }
 
         var doc = new ProjectDoc(FormatVersion, tankId,
@@ -95,7 +96,7 @@ public sealed class ProjectService : IProjectService
                 new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
             };
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, ct);
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, ct);
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);

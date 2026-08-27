@@ -201,13 +201,15 @@ public sealed class AcsApiClient : IAcsApiClient
     // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v). v3.1: level은 서버가 유도(응답에 유도 층) ──────────
     public async Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
-        double? stationX, double? stationY, double? stationTheta, string userId, CancellationToken ct = default)
+        double? stationX, double? stationY, double? stationTheta, string userId,
+        double? stationStandoffM = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
             TankId = tankId, WallCode = wallCode, Name = name,
             Corners = corners,
-            StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId
+            StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
+            StationStandoffM = stationStandoffM
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);

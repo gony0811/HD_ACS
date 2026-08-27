@@ -124,10 +124,11 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
         "drawingPos": {
           "type": "object",
-          "required": ["tank", "level", "wall_code", "x", "y", "z"],
+          "required": ["tank", "level", "wall_code", "u", "v", "x", "y", "z"],
           "properties": {
             "tank": { "type": "string" }, "level": { "type": "integer" },
             "wall_code": { "type": "string" },
+            "u": { "type": "number" }, "v": { "type": "number" },
             "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
           }
         }
@@ -259,6 +260,8 @@ CREATE TABLE ref.inspection_area (
   station_x     double precision,          -- 정차 수동 오버라이드 (전역 x,y + theta). FL/CL은 필수(§5)
   station_y     double precision,
   station_theta double precision,
+  station_standoff_m double precision,     -- 정차 이격 [m] — 영역 중심에서 내부향 법선 수평성분 방향. NULL=설정 기본
+
   sort_order    int  NOT NULL DEFAULT 0,
   created_by    text,
   created_at    timestamptz NOT NULL DEFAULT now(),
@@ -297,6 +300,12 @@ CREATE TABLE ref.robot (
   is_active     boolean NOT NULL DEFAULT true,
   UNIQUE (manufacturer, serial_number)
 );
+
+-- 로봇 시드 — manufacturer/serial은 MQTT 토픽 요소이며 시뮬레이터 기본값·MANUAL §4.3과 일치해야 한다
+INSERT INTO ref.robot (robot_id, name, manufacturer, serial_number) VALUES
+  ('AMR-01', 'HD AMR #1', 'HHI', 'AMR-01')
+ON CONFLICT (robot_id) DO UPDATE SET
+  manufacturer = EXCLUDED.manufacturer, serial_number = EXCLUDED.serial_number;
 
 -- ═══════════════════════════ ④ 런타임 (run) ═══════════════════════════
 
@@ -421,6 +430,12 @@ CREATE TABLE alarm.spec (           -- NA_A_ALARMSPEC 승계
   title       text NOT NULL,
   description text
 );
+
+-- 알람 코드 시드 — alarm.alarm.alarm_code FK 대상 (코드에서 발행하는 코드는 반드시 여기 등재)
+INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
+  ('INSPECTION_SKIPPED', 'WARNING', '검사 스킵', '재시도 상한 초과로 검사 작업이 스킵됨 (디스패처 실패 정책)')
+ON CONFLICT (alarm_code) DO UPDATE SET
+  severity = EXCLUDED.severity, title = EXCLUDED.title, description = EXCLUDED.description;
 
 CREATE TABLE alarm.alarm (
   alarm_id    uuid PRIMARY KEY DEFAULT gen_random_uuid(),

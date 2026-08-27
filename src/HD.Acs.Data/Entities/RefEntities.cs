@@ -190,6 +190,7 @@ public class InspectionAreaEntity
     public double? StationX { get; set; }               // 정차 수동 오버라이드 (전역 x,y + theta). FL/CL 필수(§5)
     public double? StationY { get; set; }
     public double? StationTheta { get; set; }
+    public double? StationStandoffM { get; set; }       // 정차 이격 [m] — NULL=설정 기본(Acs:Area:StationStandoffM)
     public int SortOrder { get; set; }
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
