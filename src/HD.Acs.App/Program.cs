@@ -232,6 +232,11 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    // seamType은 현행 계약상 LINE 한정 — POLYLINE은 AMR이 액션 FAILED 처리(AMR 회신 §5.1).
+    // 영역 작업은 2점 기하뿐이라 꺾인 용접선은 세그먼트별 LINE으로 등록한다(같은 영역=정렬 공유).
+    if (req.SeamType is { } st && !string.Equals(st, "LINE", StringComparison.OrdinalIgnoreCase))
+        return Results.BadRequest(new
+        { error = $"seamType '{st}'은 지원하지 않습니다 — 현 계약은 LINE 한정(AMR 회신 §5.1). 꺾인 용접선은 세그먼트별 LINE으로 나눠 등록하세요." });
     var poly = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
     bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
     if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
@@ -439,14 +444,26 @@ app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeReque
 
 // 비상정지 — 기능적 정지 (안전 규격 정지는 로봇측 하드웨어 [ADR-007])
 app.MapPost("/api/robots/{robotId}/emergency-stop",
-    async (string robotId, EmergencyStopRequest req, AcsDbContext db, Vda5050MasterClient vda) =>
+    async (string robotId, EmergencyStopRequest req, AcsDbContext db, Vda5050MasterClient vda, MissionService missions) =>
 {
     var robot = await db.Robots.AsNoTracking().FirstAsync(r => r.RobotId == robotId);
     await vda.EmergencyStopAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber));
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
         { UserId = req.UserId, Action = "EMERGENCY_STOP", Target = robotId });
     await db.SaveChangesAsync();
-    return Results.Ok();
+
+    // 활성 run 자동 중단 — AMR은 비상정지 시 진행 액션을 FAILED로 보고하므로(AMR 회신 §3.4),
+    // run을 중단하지 않으면 실패 정책이 정지 중인 로봇에 재배차를 시도한다. 재개는 "이어하기"(resume).
+    Guid? abortedRunId = null;
+    var active = await db.ScenarioRuns.AsNoTracking()
+        .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
+        .Select(r => (Guid?)r.RunId).FirstOrDefaultAsync();
+    if (active is Guid runId)
+    {
+        await missions.AbortRunAsync(runId);
+        abortedRunId = runId;
+    }
+    return Results.Ok(new { robotId, abortedRunId });
 });
 
 // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1] ──────────────────────────

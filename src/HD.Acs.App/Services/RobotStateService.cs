@@ -71,12 +71,29 @@ public sealed class RobotStateService
 
             await FireAsync(mission, MissionTrigger.RobotProgress, ct);
 
-            // 전 액션 종결 + 마지막 노드 도달 → 현재 정차 완료
+            // 전 액션 종결 + (마지막 노드 도달 OR 현재 정차 전 액션 FAILED) → 현재 정차 종결.
+            // 주행 실패 시 AMR은 노드 미도달 상태로 전 액션을 FAILED 종결한다(drivingFailed, AMR 회신 §3.1)
+            // — 도달 조건만 보면 work_item이 DISPATCHED로 정체하므로 전-FAILED도 종결로 취급한다.
             var remaining = await _db.OrderActions.CountAsync(
                 x => x.MissionId == mission.MissionId && x.Status != "FINISHED" && x.Status != "FAILED", ct);
             var lastSeq = await _db.OrderNodes.Where(n => n.MissionId == mission.MissionId)
                 .MaxAsync(n => (int?)n.SequenceId, ct) ?? 0;
-            if (remaining == 0 && state.LastNodeSequenceId >= lastSeq)
+            bool stopSettled = remaining == 0 && state.LastNodeSequenceId >= lastSeq;
+            if (remaining == 0 && !stopSettled)
+            {
+                var curWi = await _db.WorkItems.AsNoTracking()
+                    .FirstOrDefaultAsync(w => w.OrderId == mission.OrderId && w.Status == "DISPATCHED", ct);
+                if (curWi is not null)
+                {
+                    var stopActs = await _db.OrderActions.AsNoTracking()
+                        .Where(a => a.WorkItemId == curWi.WorkItemId).Select(a => a.Status).ToListAsync(ct);
+                    stopSettled = stopActs.Count > 0 && stopActs.All(s => s == "FAILED");
+                    if (stopSettled)
+                        _log.LogWarning("Mission {Mission}: 노드 미도달 상태에서 전 액션 FAILED — 주행 실패로 정차 종결 처리.",
+                            mission.MissionId);
+                }
+            }
+            if (stopSettled)
             {
                 // 영역 기반(greedy): 이번 정차 완료를 work_item에 반영하고 다음 최근접 배차. 아니면 legacy 완료.
                 bool areaModel = await _db.WorkItems.AnyAsync(w => w.RunId == mission.RunId, ct);

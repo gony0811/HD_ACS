@@ -6,7 +6,7 @@
 | 작성일 | 2026-08-27 |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
-| 상태 | ACS 측 계약 확정판 — `[협의]` 표시 항목은 §10에서 HD_AMR 회신 대기 |
+| 상태 | **확정** (2026-08-28 HD_AMR 회신 반영, `VDA5050_AMR_REPLY.md`) — N10(정차 이격)만 잠정값 유지 |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -147,8 +147,8 @@ ACS는 **greedy 최근접 동적 배차**를 사용한다. 층(맵) 안의 미�
       "nodePosition": {
         "x": 12.482, "y": 5.117,            // 맵 좌표 [m]
         "theta": 1.571,                     // [rad], 맵 X축 기준 CCW (부록 B)
-        "allowedDeviationXY": 0.08,         // [m]
-        "allowedDeviationTheta": 0.07,      // [rad]
+        "allowedDeviationXY": 0.08,         // [m] — 도착 판정 허용 오차 (AMR 확정: 주행 정밀도 제어 아님, 미지정 시 0.1)
+        "allowedDeviationTheta": 0.07,      // [rad] — 동일 (미지정 시 0.1)
         "mapId": "CT1-L2"                   // 층 = 맵 (§4.3)
       },
       "actions": [ /* §8 커스텀 액션 */ ]
@@ -182,6 +182,9 @@ theta       = 벽을 정면으로 바라보는 방향
 - 바닥(B)/천장(T) 영역은 수평 법선이 없어 이격 없이 중심 투영이 오며, 운영자 수동 지정 좌표가 올 수도 있다.
 - **책임 경계**: ACS의 정차점은 "목표"일 뿐이며, 접근 경로 계획·장애물(벽 포함) 충돌 회피는 **AMR 자율 주행 책임**이다.
   목표점이 도달 불가하면 진입을 강행하지 말고 `state.errors`(주행 실패 유형)로 보고할 것 (§6.4, §9.5 실패 정책으로 처리).
+- **검사 방향(툴 회전각) 유도 전제** (2026-08-29 AMR 회신 §5.2): AMR은 `seamStartW→seamEndW` 벡터를
+  **노드 `theta`(벽 정면 방향)** 기준 벽면-로컬로 투영해 촬상 기울기를 액션별 자동 계산한다 — ACS는 방향 정보를 추가로 보내지 않는다.
+  따라서 **`station_theta` 수동 오버라이드 시에도 theta는 벽 정면 방향을 유지해야** 이 유도가 성립한다.
 
 > AMR 요건: 로봇 실물 치수 확정 시 적정 기본 이격을 ACS에 회신 — 코봇 리치(용접선까지 도달)와 차체-벽 안전 여유를 동시에 만족하는 값 `[협의 N10]`.
 
@@ -338,12 +341,24 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 ### 6.4 errors
 
 ```json
-{ "errorType": "INSPECTION_FAILED", "errorLevel": "WARNING", "errorDescription": "..." }
+{ "errorType": "drivingFailed", "errorLevel": "WARNING", "errorDescription": "..." }
 ```
 
 - `errorLevel`: `WARNING`(운영 계속 가능) | `FATAL`(임무 수행 불가)
-- `errorType` **코드 체계는 HD_AMR이 목록을 제시** `[협의 N6]` — 최소 분류 제안: 주행 실패 / 검사(액션) 실패 / 장비 오류 / 측위 상실.
+- `errorType` 코드 체계 — **확정 (N6, 2026-08-28 HD_AMR 회신)**. 같은 errorType은 최신 1건만 유지 보고하며 해소 시 목록에서 제거한다:
+
+| errorType | 의미 / 발생 조건 | errorLevel |
+|---|---|---|
+| `orderValidationError` | Order 검증 실패로 폐기 — description에 orderId·사유 (§4.5.2) | WARNING |
+| `drivingFailed` | 목표 도달 불가·이동 미시작·주행 타임아웃 — **해당 Order의 전 액션을 FAILED로 종결 처리**(노드 미도달 상태) | WARNING |
+| `inspectionFailed` | 검사 액션 실패 — description에 actionId·사유 (actionStatus FAILED와 병기) | WARNING |
+| `equipmentError` | 코봇/카메라/레이저/비전 등 온보드 장비 이상 | WARNING (지속 불가 시 FATAL) |
+| `localizationLost` | 맵 일치율 저하·재측위 실패·initPosition 거부 | WARNING |
+| `emergencyStopActive` | emergencyStop 수신에 의한 기능 정지 중 | WARNING |
+| `batteryLow` | 배터리 부족 (선택 보고) | WARNING/FATAL |
+
 - ACS 정책: 액션 FAILED·errors 기준 **재시도 N회 → 스킵 → 알람** (§9.5).
+  주행 실패로 노드 미도달 + 전 액션 FAILED인 정차도 종결로 판정해 동일 정책을 태운다(※구현 2026-08-28 반영).
 
 > ※구현: 재시도 N회→스킵→알람 정책은 **actionStatus=FAILED 기준으로 동작**(2026-08-28 E2E 검증 — 재큐잉·SKIPPED·INSPECTION_SKIPPED 알람). errors의 **유형 코드별** 정책 분기는 코드 체계 협의(N6) 후 구현 예정 — 현행은 건수만 UI 전파. 계약상 AMR은 위 형식으로 보고하면 된다.
 
@@ -387,7 +402,7 @@ ACS 반응: ONLINE → 미션 `ConnectionRestored`(RUNNING 복귀 + state 재동
 | `jobRef` | 작업 역추적 키 (사람이 읽는 ID — AMR은 로깅 외 해석 불요) |
 | `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, z는 통과 |
 | `position.drawingPos` | 도면 좌표 echo — tank/level/wall_code + **u,v(벽면-로컬)** + x,y,z(도면). `wall_code`가 **티칭 자세 선택 키** |
-| `params.seamType` | `LINE` \| `POLYLINE` |
+| `params.seamType` | **`LINE` 한정** (2026-08-29 AMR 회신 §5.1 — POLYLINE은 2점 계약으로 세그먼트 방향 불명이라 AMR이 액션 FAILED 처리). 꺾인 용접선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `params.points` 기반 POLYLINE 확장은 후속 협의 |
 | `params.sectionDxfId` | 단면 프로파일 참조 ID |
 | `params.inspectionProfileId` | 검사(촬영/측정) 프로파일 ID |
 | `params.standoffMm` | 표면 이격 거리 [mm] |
@@ -523,7 +538,9 @@ sequenceDiagram
 
 ### 9.4 비상정지
 
-ACS `emergencyStop` instantAction 발행(§5.1) → AMR 즉시 정지 + state로 정지 상태 보고. 재개는 운영자 판단으로 신규 Order 재배차 (order update 아님).
+ACS `emergencyStop` instantAction 발행(§5.1) → AMR 즉시 기능 정지 + **진행 중 액션 FAILED("stopped by emergencyStop") + `emergencyStopActive` 오류 보고**(AMR 확정 §3.4).
+ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(ABORTED)** 하여 정지 중 재배차를 차단한다(※구현 2026-08-28) —
+재개는 운영자 판단으로 "이어하기"(resume, 완료분 보존) 또는 신규 run (order update 아님).
 
 ### 9.5 실패 처리
 
@@ -534,21 +551,23 @@ ACS `emergencyStop` instantAction 발행(§5.1) → AMR 즉시 정지 + state로
 
 ## 10. 협의 항목 (HD_AMR 회신 요청)
 
-본문에서 `[협의]`로 표시한 항목. **회신 전까지는 "ACS 제안"이 잠정 계약**이다.
+**2026-08-28 HD_AMR 회신 수령(`VDA5050_AMR_REPLY.md`) — N10 외 전 항목 확정.**
 
-| # | 항목 | ACS 제안 | 배경 | HD_AMR 회신 |
-|---|---|---|---|---|
-| N1 | headerId 채번 | 토픽별 단조 증가 (ACS 구현 완료) | 표준은 토픽별 증가 | |
-| N2 | timestamp 포맷 | ISO 8601 UTC 밀리초+`Z` (ACS 구현 완료, 수신은 오프셋 표기도 수용) | 표준 예시 포맷 | |
-| N3 | edge.actions | 엣지 실릴 경우 빈 배열 포함 (ACS 구현 완료, 단일 노드형에선 무관) | 표준 required 필드 | |
-| N4 | state 표준 필수 필드 (operatingMode/safetyState/edgeStates/information 등) | AMR 표준대로 발행 권장, ACS는 §6.2 최소 계약만 소비 | ACS 파서는 미지 필드 무시 | |
-| N5 | initPosition 파라미터 | 평면 key: mapId/x/y/theta | 표준 관례는 pose 객체 | |
-| N6 | errors.errorType 코드 체계 | AMR이 코드 목록 제시 (최소: 주행/검사/장비/측위) | 재시도·스킵 정책 분기 근거 | |
-| N7 | actionParameters.value 직렬화 | JSON object 그대로 (문자열 아님) | AMR 파서 제약 시 문자열 폴백 협의 | |
-| N8 | 두절 구간 상세 이력 | 최신 state 스냅샷으로 충분 (소급 재전송 없음) | 표준 범위 밖 확장 | |
-| N9 | MQTT 보안 | 평문 :1883 (폐쇄망 전제) | TLS/계정 필요 여부 | |
-| N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (벽면↔로봇 중심, 영역별 조정 가능) | 로봇 실물 치수·코봇 리치 기준으로 AMR이 적정값 회신 (§4.4) | |
-| N11 | Order 거부 보고 방식 | 폐기 + errors에 `orderValidationError`(orderId·사유 명시), 액션 단위 문제는 actionStatus FAILED로 구분 (§4.5.2) | N6 코드 체계와 함께 확정 | |
+| # | 항목 | ACS 제안 | HD_AMR 회신 (2026-08-28) |
+|---|---|---|---|
+| N1 | headerId 채번 | 토픽별 단조 증가 | ✅ 동의. AMR은 세션(프로세스) 단위 채번 — 재기동 시 1부터 리셋. **ACS는 headerId 미소비라 무해 확인** |
+| N2 | timestamp 포맷 | ISO 8601 UTC 밀리초+`Z` | ✅ 동의 (수신은 오프셋 표기도 상호 수용) |
+| N3 | edge.actions | 엣지 실릴 경우 빈 배열 포함 | ✅ 동의 |
+| N4 | state 표준 필수 필드 | AMR 표준대로 발행 권장, ACS는 §6.2 최소 계약만 소비 | ✅ 표준 전체 필드 발행 (safetyState.eStop은 기능값) |
+| N5 | initPosition 파라미터 | 평면 key: mapId/x/y/theta | ✅ 채택 (+pose 객체 형태도 방어적 수용) |
+| N6 | errors.errorType 코드 체계 | AMR이 코드 목록 제시 | ✅ **7종 확정** — §6.4 표 (같은 유형 최신 1건 유지, 해소 시 제거) |
+| N7 | actionParameters.value 직렬화 | JSON object 그대로 | ✅ object 수용 + 문자열 재파싱도 수용 — **폴백 스위치 불요 확정** |
+| N8 | 두절 구간 상세 이력 | 최신 state 스냅샷으로 충분 | ✅ 동의 (소급 재전송 미구현) |
+| N9 | MQTT 보안 | 평문 :1883 (폐쇄망) | ✅ 동의 (TLS 필요 판단 시 재협의) |
+| N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (영역별 조정) | ⏸ **보류** — 로봇 치수·코봇 리치 확정 후 회신, 잠정 0.8 m 수용 |
+| N11 | Order 거부 보고 방식 | 폐기 + `orderValidationError` | ✅ 동의 (§4.5.2 그대로 구현) |
+
+**AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
 ---
 

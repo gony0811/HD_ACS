@@ -36,6 +36,10 @@ var failJobRefs = (Environment.GetEnvironmentVariable("SIM_FAIL_JOB_REFS") ?? ""
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+// 주행 실패 주입 — 처음 N개 Order를 "노드 미도달 + 전 액션 FAILED + drivingFailed" 처리 (AMR 회신 §3.1 재현)
+var driveFailMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_DRIVE_FAIL_MAX"), out var df) ? df : 0;
+var driveFailCount = 0;
+
 // 실행 시간 (ms) — 테스트 고속화를 위해 환경변수로 조절 가능
 var travelMs = int.TryParse(Environment.GetEnvironmentVariable("SIM_TRAVEL_MS"), out var t1) ? t1 : 800;
 var fullMs   = int.TryParse(Environment.GetEnvironmentVariable("SIM_FULL_MS"),   out var t2) ? t2 : 1200;
@@ -134,6 +138,20 @@ async Task ExecuteOrderAsync(Vda5050Order order)
         state.ActionStates = order.Nodes.SelectMany(n => n.Actions)
             .Select(a => new ActionState { ActionId = a.ActionId, ActionType = a.ActionType, ActionStatus = "WAITING" })
             .ToList();
+
+        // ── 주행 실패 주입: 이동/도달 없이 전 액션 FAILED + drivingFailed 보고 [AMR 회신 §3.1] ──
+        if (driveFailCount < driveFailMax)
+        {
+            driveFailCount++;
+            await Task.Delay(travelMs);
+            foreach (var a in state.ActionStates)
+            { a.ActionStatus = "FAILED"; a.ResultDescription = "FAIL;reason=DRIVE"; }
+            state.Errors.Add(new VdaError
+            { ErrorType = "drivingFailed", ErrorLevel = "WARNING", ErrorDescription = $"주행 실패(주입 {driveFailCount}/{driveFailMax}) order={order.OrderId}" });
+            Console.WriteLine($"[SIM] 주행 실패(주입): order={order.OrderId} — 미도달, 전 액션 FAILED");
+            await PublishStateAsync();
+            return;
+        }
 
         foreach (var node in order.Nodes.OrderBy(n => n.SequenceId))
         {
