@@ -54,19 +54,36 @@
                                            Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding PlanBowLabel}" Margin="16,0,0,0"
                                            Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
-                                <TextBlock Text="· 우클릭 → 여기로 이동" Margin="16,0,0,0"
+                                <TextBlock Text="· 우클릭 → 이동/벽/이동 불가/낙상 위험/노드/엣지" Margin="16,0,0,0"
                                            Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
                             </StackPanel>
                             <TextBlock Text="{Binding PlanGotoStatus}" Margin="0,4,0,0"
                                        Foreground="{DynamicResource AppAccentBrush}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding PlanToolHint}" Margin="0,2,0,0"
+                                       Foreground="#F1C40F" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                     <Viewbox Stretch="Uniform" Margin="10">
                         <Canvas x:Name="PlanCanvas" Width="900" Height="520" Background="{DynamicResource AppCanvasBrush}"
-                                PreviewMouseRightButtonDown="OnPlanRightDown">
+                                Focusable="True"
+                                PreviewMouseRightButtonDown="OnPlanRightDown"
+                                PreviewMouseLeftButtonDown="OnPlanLeftDown"
+                                PreviewKeyDown="OnPlanKeyDown"
+                                MouseMove="OnPlanMouseMove"
+                                MouseLeave="OnPlanMouseLeave">
                             <Canvas.ContextMenu>
                                 <ContextMenu>
                                     <MenuItem Header="여기로 이동" Click="OnPlanGotoClick" />
+                                    <MenuItem Header="이 노드로 이동" Click="OnPlanGotoNodeClick" />
+                                    <Separator />
+                                    <MenuItem Header="벽 생성" Click="OnStartWall" />
+                                    <MenuItem Header="이동 불가 지역" Click="OnStartNoGo" />
+                                    <MenuItem Header="낙상 위험 지역" Click="OnStartHazard" />
+                                    <Separator />
+                                    <MenuItem Header="노드 생성" Click="OnStartNode" />
+                                    <MenuItem Header="엣지 연결" Click="OnStartEdge" />
+                                    <Separator />
+                                    <MenuItem Header="취소" Click="OnCancelTool" />
                                 </ContextMenu>
                             </Canvas.ContextMenu>
                             <!-- 전폭 엔벨로프(맥락) -->
@@ -74,6 +91,72 @@
                                      StrokeDashArray="4 3" Fill="#0FFFFFFF" />
                             <!-- 선택 층 이동 가능 구역 -->
                             <Polygon Points="{Binding PlanReach}" Stroke="#229954" StrokeThickness="2" Fill="#332ECC71" />
+                            <!-- 이동 불가 구역(NOGO, 빨강 다각형) -->
+                            <ItemsControl ItemsSource="{Binding PlanNoGos}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Polygon Points="{Binding Points}" Fill="#33E74C3C" Stroke="#E74C3C" StrokeThickness="1.5" StrokeDashArray="3 2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 낙상 위험 구역(HAZARD, 주황 실선 + 굵은 테두리 — 필수 회피) -->
+                            <ItemsControl ItemsSource="{Binding PlanHazards}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Polygon Points="{Binding Points}" Fill="#40E67E22" Stroke="#E67E22" StrokeThickness="3"
+                                                 StrokeLineJoin="Round" ToolTip="{Binding Name}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 벽(WALL, 굵은 선분) -->
+                            <ItemsControl ItemsSource="{Binding PlanWalls}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Polyline Points="{Binding Points}" Stroke="#ECF0F1" StrokeThickness="3"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 네비 엣지(노드 연결선, 파랑) -->
+                            <ItemsControl ItemsSource="{Binding PlanEdges}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Polyline Points="{Binding Points}" Stroke="#3498DB" StrokeThickness="2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 엣지 시작 노드 하이라이트(링) -->
+                            <Ellipse Width="18" Height="18" Stroke="#F39C12" StrokeThickness="2" Fill="Transparent"
+                                     Canvas.Left="{Binding EdgeStartLeft}" Canvas.Top="{Binding EdgeStartTop}"
+                                     Visibility="{Binding EdgeStartVisible, Converter={StaticResource BoolToVis}}" />
+                            <!-- 네비 노드(원, 하늘색) — Canvas.Left/Top은 컨테이너(ContentPresenter)에 걸어야 배치됨 -->
+                            <ItemsControl ItemsSource="{Binding PlanNodes}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="Canvas.Left" Value="{Binding LeftX}" />
+                                        <Setter Property="Canvas.Top" Value="{Binding TopY}" />
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Ellipse Width="12" Height="12" Fill="#5DADE2" Stroke="White" StrokeThickness="1.5"
+                                                 ToolTip="{Binding NodeId}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 등록 요소 hover 하이라이트(노랑) — 목록 항목에 마우스 올리면 해당 오브젝트 강조 -->
+                            <Polyline Points="{Binding HighlightPoly}" Stroke="#F1C40F" StrokeThickness="4" StrokeLineJoin="Round"
+                                      Visibility="{Binding HighlightPolyVisible, Converter={StaticResource BoolToVis}}" />
+                            <Ellipse Width="20" Height="20" Stroke="#F1C40F" StrokeThickness="3" Fill="#66F1C40F"
+                                     Canvas.Left="{Binding HighlightNodeLeft}" Canvas.Top="{Binding HighlightNodeTop}"
+                                     Visibility="{Binding HighlightNodeVisible, Converter={StaticResource BoolToVis}}" />
+                            <!-- 진행 중 클릭 미리보기 -->
+                            <Polyline Points="{Binding PlanDraft}" Stroke="#F1C40F" StrokeThickness="2" StrokeDashArray="2 2" />
                             <!-- 원점(바닥 중심) 마커 -->
                             <Ellipse Width="10" Height="10" Fill="#F1C40F" Stroke="#7D6608" StrokeThickness="1"
                                      Canvas.Left="{Binding PlanOriginX}" Canvas.Top="{Binding PlanOriginY}" />
@@ -82,6 +165,12 @@
                                      Canvas.Left="{Binding PlanRobotX}" Canvas.Top="{Binding PlanRobotY}"
                                      Opacity="{Binding PlanRobotOpacity}"
                                      Visibility="{Binding PlanHasRobot, Converter={StaticResource BoolToVis}}" />
+                            <!-- 마우스 hover 좌표 리드아웃(포인터 옆) -->
+                            <Border Canvas.Left="{Binding PlanHoverLabelX}" Canvas.Top="{Binding PlanHoverLabelY}"
+                                    Background="#CC1B2631" CornerRadius="3" Padding="5,2" IsHitTestVisible="False"
+                                    Visibility="{Binding PlanHoverVisible, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding PlanHoverText}" FontSize="11" FontWeight="600" Foreground="White" />
+                            </Border>
                         </Canvas>
                     </Viewbox>
                 </DockPanel>

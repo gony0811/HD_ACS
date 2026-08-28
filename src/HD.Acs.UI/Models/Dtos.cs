@@ -189,6 +189,19 @@ public sealed record WallDto(
     string? Description,
     double[]? ReachableVBand = null);   // v3.1 §8: level 필터 조회 시 [vLo,vHi] 도달 v구간
 
+/// <summary>GET /api/map-annotations 항목 — 운영자 등록 벽(WALL)·이동 불가 구역(NOGO). 도면 좌표 [[x,y]…].</summary>
+public sealed record MapAnnotationDto(
+    Guid AnnotationId, string TankId, int Level, string Kind, string Name, double[][] Points);
+
+/// <summary>GET /api/nodes 항목 — 네비 노드. X/Y=맵 좌표, DrawingX/Y=평면도 렌더용 도면 좌표.</summary>
+public sealed record NodeDto(
+    string NodeId, string MapId, int Level, string NodeType, double X, double Y, double? Theta,
+    double DrawingX, double DrawingY);
+
+/// <summary>GET /api/edges 항목 — 네비 엣지(두 노드 연결).</summary>
+public sealed record EdgeDto(
+    string EdgeId, string MapId, string StartNodeId, string EndNodeId, bool Bidirectional, string EdgeType);
+
 /// <summary>GET /api/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
 public sealed record AreaDto(
     Guid AreaId, string TankId, string WallCode, int Level, string Name,

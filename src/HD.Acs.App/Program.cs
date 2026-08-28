@@ -35,6 +35,7 @@ builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<InspectionDispatcher>();
 builder.Services.AddSingleton<IInspectionOrderingPolicy, GreedyNearestPolicy>();  // 순수 정책(무상태)
 builder.Services.AddScoped<SeamPlanningService>();
+builder.Services.AddScoped<GraphEditService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
 builder.Services.AddSignalR();
@@ -348,9 +349,83 @@ app.MapPost("/api/robots/{robotId}/goto", async (string robotId, GotoRequest req
     }
     catch (FloorMismatchException ex)
     { return Results.Conflict(new { error = ex.Message, reportedMapId = ex.ReportedMapId, requestedMapId = ex.RequestedMapId }); }
+    catch (NoGoZoneException ex)
+    { return Results.Conflict(new { error = ex.Message, zone = ex.ZoneName }); }
     catch (InvalidOperationException ex)
     { return Results.BadRequest(new { error = ex.Message }); }
 });
+
+// ── 맵 주석 (벽·이동 불가 구역) [2D 평면도] ──────────────────────────────
+app.MapPost("/api/map-annotations", async (CreateMapAnnotationRequest req, AcsDbContext db) =>
+{
+    var kind = (req.Kind ?? "").ToUpperInvariant();
+    if (kind is not ("WALL" or "NOGO" or "HAZARD"))
+        return Results.BadRequest(new { error = "kind는 WALL, NOGO 또는 HAZARD 여야 합니다." });
+    var pts = (req.Points ?? Array.Empty<double[]>())
+        .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
+    int need = kind == "WALL" ? 2 : 3;
+    if (pts.Count < need)
+        return Results.BadRequest(new { error = $"{kind}는 최소 {need}개 점이 필요합니다 (현재 {pts.Count})." });
+
+    var e = new HD.Acs.Data.Entities.MapAnnotationEntity
+    {
+        AnnotationId = Guid.NewGuid(), TankId = req.TankId, Level = req.Level, Kind = kind,
+        Name = string.IsNullOrWhiteSpace(req.Name) ? $"{kind}-{Guid.NewGuid().ToString()[..4]}" : req.Name,
+        Points = JsonSerializer.Serialize(pts),
+    };
+    db.MapAnnotations.Add(e);
+    db.AuditLogs.Add(new AuditLogEntity
+    {
+        UserId = req.UserId ?? "operator", Action = "MAP_ANNOTATION_ADD", Target = e.AnnotationId.ToString(),
+        Detail = JsonSerializer.Serialize(new { req.TankId, req.Level, kind, e.Name })
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { annotationId = e.AnnotationId, e.Level, kind, e.Name });
+});
+
+app.MapGet("/api/map-annotations", async (string tankId, int? level, AcsDbContext db) =>
+{
+    var q = db.MapAnnotations.AsNoTracking().Where(a => a.TankId == tankId);
+    if (level is int lv) q = q.Where(a => a.Level == lv);
+    var list = await q.OrderBy(a => a.CreatedAt).ToListAsync();
+    return Results.Ok(list.Select(a => new
+    {
+        a.AnnotationId, a.TankId, a.Level, a.Kind, a.Name,
+        Points = JsonSerializer.Deserialize<double[][]>(a.Points) ?? Array.Empty<double[]>()
+    }));
+});
+
+app.MapDelete("/api/map-annotations/{id:guid}", async (Guid id, AcsDbContext db) =>
+{
+    var a = await db.MapAnnotations.FindAsync(id);
+    if (a is null) return Results.NotFound();
+    db.MapAnnotations.Remove(a);
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
+// ── 네비게이션 그래프 편집 (노드·엣지) [2D 평면도] ──────────────────────
+// 노드 X/Y = 평면도 도면 좌표(서버가 T_W_D로 맵 좌표 변환·저장). 엣지 = 두 노드 연결.
+app.MapPost("/api/nodes", async (CreateNodeRequest req, GraphEditService graph) =>
+    Results.Ok(await graph.CreateNodeAsync(req.TankId, req.Level, req.X, req.Y, req.Theta, req.NodeType)));
+
+app.MapGet("/api/nodes", async (string tankId, int? level, GraphEditService graph) =>
+    Results.Ok(await graph.GetNodesAsync(tankId, level)));
+
+app.MapDelete("/api/nodes/{nodeId}", async (string nodeId, GraphEditService graph) =>
+    await graph.DeleteNodeAsync(nodeId) ? Results.Ok() : Results.NotFound());
+
+app.MapPost("/api/edges", async (CreateEdgeRequest req, GraphEditService graph) =>
+{
+    try { return Results.Ok(await graph.CreateEdgeAsync(req.StartNodeId, req.EndNodeId, req.Bidirectional ?? true, req.EdgeType)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapGet("/api/edges", async (string tankId, int? level, GraphEditService graph) =>
+    Results.Ok(await graph.GetEdgesAsync(tankId, level)));
+
+app.MapDelete("/api/edges/{edgeId}", async (string edgeId, GraphEditService graph) =>
+    await graph.DeleteEdgeAsync(edgeId) ? Results.Ok() : Results.NotFound());
 
 // 비상정지 — 기능적 정지 (안전 규격 정지는 로봇측 하드웨어 [ADR-007])
 app.MapPost("/api/robots/{robotId}/emergency-stop",
@@ -465,6 +540,9 @@ app.Run();
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
 public sealed record GotoRequest(string MapId, double X, double Y, double? Theta, string UserId);
+public sealed record CreateMapAnnotationRequest(string TankId, int Level, string Kind, string Name, double[][] Points, string? UserId);
+public sealed record CreateNodeRequest(string TankId, int Level, double X, double Y, double? Theta, string? NodeType);
+public sealed record CreateEdgeRequest(string StartNodeId, string EndNodeId, bool? Bidirectional, string? EdgeType);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);

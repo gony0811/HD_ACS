@@ -62,6 +62,47 @@ public partial class TankView : UserControl
             await _vm.GotoHereAsync(_lastPlanClick.X, _lastPlanClick.Y);
     }
 
+    /// <summary>메뉴 "이 노드로 이동" — 우클릭 지점의 노드를 집어 그 등록 좌표로 이동 명령.</summary>
+    private async void OnPlanGotoNodeClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm is not null)
+            await _vm.GotoNodeAsync(_lastPlanClick.X, _lastPlanClick.Y);
+    }
+
+    // ── 벽·이동 불가 구역 등록 도구 ──────────────────────────────────────────
+    private void OnStartWall(object sender, RoutedEventArgs e) => _vm?.StartWallToolCommand.Execute(null);
+    private void OnStartNoGo(object sender, RoutedEventArgs e) => _vm?.StartNoGoToolCommand.Execute(null);
+    private void OnStartHazard(object sender, RoutedEventArgs e) => _vm?.StartHazardToolCommand.Execute(null);
+    private void OnStartNode(object sender, RoutedEventArgs e) => _vm?.StartNodeToolCommand.Execute(null);
+    private void OnStartEdge(object sender, RoutedEventArgs e) => _vm?.StartEdgeToolCommand.Execute(null);
+    private void OnCancelTool(object sender, RoutedEventArgs e) => _vm?.CancelToolCommand.Execute(null);
+
+    /// <summary>도구 활성 시 좌클릭 → 캔버스 px를 VM에 전달(점 누적·등록).</summary>
+    private async void OnPlanLeftDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm is null || !_vm.ToolActive) return;
+        PlanCanvas.Focus();               // ESC 취소 키 수신
+        var p = e.GetPosition(PlanCanvas);
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        e.Handled = true;
+        await _vm.PlanToolClickAsync(p.X, p.Y, shift);
+    }
+
+    private void OnPlanKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) { _vm?.CancelToolCommand.Execute(null); e.Handled = true; }
+    }
+
+    /// <summary>포인터 위치의 도면 좌표를 포인터 옆에 표시.</summary>
+    private void OnPlanMouseMove(object sender, MouseEventArgs e)
+    {
+        var p = e.GetPosition(PlanCanvas);
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        _vm?.PlanHover(p.X, p.Y, shift);
+    }
+
+    private void OnPlanMouseLeave(object sender, MouseEventArgs e) => _vm?.PlanHoverLeave();
+
     private void Rebuild() { BuildShell(); BuildLevelHighlight(); BuildOverlays(); }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)

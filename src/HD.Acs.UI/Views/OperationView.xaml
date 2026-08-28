@@ -177,18 +177,108 @@
             </Border>
         </Grid>
 
-        <!-- ── 우: 알람·이벤트 피드 ── -->
+        <!-- ── 우: 알람·이벤트 / 등록 요소 탭 ── -->
         <Border Grid.Column="2" Style="{StaticResource Card}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock Grid.Row="0" Text="알람 · 이벤트" Style="{StaticResource CardHead}" />
-                <Border Grid.Row="1" Height="1" Background="{DynamicResource AppBorderBrush}" />
-                <views:AlarmsView Grid.Row="2" DataContext="{Binding Alarms}" />
-            </Grid>
+            <telerik:RadTabControl>
+                <telerik:RadTabItem Header="알람 · 이벤트">
+                    <views:AlarmsView DataContext="{Binding Alarms}" />
+                </telerik:RadTabItem>
+                <telerik:RadTabItem Header="등록 요소">
+                    <!-- 사용자가 2D 평면도에서 등록한 벽·이동 불가 구역 (DataContext=Tank) -->
+                    <Grid DataContext="{Binding Tank}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Margin="12,9,12,6">
+                            <TextBlock FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}"
+                                       Text="평면도 우클릭 → 벽 / 이동 불가 지역 / 노드 / 엣지 등록" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="필터" VerticalAlignment="Center" Margin="0,0,6,0"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" />
+                                <telerik:RadComboBox Width="120" MinHeight="26"
+                                                     ItemsSource="{Binding ElementFilters}"
+                                                     SelectedItem="{Binding SelectedElementFilter, Mode=TwoWay}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="8,0,8,8">
+                            <ItemsControl ItemsSource="{Binding ElementRows}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,0,6" Padding="9,7" CornerRadius="8"
+                                                Background="{DynamicResource AppWindowBrush}"
+                                                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                                                MouseEnter="OnElementRowEnter" MouseLeave="OnElementRowLeave">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <!-- 종류 배지 -->
+                                                <Border Grid.Column="0" CornerRadius="6" Padding="7,3" VerticalAlignment="Center" MinWidth="52">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Background" Value="#33AAB0B7" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Category}" Value="NOGO">
+                                                                    <Setter Property="Background" Value="#33E74C3C" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Category}" Value="HAZARD">
+                                                                    <Setter Property="Background" Value="#33E67E22" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Category}" Value="NODE">
+                                                                    <Setter Property="Background" Value="#335DADE2" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Category}" Value="EDGE">
+                                                                    <Setter Property="Background" Value="#333498DB" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock FontSize="10.5" FontWeight="700" HorizontalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Text" Value="벽" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Category}" Value="NOGO">
+                                                                        <Setter Property="Text" Value="이동불가" />
+                                                                        <Setter Property="Foreground" Value="#E74C3C" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Category}" Value="HAZARD">
+                                                                        <Setter Property="Text" Value="낙상위험" />
+                                                                        <Setter Property="Foreground" Value="#E67E22" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Category}" Value="NODE">
+                                                                        <Setter Property="Text" Value="노드" />
+                                                                        <Setter Property="Foreground" Value="#5DADE2" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Category}" Value="EDGE">
+                                                                        <Setter Property="Text" Value="엣지" />
+                                                                        <Setter Property="Foreground" Value="#3498DB" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="600" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Info}" FontSize="10.5" Foreground="{DynamicResource AppMutedTextBrush}" />
+                                                </StackPanel>
+                                                <telerik:RadButton Grid.Column="2" Content="삭제" MinHeight="26" Padding="8,0"
+                                                                   Command="{Binding DataContext.DeleteElementCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                   CommandParameter="{Binding}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </telerik:RadTabItem>
+            </telerik:RadTabControl>
         </Border>
     </Grid>
 </UserControl>

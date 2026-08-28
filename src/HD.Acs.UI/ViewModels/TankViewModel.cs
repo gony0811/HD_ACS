@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.Services;
 
@@ -84,8 +85,359 @@ public sealed partial class TankViewModel : ObservableObject
 
     /// <summary>운영 바에서 선택한 로봇(ShellViewModel이 Mission.SelectedRobotId를 동기화). 이동 명령 대상.</summary>
     [ObservableProperty] private string? _selectedRobotId;
-    /// <summary>이동 명령 결과/오류 안내(층 불일치 등).</summary>
+    /// <summary>이동 명령 결과/오류 안내(층 불일치·이동불가구역 등).</summary>
     [ObservableProperty] private string? _planGotoStatus;
+
+    // ── 등록 도구(벽 WALL=2점 / 이동불가 NOGO=4점 / 노드 NODE=1점 / 엣지 EDGE=노드2개) ──────
+    public enum PlanTool { None, Wall, NoGo, Node, Edge, Hazard }
+
+    /// <summary>현재 등록 도구(None이면 좌클릭은 무시).</summary>
+    [ObservableProperty] private PlanTool _activeTool = PlanTool.None;
+    /// <summary>도구 진행 안내(클릭 유도·결과).</summary>
+    [ObservableProperty] private string? _planToolHint;
+    /// <summary>등록 도구 활성 여부(뷰의 커서/게이트용).</summary>
+    public bool ToolActive => ActiveTool != PlanTool.None;
+
+    private readonly List<double[]> _pending = new();          // 진행 중 클릭점(도면 좌표)
+    private List<MapAnnotationDto> _annotations = new();
+
+    /// <summary>평면도 렌더용 — 벽(선분)·이동 불가 구역(다각형), 이미 px로 투영.</summary>
+    public sealed record PlanWallVm(PointCollection Points, string Name, Guid Id);
+    public sealed record PlanZoneVm(PointCollection Points, string Name, Guid Id);
+    public ObservableCollection<PlanWallVm> PlanWalls { get; } = new();
+    public ObservableCollection<PlanZoneVm> PlanNoGos { get; } = new();
+    /// <summary>낙상 위험 등 필수 회피 구역(다각형). 안전 자문 표시 — 실제 회피는 AMR 책임.</summary>
+    public ObservableCollection<PlanZoneVm> PlanHazards { get; } = new();
+    /// <summary>진행 중 클릭점 미리보기(폴리라인).</summary>
+    [ObservableProperty] private PointCollection _planDraft = new();
+
+    // 네비 그래프(노드·엣지)
+    private List<NodeDto> _nodes = new();
+    private List<EdgeDto> _edges = new();
+    public sealed record PlanNodeVm(double LeftX, double TopY, double CenterX, double CenterY, string NodeId, string Type);
+    public sealed record PlanEdgeVm(PointCollection Points, string EdgeId);
+    public ObservableCollection<PlanNodeVm> PlanNodes { get; } = new();
+    public ObservableCollection<PlanEdgeVm> PlanEdges { get; } = new();
+    private string? _edgeStartNodeId;
+    [ObservableProperty] private bool _edgeStartVisible;
+    [ObservableProperty] private double _edgeStartLeft;
+    [ObservableProperty] private double _edgeStartTop;
+
+    /// <summary>"등록 요소" 탭 통합 목록(벽·이동불가·노드·엣지, 전 층).</summary>
+    public sealed record PlanElementRow(string Id, string Category, string Name, string Info);
+    public ObservableCollection<PlanElementRow> ElementRows { get; } = new();
+    private readonly List<PlanElementRow> _allRows = new();
+
+    /// <summary>등록 요소 타입 필터.</summary>
+    public ObservableCollection<string> ElementFilters { get; } = new(new[] { "전체", "노드", "엣지", "벽", "이동 불가", "낙상 위험" });
+    [ObservableProperty] private string _selectedElementFilter = "전체";
+    partial void OnSelectedElementFilterChanged(string value) => ApplyElementFilter();
+
+    private static string FilterToCategory(string label) => label switch
+    {
+        "노드" => "NODE", "엣지" => "EDGE", "벽" => "WALL", "이동 불가" => "NOGO", "낙상 위험" => "HAZARD", _ => "ALL"
+    };
+
+    private void ApplyElementFilter()
+    {
+        var cat = FilterToCategory(SelectedElementFilter);
+        ElementRows.Clear();
+        foreach (var r in _allRows)
+            if (cat == "ALL" || r.Category == cat) ElementRows.Add(r);
+    }
+
+    // ── 등록 요소 hover 하이라이트(노랑) ──────────────────────────────────
+    [ObservableProperty] private string? _highlightedElementId;
+    [ObservableProperty] private PointCollection _highlightPoly = new();
+    [ObservableProperty] private bool _highlightPolyVisible;
+    [ObservableProperty] private bool _highlightNodeVisible;
+    [ObservableProperty] private double _highlightNodeLeft;
+    [ObservableProperty] private double _highlightNodeTop;
+
+    /// <summary>목록 항목 hover 시 평면도의 해당 오브젝트를 노랑으로 표시. null이면 해제.</summary>
+    public void SetHighlight(string? id)
+    {
+        HighlightedElementId = id;
+        HighlightPolyVisible = false; HighlightNodeVisible = false; HighlightPoly = new();
+        if (string.IsNullOrEmpty(id)) return;
+
+        var node = PlanNodes.FirstOrDefault(n => n.NodeId == id);
+        if (node is not null) { HighlightNodeLeft = node.CenterX - 10; HighlightNodeTop = node.CenterY - 10; HighlightNodeVisible = true; return; }
+
+        var wall = PlanWalls.FirstOrDefault(w => w.Id.ToString() == id);
+        if (wall is not null) { HighlightPoly = wall.Points; HighlightPolyVisible = true; return; }
+
+        var zone = PlanNoGos.FirstOrDefault(z => z.Id.ToString() == id)
+                   ?? PlanHazards.FirstOrDefault(z => z.Id.ToString() == id);
+        if (zone is not null) { var pc = new PointCollection(zone.Points); if (pc.Count > 0) pc.Add(pc[0]); HighlightPoly = pc; HighlightPolyVisible = true; return; }
+
+        var edge = PlanEdges.FirstOrDefault(e => e.EdgeId == id);
+        if (edge is not null) { HighlightPoly = edge.Points; HighlightPolyVisible = true; return; }
+    }
+
+    [RelayCommand] private void StartWallTool() => BeginTool(PlanTool.Wall);
+    [RelayCommand] private void StartNoGoTool() => BeginTool(PlanTool.NoGo);
+    [RelayCommand] private void StartHazardTool() => BeginTool(PlanTool.Hazard);
+    [RelayCommand] private void StartNodeTool() => BeginTool(PlanTool.Node);
+    [RelayCommand] private void StartEdgeTool() => BeginTool(PlanTool.Edge);
+
+    [RelayCommand]
+    private void CancelTool()
+    {
+        ActiveTool = PlanTool.None; _pending.Clear(); PlanDraft = new(); PlanToolHint = null;
+        _edgeStartNodeId = null; EdgeStartVisible = false;
+    }
+
+    private void BeginTool(PlanTool tool)
+    {
+        if (SelectedLevel is null) { PlanToolHint = "층(L1~L4)을 먼저 선택하세요. '전체'에서는 등록할 수 없습니다."; return; }
+        ActiveTool = tool; _pending.Clear(); PlanDraft = new();
+        _edgeStartNodeId = null; EdgeStartVisible = false;
+        PlanToolHint = tool switch
+        {
+            PlanTool.Wall => "벽 생성: 시작점 → 끝점을 클릭하세요 (ESC/우클릭 취소)",
+            PlanTool.NoGo => "이동 불가 구역: 4개 지점을 순서대로 클릭하세요 (ESC/우클릭 취소)",
+            PlanTool.Hazard => "낙상 위험 구역: 4개 지점을 순서대로 클릭하세요 (ESC/우클릭 취소)",
+            PlanTool.Node => "노드 생성: 지점을 클릭하세요 (여러 개 가능, ESC 종료)",
+            PlanTool.Edge => "엣지 연결: 시작 노드 → 끝 노드를 클릭하세요 (ESC 종료)",
+            _ => null
+        };
+    }
+
+    /// <summary>도구 활성 시 좌클릭 처리 — Shift=축 정렬. 노드=지점 생성, 엣지=노드 2개 연결, 벽/구역=점 누적.</summary>
+    public async Task PlanToolClickAsync(double px, double py, bool shift)
+    {
+        if (ActiveTool == PlanTool.None || !_planReady) return;
+        if (SelectedLevel is not int level) return;
+
+        // 노드 생성(단일 클릭, 모드 유지)
+        if (ActiveTool == PlanTool.Node)
+        {
+            var pt = SnapDrawing(px, py, shift);
+            try { await _api.CreateNodeAsync(TankId, level, pt[0], pt[1], null, "WAYPOINT"); PlanToolHint = "노드 추가됨 (계속 클릭 · ESC 종료)"; await LoadGraphAsync(); }
+            catch (Exception ex) { PlanToolHint = $"노드 실패: {ex.Message}"; }
+            return;
+        }
+
+        // 엣지 연결(노드 2개 선택, 모드 유지)
+        if (ActiveTool == PlanTool.Edge)
+        {
+            var picked = PickNodeAt(px, py);
+            if (picked is null) { PlanToolHint = "노드를 클릭하세요 (엣지 연결)"; return; }
+            if (_edgeStartNodeId is null)
+            {
+                _edgeStartNodeId = picked.NodeId; EdgeStartLeft = picked.LeftX - 3; EdgeStartTop = picked.TopY - 3; EdgeStartVisible = true;
+                PlanToolHint = "끝 노드를 클릭하세요";
+                return;
+            }
+            var start = _edgeStartNodeId; _edgeStartNodeId = null; EdgeStartVisible = false;
+            try { await _api.CreateEdgeAsync(start, picked.NodeId, true, "TRAVEL"); PlanToolHint = "엣지 연결됨 (계속 · ESC 종료)"; await LoadGraphAsync(); }
+            catch (Exception ex) { PlanToolHint = $"엣지 실패: {ex.Message}"; }
+            return;
+        }
+
+        // 벽/이동 불가 구역: 점 누적
+        _pending.Add(SnapDrawing(px, py, shift));   // 직전 꼭짓점 기준 수평/수직 스냅(Shift)
+        UpdateDraft();
+
+        int need = ActiveTool == PlanTool.Wall ? 2 : 4;
+        if (_pending.Count < need)
+        {
+            PlanToolHint = ActiveTool switch
+            {
+                PlanTool.Wall => "끝점을 클릭하세요",
+                PlanTool.Hazard => $"낙상 위험 구역: {_pending.Count}/4 점",
+                _ => $"이동 불가 구역: {_pending.Count}/4 점"
+            };
+            return;
+        }
+
+        var kind = ActiveTool switch { PlanTool.Wall => "WALL", PlanTool.Hazard => "HAZARD", _ => "NOGO" };
+        var pts = _pending.ToArray();
+        try
+        {
+            await _api.CreateMapAnnotationAsync(TankId, level, kind, "", pts, "operator");
+            PlanToolHint = kind switch { "WALL" => "벽 등록 완료", "HAZARD" => "낙상 위험 구역 등록 완료", _ => "이동 불가 구역 등록 완료" };
+            await LoadAnnotationsAsync();
+        }
+        catch (Exception ex) { PlanToolHint = $"등록 실패: {ex.Message}"; }
+
+        ActiveTool = PlanTool.None; _pending.Clear(); PlanDraft = new();
+    }
+
+    private void UpdateDraft()
+    {
+        var pc = new PointCollection();
+        foreach (var p in _pending) pc.Add(ToPx(p));
+        PlanDraft = pc;
+    }
+
+    /// <summary>도면 좌표 → 캔버스 px.</summary>
+    private System.Windows.Point ToPx(double[] d) =>
+        new(_pOffX + (d[0] - _pXMin) * _pScale, _pOffY + (_pYMax - d[1]) * _pScale);
+
+    /// <summary>포인터 px → 도면 좌표. Shift+직전 꼭짓점 있으면 수평/수직(우세 축)으로 스냅.</summary>
+    private double[] SnapDrawing(double px, double py, bool shift)
+    {
+        double dx = _pXMin + (px - _pOffX) / _pScale;
+        double dy = _pYMax - (py - _pOffY) / _pScale;
+        if (shift && _pending.Count > 0)
+        {
+            var last = _pending[^1];
+            if (Math.Abs(dx - last[0]) >= Math.Abs(dy - last[1])) dy = last[1];   // 수평(Δy=0)
+            else dx = last[0];                                                    // 수직(Δx=0)
+        }
+        return new[] { dx, dy };
+    }
+
+    /// <summary>등록된 맵 주석(전 층)을 불러와 목록·평면도 렌더를 갱신한다.</summary>
+    public async Task LoadAnnotationsAsync()
+    {
+        try { _annotations = (await _api.GetMapAnnotationsAsync(TankId)).ToList(); }
+        catch { _annotations = new(); }
+        BuildPlanAnnotations();
+        BuildElementRows();
+    }
+
+    /// <summary>네비 그래프(노드·엣지, 전 층)를 불러와 평면도 렌더·목록 갱신.</summary>
+    public async Task LoadGraphAsync()
+    {
+        try { _nodes = (await _api.GetNodesAsync(TankId)).ToList(); } catch { _nodes = new(); }
+        try { _edges = (await _api.GetEdgesAsync(TankId)).ToList(); } catch { _edges = new(); }
+        BuildPlanGraph();
+        BuildElementRows();
+    }
+
+    private void BuildPlanAnnotations()
+    {
+        PlanWalls.Clear(); PlanNoGos.Clear(); PlanHazards.Clear();
+        if (!_planReady) return;
+        int? lvl = SelectedLevel;   // 전체=null → 모든 층, L{n}=그 층만
+        foreach (var a in _annotations)
+        {
+            if (lvl is int L && a.Level != L) continue;
+            var pc = new PointCollection();
+            foreach (var p in a.Points)
+                if (p is { Length: >= 2 }) pc.Add(ToPx(p));
+            switch (a.Kind)
+            {
+                case "WALL": PlanWalls.Add(new PlanWallVm(pc, a.Name, a.AnnotationId)); break;
+                case "HAZARD": PlanHazards.Add(new PlanZoneVm(pc, a.Name, a.AnnotationId)); break;
+                default: PlanNoGos.Add(new PlanZoneVm(pc, a.Name, a.AnnotationId)); break;
+            }
+        }
+    }
+
+    private void BuildPlanGraph()
+    {
+        PlanNodes.Clear(); PlanEdges.Clear();
+        if (!_planReady) return;
+        int? lvl = SelectedLevel;
+        var byId = new Dictionary<string, System.Windows.Point>();
+        foreach (var n in _nodes)
+        {
+            if (lvl is int L && n.Level != L) continue;
+            var c = ToPx(new[] { n.DrawingX, n.DrawingY });
+            byId[n.NodeId] = c;
+            PlanNodes.Add(new PlanNodeVm(c.X - 6, c.Y - 6, c.X, c.Y, n.NodeId, n.NodeType));
+        }
+        foreach (var e in _edges)
+        {
+            if (!byId.TryGetValue(e.StartNodeId, out var a) || !byId.TryGetValue(e.EndNodeId, out var b)) continue;
+            PlanEdges.Add(new PlanEdgeVm(new PointCollection { a, b }, e.EdgeId));
+        }
+    }
+
+    /// <summary>클릭 px에서 임계(16px) 내 최근접 렌더 노드를 반환(엣지 연결용).</summary>
+    private PlanNodeVm? PickNodeAt(double px, double py, double thresholdPx = 16)
+    {
+        PlanNodeVm? best = null; double bestD2 = thresholdPx * thresholdPx;
+        foreach (var n in PlanNodes)
+        {
+            double d2 = (n.CenterX - px) * (n.CenterX - px) + (n.CenterY - py) * (n.CenterY - py);
+            if (d2 <= bestD2) { bestD2 = d2; best = n; }
+        }
+        return best;
+    }
+
+    /// <summary>등록 요소 통합 목록 재구성(벽·이동불가·노드·엣지) → _allRows, 필터 적용.</summary>
+    private void BuildElementRows()
+    {
+        _allRows.Clear();
+        foreach (var a in _annotations.OrderBy(a => a.Level).ThenBy(a => a.Kind))
+        {
+            string label = a.Kind switch { "WALL" => "벽", "HAZARD" => "낙상 위험", _ => "이동불가" };
+            _allRows.Add(new PlanElementRow(a.AnnotationId.ToString(), a.Kind, a.Name, $"L{a.Level} · {label} · {a.Points.Length}점"));
+        }
+        foreach (var n in _nodes.OrderBy(n => n.Level))
+            _allRows.Add(new PlanElementRow(n.NodeId, "NODE", n.NodeId, $"L{n.Level} · 노드 · {n.NodeType} · ({n.X:0.#},{n.Y:0.#})"));
+        foreach (var e in _edges.OrderBy(e => e.MapId))
+            _allRows.Add(new PlanElementRow(e.EdgeId, "EDGE", e.EdgeId, $"엣지 · {e.EdgeType}{(e.Bidirectional ? " ↔" : " →")}"));
+        ApplyElementFilter();
+    }
+
+    [RelayCommand]
+    private async Task DeleteElementAsync(PlanElementRow? row)
+    {
+        if (row is null) return;
+        try
+        {
+            switch (row.Category)
+            {
+                case "WALL": case "NOGO": case "HAZARD":
+                    if (Guid.TryParse(row.Id, out var gid)) { await _api.DeleteMapAnnotationAsync(gid); await LoadAnnotationsAsync(); }
+                    break;
+                case "NODE": await _api.DeleteNodeAsync(row.Id); await LoadGraphAsync(); break;
+                case "EDGE": await _api.DeleteEdgeAsync(row.Id); await LoadGraphAsync(); break;
+            }
+        }
+        catch (Exception ex) { PlanToolHint = $"삭제 실패: {ex.Message}"; }
+    }
+
+    partial void OnActiveToolChanged(PlanTool value) => OnPropertyChanged(nameof(ToolActive));
+
+    // ── 마우스 hover 좌표 리드아웃 ─────────────────────────────────────────
+    [ObservableProperty] private bool _planHoverVisible;
+    [ObservableProperty] private string _planHoverText = "";
+    [ObservableProperty] private double _planHoverLabelX;
+    [ObservableProperty] private double _planHoverLabelY;
+
+    /// <summary>포인터 px → 도면 좌표(m) 리드아웃 + (도구 활성 시) 러버밴드. Shift=수평/수직 스냅.</summary>
+    public void PlanHover(double px, double py, bool shift)
+    {
+        if (!_planReady) { PlanHoverVisible = false; return; }
+
+        if (ToolActive && _pending.Count > 0)
+        {
+            // 스냅된 지점(= 실제 클릭이 놓일 위치)으로 러버밴드·리드아웃 일치
+            var snapped = SnapDrawing(px, py, shift);
+            var sp = ToPx(snapped);
+
+            var pc = new PointCollection();
+            foreach (var p in _pending) pc.Add(ToPx(p));
+            pc.Add(sp);                       // 마지막 꼭짓점 → (스냅된) 포인터
+            PlanDraft = pc;
+
+            PlanHoverText = $"x={snapped[0]:0.##}, y={snapped[1]:0.##} m" + (shift ? "  ⇥ 정렬" : "");
+            PlanHoverLabelX = sp.X + 12;
+            PlanHoverLabelY = sp.Y + 6;
+        }
+        else
+        {
+            double dx = _pXMin + (px - _pOffX) / _pScale;
+            double dy = _pYMax - (py - _pOffY) / _pScale;
+            PlanHoverText = $"x={dx:0.##}, y={dy:0.##} m";
+            PlanHoverLabelX = px + 12;   // 포인터 오른쪽
+            PlanHoverLabelY = py + 6;
+        }
+        PlanHoverVisible = true;
+    }
+
+    public void PlanHoverLeave()
+    {
+        PlanHoverVisible = false;
+        if (ToolActive) UpdateDraft();   // 포인터로 뻗은 러버밴드 제거(확정 점만 남김)
+    }
 
     // 상면 투영 파라미터(로봇 마커가 footprint와 동일 변환을 쓰도록 저장)
     private double _pScale, _pOffX, _pOffY, _pXMin, _pYMax;
@@ -132,6 +484,8 @@ public sealed partial class TankViewModel : ObservableObject
         var o = P(ox, oy); PlanOriginX = o.X - 5; PlanOriginY = o.Y - 5;   // 원점 마커(지름 10) 중심 보정
         PlanBowLabel = "▲ +y 좌현(Port)    ▶ +x 선수(F)";
         BuildPlanRobot();
+        BuildPlanAnnotations();   // 벽·이동 불가 구역 렌더 갱신(뷰 변환 의존)
+        BuildPlanGraph();         // 노드·엣지 렌더 갱신
     }
 
     /// <summary>로봇 상면 마커를 현재 footprint 변환으로 갱신(다른 층이면 흐리게).</summary>
@@ -178,6 +532,42 @@ public sealed partial class TankViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// 2D 평면도 우클릭 "이 노드로 이동" — 우클릭 지점 임계 내 노드를 집어, 클릭 픽셀이 아니라
+    /// 그 노드의 **등록 도면 좌표**로 선택 로봇에 이동 명령. 가드는 GotoHere와 동일(층·로봇). 경로는 HD_AMR.
+    /// </summary>
+    public async Task GotoNodeAsync(double canvasPxX, double canvasPxY)
+    {
+        PlanGotoStatus = null;
+        if (!_planReady) { PlanGotoStatus = "선창 미로드 — 이동할 수 없습니다."; return; }
+        if (SelectedLevel is not int level)
+        {
+            PlanGotoStatus = "층(L1~L4)을 먼저 선택하세요. '전체' 뷰에서는 이동할 수 없습니다.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(SelectedRobotId))
+        {
+            PlanGotoStatus = "이동할 로봇을 먼저 선택하세요(운영 바의 로봇 콤보).";
+            return;
+        }
+
+        var picked = PickNodeAt(canvasPxX, canvasPxY);
+        if (picked is null) { PlanGotoStatus = "노드 위에서 우클릭하세요(임계 16px)."; return; }
+        var node = _nodes.FirstOrDefault(n => n.NodeId == picked.NodeId);
+        if (node is null) { PlanGotoStatus = "노드 정보를 찾을 수 없습니다."; return; }
+
+        string mapId = $"{TankId}-L{level}";
+        try
+        {
+            await _api.GotoAsync(SelectedRobotId!, mapId, node.DrawingX, node.DrawingY, null, "operator");
+            PlanGotoStatus = $"이동 명령 전송: {SelectedRobotId} → 노드 {node.NodeId} 도면({node.DrawingX:0.##}, {node.DrawingY:0.##}) @ {mapId}";
+        }
+        catch (Exception ex)
+        {
+            PlanGotoStatus = $"이동 불가: {ex.Message}";   // 층 불일치(409)·NOGO/HAZARD 등 서버 메시지 노출
+        }
+    }
+
     /// <summary>팔각 단면 반폭 y(z) — 하부챔퍼/수직벽/상부챔퍼 구간별 선형(3D HalfWidth와 동일 정의).</summary>
     private static double HalfWidth(TankGeometryDto g, double z)
     {
@@ -213,6 +603,8 @@ public sealed partial class TankViewModel : ObservableObject
             ShellWalls.Clear();
             foreach (var w in walls) ShellWalls.Add(w);
             BuildPlan();                   // 평면도(2D) 상면 투영 갱신
+            await LoadAnnotationsAsync();   // 벽·이동 불가 구역 로드
+            await LoadGraphAsync();         // 노드·엣지 로드
             await LoadOverlaysAsync();     // 영역·작업 로드 후 ViewChanged
             await LoadLevelWallsAsync();   // ViewChanged 발생(셸+강조 재빌드)
         }

@@ -231,6 +231,22 @@ public sealed class MissionService
         if (!string.Equals(reported, mapId, StringComparison.OrdinalIgnoreCase))
             throw new FloorMismatchException(reported, mapId);
 
+        // ── 이동 불가 구역 게이트: 대상 지점(도면 좌표)이 등록된 NOGO 구역 안이면 이동 거부
+        var (tankOfMap, levelOfMap) = ParseMapId(mapId);
+        if (levelOfMap is int lvl)
+        {
+            // NOGO(운영 회피) + HAZARD(낙상 등 필수 회피) 모두 목표점 게이트로 차단
+            var zones = await _db.MapAnnotations.AsNoTracking()
+                .Where(a => a.TankId == tankOfMap && a.Level == lvl && (a.Kind == "NOGO" || a.Kind == "HAZARD"))
+                .ToListAsync(ct);
+            foreach (var z in zones)
+            {
+                var poly = JsonSerializer.Deserialize<double[][]>(z.Points);
+                if (poly is { Length: >= 3 } && AreaGeometry.PointInPolygon(drawingX, drawingY, poly))
+                    throw new NoGoZoneException(z.Kind == "HAZARD" ? $"낙상 위험 구역 '{z.Name}'" : z.Name);
+            }
+        }
+
         // ── 도면 좌표 → 맵 좌표 (유효 캘리브레이션 있으면 적용)
         double mapX = drawingX, mapY = drawingY;
         var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct);
@@ -314,6 +330,14 @@ public sealed class MissionService
             Vec(pos, "seamEndDrawing"));
     }
 
+    /// <summary>mapId "{tank}-L{level}" → (tank, level). 형식 불일치면 level=null.</summary>
+    private static (string Tank, int? Level) ParseMapId(string mapId)
+    {
+        int i = mapId.LastIndexOf("-L", StringComparison.OrdinalIgnoreCase);
+        if (i > 0 && int.TryParse(mapId[(i + 2)..], out var lv)) return (mapId[..i], lv);
+        return (mapId, null);
+    }
+
     private static string? FindNearestNode(Core.Graph.MapGraph graph, RobotContextEntity ctx)
     {
         if (ctx.ReportedX is not double rx || ctx.ReportedY is not double ry) return null;
@@ -334,4 +358,11 @@ public sealed class FloorMismatchException : Exception
         ReportedMapId = reported;
         RequestedMapId = requested;
     }
+}
+
+/// <summary>수동 이동 대상 지점이 등록된 이동 불가(NOGO) 구역 내부 — 이동 금지. 엔드포인트가 409로 매핑.</summary>
+public sealed class NoGoZoneException(string zoneName)
+    : Exception($"이동 불가 구역 '{zoneName}' 안이라 이동할 수 없습니다.")
+{
+    public string ZoneName { get; } = zoneName;
 }

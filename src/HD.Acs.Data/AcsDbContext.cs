@@ -37,6 +37,7 @@ public class AcsDbContext : DbContext
     public DbSet<OrderActionEntity> OrderActions => Set<OrderActionEntity>();
     public DbSet<RobotContextEntity> RobotContexts => Set<RobotContextEntity>();
     public DbSet<WorkItemEntity> WorkItems => Set<WorkItemEntity>();
+    public DbSet<MapAnnotationEntity> MapAnnotations => Set<MapAnnotationEntity>();
     // hist / alarm / sys
     public DbSet<TransitionLogEntity> TransitionLogs => Set<TransitionLogEntity>();
     public DbSet<InspectionResultEntity> InspectionResults => Set<InspectionResultEntity>();
@@ -70,6 +71,10 @@ public class AcsDbContext : DbContext
 
         mb.Entity<ZoneEntity>(e => { e.ToTable("zone", "ref"); e.HasKey(x => x.ZoneId);
             e.Property(x => x.Geometry).HasColumnType("jsonb"); });
+
+        mb.Entity<MapAnnotationEntity>(e => { e.ToTable("map_annotation", "ref"); e.HasKey(x => x.AnnotationId);
+            e.Property(x => x.Points).HasColumnType("jsonb");
+            e.HasIndex(x => new { x.TankId, x.Level }); });
 
         mb.Entity<ZoneMemberEntity>(e => { e.ToTable("zone_member", "ref");
             e.HasKey(x => new { x.ZoneId, x.NodeId }); });

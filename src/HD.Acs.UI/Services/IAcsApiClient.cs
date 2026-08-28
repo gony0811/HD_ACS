@@ -21,9 +21,23 @@ public interface IAcsApiClient
     Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
         double x, double y, double theta, CancellationToken ct = default);
     Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default);
-    // 수동 지점 이동(2D 평면도). 층 불일치 시 서버가 409 → 예외로 메시지 노출.
+    // 수동 지점 이동(2D 평면도). 층 불일치·이동불가구역 시 서버가 409 → 예외로 메시지 노출.
     Task GotoAsync(string robotId, string mapId, double x, double y, double? theta, string userId,
         CancellationToken ct = default);
+
+    // 맵 주석(벽·이동 불가 구역) — 2D 평면도 등록/조회/삭제.
+    Task<IReadOnlyList<MapAnnotationDto>> GetMapAnnotationsAsync(string tankId, int? level = null, CancellationToken ct = default);
+    Task<Guid> CreateMapAnnotationAsync(string tankId, int level, string kind, string name, double[][] points,
+        string userId, CancellationToken ct = default);
+    Task DeleteMapAnnotationAsync(Guid id, CancellationToken ct = default);
+
+    // 네비게이션 그래프(노드·엣지) — 2D 평면도. 노드 x,y는 도면 좌표(서버가 맵 좌표로 변환).
+    Task<IReadOnlyList<NodeDto>> GetNodesAsync(string tankId, int? level = null, CancellationToken ct = default);
+    Task<NodeDto> CreateNodeAsync(string tankId, int level, double x, double y, double? theta, string? nodeType, CancellationToken ct = default);
+    Task DeleteNodeAsync(string nodeId, CancellationToken ct = default);
+    Task<IReadOnlyList<EdgeDto>> GetEdgesAsync(string tankId, int? level = null, CancellationToken ct = default);
+    Task CreateEdgeAsync(string startNodeId, string endNodeId, bool bidirectional, string? edgeType, CancellationToken ct = default);
+    Task DeleteEdgeAsync(string edgeId, CancellationToken ct = default);
 
     // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,

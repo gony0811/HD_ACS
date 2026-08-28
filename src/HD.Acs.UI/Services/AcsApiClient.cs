@@ -82,7 +82,70 @@ public sealed class AcsApiClient : IAcsApiClient
     {
         var resp = await _http.PostAsJsonAsync($"/api/robots/{robotId}/goto",
             new { MapId = mapId, X = x, Y = y, Theta = theta, UserId = userId }, ct);
-        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(층 불일치)/400 {error} 메시지 노출
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(층 불일치·이동불가구역)/400 {error} 메시지 노출
+    }
+
+    public async Task<IReadOnlyList<MapAnnotationDto>> GetMapAnnotationsAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/map-annotations?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
+        return await _http.GetFromJsonAsync<List<MapAnnotationDto>>(url, ct) ?? new();
+    }
+
+    public async Task<Guid> CreateMapAnnotationAsync(string tankId, int level, string kind, string name,
+        double[][] points, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/map-annotations",
+            new { TankId = tankId, Level = level, Kind = kind, Name = name, Points = points, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 점 개수 부족 400 메시지 노출
+        return (await resp.Content.ReadFromJsonAsync<AnnotationResult>(ct))?.AnnotationId ?? Guid.Empty;
+    }
+
+    public async Task DeleteMapAnnotationAsync(Guid id, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/map-annotations/{id}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    private sealed record AnnotationResult(Guid AnnotationId);
+
+    // ── 네비게이션 그래프(노드·엣지) ──────────
+    public async Task<IReadOnlyList<NodeDto>> GetNodesAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/nodes?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
+        return await _http.GetFromJsonAsync<List<NodeDto>>(url, ct) ?? new();
+    }
+
+    public async Task<NodeDto> CreateNodeAsync(string tankId, int level, double x, double y, double? theta, string? nodeType, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/nodes",
+            new { TankId = tankId, Level = level, X = x, Y = y, Theta = theta, NodeType = nodeType }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return (await resp.Content.ReadFromJsonAsync<NodeDto>(ct))!;
+    }
+
+    public async Task DeleteNodeAsync(string nodeId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/nodes/{Uri.EscapeDataString(nodeId)}", ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<IReadOnlyList<EdgeDto>> GetEdgesAsync(string tankId, int? level = null, CancellationToken ct = default)
+    {
+        var url = $"/api/edges?tankId={Uri.EscapeDataString(tankId)}" + (level is int l ? $"&level={l}" : "");
+        return await _http.GetFromJsonAsync<List<EdgeDto>>(url, ct) ?? new();
+    }
+
+    public async Task CreateEdgeAsync(string startNodeId, string endNodeId, bool bidirectional, string? edgeType, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/edges",
+            new { StartNodeId = startNodeId, EndNodeId = endNodeId, Bidirectional = bidirectional, EdgeType = edgeType }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 자기연결·다른층·중복 400 메시지 노출
+    }
+
+    public async Task DeleteEdgeAsync(string edgeId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/edges/{Uri.EscapeDataString(edgeId)}", ct);
+        resp.EnsureSuccessStatusCode();
     }
 
     // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────

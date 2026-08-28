@@ -69,6 +69,19 @@ CREATE TABLE ref.zone_member (          -- NA_R_LINK_ZONE 대응
   PRIMARY KEY (zone_id, node_id)
 );
 
+-- 운영자가 2D 평면도에서 등록하는 맵 주석 — 벽(WALL, 선분 2점) / 이동 불가 구역(NOGO, 다각형).
+-- 좌표는 도면 프레임 [[x,y],…] (평면도 클릭 → 역투영). NOGO는 goto 게이트에 사용(대상 지점이 구역 내면 이동 거부).
+CREATE TABLE ref.map_annotation (
+  annotation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tank_id       text NOT NULL,
+  level         int  NOT NULL,                 -- 층(맵)
+  kind          text NOT NULL,                 -- WALL | NOGO | HAZARD(낙상 등 필수 회피)
+  name          text NOT NULL,
+  points        jsonb NOT NULL,                -- [[x,y],…] 도면 좌표 (WALL=2점, NOGO/HAZARD≥3점)
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_map_annotation_tank_level ON ref.map_annotation (tank_id, level);
+
 -- ─────────────── 도면→맵 캘리브레이션 (ref) [PHASE2 WP-1 · T_W_D] ───────────────
 -- 층별 도면 좌표 → AMR SLAM 맵 좌표 강체변환. 맵버전과 바인딩되어 맵 재생성 시 자동 무효.
 CREATE TABLE ref.map_calibration (

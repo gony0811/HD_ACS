@@ -82,6 +82,18 @@ public class ZoneMemberEntity
     public string NodeId { get; set; } = "";
 }
 
+/// <summary>운영자가 2D 평면도에서 등록한 맵 주석 — 벽(WALL, 선분 2점) / 이동 불가 구역(NOGO, 다각형). 도면 좌표.</summary>
+public class MapAnnotationEntity
+{
+    public Guid AnnotationId { get; set; }
+    public string TankId { get; set; } = "";
+    public int Level { get; set; }                     // 층(맵)
+    public string Kind { get; set; } = "WALL";         // WALL | NOGO
+    public string Name { get; set; } = "";
+    public string Points { get; set; } = "[]";         // jsonb [[x,y],…] 도면 좌표(WALL=2점, NOGO≥3점)
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public class ActionCatalogEntity
 {
     public string ActionType { get; set; } = "";

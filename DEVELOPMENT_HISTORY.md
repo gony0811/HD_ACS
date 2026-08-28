@@ -5,6 +5,156 @@ HD_ACS 개발 작업 요약 기록. 각 작업은 **날짜 · 제목 · 배경 �
 
 ---
 
+## 2026-08-28 — "이 노드로 이동" 추가 — 노드 등록 좌표로 정확 이동
+
+### 배경
+- 기존 "여기로 이동"은 우클릭한 **픽셀 지점**으로 보내 노드를 대략만 겨냥. 등록된 노드의 정확한 좌표로 이동하는 전용 명령 요청.
+
+### 변경 내용
+- `TankViewModel.GotoNodeAsync(px,py)`: 우클릭 지점 임계(16px) 내 노드를 `PickNodeAt`으로 집고, 클릭 픽셀이 아니라 그 노드의 **등록 도면 좌표**(`NodeDto.DrawingX/DrawingY`)로 `GotoAsync` 호출. 가드(층 L{n} 선택·로봇 선택)는 GotoHere와 동일, 노드 없으면 안내. 노드는 선택 층만 렌더되므로 mapId 층 일치 보장.
+- 우클릭 메뉴에 "이 노드로 이동"(`OnPlanGotoNodeClick`) 추가.
+- 서버 경로는 기존 `ManualGotoAsync` 재사용 → 층 게이트 + NOGO/HAZARD 목표점 게이트 그대로 적용. 노드↔목표 사이 **경로 계획은 HD_AMR 책임**(단일 노드 Order).
+
+### 검증
+- UI 빌드 0 error(temp 출력). 실동작은 App+UI 재기동 후 로봇·층 선택 상태에서 확인.
+
+### 후속
+- 여러 노드를 순서대로 경유(그래프 경로, multi-node Order)는 별도 작업. 현재는 단일 노드 직접 이동.
+
+---
+
+## 2026-08-28 — 낙상 위험(HAZARD) 구역 추가 — 필수 회피 존
+
+### 배경
+- "꼭 피해야 하는 지점(낙상 위험, 예: 엘리베이터 샤프트 개구부)"을 운영상 구분·표시하고 목표점 이동을 차단할 수단 요청.
+- **안전 원칙 명확화**: 낙상 방지의 실질 보증은 물리 조치 + AMR 온보드(코스트맵 keep-out·cliff 감지)에 있음. ACS의 벽·NOGO·HAZARD는 AMR에 전달되지 않는 **자문(advisory) 계층**이며, HAZARD는 그 위의 운영자 인지 + 미션 목표 차단 역할. (실제 회피를 위한 AMR 맵-동기화는 VDA 5050 밖 협의사항 — 후속)
+
+### 변경 내용
+1. **백엔드**: `POST /api/map-annotations`가 `HAZARD` kind 허용(다각형 ≥3점, NOGO와 동일 검증). `MissionService.ManualGotoAsync` 목표점 게이트를 NOGO+HAZARD 모두 검사하도록 확장(HAZARD 안으로 goto 시 거부, 메시지에 "낙상 위험 구역" 표기). `ref.map_annotation.kind` 주석에 HAZARD 명시(CHECK 제약 없어 스키마 변경 불필요).
+2. **UI**: `PlanTool.Hazard` + `StartHazardTool`(4점 다각형, NOGO 패턴 재사용), `PlanHazards` 렌더 컬렉션(주황 #E67E22 실선·굵은 테두리로 NOGO 빨강 점선과 구분), 우클릭 메뉴 "낙상 위험 지역", 등록 요소 필터에 "낙상 위험"·배지(낙상위험/주황)·hover 노랑 하이라이트·삭제 경로 연결.
+
+### 검증
+- App·UI 빌드 각 0 error(temp 출력으로 exe 잠금 회피). DB CHECK 제약 없어 마이그레이션 불필요.
+- API/DB·UI 실동작은 App+UI 재기동 후 확인 필요.
+
+### 후속
+- ③ 접근 알람(로봇 state 위치가 HAZARD 근접/진입 시 알람·비상정지 후보)·그래프 경로 도입 시 HAZARD 통과 노드/엣지 배제.
+- ④ ACS HAZARD 기하를 AMR keep-out 지도로 넘기는 맵-동기화 — HD_AMR과 인터페이스 협의(VDA5050_INTERFACE.md 미결 항목).
+
+---
+
+## 2026-08-28 — 등록 요소 타입 필터 + hover 시 평면도 오브젝트 노랑 하이라이트
+
+### 배경
+- "등록 요소" 탭에서 노드/엣지/벽/이동불가를 **구분해 보고**, 목록 항목에 **마우스를 올리면 어떤 오브젝트인지** 평면도에서 노랑으로 알 수 있게 요청.
+
+### 변경 내용
+1. **타입 필터**: `TankViewModel`에 `ElementFilters`(전체/노드/엣지/벽/이동 불가)·`SelectedElementFilter`. 전체 행은 `_allRows`에 두고 `ApplyElementFilter`가 선택 카테고리로 `ElementRows` 필터. `OperationView` "등록 요소" 탭 상단에 필터 콤보 추가.
+2. **hover 하이라이트**: 목록 항목 Border `MouseEnter`/`MouseLeave` → `Tank.SetHighlight(id)`/`null`. `SetHighlight`가 id로 렌더 컬렉션(PlanNodes/Walls/NoGos/Edges)에서 오브젝트를 찾아 평면도에 노랑 오버레이(노드=링+채움, 벽/엣지=굵은 선, 이동불가=닫힌 폴리라인) 표시. `PlanEdgeVm`에 `EdgeId` 추가(하이라이트 매칭용), TankView에 노랑 하이라이트 레이어(Polyline+Ellipse) 추가. `OperationView.xaml.cs`에 hover 핸들러.
+
+### 검증
+- `HD.Acs.UI` 빌드 0 error. 백엔드/DB 무변경. 라이브는 UI 재기동 후.
+
+---
+
+## 2026-08-28 — (버그수정) 노드가 좌상단 구석에 몰리는 렌더 버그
+
+### 원인
+- 노드 `ItemsControl`(Canvas 패널)에서 `Canvas.Left/Top`을 **DataTemplate 안 Ellipse**에 걸었음. ItemsControl은 항목을 `ContentPresenter`로 감싸므로 위치 부착 속성은 **컨테이너**에 걸려야 Canvas가 배치한다 → 무시되어 모든 노드가 (0,0)에 겹침. (벽/구역/엣지는 `Points` 절대좌표라 무영향이었음.)
+
+### 변경 내용
+- `TankView` 노드 ItemsControl에 `ItemContainerStyle`(TargetType=ContentPresenter)로 `Canvas.Left={Binding LeftX}`·`Canvas.Top={Binding TopY}` 지정, Ellipse에서는 제거. 서버 데이터·좌표 변환은 정상이었음(검증: GET 응답 도면좌표 -12.5/10.6로 정상 분산).
+
+### 검증
+- `HD.Acs.UI` 빌드 0 error. 라이브는 UI 재기동 후.
+
+---
+
+## 2026-08-28 — 2D 평면도 네비게이션 그래프 편집(노드·엣지 등록)
+
+### 배경
+- 평면도에서 **실제 네비 그래프**(ref.node/ref.edge)를 등록하고 싶다는 요청. 결정: 실제 그래프(VDA order 경로 생성에 사용), **엣지=두 노드 연결**.
+
+### 변경 내용
+1. **백엔드** `GraphEditService`(신규): 노드 좌표는 **맵 프레임**(VDA nodePosition)으로 저장하며, 평면도 도면 좌표 ↔ 맵 좌표는 층 유효 **T_W_D**로 변환(캘리브레이션 없으면 항등 — 기존 goto/마커와 동일). `ref.map` 없으면 자동 생성(FK). 엣지는 두 노드 연결(자기연결·다른층·중복 가드). 노드 삭제 시 인접 엣지 정리. REST `POST/GET/DELETE /api/nodes`·`/api/edges`(노드 X/Y=도면 좌표 입력→서버가 맵 좌표 변환·응답에 도면 좌표 동봉해 렌더 지원), DI 등록. `ref.map/node/edge`는 기존 스키마라 마이그레이션 불필요.
+2. **UI 클라이언트**: `NodeDto`/`EdgeDto` + `Get/Create/Delete Node·Edge`.
+3. **UI (TankViewModel)**: 등록 도구에 `Node`(단일 클릭 생성, 모드 유지)·`Edge`(노드 2개 클릭 연결, 시작 노드 하이라이트) 추가. 노드 픽(16px 임계 최근접), 그래프 로드/렌더(`PlanNodes`/`PlanEdges`, 도면 좌표→px), Shift 축 정렬은 노드 배치에도 적용. "등록 요소" 탭을 **통합 목록**(`ElementRows`: 벽·이동불가·노드·엣지)으로 재편 + 카테고리별 삭제(`DeleteElementCommand`).
+4. **UI (뷰)**: `TankView` 컨텍스트 메뉴에 "노드 생성"·"엣지 연결" + 노드(원)·엣지(선)·시작노드 링 렌더. `OperationView` "등록 요소" 탭 배지/삭제를 4종(WALL/NOGO/NODE/EDGE)으로 확장.
+
+### 검증
+- `HD.Acs.App`/`HD.Acs.UI` 빌드 **0 error**. DB `ref.map→node→edge` FK 체인 삽입/삭제 검증(2노드·1엣지). 라이브 UI/E2E는 App+UI 재기동 후.
+
+### 참고(경계)
+- 등록 노드/엣지는 `OrderBuilder`+`MapGraph`(그래프 기반 Order 경로)에서 소비된다. 현재 활성 배차(`InspectionDispatcher`)는 정차 단위 단일 노드 Order라 이 그래프를 직접 쓰지 않음 — 그래프 기반 경로(seam/inspection_point 경로) 활용 시 반영.
+
+### 후속
+- 노드 타입 선택 UI(현재 WAYPOINT 고정)·엣지 방향/타입(양방향 TRAVEL 고정)·노드 이동/편집·.hdacs 파일 포함.
+
+---
+
+## 2026-08-28 — 2D 평면도 등록 Shift 축 정렬(수평/수직 스냅)
+
+### 배경
+- 벽·이동 불가 구역 선택 중 Shift를 누르면 직전 꼭짓점 기준 수평/수직으로 정렬되게 해달라는 요청(CAD 관행).
+
+### 변경 내용
+- `TankViewModel.SnapDrawing(px,py,shift)`: 포인터→도면 좌표 역투영 후 Shift+직전 꼭짓점이 있으면 우세 축으로 스냅(|Δx|≥|Δy|→수평[Δy=0], 아니면 수직[Δx=0]). `PlanToolClickAsync`(클릭 확정)·`PlanHover`(러버밴드·리드아웃) 모두 동일 스냅 적용 → 미리보기 끝점=실제 클릭 위치 일치. 리드아웃에 "⇥ 정렬" 표시. `ToPx` 헬퍼 추출.
+- `TankView`: MouseMove/좌클릭 핸들러가 `Keyboard.Modifiers`의 Shift 상태를 VM에 전달.
+
+### 검증
+- `HD.Acs.UI` 빌드 0 error. 백엔드/DB 무변경.
+
+---
+
+## 2026-08-28 — 2D 평면도 등록 도구 러버밴드(마지막 꼭짓점→포인터 선)
+
+### 배경
+- 벽·이동 불가 구역 등록 중, 다음 점을 찍기 전에 직전 꼭짓점과 포인터 사이 선을 보고 싶다는 요청.
+
+### 변경 내용
+- `TankViewModel.PlanHover`: 등록 도구 활성 + 확정 점이 있으면 `PlanDraft`(기존 미리보기 폴리라인)를 "확정 점들 + 현재 포인터"로 갱신 → 마지막 꼭짓점→포인터 러버밴드 실시간 표시. `PlanHoverLeave`는 도구 활성 시 `UpdateDraft`로 러버밴드 제거(확정 점만 유지). 렌더는 기존 `PlanDraft` 폴리라인 재사용(XAML 무변경).
+
+### 검증
+- `HD.Acs.UI` 빌드 0 error. 백엔드/DB 무변경.
+
+---
+
+## 2026-08-28 — 2D 평면도 마우스 hover 좌표 리드아웃
+
+### 배경
+- 평면도에서 포인터 위치의 도면 좌표를 즉시 확인하고 싶다는 요청.
+
+### 변경 내용
+- `TankViewModel.PlanHover(px,py)`: 캔버스 px를 도면 좌표(m)로 역투영(기존 투영의 역변환) → `PlanHoverText`("x=…, y=… m")·포인터 옆 라벨 위치(`PlanHoverLabelX/Y`)·`PlanHoverVisible` 갱신. `PlanHoverLeave`로 숨김.
+- `TankView`: 평면도 캔버스 `MouseMove`/`MouseLeave` 핸들러 + 포인터 옆 반투명 좌표 라벨(`IsHitTestVisible=False`로 클릭 방해 없음). Viewbox 안이라 라벨도 함께 스케일.
+
+### 검증
+- `HD.Acs.UI` 빌드 0 error. 백엔드/DB 무변경(순수 뷰 계층). 라이브는 UI 재기동 후.
+
+---
+
+## 2026-08-28 — 2D 평면도 맵 주석: 벽 생성 · 이동 불가 구역 + 등록 요소 탭 (DB 백엔드)
+
+### 배경
+- 2D 평면도에서 운영자가 **우클릭 메뉴로 벽(WALL)·이동 불가 구역(NOGO)을 등록**하고, 우측 패널에서 목록으로 관리하고 싶다는 요청.
+- 결정(사용자 확인): **DB 백엔드**(영속·다중 사용자), **이동 불가 구역은 "여기로 이동"(goto) 차단**.
+
+### 변경 내용
+1. **DB/백엔드**: `ref.map_annotation`(annotation_id·tank_id·level·kind[WALL|NOGO]·name·points jsonb·created_at) 신설 — `db/schema.sql` + `db/migrations/2026-08-28_map_annotation.sql`(dev-postgres 적용). `MapAnnotationEntity`/DbSet/매핑(jsonb+인덱스). REST `POST/GET/DELETE /api/map-annotations`(kind 검증·최소 점수[WALL 2·NOGO 3] 검증·감사로그 MAP_ANNOTATION_ADD). 좌표는 **도면 프레임 [[x,y]…]**.
+2. **goto 게이트**: `MissionService.ManualGotoAsync`에 NOGO 검사 추가 — 대상 지점(도면 좌표)이 그 층 NOGO 다각형 안이면 `NoGoZoneException`(신설) → **409**(이동 거부). `AreaGeometry.PointInPolygon`(단위테스트됨) 재사용, `ParseMapId`로 mapId→(tank,level).
+3. **UI 클라이언트**: `MapAnnotationDto` + `IAcsApiClient.GetMapAnnotations/CreateMapAnnotation/DeleteMapAnnotation` + 구현.
+4. **UI (TankViewModel)**: 등록 도구 상태머신(`PlanTool` None/Wall/NoGo) — `StartWallTool`/`StartNoGoTool`/`CancelTool` 명령, `PlanToolClickAsync`(캔버스 px→도면 좌표 역투영·점 누적, WALL 2점/NOGO 4점 도달 시 등록), 진행 미리보기(`PlanDraft`). 렌더 컬렉션 `PlanWalls`(선분)·`PlanNoGos`(다각형)를 `BuildPlan` 투영에 맞춰 갱신(선택 층 필터). `AnnotationRows`(전 층 목록) + `DeleteAnnotation` 명령.
+5. **UI (뷰)**: `TankView` 평면도 캔버스에 우클릭 메뉴(여기로 이동/벽 생성/이동 불가 지역/취소) + 좌클릭(도구 활성 시 점 지정)·ESC 취소 + 벽/구역/미리보기 렌더. `OperationView` 우측 패널을 탭으로 전환(**알람·이벤트** / **등록 요소**=벽·구역 목록+삭제, DataContext=Tank).
+
+### 검증
+- `HD.Acs.App`/`HD.Acs.UI` 빌드 **0 error**. 마이그레이션 dev-postgres 적용. `ref.map_annotation` **jsonb 왕복 검증**(INSERT/SELECT/DELETE, jsonb_array_length=4).
+- goto NOGO 게이트는 단위테스트된 `PointInPolygon` 재사용. 라이브 UI/E2E는 App+UI **재기동 후** 확인(현재 실행 중인 :5100 App·UI는 구빌드).
+
+### 후속
+- .hdacs 프로젝트 파일에 맵 주석 포함(내보내기/가져오기), 벽의 goto/네비 반영 여부(현재 벽=시각 주석), 이름 지정 UI.
+
+---
+
 ## 2026-08-27 — ADR-013 신설 (검사 액션 계약 + 정렬 책임 경계)
 
 ### 배경
