@@ -130,7 +130,7 @@
 - ✅ 두절 구간 이력: 최신 state 스냅샷 동기화로 충분(소급 재전송 없음)을 기본 계약으로 — 상세 이력 확장은 사양서 §10 N8 협의
 - ✅ MQTT: Mosquitto(:1883, 폐쇄망 평문), 전 채널 QoS 1, connection만 retain+Last Will — 보안(TLS) 여부는 사양서 §10 N9 협의
 
-**잔여 미결**: HD_AMR 측 회신 대기 항목은 사양서 §10 협의 표(N1~N9)에서 관리한다.
+**잔여 미결**: HD_AMR 측 회신 대기 항목은 사양서 §10 협의 표(N1~N11)에서 관리한다.
 
 ---
 
@@ -230,7 +230,7 @@
 
 | # | 항목 | 관련 ADR | 상태/비고 |
 |---|---|---|---|
-| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ✅ 해소 — v2.0·startWeldInspection 확정, `VDA5050_INTERFACE_SPEC.md`로 이관 (HD_AMR 회신 대기 항목은 사양서 §10 N1~N9) |
+| Q1 | VDA 5050 버전·커스텀 액션 카탈로그 | ADR-008 | ✅ 해소 — v2.0·startWeldInspection 확정, `VDA5050_INTERFACE_SPEC.md`로 이관 (HD_AMR 회신 대기 항목은 사양서 §10 N1~N11) |
 | Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |

@@ -3,9 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
              xmlns:views="clr-namespace:HD.Acs.UI.Views"
+             xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure"
              TextElement.Foreground="{DynamicResource AppTextBrush}">
     <!-- DataContext = ShellViewModel (상위에서 상속). 하위 뷰는 Shell 자식 VM에 바인딩. -->
     <UserControl.Resources>
+        <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
@@ -132,6 +134,72 @@
                             </ScrollViewer>
                         </Grid>
                     </telerik:RadTabItem>
+                    <telerik:RadTabItem Header="작업 현황">
+                        <!-- 실행 큐(work_item) 모니터링 — WorkItemProgress 푸시로 실시간 갱신 [INSPECTION_SCENARIO §3.1] -->
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Margin="12,10,12,6" FontWeight="700" FontSize="14"
+                                       Text="{Binding Mission.WorkSummary}" />
+                            <telerik:RadGridView Grid.Row="1" Margin="6,0,6,6"
+                                                 ItemsSource="{Binding Mission.WorkItems}"
+                                                 AutoGenerateColumns="False" IsReadOnly="True"
+                                                 RowIndicatorVisibility="Collapsed" ShowGroupPanel="False"
+                                                 CanUserFreezeColumns="False" FontSize="11"
+                                                 RowDetailsVisibilityMode="VisibleWhenSelected">
+                                <!-- 행 확장: 선택한 영역의 용접라인(TASK/액션) 현황 드릴다운 -->
+                                <telerik:RadGridView.RowDetailsTemplate>
+                                    <DataTemplate>
+                                        <ItemsControl ItemsSource="{Binding Tasks}" Margin="24,4,8,6">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,1">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="0" Text="{Binding Seq}" FontSize="10" FontWeight="Bold"
+                                                                   Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="11"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        <Border Grid.Column="2" CornerRadius="3" Padding="6,1" Margin="4,0"
+                                                                Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
+                                                            <TextBlock Text="{Binding Status}" FontSize="9" FontWeight="Bold"
+                                                                       Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                        </Border>
+                                                        <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="9" MaxWidth="120"
+                                                                   Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Detail}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </DataTemplate>
+                                </telerik:RadGridView.RowDetailsTemplate>
+                                <telerik:RadGridView.Columns>
+                                    <telerik:GridViewDataColumn Header="#" DataMemberBinding="{Binding Seq}" Width="36" />
+                                    <telerik:GridViewDataColumn Header="영역" DataMemberBinding="{Binding AreaName}" Width="*" />
+                                    <telerik:GridViewDataColumn Header="층" DataMemberBinding="{Binding Level}" Width="36" />
+                                    <telerik:GridViewDataColumn Header="상태" Width="86">
+                                        <telerik:GridViewDataColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Border CornerRadius="3" Padding="6,1" HorizontalAlignment="Left"
+                                                        Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
+                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold"
+                                                               Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </telerik:GridViewDataColumn.CellTemplate>
+                                    </telerik:GridViewDataColumn>
+                                    <telerik:GridViewDataColumn Header="재시도" DataMemberBinding="{Binding Attempts}" Width="52" />
+                                </telerik:RadGridView.Columns>
+                            </telerik:RadGridView>
+                        </Grid>
+                    </telerik:RadTabItem>
                     <telerik:RadTabItem Header="수동 층 변경">
                         <views:ManualZoneChangeView DataContext="{Binding ManualZoneChange}" />
                     </telerik:RadTabItem>
@@ -156,6 +224,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <telerik:RadComboBox Grid.Column="0" Width="180" MinHeight="30" Margin="0,0,6,0"
@@ -166,11 +236,17 @@
                                          SelectedItem="{Binding Mission.SelectedRobotId, Mode=TwoWay}" />
                     <telerik:RadButton Grid.Column="2" Content="미션 시작" MinHeight="30" Margin="0,0,6,0"
                                        Command="{Binding Mission.StartRunCommand}" />
-                    <telerik:RadButton Grid.Column="3" Content="다음 층 릴리스" MinHeight="30" Margin="0,0,6,0"
+                    <telerik:RadButton Grid.Column="3" Content="이어하기" MinHeight="30" Margin="0,0,6,0"
+                                       ToolTip="가장 최근 미완료 run 재개 — 완료·스킵된 영역은 건너뛰고 남은 작업만 재배차"
+                                       Command="{Binding Mission.ResumeRunCommand}" />
+                    <telerik:RadButton Grid.Column="4" Content="중단" MinHeight="30" Margin="0,0,6,0"
+                                       ToolTip="후속 배차 중지(진행 중 정차는 완주). 즉시 정지는 ■비상정지"
+                                       Command="{Binding Mission.AbortRunCommand}" />
+                    <telerik:RadButton Grid.Column="5" Content="다음 층 릴리스" MinHeight="30" Margin="0,0,6,0"
                                        Command="{Binding Mission.ReleaseNextCommand}" />
-                    <telerik:RadButton Grid.Column="4" Content="새로고침" MinHeight="30"
+                    <telerik:RadButton Grid.Column="6" Content="새로고침" MinHeight="30"
                                        Command="{Binding Mission.RefreshCurrentRunCommand}" />
-                    <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
+                    <TextBlock Grid.Column="7" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
                                Foreground="{DynamicResource AppMutedTextBrush}" FontSize="12"
                                Text="{Binding Mission.StatusMessage}" />
                 </Grid>

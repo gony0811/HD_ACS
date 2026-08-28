@@ -59,6 +59,13 @@ public sealed class RobotStateService
                 oa.Status = a.ActionStatus;
                 if (a.ActionStatus is "FINISHED" or "FAILED")
                     await RecordInspectionResultAsync(mission, oa, a, robot, ct);
+
+                // 용접라인(액션) 단위 실시간 푸시 — 상태가 실제로 변한 액션만 (운영 UI 작업 현황 드릴다운)
+                await _hub.Clients.All.SendAsync("TaskActionProgress", new
+                {
+                    mission.RunId, oa.WorkItemId, oa.TaskId, oa.ActionId,
+                    Status = a.ActionStatus, a.ResultDescription,
+                }, ct);
                 // TODO: FAILED 시 정책 엔진(시나리오 policy jsonb) 적용 → 재시도 Order(orderUpdateId+1) / 스킵 / 알람
             }
 

@@ -18,6 +18,8 @@ public interface IMonitoringClient
     event EventHandler<RobotConnectionDto>? RobotConnectionReceived;
     event EventHandler<MissionProgressDto>? MissionProgressReceived;
     event EventHandler<RunProgressDto>? RunProgressReceived;   // TASK 단위 진행률
+    event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;   // 실행 큐 항목 상태 변화 단건
+    event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;   // 용접라인(액션) 상태 변화 단건
     event EventHandler<AlarmDto>? AlarmRaised;   // 백엔드 미발화 — 대비용 구독
 
     Task StartAsync(CancellationToken ct = default);

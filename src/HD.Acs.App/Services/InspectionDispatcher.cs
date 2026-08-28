@@ -5,8 +5,10 @@ using HD.Acs.Core.Geometry;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
+using HD.Acs.App.Hubs;
 using HD.Acs.Vda5050;
 using HD.Acs.Vda5050.Messages;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace HD.Acs.App.Services;
@@ -21,15 +23,17 @@ public sealed class InspectionDispatcher
     private readonly AcsDbContext _db;
     private readonly Vda5050MasterClient _vda;
     private readonly IInspectionOrderingPolicy _policy;
+    private readonly IHubContext<MonitoringHub> _hub;
     private readonly ILogger<InspectionDispatcher> _log;
     private readonly int _maxRetries;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
-        IInspectionOrderingPolicy policy, IConfiguration config, ILogger<InspectionDispatcher> log)
+        IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
+        IConfiguration config, ILogger<InspectionDispatcher> log)
     {
-        _db = db; _vda = vda; _policy = policy; _log = log;
+        _db = db; _vda = vda; _policy = policy; _hub = hub; _log = log;
         _maxRetries = config.GetValue("Acs:Dispatch:MaxRetries", 2);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
@@ -55,9 +59,28 @@ public sealed class InspectionDispatcher
             .Where(a => a.TankId == tankId)
             .OrderBy(a => a.Level).ThenBy(a => a.SortOrder)
             .ToListAsync(ct);
+
+        // 부분 검사 계획: 시나리오에 연결된 영역이 있으면 그 영역만 전개, 없으면 선창 전체(하위호환)
+        var linked = await _db.ScenarioAreas.AsNoTracking()
+            .Where(sa => sa.ScenarioId == run.ScenarioId)
+            .ToDictionaryAsync(sa => sa.AreaId, sa => sa.SortOrder, ct);
+        if (linked.Count > 0)
+        {
+            var total = areas.Count;
+            areas = areas.Where(a => linked.ContainsKey(a.AreaId))
+                .OrderBy(a => a.Level).ThenBy(a => linked[a.AreaId]).ThenBy(a => a.SortOrder)
+                .ToList();
+            _log.LogInformation("Run {Run}: 부분 검사 계획 — 시나리오 대상 {N}개 영역 전개 (선창 전체 {Total}개 중).",
+                run.RunId, areas.Count, total);
+        }
+        else
+        {
+            _log.LogInformation("Run {Run}: 시나리오에 연결된 영역 없음 — 선창 전체 {Total}개 영역 전개.", run.RunId, areas.Count);
+        }
+
         if (areas.Count == 0)
         {
-            _log.LogWarning("Run {Run}: 선창 {Tank}에 등록된 영역이 없어 작업 큐가 비었습니다.", run.RunId, tankId);
+            _log.LogWarning("Run {Run}: 선창 {Tank}에 전개할 영역이 없어 작업 큐가 비었습니다.", run.RunId, tankId);
             return;
         }
 
@@ -179,6 +202,13 @@ public sealed class InspectionDispatcher
     public async Task DispatchNextAsync(Guid runId, CancellationToken ct)
     {
         var run = await _db.ScenarioRuns.Include(r => r.Missions).FirstAsync(r => r.RunId == runId, ct);
+        // 중단/완료된 run은 후속 배차·완료 전이 금지 — abort 후 진행 중이던 정차가 완주되어도
+        // ABORTED가 COMPLETED로 덮이지 않는다(정차 결과 기록은 완료 훅에서 이미 반영됨, resume 대비 보존).
+        if (run.State is "ABORTED" or "COMPLETED")
+        {
+            _log.LogInformation("Run {Run}: 상태 {State} — 배차하지 않음.", runId, run.State);
+            return;
+        }
         var ctx = await _db.RobotContexts.FindAsync(new object[] { run.RobotId }, ct);
         var floor = ctx?.ReportedMapId;
         if (floor is null) { _log.LogInformation("Run {Run}: 로봇 보고 층 미확인 — 배차 보류.", runId); return; }
@@ -274,8 +304,16 @@ public sealed class InspectionDispatcher
         // 저장을 발행보다 먼저 — 저장 실패 시 로봇에 미기록 Order가 나가는 실행-기록 불일치 방지
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+        await PushWorkItemAsync(run.RunId, tracked, ct);
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
+
+    /// <summary>work_item 상태 변화 단건 푸시 — 운영 UI 작업 현황 실시간 갱신용.</summary>
+    private Task PushWorkItemAsync(Guid runId, WorkItemEntity wi, CancellationToken ct) =>
+        _hub.Clients.All.SendAsync("WorkItemProgress", new
+        {
+            RunId = runId, wi.WorkItemId, wi.AreaId, wi.MapId, wi.Status, wi.Attempts,
+        }, ct);
 
     // ── 정차 완료/실패 처리 후 다음 배차 (RobotStateService 완료 훅에서 호출) ──────────
     /// <summary>현재 정차(mission.OrderId)의 액션 결과로 work_item을 DONE/FAILED(재큐잉/스킵) 처리하고 다음을 배차.</summary>
@@ -318,6 +356,7 @@ public sealed class InspectionDispatcher
             }
             wi.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
+            await PushWorkItemAsync(mission.RunId, wi, ct);   // DONE / PENDING(재큐잉) / SKIPPED
         }
         await DispatchNextAsync(mission.RunId, ct);
     }

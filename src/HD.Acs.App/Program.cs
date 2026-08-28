@@ -13,11 +13,19 @@ using Serilog;
 // HD_ACS 서버 — 단일 프로세스 모놀리스 [ADR-011]
 // REST API(명령/조회) + SignalR(실시간 푸시) + VDA 5050 마스터 [ADR-001/005]
 
-var builder = WebApplication.CreateBuilder(args);
+// content root를 exe 위치로 고정 — 기본값(현재 작업 디렉터리)이면 다른 폴더에서 exe 직접 실행 시
+// appsettings.json을 못 읽어 ConnectionString 미초기화로 기동 실패한다. OS 서비스 배포(ADR-011,
+// cwd=System32)에도 필수.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
-// Kestrel 리스닝 포트 = Acs:Api:ListenPort (기본 5100). UI(REST/SignalR)가 http://localhost:5100 로 붙는다.
+// Kestrel 리스닝 포트 = Acs:Api:ListenPort (기본 5199). UI(REST/SignalR)가 http://localhost:5199 로 붙는다.
+// 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
-builder.WebHost.UseUrls($"http://localhost:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5100)}");
+builder.WebHost.UseUrls($"http://localhost:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
@@ -70,7 +78,52 @@ app.MapGet("/api/robots/{robotId}/context", async (string robotId, AcsDbContext 
 
 app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()
-        .Select(s => new { s.ScenarioId, s.Name, s.Version, s.TankId, s.Status }).ToListAsync()));
+        .Select(s => new
+        {
+            s.ScenarioId, s.Name, s.Version, s.TankId, s.Status,
+            // 부분 검사 계획: 연결 영역 수 (0 = 선창 전체 검사)
+            AreaCount = db.ScenarioAreas.Count(sa => sa.ScenarioId == s.ScenarioId),
+        }).ToListAsync()));
+
+// ── 부분 검사 계획: 시나리오 검사 대상 영역 연결 (연결 0건 = 선창 전체) ──
+app.MapGet("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, AcsDbContext db) =>
+{
+    if (!await db.Scenarios.AsNoTracking().AnyAsync(s => s.ScenarioId == scenarioId))
+        return Results.NotFound(new { error = $"시나리오 '{scenarioId}' 없음" });
+    return Results.Ok(await (
+        from sa in db.ScenarioAreas.AsNoTracking()
+        join a in db.InspectionAreas.AsNoTracking() on sa.AreaId equals a.AreaId
+        where sa.ScenarioId == scenarioId
+        orderby sa.SortOrder, a.WallCode, a.Name
+        select new { sa.AreaId, a.WallCode, a.Level, a.Name, sa.SortOrder }).ToListAsync());
+});
+
+// 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
+app.MapPut("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, SetScenarioAreasRequest req, AcsDbContext db) =>
+{
+    var scenario = await db.Scenarios.AsNoTracking().FirstOrDefaultAsync(s => s.ScenarioId == scenarioId);
+    if (scenario is null) return Results.NotFound(new { error = $"시나리오 '{scenarioId}' 없음" });
+
+    var ids = (req.AreaIds ?? Array.Empty<Guid>()).Distinct().ToArray();
+    if (ids.Length > 0)
+    {
+        var valid = await db.InspectionAreas.AsNoTracking()
+            .Where(a => ids.Contains(a.AreaId) && a.TankId == scenario.TankId)
+            .Select(a => a.AreaId).ToListAsync();
+        var invalid = ids.Except(valid).ToArray();
+        if (invalid.Length > 0)
+            return Results.BadRequest(new
+            { error = $"존재하지 않거나 시나리오 선창({scenario.TankId})이 아닌 영역 {invalid.Length}건: {string.Join(", ", invalid.Take(3))}…" });
+    }
+
+    var existing = await db.ScenarioAreas.Where(sa => sa.ScenarioId == scenarioId).ToListAsync();
+    db.ScenarioAreas.RemoveRange(existing);
+    for (int i = 0; i < ids.Length; i++)
+        db.ScenarioAreas.Add(new HD.Acs.Data.Entities.ScenarioAreaEntity
+        { ScenarioId = scenarioId, AreaId = ids[i], SortOrder = i });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { scenarioId, areaCount = ids.Length });
+});
 
 // ── 선창 파라메트릭 정의 + 면 자동생성 [SPEC v3 §2/§3] ──
 app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeometryRequest req, TankGeometryService svc) =>
@@ -303,7 +356,31 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
+    catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
+
+// run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
+app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, MissionService missions) =>
+{
+    try { await missions.AbortRunAsync(runId); return Results.Ok(new { runId, state = "ABORTED" }); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+// run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차 [INSPECTION_SCENARIO §3.1]
+app.MapPost("/api/runs/{runId:guid}/resume", async (Guid runId, MissionService missions) =>
+{
+    try { await missions.ResumeRunAsync(runId); return Results.Ok(new { runId, state = "RUNNING" }); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
+    { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+// 로봇의 가장 최근 재개 가능 run (미종결 작업 보유) — UI "이어하기" 사전 확인용
+app.MapGet("/api/runs/resumable", async (string robotId, MissionService missions) =>
+    await missions.FindResumableRunAsync(robotId) is { } r ? Results.Ok(r) : Results.NotFound());
 
 app.MapPost("/api/runs/{runId:guid}/release-next", async (Guid runId, MissionService missions) =>
 {
@@ -320,9 +397,32 @@ app.MapGet("/api/runs/{runId:guid}", async (Guid runId, AcsDbContext db) =>
 // 검사 작업 큐 조회 (greedy 배차 상태 — 운영 화면 층 진행/오버레이 소스)
 app.MapGet("/api/runs/{runId:guid}/work-items", async (Guid runId, AcsDbContext db) =>
     Results.Ok(await db.WorkItems.AsNoTracking().Where(w => w.RunId == runId)
-        .OrderBy(w => w.MapId).ThenBy(w => w.Seq)
-        .Select(w => new { w.WorkItemId, w.AreaId, w.MapId, w.X, w.Y, w.Theta, w.Status, w.Attempts })
+        .Join(db.InspectionAreas.AsNoTracking(), w => w.AreaId, a => a.AreaId,
+            (w, a) => new { w, AreaName = a.Name, a.Level })
+        .OrderBy(x => x.w.MapId).ThenBy(x => x.w.Seq)
+        .Select(x => new
+        {
+            x.w.WorkItemId, x.w.AreaId, x.AreaName, x.Level, x.w.MapId, x.w.Seq,
+            x.w.X, x.w.Y, x.w.Theta, x.w.Status, x.w.Attempts,
+        })
         .ToListAsync()));
+
+// 용접라인(액션) 단위 상태 조회 — 작업 현황 드릴다운 초기 로드. 실시간은 SignalR "TaskActionProgress".
+// 재시도로 동일 TaskId 액션이 여럿이면 CreatedAt 오름차순 — 클라이언트가 나중 것으로 덮어써 최신 반영.
+app.MapGet("/api/runs/{runId:guid}/task-actions", async (Guid runId, AcsDbContext db) =>
+    Results.Ok(await (
+        from a in db.OrderActions.AsNoTracking()
+        join w in db.WorkItems.AsNoTracking() on a.WorkItemId equals (Guid?)w.WorkItemId
+        where w.RunId == runId
+        join t0 in db.AreaTasks.AsNoTracking() on a.TaskId equals (Guid?)t0.TaskId into tg
+        from t in tg.DefaultIfEmpty()
+        orderby a.CreatedAt
+        select new
+        {
+            a.ActionId, a.WorkItemId, a.TaskId,
+            TaskSeq = (int?)t.Seq, TaskName = t.Name,
+            a.Status, a.Result, a.CreatedAt,
+        }).ToListAsync()));
 
 // TASK 단위 진행률 (완료/전체·%) — 운영 화면 초기 로드·새로고침용 pull. 실시간은 SignalR "RunProgress".
 app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress, AcsDbContext db) =>
@@ -453,6 +553,7 @@ public sealed record EmergencyStopRequest(string UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
+public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
 // 선창 파라미터 등록 [SPEC v3 §2/§8]. 각도는 deg 입력(서버가 rad 변환).

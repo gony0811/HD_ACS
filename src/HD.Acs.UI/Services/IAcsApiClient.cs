@@ -14,9 +14,14 @@ public interface IAcsApiClient
     Task<IReadOnlyList<ScenarioSummaryDto>> GetScenariosAsync(CancellationToken ct = default);
     Task<ScenarioRunDto?> GetRunAsync(Guid runId, CancellationToken ct = default);
     Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default);
+    Task<IReadOnlyList<WorkItemDto>> GetWorkItemsAsync(Guid runId, CancellationToken ct = default);
+    Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default);
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);
+    Task AbortRunAsync(Guid runId, CancellationToken ct = default);
+    Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
+    Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);
     Task<bool> ReleaseNextMissionAsync(Guid runId, CancellationToken ct = default);
     Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
         double x, double y, double theta, CancellationToken ct = default);
@@ -34,6 +39,9 @@ public interface IAcsApiClient
     Task<Guid> CreateScenarioAsync(string name, string tankId, CancellationToken ct = default);
     // 참조하는 run이 있으면 서버가 409(메시지 포함)로 거부한다.
     Task DeleteScenarioAsync(Guid scenarioId, CancellationToken ct = default);
+    // 부분 검사 계획 — 시나리오 검사 대상 영역 (빈 목록 = 전체 검사)
+    Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default);
+    Task SetScenarioAreasAsync(Guid scenarioId, IReadOnlyList<Guid> areaIds, CancellationToken ct = default);
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);

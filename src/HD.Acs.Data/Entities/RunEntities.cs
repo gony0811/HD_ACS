@@ -63,6 +63,7 @@ public class OrderActionEntity
     public string Status { get; set; } = "WAITING";
     public string? Result { get; set; }               // jsonb — 촬영 성공/실패 [ADR-004]
     public int Attempts { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;   // 재시도 시 최신 액션 판별
 }
 
 /// <summary>

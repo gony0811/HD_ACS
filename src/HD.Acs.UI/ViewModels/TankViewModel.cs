@@ -30,6 +30,54 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>등록된 영역·작업 (3D 도면 오버레이). 뷰 모드로 필터해 렌더.</summary>
     public ObservableCollection<AreaOverlay> Overlays { get; } = new();
 
+    // ── 실행 큐(work_item)·용접라인(액션) 상태색 — 운영 중 진행 표시 [INSPECTION_SCENARIO §3.1] ──
+    private readonly Dictionary<Guid, string> _workStatusByArea = new();
+    private readonly Dictionary<Guid, string> _workStatusByTask = new();
+
+    /// <summary>현재 run의 영역별 work_item + 용접라인별 액션 상태 반영(초기 로드·푸시 갱신 시 Shell이 호출).
+    /// null/빈=계획 보기(영역=기본 녹색, 용접선=주황).</summary>
+    public void ApplyWorkItemStatuses(
+        IReadOnlyDictionary<Guid, string>? statusByArea,
+        IReadOnlyDictionary<Guid, string>? statusByTask = null)
+    {
+        _workStatusByArea.Clear();
+        if (statusByArea is not null)
+            foreach (var (areaId, status) in statusByArea) _workStatusByArea[areaId] = status;
+        _workStatusByTask.Clear();
+        if (statusByTask is not null)
+            foreach (var (taskId, status) in statusByTask) _workStatusByTask[taskId] = status;
+        BuildFacePlots();
+        ViewChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>영역의 현재 work_item 상태 (없으면 null = 계획 보기).</summary>
+    public string? WorkItemStatusOf(Guid areaId) =>
+        _workStatusByArea.TryGetValue(areaId, out var s) ? s : null;
+
+    /// <summary>용접라인의 현재 액션 상태 (없으면 null = 계획 보기, 기본 주황).</summary>
+    public string? TaskStatusOf(Guid taskId) =>
+        _workStatusByTask.TryGetValue(taskId, out var s) ? s : null;
+
+    /// <summary>상태 → (채움, 외곽선) 색 — 전개도(브러시 컨버터)·3D(material)·상태 배지가 공유하는 단일 매핑.
+    /// 영역(work_item): null=계획(녹) / PENDING=회 / DISPATCHED=파랑 / DONE=녹(진) / SKIPPED·FAILED=빨강.
+    /// 용접라인(액션): PLANNED·WAITING=회 / RUNNING=파랑 / FINISHED=녹(진) / FAILED=빨강.</summary>
+    public static (System.Windows.Media.Color Fill, System.Windows.Media.Color Line) StatusColors(string? status) => status switch
+    {
+        "PENDING" or "PLANNED" or "WAITING" =>
+            (System.Windows.Media.Color.FromArgb(0x26, 0x80, 0x8A, 0x94), System.Windows.Media.Color.FromRgb(0x80, 0x8A, 0x94)),
+        "DISPATCHED" or "RUNNING" =>
+            (System.Windows.Media.Color.FromArgb(0x38, 0x2E, 0x86, 0xDE), System.Windows.Media.Color.FromRgb(0x2E, 0x86, 0xDE)),
+        "DONE" or "FINISHED" =>
+            (System.Windows.Media.Color.FromArgb(0x40, 0x27, 0xAE, 0x60), System.Windows.Media.Color.FromRgb(0x2E, 0xCC, 0x71)),
+        "FAILED" or "SKIPPED" =>
+            (System.Windows.Media.Color.FromArgb(0x38, 0xE7, 0x4C, 0x3C), System.Windows.Media.Color.FromRgb(0xE7, 0x4C, 0x3C)),
+        _ => (System.Windows.Media.Color.FromArgb(0x26, 0x27, 0xAE, 0x60), System.Windows.Media.Color.FromRgb(0x22, 0x99, 0x54)),
+    };
+
+    /// <summary>용접선 외곽 색 — 상태 없으면 계획 기본 주황(#E67E22), 있으면 상태색.</summary>
+    public static System.Windows.Media.Color WeldLineColor(string? status) =>
+        status is null ? System.Windows.Media.Color.FromRgb(0xE6, 0x7E, 0x22) : StatusColors(status).Line;
+
     /// <summary>전개도 탭 — 면별 2D 도면(실제 비율 형상 + 영역·작업 오버레이, 이미 캔버스 px로 투영).</summary>
     public sealed record FacePlot(string Code, string Dim, PointCollection Outline,
         IReadOnlyList<AreaPoly> Areas, IReadOnlyList<TaskSeg> Tasks);
@@ -148,12 +196,13 @@ public sealed partial class TankViewModel : ObservableObject
                     var corners = ov.Area.Corners ?? RectUv(ov.Area.UMin, ov.Area.VMin, ov.Area.UMax, ov.Area.VMax);
                     var pc = PC(corners);
                     double cx = pc.Count > 0 ? pc.Average(p => p.X) : 0, cy = pc.Count > 0 ? pc.Average(p => p.Y) : 0;
-                    areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name));
+                    areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
                     foreach (var t in ov.Tasks)
                     {
                         var (x1, y1) = Proj(t.StartU, t.StartV);
                         var (x2, y2) = Proj(t.EndU, t.EndV);
-                        tasks.Add(new TaskSeg(x1, y1, x2, y2, x2 - 4, y2 - 4, (x1 + x2) / 2, (y1 + y2) / 2, t.Seq.ToString()));
+                        tasks.Add(new TaskSeg(x1, y1, x2, y2, x2 - 4, y2 - 4, (x1 + x2) / 2, (y1 + y2) / 2, t.Seq.ToString(),
+                            TaskStatusOf(t.TaskId)));
                     }
                 }
             }

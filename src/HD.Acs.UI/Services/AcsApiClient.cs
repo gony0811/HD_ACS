@@ -37,6 +37,12 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<ScenarioRunDto>(ct);
     }
 
+    public async Task<IReadOnlyList<WorkItemDto>> GetWorkItemsAsync(Guid runId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<WorkItemDto>>($"/api/runs/{runId}/work-items", ct) ?? new();
+
+    public async Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<TaskActionDto>>($"/api/runs/{runId}/task-actions", ct) ?? new();
+
     public async Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/runs/{runId}/progress", ct);
@@ -49,9 +55,29 @@ public sealed class AcsApiClient : IAcsApiClient
     {
         var resp = await _http.PostAsJsonAsync("/api/runs",
             new { ScenarioId = scenarioId, RobotId = robotId }, ct);
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(활성 run 존재)·400의 {error} 메시지 노출
         var body = await resp.Content.ReadFromJsonAsync<StartRunResult>(ct);
         return body?.RunId ?? Guid.Empty;
+    }
+
+    public async Task AbortRunAsync(Guid runId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"/api/runs/{runId}/abort", null, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+    }
+
+    public async Task ResumeRunAsync(Guid runId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"/api/runs/{runId}/resume", null, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(재개 불가)·409(다른 활성 run) 메시지 노출
+    }
+
+    public async Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/runs/resumable?robotId={Uri.EscapeDataString(robotId)}", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<ResumableRunDto>(ct);
     }
 
     public async Task<bool> ReleaseNextMissionAsync(Guid runId, CancellationToken ct = default)
@@ -128,6 +154,20 @@ public sealed class AcsApiClient : IAcsApiClient
     {
         var resp = await _http.DeleteAsync($"/api/scenarios/{scenarioId}", ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(참조 run 존재)의 {error} 메시지 노출
+    }
+
+    public async Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/areas", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return new List<ScenarioAreaDto>();
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<ScenarioAreaDto>>(ct) ?? new();
+    }
+
+    public async Task SetScenarioAreasAsync(Guid scenarioId, IReadOnlyList<Guid> areaIds, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/scenarios/{scenarioId}/areas", new { AreaIds = areaIds }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(미존재/타 선창 영역)의 {error} 메시지 노출
     }
 
     public async Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,

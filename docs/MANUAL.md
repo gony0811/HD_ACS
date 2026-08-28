@@ -1,4 +1,4 @@
-# HD_ACS 사용자 매뉴얼
+﻿# HD_ACS 사용자 매뉴얼
 
 > **대상 독자**: HD_ACS를 설치·실행·운영하려는 개발자/운영자.
 > **문서 성격**: "어떻게 사용하는가" 중심. 코드 구조·향후 개발 방향은 `DEVELOPMENT_GUIDE.md` 참고.
@@ -13,7 +13,7 @@ HD_ACS는 **HD현대중공업 LNG 화물창 용접검사로봇의 관제 시스�
 인터페이스는 **VDA 5050 over MQTT** 하나뿐이다.
 
 ```
-운영자(WPF UI / Web) ──REST+SignalR──▶ HD_ACS 서버 (:5100)
+운영자(WPF UI / Web) ──REST+SignalR──▶ HD_ACS 서버 (:5199)
                                           │ VDA 5050 over MQTT (:1883)
                                           ▼
                        HD_AMR (로봇 온보드) — AMR 주행·코봇 검사·장비 제어 전담
@@ -46,7 +46,7 @@ HD_ACS는 **HD현대중공업 LNG 화물창 용접검사로봇의 관제 시스�
 | `HD.Acs.Core.Tests` | xUnit 단위 테스트 (DrawingTransform, SeamSlicer) |
 | `HD.Acs.Data` | EF Core + Npgsql — ref/run/hist/alarm/sys 스키마 엔티티, GraphLoader |
 | `HD.Acs.Vda5050` | VDA 5050 v2.0 메시지, MQTT 마스터 클라이언트(MQTTnet), OrderBuilder |
-| `HD.Acs.App` | **서버 본체** — ASP.NET Core, REST(:5100) + SignalR + VDA 브릿지, 단일 프로세스 [ADR-011] |
+| `HD.Acs.App` | **서버 본체** — ASP.NET Core, REST(:5199) + SignalR + VDA 브릿지, 단일 프로세스 [ADR-011] |
 | `HD.Acs.Simulator` | 가상 HD_AMR — Order 수신→노드 순회→액션 실행/보고. 실장비 없이 E2E 검증용 |
 | `HD.Acs.SimTest` | 시뮬레이터 검증 드라이버 (ACS·DB 없이 마스터 역할 수행, 시나리오 S1~S3) |
 | `HD.Acs.UI` | WPF 운영 앱 (**Windows 전용**, net8.0-windows) — Telerik Fluent + HelixToolkit 3D |
@@ -95,7 +95,7 @@ psql -d hdacs -f db/schema.sql
 
 ```bash
 cd src
-dotnet run --project HD.Acs.App        # http://localhost:5100
+dotnet run --project HD.Acs.App        # http://localhost:5199
 ```
 
 `HD.Acs.App/appsettings.json` 주요 설정:
@@ -104,7 +104,7 @@ dotnet run --project HD.Acs.App        # http://localhost:5100
 |---|---|---|
 | `ConnectionStrings:Default` | localhost/hdacs/postgres | PostgreSQL 연결 |
 | `Acs:Mqtt:Host/Port` | localhost:1883 | MQTT 브로커 |
-| `Acs:Api:ListenPort` | 5100 | REST/SignalR 포트 |
+| `Acs:Api:ListenPort` | 5199 | REST/SignalR 포트 |
 | `Acs:Calibration:RmsWarnM` | 0.05 | T_W_D 등록 잔차 RMS 경고 임계(m) |
 | `Acs:Slicer:CobotReachM` | 1.0 | 코봇 리치(m) — 슬라이싱 구간 길이 결정 |
 | `Acs:Slicer:OverlapM` | 0.2 | 구간 겹침(m) |
@@ -210,9 +210,27 @@ Order 발행 [Q9]. Order는 두절 내성을 위해 전체 Base 선릴리즈된�
 UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 새 층·위치 지정(initPosition 발행) →
 `POST /api/runs/{runId}/release-next`로 다음 층 미션 릴리즈.
 
+**부분 검사 계획**: 계획 ▸ 시나리오 탭에서 시나리오를 선택하면 우측 "검사 대상 영역" 패널에 선창 전체 영역이
+체크박스 목록으로 뜬다 — 검사할 영역만 체크 후 "대상 저장". **체크 0개 = 선창 전체 검사**(정기 전수검사).
+run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2 좌현벽 보수 후 재검" 시나리오에 PL 영역 8개만 담기).
+전개는 시작 시점 스냅샷 — run 도중 시나리오를 바꿔도 진행 중 run에는 영향 없다.
+
+**중단·이어하기**: 미션 컨트롤 바의 **"중단"**은 후속 배차만 멈춘다(진행 중 정차는 완주·결과 기록, 즉시 정지는 ■비상정지).
+**"이어하기"**는 로봇의 가장 최근 미완료 run을 재개 — **완료·스킵된 영역은 건너뛰고** 남은 작업만 재배차한다
+(중단 시점에 배차만 됐던 정차는 재검사). 같은 로봇에 진행 중 run이 있으면 새 "미션 시작"은 409로 거부된다.
+완료 이력은 run 단위 — **새 run은 항상 선창 전체 재검사**(정기검사 사이클)이며, 영구 이력은 `hist.inspection_result`.
+
 ### 단계 5 — 모니터링·예외 대응
 
 - 실시간 현황은 SignalR `/hubs/monitoring` → UI 로봇상태/미션 패널에 푸시.
+- **작업 현황(실행 큐)**: 운영 탭 좌측 "작업 현황" 탭에서 정차 단위 항목(순번·영역·층·상태·재시도)을 실시간 확인
+  (`WorkItemProgress` 푸시 — 배차/완료/재큐잉/스킵 시점). 같은 상태가 TankView 3D·전개도의 **영역 색**으로도 표시:
+  대기=회색 · 배차중=파랑 · 완료=녹색 · 스킵/실패=빨강 (run이 없으면 계획 보기 기본 녹색). 층 진행 레일의 미니 바는
+  그 층 실행 큐의 종결 비율(완료+스킵/전체).
+- **용접라인 드릴다운**: 작업 현황에서 영역 행을 선택하면 아래로 그 영역의 **용접라인(액션) 목록**이 펼쳐진다 —
+  순번·이름·상태 배지(PLANNED/WAITING=회 · RUNNING=파랑 · FINISHED=녹 · FAILED=빨)·실행 상세(`anchor=FULL/SHARED` 등).
+  실시간은 `TaskActionProgress` 푸시(액션 상태 변화 단건), 초기 로드는 `GET /api/runs/{id}/task-actions`.
+  TankView의 **용접선 선분**도 같은 상태색으로 칠해진다(run 없으면 계획 기본 주황).
 - 상태의 진실은 항상 로봇(robot-is-truth): ACS는 state 보고의 lastNodeId/actionStates를 actionId로 대조해 DB를 갱신.
 - 통신 두절 시 connection Last Will로 OFFLINE 표시 — 로봇은 릴리즈된 Order를 계속 실행, 복귀 시 state 기준 재동기화.
 - **비상정지**: UI 툴바 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
@@ -220,7 +238,7 @@ UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 새
 
 ---
 
-## 6. REST API 레퍼런스 (:5100)
+## 6. REST API 레퍼런스 (:5199)
 
 ### 로봇
 | 메서드/경로 | 설명 |
@@ -253,8 +271,15 @@ UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 새
 ### 실행
 | 메서드/경로 | 설명 |
 |---|---|
-| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. 층별 미션 분해 + 첫 미션 릴리즈 시도 |
+| `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
+| `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
+| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
 | `GET /api/runs/{runId}` | Run/미션 상태 조회 |
+| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지 |
+| `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
+| `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
+| `GET /api/runs/{runId}/work-items` | 실행 큐(정차 단위) 상태 조회 |
+| `GET /api/runs/{runId}/task-actions` | 용접라인(액션) 단위 상태 조회 |
 | `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |
 
 ### 실시간

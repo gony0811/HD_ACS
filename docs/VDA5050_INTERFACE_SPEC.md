@@ -168,6 +168,75 @@ ACS는 **greedy 최근접 동적 배차**를 사용한다. 층(맵) 안의 미�
 - ACS는 **로봇이 보고한 층(state.agvPosition.mapId)과 일치하는 Order만 발행**한다 (층 검증 게이트, §9.2).
 - 층간 이동(엘리베이터)은 수동 운영 — ACS는 Order로 층 이동을 명령하지 않는다 [Q9].
 
+### 4.4 정차점(nodePosition)의 의미와 산출 (참고)
+
+ACS가 발행하는 `nodePosition`은 다음과 같이 산출된 **벽면 이격 정차점**이다 (ACS 내부 규칙이나, AMR이 목표점의 성격을 이해하는 데 필요해 기재):
+
+```
+정차점(x,y) = 검사 영역 중심의 바닥 투영 + (벽 내부향 법선의 수평 성분) × 정차 이격(standoff)
+theta       = 벽을 정면으로 바라보는 방향
+```
+
+- **정차 이격(기본 0.8 m, 영역별 설정 가능)이 이미 반영되어 있다** — 목표점이 벽면에 붙어 있지 않다.
+  이격 값은 "벽면 ↔ 로봇 기준점(중심)" 거리이므로, 실제 차체-벽 여유 = 이격 − 로봇 반폭 − allowedDeviationXY.
+- 바닥(B)/천장(T) 영역은 수평 법선이 없어 이격 없이 중심 투영이 오며, 운영자 수동 지정 좌표가 올 수도 있다.
+- **책임 경계**: ACS의 정차점은 "목표"일 뿐이며, 접근 경로 계획·장애물(벽 포함) 충돌 회피는 **AMR 자율 주행 책임**이다.
+  목표점이 도달 불가하면 진입을 강행하지 말고 `state.errors`(주행 실패 유형)로 보고할 것 (§6.4, §9.5 실패 정책으로 처리).
+
+> AMR 요건: 로봇 실물 치수 확정 시 적정 기본 이격을 ACS에 회신 — 코봇 리치(용접선까지 도달)와 차체-벽 안전 여유를 동시에 만족하는 값 `[협의 N10]`.
+
+### 4.5 Order 수명주기
+
+발행된 Order 1건의 상태 흐름과 양측 책임:
+
+```mermaid
+stateDiagram-v2
+    [*] --> 발행됨 : ACS PublishOrder (DB 기록 후 발행)
+    발행됨 --> 실행중 : AMR 수신·검증 통과
+    발행됨 --> 거부됨 : 검증 실패 (§4.5.2)
+    실행중 --> 실행중 : 두절 시에도 자율 계속 (§9.3)
+    실행중 --> 완결 : 노드 도달 + 전 액션 FINISHED/FAILED
+    거부됨 --> [*] : errors 보고 + Order 폐기
+    완결 --> [*] : state 대조 → ACS가 다음 정차 Order 발행
+```
+
+**4.5.1 상태 판정의 주체와 근거**
+
+| 상태 | 판정 주체 | 근거 |
+|---|---|---|
+| 발행됨 | ACS | Order 발행 직전 DB에 정차·액션 기록 (저장 → 발행 순서) |
+| 실행중 | ACS | state의 `orderId` 일치 + `driving`/`actionStates` 진행 보고 |
+| 완결 | ACS | `lastNodeSequenceId` ≥ 목표 노드 seq **AND** 해당 Order의 전 액션이 FINISHED/FAILED (§6.2 대조 규칙) — "전 액션 성공"이 아니라 **전 액션 종결**이 완결 조건이며, FAILED 포함 여부는 실패 정책(§9.5)이 처리 |
+| 폐기 | AMR | **신규 orderId 수신 = 이전 Order 즉시 폐기** (ACS는 이전 Order 완결 후에만 새 Order를 보내는 것을 보증하나, 비상정지·수동 개입 후 재배차 경로에서는 미완결 상태의 교체가 발생할 수 있음) |
+
+**4.5.2 Order 거부(rejection)** `[협의 N11]`
+
+AMR이 수신한 Order를 실행할 수 없는 경우(모르는 `mapId`, 필수 필드 누락, 파라미터 검증 실패, 현재 층 불일치 등):
+
+- Order를 **폐기**하고(부분 실행 금지), 기존 실행 중 Order가 있으면 그것을 유지한다.
+- `state.errors[]`에 거부 사실을 보고한다 — ACS 제안: `errorType: "orderValidationError"`(N6 코드 체계와 함께 확정), `errorLevel: "WARNING"`, `errorDescription`에 거부된 orderId와 사유.
+- 개별 **액션** 파라미터만 문제인 경우는 Order 거부가 아니라 해당 액션을 `actionStatus: "FAILED"`로 보고한다 (§9.5 재시도 정책 경로 — 시뮬레이터의 `FAIL;reason=PARAM(...)` 계약이 이 케이스).
+
+> ※구현: 현행 ACS는 Order 거부의 자동 감지·재배차가 미구현이다(거부되면 해당 정차가 DISPATCHED로 남음 — 운영자 개입 필요). N11 확정 후 errors 기반 자동 처리 추가 예정. AMR은 위 계약대로 보고하면 된다.
+
+**4.5.3 취소(cancelOrder) — 미사용**
+
+VDA 5050 표준의 `cancelOrder` instantAction은 **본 프로젝트에서 사용하지 않는다** (AMR은 미구현 가능).
+진행 중 작업의 중단은 ① `emergencyStop`(즉시 기능 정지, §5.1) → ② 운영자 판단 → ③ **신규 orderId의 새 Order 재배차**로 처리한다. 단일 노드 Order 모델이라 취소가 필요한 잔여 horizon이 없기 때문이다.
+
+**4.5.4 완결 후 orderId 보고 유지**
+
+정차 완결 후에도 AMR은 **다음 Order를 수신할 때까지** state에 마지막 `orderId`와 최종 `actionStates`를 유지 보고한다 (`""`로 지우지 말 것) — 두절-재접속 시 ACS가 최신 state 1건으로 따라잡는 근거(§9.3). `orderId: ""`는 부팅 후 아직 어떤 Order도 받은 적 없는 상태에만 사용한다.
+
+**4.5.5 ACS 내부 큐와의 대응 (참고)**
+
+Order가 "어디서 오는지": run 시작 시 ACS는 계획(검사 영역·용접선)을 **실행 큐(work_item)**로 일괄 전개하고,
+큐 항목별 상태(PENDING → DISPATCHED → DONE / 재큐잉 → SKIPPED)를 자체 관리한다. Order는 큐에서
+로봇 최근접 항목을 꺼낼 때마다 생성·발행되며(§4.1), 실패 재시도의 재발행도 이 큐를 거쳐
+**"발행됨" 상태로 재진입**한다. 이 발행 전 수명주기는 VDA 5050 계약 범위 밖의 ACS 내부 사양이며,
+상세 상태 머신은 `INSPECTION_SCENARIO.md` §3(내부 상태 모델의 정본)을 참조 — AMR은 이 절의
+존재만 알면 되고 구현 요건은 없다.
+
 ---
 
 ## 5. instantActions (ACS → AMR)
@@ -478,6 +547,8 @@ ACS `emergencyStop` instantAction 발행(§5.1) → AMR 즉시 정지 + state로
 | N7 | actionParameters.value 직렬화 | JSON object 그대로 (문자열 아님) | AMR 파서 제약 시 문자열 폴백 협의 | |
 | N8 | 두절 구간 상세 이력 | 최신 state 스냅샷으로 충분 (소급 재전송 없음) | 표준 범위 밖 확장 | |
 | N9 | MQTT 보안 | 평문 :1883 (폐쇄망 전제) | TLS/계정 필요 여부 | |
+| N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (벽면↔로봇 중심, 영역별 조정 가능) | 로봇 실물 치수·코봇 리치 기준으로 AMR이 적정값 회신 (§4.4) | |
+| N11 | Order 거부 보고 방식 | 폐기 + errors에 `orderValidationError`(orderId·사유 명시), 액션 단위 문제는 actionStatus FAILED로 구분 (§4.5.2) | N6 코드 체계와 함께 확정 | |
 
 ---
 
@@ -568,4 +639,5 @@ ACS `emergencyStop` instantAction 발행(§5.1) → AMR 즉시 정지 + state로
 - [ ] `emergencyStop`: 즉시 기능 정지 + 상태 보고 (§5.1)
 - [ ] 실패 시 actionStatus FAILED + resultDescription (+ errors 유형 코드) (§9.5)
 - [ ] 두절 중 진행 Order 자율 계속 + 재접속 시 최신 state 즉시 발행 (§9.3)
-- [ ] §10 협의 항목 N1~N9 회신
+- [ ] orderId 수명주기: 신규 orderId=이전 폐기, 완결 후 마지막 orderId·actionStates 유지 보고, 거부 시 errors 보고 (§4.5)
+- [ ] §10 협의 항목 N1~N11 회신

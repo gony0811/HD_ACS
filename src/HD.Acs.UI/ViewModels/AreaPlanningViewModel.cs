@@ -11,9 +11,10 @@ namespace HD.Acs.UI.ViewModels;
 
 /// <summary>(u,v) 캔버스 도형 — 좌표는 이미 캔버스 px로 투영됨.</summary>
 public sealed record AreaBox(double Left, double Top, double Width, double Height, string Label);
-/// <summary>임의 4점 영역 폴리곤(캔버스 px) — Points=투영된 꼭짓점, 라벨 앵커.</summary>
-public sealed record AreaPoly(PointCollection Points, double LabelX, double LabelY, string Label);
-public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge);
+/// <summary>임의 4점 영역 폴리곤(캔버스 px) — Points=투영된 꼭짓점, 라벨 앵커. Status=work_item 상태(null=계획 표시).</summary>
+public sealed record AreaPoly(PointCollection Points, double LabelX, double LabelY, string Label, string? Status = null);
+public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge,
+    string? Status = null);   // 액션 상태(운영 중 용접선 색) — null=계획 표시(주황)
 public sealed record StationMarker(double Left, double Top, string Label);
 /// <summary>층 필터 선택 항목 [SPEC v3.1 §9]. Level=1-based, Label="L1".</summary>
 public sealed record LevelOption(int Level, string Label);

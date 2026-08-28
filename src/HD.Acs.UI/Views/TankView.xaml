@@ -6,6 +6,7 @@
              xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure">
     <UserControl.Resources>
         <conv:NormalizedToCanvasConverter x:Key="NormToCanvas" />
+        <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
     </UserControl.Resources>
     <DockPanel TextElement.Foreground="{DynamicResource AppTextBrush}">
         <!-- 층 선택 L1~L4 + 로봇 위치 -->
@@ -64,8 +65,13 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Canvas>
-                                                            <Polygon Points="{Binding Points}" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1" />
-                                                            <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="9" FontWeight="Bold" Foreground="#186A3B" />
+                                                            <!-- work_item 상태색: 계획=녹 / 대기=회 / 배차=파랑 / 완료=녹(진) / 스킵·실패=빨강 -->
+                                                            <Polygon Points="{Binding Points}"
+                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}"
+                                                                     Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}"
+                                                                     StrokeThickness="1" />
+                                                            <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="9" FontWeight="Bold"
+                                                                       Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
                                                         </Canvas>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
@@ -76,8 +82,11 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Canvas>
-                                                            <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="#E67E22" StrokeThickness="2" />
-                                                            <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="6" Height="6" Fill="#CA6F1E" />
+                                                            <!-- 용접선 액션 상태색: 계획=주황 / 대기=회 / 진행=파랑 / 완료=녹 / 실패=빨강 -->
+                                                            <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" StrokeThickness="2"
+                                                                  Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
+                                                            <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="6" Height="6"
+                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
                                                         </Canvas>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>

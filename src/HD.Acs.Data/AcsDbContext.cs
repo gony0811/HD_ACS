@@ -21,6 +21,7 @@ public class AcsDbContext : DbContext
     public DbSet<ZoneMemberEntity> ZoneMembers => Set<ZoneMemberEntity>();
     public DbSet<ActionCatalogEntity> ActionCatalog => Set<ActionCatalogEntity>();
     public DbSet<ScenarioEntity> Scenarios => Set<ScenarioEntity>();
+    public DbSet<ScenarioAreaEntity> ScenarioAreas => Set<ScenarioAreaEntity>();
     public DbSet<InspectionPointEntity> InspectionPoints => Set<InspectionPointEntity>();
     public DbSet<InspectionTaskEntity> InspectionTasks => Set<InspectionTaskEntity>();
     public DbSet<RobotEntity> Robots => Set<RobotEntity>();
@@ -121,6 +122,11 @@ public class AcsDbContext : DbContext
 
         mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);
             e.HasIndex(x => new { x.AreaId, x.Seq }).IsUnique(); });
+
+        mb.Entity<ScenarioAreaEntity>(e => { e.ToTable("scenario_area", "ref");
+            e.HasKey(x => new { x.ScenarioId, x.AreaId });
+            e.HasOne<ScenarioEntity>().WithMany().HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<InspectionAreaEntity>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Cascade); });
 
         // ═══ run ═══
         mb.Entity<ScenarioRunEntity>(e => { e.ToTable("scenario_run", "run");

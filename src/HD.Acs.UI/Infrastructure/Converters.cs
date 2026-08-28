@@ -48,6 +48,30 @@ public sealed class EnumToBooleanConverter : IValueConverter
 }
 
 /// <summary>
+/// work_item 상태 문자열 → 브러시. ConverterParameter="fill"(반투명 채움) | "stroke"(외곽/배지, 기본).
+/// 색 매핑의 단일 소스는 TankViewModel.StatusColors (3D material과 공유).
+/// </summary>
+public sealed class WorkStatusToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var status = value as string;
+        var color = (parameter as string)?.ToLowerInvariant() switch
+        {
+            "fill" => ViewModels.TankViewModel.StatusColors(status).Fill,
+            "weldstroke" => ViewModels.TankViewModel.WeldLineColor(status),   // 상태 없으면 계획 기본 주황
+            _ => ViewModels.TankViewModel.StatusColors(status).Line,
+        };
+        var brush = new System.Windows.Media.SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}
+
+/// <summary>
 /// 정규화 좌표(0~1)를 전개도 Canvas 픽셀로 변환. ConverterParameter="캔버스크기|박스크기"(예: "400|72")로
 /// 박스 중심이 해당 위치에 오도록 Canvas.Left/Top 값을 반환한다.
 /// </summary>

@@ -49,6 +49,52 @@ public sealed record MissionProgressDto(
     Guid MissionId,
     string State);
 
+/// <summary>GET /api/runs/{id}/work-items — 실행 큐 항목(정차 1곳=영역 1개).
+/// Status: PENDING | DISPATCHED | DONE | SKIPPED (+ Attempts 재시도 누적) [INSPECTION_SCENARIO §3.1]</summary>
+public sealed record WorkItemDto(
+    Guid WorkItemId,
+    Guid AreaId,
+    string AreaName,
+    int Level,
+    string MapId,
+    int Seq,
+    string Status,
+    int Attempts);
+
+/// <summary>GET /api/runs/resumable — 로봇의 가장 최근 재개 가능 run(미종결 작업 보유).</summary>
+public sealed record ResumableRunDto(
+    Guid RunId, Guid ScenarioId, string State, DateTimeOffset StartedAt,
+    int Pending, int Done, int Skipped);
+
+/// <summary>GET /api/runs/{id}/task-actions — 용접라인(액션) 단위 상태. CreatedAt 오름차순(재시도 시 나중 것이 최신).</summary>
+public sealed record TaskActionDto(
+    Guid ActionId,
+    Guid? WorkItemId,
+    Guid? TaskId,
+    int? TaskSeq,
+    string? TaskName,
+    string Status,
+    string? Result,        // 종결 시 {"ActionStatus","ResultDescription"} json
+    DateTimeOffset CreatedAt);
+
+/// <summary>SignalR "TaskActionProgress" 푸시 — 액션 상태 변화 단건(WAITING→RUNNING→FINISHED/FAILED).</summary>
+public sealed record TaskActionProgressDto(
+    Guid RunId,
+    Guid? WorkItemId,
+    Guid? TaskId,
+    Guid ActionId,
+    string Status,
+    string? ResultDescription);
+
+/// <summary>SignalR "WorkItemProgress" 푸시 — work_item 상태 변화 단건(배차/완료/재큐잉/스킵).</summary>
+public sealed record WorkItemProgressDto(
+    Guid RunId,
+    Guid WorkItemId,
+    Guid AreaId,
+    string MapId,
+    string Status,
+    int Attempts);
+
 /// <summary>SignalR "RunProgress" 푸시 / GET /api/runs/{id}/progress — Run 단위 TASK 진행률.
 /// Percent = CompletedTasks / TotalTasks × 100 (종결 기준). Completed = Succeeded + Failed.</summary>
 public sealed record RunProgressDto(
@@ -65,13 +111,21 @@ public sealed record RunProgressDto(
     public double Fraction => TotalTasks > 0 ? (double)CompletedTasks / TotalTasks : 0.0;
 }
 
-/// <summary>GET /api/scenarios 투영.</summary>
+/// <summary>GET /api/scenarios 투영. AreaCount = 연결된 검사 대상 영역 수 (0 = 선창 전체 검사).</summary>
 public sealed record ScenarioSummaryDto(
     Guid ScenarioId,
     string Name,
     int Version,
     string TankId,
-    string Status);
+    string Status,
+    int AreaCount = 0)
+{
+    /// <summary>그리드 "대상" 컬럼 표시용.</summary>
+    public string TargetText => AreaCount == 0 ? "전체" : $"{AreaCount}개 영역";
+}
+
+/// <summary>GET /api/scenarios/{id}/areas 항목 — 시나리오 검사 대상 영역 [부분 검사 계획].</summary>
+public sealed record ScenarioAreaDto(Guid AreaId, string WallCode, int Level, string Name, int SortOrder);
 
 /// <summary>GET /api/runs/{id} — run.scenario_run (+ 층 미션 시퀀스).
 /// State: RUNNING | WAITING_FLOOR_TRANSFER | COMPLETED | ABORTED</summary>

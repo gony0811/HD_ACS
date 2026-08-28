@@ -11,7 +11,11 @@
             <views:AreaManagementView DataContext="{Binding AreaPlanning}" />
         </telerik:RadTabItem>
         <telerik:RadTabItem Header="시나리오">
-            <Grid Margin="14" MaxWidth="820" HorizontalAlignment="Left">
+            <Grid Margin="14" MaxWidth="1180" HorizontalAlignment="Left">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MaxWidth="700" />
+                    <ColumnDefinition Width="420" />
+                </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -19,10 +23,10 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Text="검사 시나리오 관리" FontWeight="Bold" FontSize="14" Margin="0,0,0,8" />
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="검사 시나리오 관리" FontWeight="Bold" FontSize="14" Margin="0,0,0,8" />
 
                 <!-- 생성/삭제 툴바 -->
-                <Border Grid.Row="1" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,10">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="이름" VerticalAlignment="Center" Margin="0,0,8,0" />
@@ -39,7 +43,7 @@
                 </Border>
 
                 <!-- 시나리오 목록 (운영 콤보와 동일 소스) -->
-                <telerik:RadGridView Grid.Row="2" ItemsSource="{Binding Mission.Scenarios}"
+                <telerik:RadGridView Grid.Row="2" Grid.Column="0" ItemsSource="{Binding Mission.Scenarios}"
                                      SelectedItem="{Binding Mission.SelectedScenario, Mode=TwoWay}"
                                      AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed">
                     <telerik:RadGridView.Columns>
@@ -47,12 +51,88 @@
                         <telerik:GridViewDataColumn Header="Ver" DataMemberBinding="{Binding Version}" Width="60" />
                         <telerik:GridViewDataColumn Header="상태" DataMemberBinding="{Binding Status}" Width="110" />
                         <telerik:GridViewDataColumn Header="선창" DataMemberBinding="{Binding TankId}" Width="90" />
+                        <telerik:GridViewDataColumn Header="대상" DataMemberBinding="{Binding TargetText}" Width="90" />
                     </telerik:RadGridView.Columns>
                 </telerik:RadGridView>
 
-                <TextBlock Grid.Row="3" Margin="0,8,0,0" TextWrapping="Wrap" FontSize="12"
+                <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,8,0,0" TextWrapping="Wrap" FontSize="12"
                            Foreground="{DynamicResource AppMutedTextBrush}"
                            Text="{Binding Mission.StatusMessage}" />
+
+                <!-- 부분 검사 계획: 선택 시나리오의 검사 대상 영역 (체크 0개 = 선창 전체) -->
+                <Border Grid.Row="0" Grid.RowSpan="4" Grid.Column="1" Margin="12,0,0,0"
+                        Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="검사 대상 영역 (부분 검사 계획)" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Grid.Row="1" Margin="0,0,0,6" FontSize="11.5"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   Text="{Binding Mission.ScenarioAreaSummary}" />
+                        <!-- 좌: 선창 영역 풀 [+] / 우: 검사 대상 [−] -->
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="선창 영역" FontSize="11" FontWeight="Bold"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="검사 대상" FontSize="11" FontWeight="Bold"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
+                            <ScrollViewer Grid.Row="1" Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Mission.AvailableAreas}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,1">
+                                                <telerik:RadButton Content="+" Width="24" Height="22" Padding="0" FontWeight="Bold"
+                                                                   ToolTip="검사 대상에 추가"
+                                                                   Command="{Binding DataContext.Mission.AddScenarioAreaCommand,
+                                                                             RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                   CommandParameter="{Binding}" />
+                                                <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <ScrollViewer Grid.Row="1" Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Mission.SelectedAreas}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,1">
+                                                <telerik:RadButton Content="−" Width="24" Height="22" Padding="0" FontWeight="Bold"
+                                                                   ToolTip="대상에서 제거"
+                                                                   Command="{Binding DataContext.Mission.RemoveScenarioAreaCommand,
+                                                                             RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                   CommandParameter="{Binding}" />
+                                                <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                        <telerik:RadButton Grid.Row="3" Content="대상 저장" MinHeight="30" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="110"
+                                           ToolTip="대상 목록만 검사(run 시작 시 전개). 대상 0개 = 선창 전체 검사"
+                                           Command="{Binding Mission.SaveScenarioAreasCommand}" />
+                    </Grid>
+                </Border>
             </Grid>
         </telerik:RadTabItem>
         <telerik:RadTabItem Header="캘리브레이션 (T_W_D)">

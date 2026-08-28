@@ -14,7 +14,7 @@
 ```bash
 # 1. 인프라: PostgreSQL + Mosquitto 기동, db/schema.sql 적용
 # 2. 서버
-dotnet run --project HD.Acs.App          # :5100
+dotnet run --project HD.Acs.App          # :5199 (5100은 NAMUGA 계열 제품과 충돌 회피)
 # 3. 시뮬레이터
 dotnet run --project HD.Acs.Simulator -- localhost HHI AMR-01 CT1-L1
 # 4. (Windows) UI

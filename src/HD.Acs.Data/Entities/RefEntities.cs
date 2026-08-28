@@ -197,6 +197,14 @@ public class InspectionAreaEntity
     public List<AreaTaskEntity> Tasks { get; set; } = new();
 }
 
+/// <summary>시나리오 검사 대상 영역 연결 [부분 검사 계획]. 연결 0건 = 선창 전체 검사(하위호환).</summary>
+public class ScenarioAreaEntity
+{
+    public Guid ScenarioId { get; set; }
+    public Guid AreaId { get; set; }
+    public int SortOrder { get; set; }   // 표시·Seq용 (배차 순서는 greedy 최근접)
+}
+
 // 검사 작업 [SPEC v3 §4] — 영역 내 용접선. 시작/끝점은 면 로컬 (u,v). 작업 1개 = TASK 1개.
 public class AreaTaskEntity
 {

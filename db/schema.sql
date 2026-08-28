@@ -289,6 +289,14 @@ CREATE TABLE ref.area_task (
 );
 CREATE INDEX ix_area_task_area ON ref.area_task (area_id);
 
+-- 시나리오 검사 대상 영역 연결 [부분 검사 계획] — 연결 0건 = 선창 전체 검사(하위호환)
+CREATE TABLE ref.scenario_area (
+  scenario_id uuid NOT NULL REFERENCES ref.scenario ON DELETE CASCADE,
+  area_id     uuid NOT NULL REFERENCES ref.inspection_area (area_id) ON DELETE CASCADE,
+  sort_order  int  NOT NULL DEFAULT 0,   -- 표시·Seq용 (배차 순서는 greedy 최근접)
+  PRIMARY KEY (scenario_id, area_id)
+);
+
 -- ═══════════════════════════ 로봇 마스터 (ref) ═══════════════════════════
 
 CREATE TABLE ref.robot (
@@ -371,7 +379,8 @@ CREATE TABLE run.order_action (
   status           text NOT NULL DEFAULT 'WAITING',
     -- WAITING | INITIALIZING | RUNNING | FINISHED | FAILED  (VDA5050 actionStatus)
   result           jsonb,              -- 성공/실패 응답 [ADR-004]
-  attempts         int NOT NULL DEFAULT 0
+  attempts         int NOT NULL DEFAULT 0,
+  created_at       timestamptz NOT NULL DEFAULT now()   -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
 );
 CREATE INDEX ix_orderaction_mission ON run.order_action (mission_id, node_sequence_id);
 

@@ -65,6 +65,12 @@ public sealed partial class ShellViewModel : ObservableObject
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
 
+        // 실행 큐(work_item)·용접라인(액션) 상태 변화 → TankView 영역/용접선 상태색 갱신 (운영 진행 지도)
+        Mission.WorkItemsChanged += (_, _) =>
+            Tank.ApplyWorkItemStatuses(
+                Mission.WorkItems.ToDictionary(w => w.AreaId, w => w.Status),
+                Mission.WorkItems.SelectMany(w => w.Tasks).ToDictionary(t => t.TaskId, t => t.Status));
+
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);
         RobotStatus.PropertyChanged += (_, e) =>
         {
@@ -139,9 +145,9 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         // 파일 파싱 단계(매직/버전/GZip/JSON) — ProjectService가 InvalidDataException을 던짐
         InvalidDataException => $"프로젝트 {verb} 실패: 이 프로그램의 프로젝트 파일이 아니거나 손상되었습니다.\n\n{ex.Message}",
-        // DB 재적재 단계 — 관제 서버(:5100)/PostgreSQL 연결 실패
+        // DB 재적재 단계 — 관제 서버(:5199)/PostgreSQL 연결 실패
         HttpRequestException => $"프로젝트 {verb} 실패: 파일은 정상이지만 관제 서버에 연결하지 못했습니다.\n" +
-            "HD.Acs.App(포트 5100)과 PostgreSQL이 실행 중인지 확인한 뒤 다시 시도하세요.\n\n" +
+            "HD.Acs.App(포트 5199)과 PostgreSQL이 실행 중인지 확인한 뒤 다시 시도하세요.\n\n" +
             $"({ex.Message})",
         _ => $"프로젝트 {verb} 실패:\n{ex.Message}",
     };

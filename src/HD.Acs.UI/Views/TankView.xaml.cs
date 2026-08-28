@@ -163,10 +163,10 @@ public partial class TankView : UserControl
         int? lvl = _vm.SelectedLevel;   // 전체=null → 모든 영역, L{n}=그 층만
         var wallByCode = _vm.ShellWalls.GroupBy(w => w.WallCode).ToDictionary(g => g.Key, g => g.First());
 
-        var areaFill = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0x30, 0x27, 0xAE, 0x60)));
         var areaGroup = new Model3DGroup();
-        var areaLines = new LinesVisual3D { Color = Color.FromRgb(0x1E, 0x8B, 0x4E), Thickness = 2.0 };   // 녹색 영역 외곽
-        var weldLines = new LinesVisual3D { Color = Color.FromRgb(0xE6, 0x7E, 0x22), Thickness = 3.0 };   // 주황 용접선
+        // 외곽선·용접선은 상태색별 LinesVisual3D를 지연 생성해 공유 (상태 종류 수만큼만 생성)
+        var linesByColor = new Dictionary<Color, LinesVisual3D>();
+        var weldByColor = new Dictionary<Color, LinesVisual3D>();
         var startPts = new PointsVisual3D { Color = Color.FromRgb(0x27, 0xAE, 0x60), Size = 11 };          // 시작=녹
         var endPts = new PointsVisual3D { Color = Color.FromRgb(0xC0, 0x39, 0x2B), Size = 11 };            // 끝=빨
 
@@ -188,6 +188,11 @@ public partial class TankView : UserControl
                 if (p is { Length: >= 2 } && TryPoint(wall, p[0], p[1], out var cp)) pts3d.Add(cp + off);
             if (pts3d.Count >= 3)
             {
+                // work_item 상태색 (계획=녹, 대기=회, 배차=파랑, 완료=녹(진), 스킵·실패=빨강)
+                var (fillC, lineC) = ViewModels.TankViewModel.StatusColors(_vm.WorkItemStatusOf(a.AreaId));
+                var areaFill = new DiffuseMaterial(new SolidColorBrush(fillC));
+                if (!linesByColor.TryGetValue(lineC, out var areaLines))
+                    linesByColor[lineC] = areaLines = new LinesVisual3D { Color = lineC, Thickness = 2.0 };
                 areaGroup.Children.Add(new GeometryModel3D(PolygonMesh(pts3d), areaFill) { BackMaterial = areaFill });
                 AddClosedOutline(areaLines, pts3d);
                 double cx = pts3d.Average(q => q.X), cy = pts3d.Average(q => q.Y), cz = pts3d.Average(q => q.Z);
@@ -195,11 +200,14 @@ public partial class TankView : UserControl
                 { Text = a.Name, Position = new Point3D(cx, cy, cz), Foreground = Brushes.White, FontSize = 12 });
             }
 
-            // 작업 용접선(시작/끝 마커 + seq 라벨)
+            // 작업 용접선(시작/끝 마커 + seq 라벨) — 액션 상태색 (계획=주황)
             foreach (var t in ov.Tasks)
             {
                 if (!TryPoint(wall, t.StartU, t.StartV, out var s) || !TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
                 s += off; e += off;
+                var weldC = ViewModels.TankViewModel.WeldLineColor(_vm.TaskStatusOf(t.TaskId));
+                if (!weldByColor.TryGetValue(weldC, out var weldLines))
+                    weldByColor[weldC] = weldLines = new LinesVisual3D { Color = weldC, Thickness = 3.0 };
                 weldLines.Points.Add(s); weldLines.Points.Add(e);
                 startPts.Points.Add(s); endPts.Points.Add(e);
                 var mid = new Point3D((s.X + e.X) / 2, (s.Y + e.Y) / 2, (s.Z + e.Z) / 2);
@@ -209,8 +217,8 @@ public partial class TankView : UserControl
         }
 
         if (areaGroup.Children.Count > 0) OverlayModel.Children.Add(new ModelVisual3D { Content = areaGroup });
-        OverlayModel.Children.Add(areaLines);
-        OverlayModel.Children.Add(weldLines);
+        foreach (var lines in linesByColor.Values) OverlayModel.Children.Add(lines);
+        foreach (var lines in weldByColor.Values) OverlayModel.Children.Add(lines);
         OverlayModel.Children.Add(startPts);
         OverlayModel.Children.Add(endPts);
     }
