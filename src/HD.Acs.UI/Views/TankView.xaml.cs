@@ -21,10 +21,35 @@ public partial class TankView : UserControl
     // 면 두께 강조·z-fighting 회피용 법선 방향 오프셋(m)
     private const double HighlightOffsetM = 0.02;
 
+    // 수동 이동: 바닥 그리드 클릭 판정용 히트 평면(층 격리 모드에서만 생성)
+    private GeometryModel3D? _gridHitModel;
+    private double _gridZ;
+
     public TankView()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
+        Viewport.MouseLeftButtonDown += OnViewportMouseDown;
+    }
+
+    /// <summary>수동 이동 모드에서 바닥 그리드 클릭 → 도면 (x,y)로 goto 명령.</summary>
+    private void OnViewportMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_vm is null || !_vm.ManualMoveMode || _gridHitModel is null) return;
+        var hits = Viewport.Viewport.FindHits(e.GetPosition(Viewport));
+        var hit = hits.FirstOrDefault(h => ReferenceEquals(h.Model, _gridHitModel));
+        if (hit is null) return;
+
+        var p = hit.Position;
+        PlaceMoveMarker(p);
+        _ = _vm.RequestMoveAsync(p.X, p.Y);
+    }
+
+    private void PlaceMoveMarker(Point3D p)
+    {
+        MoveMarker.Children.Clear();
+        MoveMarker.Children.Add(new SphereVisual3D
+        { Center = new Point3D(p.X, p.Y, _gridZ + 0.25), Radius = 0.25, Fill = new SolidColorBrush(Color.FromRgb(0x9B, 0x59, 0xB6)) });
     }
 
     private void OnDataContextChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e)
@@ -46,12 +71,45 @@ public partial class TankView : UserControl
 
     private void OnViewChanged(object? sender, EventArgs e) => Rebuild();
 
-    private void Rebuild() { BuildShell(); BuildLevelHighlight(); BuildOverlays(); }
+    private void Rebuild() { BuildShell(); BuildLevelHighlight(); BuildOverlays(); BuildFloorGrid(); }
+
+    // ── 층 바닥 그리드 (층 격리 모드) — 수동 이동 클릭 대상 평면 + 1m 격자 ─────────
+    private void BuildFloorGrid()
+    {
+        FloorGrid.Children.Clear();
+        MoveMarker.Children.Clear();
+        _gridHitModel = null;
+        if (_vm?.Geometry is not { } g || _vm.SelectedLevel is not int level) return;
+
+        // 층 주행 평면 z = level_z[level-1] (미정의 시 0)
+        _gridZ = g.LevelZ is { } lz && level - 1 < lz.Length ? lz[level - 1] : 0.0;
+        double hw = HalfWidth(g, _gridZ);
+        double x0 = g.OriginOx - g.LengthL / 2, x1 = g.OriginOx + g.LengthL / 2;
+        double y0 = g.OriginOy - hw, y1 = g.OriginOy + hw;
+        double z = _gridZ + 0.015;   // 셸과의 z-fighting 회피
+
+        // 클릭 히트 평면(옅은 파랑 반투명) — 재질이 투명해도 히트 테스트는 지오메트리 기준
+        var mesh = PolygonMesh(new List<Point3D>
+        {
+            new(x0, y0, z), new(x1, y0, z), new(x1, y1, z), new(x0, y1, z),
+        });
+        var mat = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0x16, 0x2E, 0x86, 0xC1)));
+        _gridHitModel = new GeometryModel3D(mesh, mat) { BackMaterial = mat };
+        FloorGrid.Children.Add(new ModelVisual3D { Content = _gridHitModel });
+
+        // 1m 격자선
+        var lines = new LinesVisual3D { Color = Color.FromRgb(0x5D, 0x8A, 0xA8), Thickness = 1.0 };
+        for (double x = Math.Ceiling(x0); x <= x1 + 1e-9; x += 1.0)
+        { lines.Points.Add(new Point3D(x, y0, z)); lines.Points.Add(new Point3D(x, y1, z)); }
+        for (double y = Math.Ceiling(y0); y <= y1 + 1e-9; y += 1.0)
+        { lines.Points.Add(new Point3D(x0, y, z)); lines.Points.Add(new Point3D(x1, y, z)); }
+        FloorGrid.Children.Add(lines);
+    }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(TankViewModel.RobotX)
-            or nameof(TankViewModel.RobotY)
+        if (e.PropertyName is nameof(TankViewModel.RobotDrawingX)
+            or nameof(TankViewModel.RobotDrawingY)
             or nameof(TankViewModel.HasRobotPosition))
             UpdateRobotMarker();
     }
@@ -59,10 +117,8 @@ public partial class TankView : UserControl
     private void UpdateRobotMarker()
     {
         if (_vm is null) return;
-        // 로봇 월드 좌표를 3D 씬 좌표에 직접 매핑(placeholder). 실제 좌표 캘리브레이션은 후속.
-        double x = _vm.RobotX ?? 0;
-        double y = _vm.RobotY ?? 0;
-        RobotMarker.Transform = new TranslateTransform3D(x, y, 0);
+        // 맵 좌표 → 도면 좌표(T_W_D 역변환, VM에서 산출) + 로봇 층 주행 평면 z에 표시.
+        RobotMarker.Transform = new TranslateTransform3D(_vm.RobotDrawingX, _vm.RobotDrawingY, _vm.RobotDrawingZ);
     }
 
     // ── 3D 셸 (반투명 면 + 팔각 모서리 와이어) ──────────────────────────────

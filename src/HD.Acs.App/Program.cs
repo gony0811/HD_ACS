@@ -466,6 +466,54 @@ app.MapPost("/api/robots/{robotId}/emergency-stop",
     return Results.Ok(new { robotId, abortedRunId });
 });
 
+// 수동 이동(goto) — 이동 테스트용. 도면 좌표를 T_W_D로 맵 좌표로 변환해 **액션 없는 단일 노드 Order** 발행.
+// 진행 중 run이 있으면 409(신규 orderId가 진행 중 정차를 폐기시키므로), 로봇 보고 층과 다르면 409.
+app.MapPost("/api/robots/{robotId}/goto",
+    async (string robotId, GotoRequest req, AcsDbContext db, Vda5050MasterClient vda, IConfiguration config) =>
+{
+    var robot = await db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId);
+    if (robot is null) return Results.NotFound(new { error = $"robot '{robotId}' 없음" });
+
+    var activeRun = await db.ScenarioRuns.AsNoTracking()
+        .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
+        .Select(r => (Guid?)r.RunId).FirstOrDefaultAsync();
+    if (activeRun is not null)
+        return Results.Conflict(new { error = $"진행 중인 run({activeRun})이 있습니다 — 수동 이동은 중단(abort) 후 사용하세요." });
+
+    var ctx = await db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId);
+    if (ctx?.ReportedMapId is not { } mapId)
+        return Results.Conflict(new { error = "로봇 보고 층(mapId)이 없습니다 — 로봇 연결 상태를 확인하세요." });
+    if (!mapId.EndsWith($"-L{req.Level}", StringComparison.OrdinalIgnoreCase))
+        return Results.Conflict(new { error = $"로봇이 다른 층({mapId})에 있습니다 — L{req.Level} 이동은 수동 층 변경 후 가능합니다." });
+
+    var map = await db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId);
+    if (map is null) return Results.NotFound(new { error = $"map '{mapId}' 없음" });
+    var cal = await db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
+        .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync();
+    DrawingTransform t;
+    try { t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0); }
+    catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+
+    var (mx, my) = t.DrawingToMap(req.XDrawing, req.YDrawing);
+    var orderId = Guid.NewGuid().ToString();
+    var order = new HD.Acs.Vda5050.Messages.Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
+    order.Nodes.Add(new HD.Acs.Vda5050.Messages.OrderNode
+    {
+        NodeId = $"GOTO-{orderId[..8]}", SequenceId = 0, Released = true,
+        NodePosition = new HD.Acs.Vda5050.Messages.NodePosition
+        {
+            X = mx, Y = my, MapId = mapId,   // theta 미지정 — 도착 방향 자유
+            AllowedDeviationXY = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08),
+            AllowedDeviationTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07),
+        },
+    });
+    await vda.PublishOrderAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber), order);
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+        { UserId = req.UserId ?? "", Action = "MANUAL_GOTO", Target = $"{robotId} → {mapId} ({mx:F2},{my:F2})" });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { orderId, mapId, mapX = mx, mapY = my });
+});
+
 // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1] ──────────────────────────
 // 맵버전 바인딩: 대응쌍/변환은 현재 ref.map.version에 귀속. 맵 재생성 시 자동 무효 [§2.5].
 
@@ -567,6 +615,7 @@ app.Run();
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
 public sealed record EmergencyStopRequest(string UserId);
+public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, string? UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);

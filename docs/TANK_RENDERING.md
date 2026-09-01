@@ -144,16 +144,12 @@ z를 `[zLo, zHi]`로 클리핑한 뒤 챔퍼 무릎(`hLow`, `hLow+hWall`)이 구
 
 법선이 **내부향**이므로 부호를 뒤집어야 바깥으로 나간다. 새 레이어를 추가한다면 0.03 m보다 더 띄울 것.
 
-### 5.6 로봇 마커 — ⚠ 미완성
+### 5.6 로봇 마커 — ✅ T_W_D 역변환 적용 (2026-08-31 해소)
 
-```csharp
-// 로봇 월드 좌표를 3D 씬 좌표에 직접 매핑(placeholder). 실제 좌표 캘리브레이션은 후속.
-RobotMarker.Transform = new TranslateTransform3D(x, y, 0);
-```
-
-`RobotStateDto.ReportedX/Y`는 **AMR 맵 좌표**인데 도면 좌표 씬에 그대로 찍고 있다.
-두 프레임이 우연히 일치하지 않는 한 마커 위치는 틀린다. **T_W_D 역변환(`DrawingTransform`)이 빠져 있다.**
-z도 0 고정이라 층이 반영되지 않는다(층은 마커를 흐리게 하는 데만 쓰인다 — `RobotOnSelectedFloor`).
+`RobotStateDto.ReportedX/Y`(맵 좌표)를 층별 T_W_D **역변환**으로 도면 좌표로 바꿔 찍는다:
+`drawing = R(−yaw)·(map − t)`. 변환은 `TankViewModel.UpdateRobotDrawingPose`가 수행하며
+층별 캘리브레이션을 `GET /api/maps/{mapId}/calibration`으로 1회 캐시(미보정 층은 원시 좌표 폴백,
+프로젝트 로드 시 캐시 무효화). z도 로봇 층의 주행 평면 높이(`level_z[n-1]`)로 표시된다.
 
 ---
 
@@ -245,9 +241,9 @@ v = _projVlen − (py − Margin) / _projScale − VOff     // 층-로컬로 환
 그러나 실제 구현은 `WrapPanel` 격자다. `NormX`/`NormY`는 **어디에도 바인딩되어 있지 않다(사문화)**.
 문서를 현행에 맞추든지, 방사형 배치를 구현하든지 한쪽으로 정리가 필요하다.
 
-### 8.2 로봇 마커에 T_W_D 역변환이 없다
+### 8.2 로봇 마커에 T_W_D 역변환이 없다 — ✅ 해소 (2026-08-31)
 
-§5.6 참조. 코드에 `placeholder` 주석으로 남아 있다.
+§5.6 참조. 역변환+층 z 표시로 수정 완료.
 
 ### 8.3 `A`(후벽) 면의 U축 방향이 대외 정본과 반대다
 

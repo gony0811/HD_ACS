@@ -23,6 +23,8 @@ public interface IAcsApiClient
     Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
     Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);
     Task<bool> ReleaseNextMissionAsync(Guid runId, CancellationToken ct = default);
+    /// <summary>수동 이동(goto) — 도면 좌표를 서버가 T_W_D로 변환해 액션 없는 단일 노드 Order 발행. 이동 테스트용.</summary>
+    Task GotoAsync(string robotId, int level, double xDrawing, double yDrawing, CancellationToken ct = default);
     Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
         double x, double y, double theta, CancellationToken ct = default);
     Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default);

@@ -112,6 +112,28 @@ public sealed partial class TankViewModel : ObservableObject
     [ObservableProperty] private double? _robotY;
     [ObservableProperty] private string? _robotMapId;
 
+    // ── 수동 이동 (층 격리 뷰 바닥 그리드 클릭 → goto Order) — 이동 테스트용 ──
+    /// <summary>켜면 층 바닥 그리드 클릭이 해당 지점으로 수동 이동을 명령한다 (오조작 방지 토글).</summary>
+    [ObservableProperty] private bool _manualMoveMode;
+    [ObservableProperty] private string? _moveStatus;
+    private string? _lastRobotId;   // 최근 state 보고 로봇 — 단일 로봇 MVP
+
+    /// <summary>바닥 그리드 클릭 지점(도면 x,y)으로 이동 명령. 뷰 코드비하인드가 호출.</summary>
+    public async Task RequestMoveAsync(double xDrawing, double yDrawing)
+    {
+        if (SelectedLevel is not int level) return;
+        if (_lastRobotId is not { } robotId) { MoveStatus = "로봇 보고 없음 — 연결 확인"; return; }
+        try
+        {
+            await _api.GotoAsync(robotId, level, xDrawing, yDrawing);
+            MoveStatus = $"이동 명령: ({xDrawing:F2}, {yDrawing:F2}) → {robotId}";
+        }
+        catch (Exception ex)
+        {
+            MoveStatus = $"이동 실패: {ex.Message}";
+        }
+    }
+
     public bool HasRobotPosition => RobotX is not null && RobotY is not null;
 
     /// <summary>선택 뷰 층에 로봇이 있는지 — 다른 층이면 마커를 흐리게. "전체"면 항상 표시(비교 안 함).</summary>
@@ -131,6 +153,7 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>선창 면 전체를 불러와 3D 셸을 구성하고, 현재 뷰 모드 강조를 로드한다.</summary>
     public async Task LoadAsync()
     {
+        _calByMapId.Clear(); _calMissing.Clear();   // 프로젝트/캘리브레이션 변경 대비 T_W_D 캐시 무효화
         try
         {
             Geometry = await _api.GetTankGeometryAsync(TankId);   // 마구리 팔각 윤곽용 치수
@@ -246,13 +269,71 @@ public sealed partial class TankViewModel : ObservableObject
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // ── 로봇 마커 좌표 변환: 맵 → 도면 (T_W_D 역변환) ────────────────────────
+    // 로봇 보고는 맵 좌표, 3D 씬은 도면 좌표 — 역변환 없이 찍으면 T_W_D(tx,ty,yaw)만큼 어긋나 보인다.
+    private readonly Dictionary<string, (double Tx, double Ty, double Yaw)> _calByMapId = new();
+    private readonly HashSet<string> _calMissing = new();   // 미보정 층 — 재조회 폭주 방지
+
+    /// <summary>마커용 도면 좌표. 캘리브레이션 미보정 층은 원시(맵) 좌표 폴백.</summary>
+    public double RobotDrawingX { get; private set; }
+    public double RobotDrawingY { get; private set; }
+    /// <summary>로봇 층의 주행 평면 z (level_z) — 마커를 그 층 높이에 표시.</summary>
+    public double RobotDrawingZ { get; private set; }
+
     private void OnRobotState(object? sender, RobotStateDto s)
     {
+        _lastRobotId = s.RobotId;
         RobotX = s.ReportedX;
         RobotY = s.ReportedY;
         RobotMapId = s.ReportedMapId;
+        UpdateRobotDrawingPose();
         OnPropertyChanged(nameof(HasRobotPosition));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));
+    }
+
+    private void UpdateRobotDrawingPose()
+    {
+        double mx = RobotX ?? 0, my = RobotY ?? 0;
+        double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표
+        if (RobotMapId is { } mapId)
+        {
+            if (_calByMapId.TryGetValue(mapId, out var c))
+            {
+                // drawing = R(−yaw) · (map − t)
+                double px = mx - c.Tx, py = my - c.Ty;
+                double cos = Math.Cos(-c.Yaw), sin = Math.Sin(-c.Yaw);
+                dx = cos * px - sin * py;
+                dy = sin * px + cos * py;
+            }
+            else if (!_calMissing.Contains(mapId))
+            {
+                _ = LoadCalibrationAsync(mapId);   // 최초 1회 비동기 로드 — 도착 시 재계산
+            }
+
+            // 층 z: mapId "{tank}-L{n}" → level_z[n-1]
+            var idx = mapId.LastIndexOf("-L", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0 && int.TryParse(mapId[(idx + 2)..], out int lv)
+                && Geometry?.LevelZ is { } lz && lv - 1 >= 0 && lv - 1 < lz.Length)
+                RobotDrawingZ = lz[lv - 1];
+            else
+                RobotDrawingZ = 0;
+        }
+        RobotDrawingX = dx;
+        RobotDrawingY = dy;
+        OnPropertyChanged(nameof(RobotDrawingX));
+        OnPropertyChanged(nameof(RobotDrawingY));
+    }
+
+    private async Task LoadCalibrationAsync(string mapId)
+    {
+        try
+        {
+            var cal = await _api.GetCalibrationAsync(mapId);
+            if (cal is not null) _calByMapId[mapId] = (cal.Tx, cal.Ty, cal.YawRad);
+            else _calMissing.Add(mapId);   // 미보정 층 — 원시 좌표 폴백 유지
+        }
+        catch { _calMissing.Add(mapId); }
+        UpdateRobotDrawingPose();
     }
 
     partial void OnSelectedViewModeChanged(string value)

@@ -17,6 +17,13 @@
                                      SelectedItem="{Binding SelectedViewMode, Mode=TwoWay}" />
                 <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsChecked="{Binding ShowOverlays, Mode=TwoWay}" />
+                <CheckBox Content="수동 이동(그리드 클릭)" VerticalAlignment="Center" Margin="16,0,0,0"
+                          IsEnabled="{Binding IsolateLevel}"
+                          ToolTip="층(L1~L4) 선택 시 바닥 그리드가 표시됩니다 — 클릭 지점으로 로봇 이동 명령(이동 테스트용). 진행 중 run이 있으면 거부됩니다."
+                          IsChecked="{Binding ManualMoveMode, Mode=TwoWay}" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="{Binding MoveStatus}" />
                 <TextBlock Margin="16,0,0,0" VerticalAlignment="Center"
                            Text="{Binding RobotMapId, StringFormat='로봇 층: {0}'}" />
                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
@@ -39,6 +46,9 @@
                     <ModelVisual3D x:Name="LevelHighlight" />
                     <!-- 영역·작업(용접선) 오버레이 — 코드비하인드에서 영역/작업 (u,v)로 빌드 -->
                     <ModelVisual3D x:Name="OverlayModel" />
+                    <!-- 층 바닥 그리드(수동 이동 클릭 평면) + 이동 목표 마커 — 코드비하인드 빌드 -->
+                    <ModelVisual3D x:Name="FloorGrid" />
+                    <ModelVisual3D x:Name="MoveMarker" />
                     <!-- 로봇 마커 (코드비하인드에서 위치 갱신) -->
                     <helix:SphereVisual3D x:Name="RobotMarker" Center="0,0,0.4" Radius="0.4" Fill="#E74C3C" />
                 </helix:HelixViewport3D>
