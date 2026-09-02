@@ -7,6 +7,7 @@ public static class Vda5050Topics
 {
     public const string DefaultPrefix = "uagv";
     public const string DefaultVersion = "v2";
+    public static readonly RobotRef AcsIdentity = new("HD_ACS", "HD_ACS", "hd-acs-master");
 
     public static string Order(RobotRef r, string prefix = DefaultPrefix, string ver = DefaultVersion)
         => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/order";
@@ -16,4 +17,8 @@ public static class Vda5050Topics
         => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/state";
     public static string Connection(RobotRef r, string prefix = DefaultPrefix, string ver = DefaultVersion)
         => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/connection";
+
+    /// <summary>ACS 프로세스 생존 신호 [VDA5050_INTERFACE_SPEC §7.2, N12].</summary>
+    public static string AcsConnection(string prefix = DefaultPrefix, string ver = DefaultVersion)
+        => Connection(AcsIdentity, prefix, ver);
 }

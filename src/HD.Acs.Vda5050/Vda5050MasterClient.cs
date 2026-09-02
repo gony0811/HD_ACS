@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using HD.Acs.Vda5050.Messages;
 using MQTTnet;
 using MQTTnet.Client;
@@ -17,8 +18,10 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
     private readonly IMqttClient _client;
     private readonly string _host;
     private readonly int _port;
-    private readonly Dictionary<string, RobotRef> _robotsByTopicKey = new();
+    private readonly ConcurrentDictionary<string, RobotRef> _robotsByTopicKey = new();
     private readonly Dictionary<string, int> _headerIdByTopic = new();   // 토픽별 단조 증가 [SPEC §3 N1]
+    private readonly object _disconnectSync = new();
+    private TaskCompletionSource _disconnected = NewDisconnectSignal();
 
     public event Func<RobotRef, Vda5050State, Task>? StateReceived;
     public event Func<RobotRef, Vda5050Connection, Task>? ConnectionReceived;
@@ -29,16 +32,40 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         _port = port;
         _client = new MqttFactory().CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageAsync;
+        _client.DisconnectedAsync += _ =>
+        {
+            lock (_disconnectSync)
+                _disconnected.TrySetResult();
+            return Task.CompletedTask;
+        };
     }
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {
+        lock (_disconnectSync)
+            _disconnected = NewDisconnectSignal();
+
+        var will = CreateAcsConnection("CONNECTIONBROKEN");
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(_host, _port)
             .WithClientId("hd-acs-master")
             .WithCleanSession()
+            .WithWillTopic(Vda5050Topics.AcsConnection())
+            .WithWillPayload(JsonSerializer.Serialize(will, Json))
+            .WithWillQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .WithWillRetain()
             .Build();
         await _client.ConnectAsync(options, ct);
+        await PublishAcsConnectionAsync("ONLINE", ct);
+    }
+
+    /// <summary>현재 MQTT 연결이 끊길 때까지 대기 — 브리지의 런타임 재접속 루프에서 사용.</summary>
+    public Task WaitForDisconnectAsync(CancellationToken ct = default)
+    {
+        Task signal;
+        lock (_disconnectSync)
+            signal = _disconnected.Task;
+        return signal.WaitAsync(ct);
     }
 
     /// <summary>로봇 등록: state/connection 토픽 구독 (fleet-ready — 로봇별 호출 [ADR-003])</summary>
@@ -62,6 +89,10 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         Stamp(actions, robot, topic);
         return PublishAsync(topic, actions, ct);
     }
+
+    /// <summary>ACS 생존 상태 발행. ONLINE/OFFLINE은 항상 retained QoS 1 [SPEC §7.2, N12].</summary>
+    public Task PublishAcsConnectionAsync(string connectionState, CancellationToken ct = default)
+        => PublishAsync(Vda5050Topics.AcsConnection(), CreateAcsConnection(connectionState), ct, retain: true);
 
     /// <summary>비상정지 — 기능적 정지이며 안전 규격 정지가 아님 [ADR-007]</summary>
     public Task EmergencyStopAsync(RobotRef robot, CancellationToken ct = default)
@@ -103,13 +134,21 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         msg.SerialNumber = robot.SerialNumber;
     }
 
-    private async Task PublishAsync<T>(string topic, T payload, CancellationToken ct)
+    private Vda5050Connection CreateAcsConnection(string connectionState)
     {
-        var msg = new MqttApplicationMessageBuilder()
+        var message = new Vda5050Connection { ConnectionState = connectionState };
+        Stamp(message, Vda5050Topics.AcsIdentity, Vda5050Topics.AcsConnection());
+        return message;
+    }
+
+    private async Task PublishAsync<T>(string topic, T payload, CancellationToken ct, bool retain = false)
+    {
+        var builder = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
             .WithPayload(JsonSerializer.Serialize(payload, Json))
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce);
+        if (retain) builder.WithRetainFlag();
+        var msg = builder.Build();
         await _client.PublishAsync(msg, ct);
     }
 
@@ -143,10 +182,28 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task DisconnectAsync(CancellationToken ct = default)
     {
         if (_client.IsConnected)
-            await _client.DisconnectAsync();
+        {
+            try
+            {
+                await PublishAcsConnectionAsync("OFFLINE", ct);
+            }
+            finally
+            {
+                if (_client.IsConnected)
+                    await _client.DisconnectAsync(cancellationToken: ct);
+            }
+        }
+    }
+
+    private static TaskCompletionSource NewDisconnectSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisconnectAsync();
         _client.Dispose();
     }
 }

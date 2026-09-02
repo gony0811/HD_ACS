@@ -75,28 +75,45 @@ public sealed class VdaBridgeService : BackgroundService
                 _log.LogInformation("서버 기동 시 로봇 연결 상태 {Count}건을 OFFLINE으로 초기화", resetCount);
         }
 
-        // 연결 재시도 루프 (브로커는 별도 OS 서비스 — 앱보다 늦게 뜰 수 있음 [ADR-011])
+        // 최초 접속뿐 아니라 운전 중 브로커/네트워크 두절도 재접속한다. CleanSession이므로
+        // 접속할 때마다 로봇 토픽을 다시 구독해야 한다 [SPEC §7.2, N12].
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 await _vda.ConnectAsync(ct);
-                break;
+
+                using var scope = _scopes.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+                var robots = await db.Robots.AsNoTracking().Where(r => r.IsActive).ToListAsync(ct);
+                foreach (var r in robots)
+                    await _vda.RegisterRobotAsync(new RobotRef(r.RobotId, r.Manufacturer, r.SerialNumber), ct);
+
+                _log.LogInformation("VDA 5050 마스터 MQTT 연결 — ACS ONLINE 발행, 로봇 {Count}대 구독", robots.Count);
+                await _vda.WaitForDisconnectAsync(ct);
+                _log.LogWarning("MQTT 연결 끊김, 5초 후 재접속");
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
                 _log.LogWarning("MQTT 연결 실패, 5초 후 재시도: {Msg}", ex.Message);
-                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                try { await _vda.DisconnectAsync(ct); }
+                catch (Exception disconnectEx)
+                {
+                    _log.LogDebug(disconnectEx, "재접속 준비 중 MQTT 연결 정리 실패");
+                }
             }
-        }
 
-        using (var scope = _scopes.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
-            var robots = await db.Robots.AsNoTracking().Where(r => r.IsActive).ToListAsync(ct);
-            foreach (var r in robots)
-                await _vda.RegisterRobotAsync(new RobotRef(r.RobotId, r.Manufacturer, r.SerialNumber), ct);
-            _log.LogInformation("VDA 5050 마스터 기동 — 로봇 {Count}대 구독", robots.Count);
+            try { await Task.Delay(TimeSpan.FromSeconds(5), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
         }
+    }
+
+    public override async Task StopAsync(CancellationToken ct)
+    {
+        // 먼저 재접속 루프를 끝낸 뒤 OFFLINE(retain)을 발행하고 정상 DISCONNECT한다.
+        // 정상 종료에서는 브로커 Last Will이 발행되지 않는다.
+        try { await base.StopAsync(ct); }
+        finally { await _vda.DisconnectAsync(ct); }
     }
 }
