@@ -2,12 +2,13 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.1** |
-| 작성일 | 2026-08-27 (최종 개정 2026-09-01) |
+| 문서 버전 | **1.2** |
+| 작성일 | 2026-08-27 (최종 개정 2026-09-03) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
-| 상태 | **확정** (2026-08-28 HD_AMR 회신 반영, `VDA5050_AMR_REPLY.md`) — N10(정차 이격)만 잠정값 유지 |
+| 상태 | **확정** (2026-08-28 HD_AMR 회신 반영, `VDA5050_AMR_REPLY.md`) — N10(정차 이격)은 잠정값, N12(ACS 생존 신호)는 신규 협의 대기 |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
+| 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·HD_AMR 협의 전 항목** `[협의 N12]` |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -70,6 +71,7 @@ ACS는 AMR 플랫폼·협동로봇·검사장비를 개별 제어하지 않으�
 | `instantActions` | ACS → AMR | 1 | false | 즉시 액션 (§5) |
 | `state` | AMR → ACS | 1 | false | **2초 주기** + 이벤트 시 즉시 (§6) |
 | `connection` | AMR → ACS | 1 | **true** | 생존 신호 + MQTT Last Will (§7) |
+| `connection` (ACS identity) | ACS → AMR | 1 | **true** | ACS 전용 identity의 생존 신호 + MQTT Last Will (§7.2) `[협의 N12]` |
 | `factsheet` | AMR → ACS | — | — | **예약 채널 (현행 미사용)** — 향후 로봇 능력 조회용. 현행 ACS는 발행/구독하지 않음 |
 | `visualization` | — | — | — | **미사용** — 위치는 state.agvPosition으로 충분 (2초 주기) |
 
@@ -84,6 +86,15 @@ AMR은 MQTT 접속 시 다음 Will을 반드시 설정한다:
 → Wi-Fi 두절·프로세스 사망 시 브로커가 대신 CONNECTIONBROKEN을 발행하여 ACS가 두절을 감지한다 [ADR-002].
 
 > ※구현: 시뮬레이터(`HD.Acs.Simulator/Program.cs:46-51`)가 이 규약대로 동작. Will payload의 headerId/timestamp는 접속 시점 값이어도 무방(ACS는 connectionState만 소비).
+
+ACS도 MQTT 접속 시 ACS 전용 `connection` 토픽에 다음 Will을 설정한다 `[협의 N12]`:
+
+- Will 토픽: `uagv/v2/HD_ACS/hd-acs-master/connection`
+- Will payload: `connectionState: "CONNECTIONBROKEN"` 인 §7.2 메시지
+- Will retain: **true**, QoS 1
+
+ACS 생존 토픽은 로봇별 토픽이 아니라 **ACS 인스턴스당 하나**다. 따라서 여러 AMR이 동일 토픽을 구독하며,
+AMR 수가 늘어나도 ACS MQTT 연결과 Will은 추가하지 않는다.
 
 ---
 
@@ -400,7 +411,9 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 
 ---
 
-## 7. connection (AMR → ACS)
+## 7. connection 생존 신호
+
+### 7.1 AMR → ACS
 
 ```json
 { "headerId": 3, "timestamp": "...", "version": "2.0.0",
@@ -415,6 +428,43 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 | `CONNECTIONBROKEN` | **브로커** — Last Will (비정상 두절) | true |
 
 ACS 반응: ONLINE → 미션 `ConnectionRestored`(RUNNING 복귀 + state 재동기화) / OFFLINE·CONNECTIONBROKEN → 미션 `DISCONNECTED` 표시. **두절 중에도 AMR은 진행 중 Order를 자율 계속 수행한다** — 재접속 후 최신 state 1건으로 ACS가 따라잡는다(robot-is-truth) [ADR-002].
+
+### 7.2 ACS → AMR `[협의 N12]`
+
+ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모델을 재사용하는 **프로젝트 확장**이다.
+로봇 `connection` retained 값을 덮어쓰지 않도록 ACS에 별도 identity를 부여한다.
+
+| 항목 | 값 |
+|---|---|
+| 토픽 | `uagv/v2/HD_ACS/hd-acs-master/connection` |
+| 발행 | HD_ACS |
+| 구독 | 모든 HD_AMR 인스턴스 |
+| QoS / retain | **1 / true** |
+| ACS identity | `manufacturer: "HD_ACS"`, `serialNumber: "hd-acs-master"` |
+
+```json
+{ "headerId": 1, "timestamp": "2026-09-03T00:00:00.000Z", "version": "2.0.0",
+  "manufacturer": "HD_ACS", "serialNumber": "hd-acs-master",
+  "connectionState": "ONLINE" }
+```
+
+| connectionState | 발행 주체·시점 | retain |
+|---|---|---|
+| `ONLINE` | ACS — MQTT 접속·재접속 직후 | true |
+| `OFFLINE` | ACS — 정상 종료 직전 | true |
+| `CONNECTIONBROKEN` | **브로커** — ACS Last Will(프로세스 사망·네트워크 두절) | true |
+
+- ACS는 주기 heartbeat 메시지를 추가 발행하지 않는다. MQTT 세션과 Last Will이 생존 판정의 근거이며,
+  재접속 때마다 최신 `ONLINE` retained 메시지를 갱신한다.
+- `headerId`는 ACS 프로세스 세션 내에서 이 토픽 기준 단조 증가한다. 재기동 시 1부터 시작할 수 있다.
+- Last Will의 `timestamp`와 `headerId`는 MQTT 접속 시 생성한 값이어도 된다. 수신 측은
+  `CONNECTIONBROKEN` 수신 시각을 실제 두절 감지 시각으로 사용한다.
+- HD_AMR은 `OFFLINE` 또는 `CONNECTIONBROKEN` 수신 후 **신규 Order 수신을 기대하지 않되**, 이미 릴리즈된
+  Order는 §9.3에 따라 자율 계속한다. 로봇 안전 정지의 근거로 사용하지 않는다.
+- HD_AMR은 `ONLINE` 수신 시 별도 복구 명령을 요구하지 않고, 이후 수신되는 Order를 정상 처리한다.
+- 브로커 자체 장애 중에는 Will을 전달할 수 없으므로 HD_AMR은 MQTT 연결 끊김도 ACS 통신 두절로 동일 취급한다.
+
+> ※구현 상태(2026-09-03): 사양만 추가됨. ACS 발행 및 HD_AMR 구독 구현은 N12 합의 후 반영한다.
 
 ---
 
@@ -594,7 +644,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 
 ## 10. 협의 항목 (HD_AMR 회신 요청)
 
-**2026-08-28 HD_AMR 회신 수령(`VDA5050_AMR_REPLY.md`) — N10 외 전 항목 확정.**
+**2026-08-28 HD_AMR 회신 수령(`VDA5050_AMR_REPLY.md`) — N10 보류. 2026-09-03 추가한 N12는 신규 협의 대기.**
 
 | # | 항목 | ACS 제안 | HD_AMR 회신 (2026-08-28) |
 |---|---|---|---|
@@ -609,6 +659,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N9 | MQTT 보안 | 평문 :1883 (폐쇄망) | ✅ 동의 (TLS 필요 판단 시 재협의) |
 | N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (영역별 조정) | ⏸ **보류** — 로봇 치수·코봇 리치 확정 후 회신, 잠정 0.8 m 수용 |
 | N11 | Order 거부 보고 방식 | 폐기 + `orderValidationError` | ✅ 동의 (§4.5.2 그대로 구현) |
+| N12 | ACS 생존 신호 | ACS 전용 `connection` 토픽 + ONLINE/OFFLINE/Last Will, QoS 1·retain (§7.2) | ⏳ **신규 협의 요청** — HD_AMR 구독·상태 처리 확인 필요 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
@@ -693,6 +744,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 
 - [ ] MQTT 접속: clientId 고유, **Last Will = connection/CONNECTIONBROKEN/retain** (§2.4)
 - [ ] 접속 직후 `connection ONLINE`(retain) 발행 (§7)
+- [ ] ACS 전용 `uagv/v2/HD_ACS/hd-acs-master/connection` 구독 및 ONLINE/OFFLINE/CONNECTIONBROKEN 처리 (§7.2, **N12 합의 후**)
 - [ ] `order`·`instantActions` 구독 (QoS 1) — manufacturer/serialNumber 자기 토픽 (§2.2)
 - [ ] `state` 2초 주기 + 이벤트 즉시 발행, **agvPosition.mapId 필수** (§6.1)
 - [ ] orderId 변경 = 새 임무, actionId/nodeId **echo만** (재발급 금지) (§4.1, §6.2)
