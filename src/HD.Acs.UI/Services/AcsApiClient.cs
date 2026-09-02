@@ -214,6 +214,19 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<SlicedStationDto>> GetStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<SlicedStationDto>>($"/api/scenarios/{scenarioId}/stations", ct) ?? new();
 
+    public async Task<IReadOnlyList<AmrTeachingRowDto>> GetAmrTeachingTableAsync(string tankId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<AmrTeachingRowDto>>(
+            $"/api/tanks/{Uri.EscapeDataString(tankId)}/amr-teaching-table", ct) ?? new();
+
+    public async Task<AmrTeachingRowDto?> SetAmrMappingAsync(string nodeId, int? jobIndex, int? taskIndex = null,
+        string? gotoMode = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/nodes/{Uri.EscapeDataString(nodeId)}/amr-mapping",
+            new { JobIndex = jobIndex, TaskIndex = taskIndex, GotoMode = gotoMode }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<AmrTeachingRowDto>(ct);
+    }
+
     // ── 선창 3D 정의 [SPEC v3 §2/§3] — 파라미터 등록 → 면 자동생성 ──────────
     public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
