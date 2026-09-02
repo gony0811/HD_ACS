@@ -25,7 +25,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // Kestrel 리스닝 포트 = Acs:Api:ListenPort (기본 5199). UI(REST/SignalR)가 http://localhost:5199 로 붙는다.
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
-builder.WebHost.UseUrls($"http://localhost:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
+builder.WebHost.UseUrls($"http://0.0.0.0:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 

@@ -60,6 +60,21 @@ public sealed class VdaBridgeService : BackgroundService
             }
         };
 
+        // connection_state는 마지막 수신값을 보관하는 캐시이므로 서버 재기동 뒤에도
+        // 이전 ONLINE 값이 DB에 남아 있을 수 있다. 실제 연결 메시지를 새로 받기 전에는
+        // 연결된 것으로 표시하지 않도록 MQTT 연결/구독보다 먼저 초기화한다.
+        using (var scope = _scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+            var resetCount = await db.RobotContexts
+                .Where(ctx => ctx.ConnectionState != null && ctx.ConnectionState != "OFFLINE")
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(ctx => ctx.ConnectionState, "OFFLINE"), ct);
+
+            if (resetCount > 0)
+                _log.LogInformation("서버 기동 시 로봇 연결 상태 {Count}건을 OFFLINE으로 초기화", resetCount);
+        }
+
         // 연결 재시도 루프 (브로커는 별도 OS 서비스 — 앱보다 늦게 뜰 수 있음 [ADR-011])
         while (!ct.IsCancellationRequested)
         {
