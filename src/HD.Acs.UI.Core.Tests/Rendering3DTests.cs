@@ -127,6 +127,48 @@ public class Rendering3DTests
     }
 
     [Fact]
+    public void SceneBuilder_RobotHeading_EmitsArrowOnlyWhenKnown()
+    {
+        var g = Geometry();
+        var walls = Walls();
+        var baseInput = new TankSceneInput(walls, Array.Empty<WallDto>(), g, Array.Empty<TankViewModel.AreaOverlay>(),
+            ShowOverlays: false, SelectedLevel: null, _ => null, _ => null,
+            HasRobotPosition: true, RobotPosition: new Pt3(2, 1, 0));
+
+        var without = TankSceneBuilder.Build(baseInput);
+        var with = TankSceneBuilder.Build(baseInput with { RobotHeading = Math.PI / 2 });   // 도면 +y 방향
+
+        // theta 없음 → 원만. 있음 → 축 1선분 + 화살촉 1면(셰이딩 없음) 추가
+        Assert.Equal(without.Segments.Count + 1, with.Segments.Count);
+        Assert.Equal(without.Faces.Count + 1, with.Faces.Count);
+        var head = Assert.Single(with.Faces, f => !f.Shade && f.Points.Count == 3);
+        var shaft = Assert.Single(with.Segments, s => s.Thickness == 2.5);
+
+        // +y heading: 축 끝·화살촉 끝이 로봇 위치에서 +y로 나감(x 동일), 바닥에서 살짝 띄움
+        Assert.Equal(2, shaft.B.X, 9);
+        Assert.Equal(1 + TankSceneBuilder.HeadingShaftM, shaft.B.Y, 9);
+        Assert.Equal(TankSceneBuilder.HeadingLiftM, shaft.B.Z, 9);
+        var tip = head.Points.MaxBy(p => p.Y);
+        Assert.Equal(1 + TankSceneBuilder.HeadingTipM, tip.Y, 9);
+        Assert.Equal(2, tip.X, 9);
+
+        // 위치 없음 → heading이 있어도 아무것도 그리지 않음
+        var none = TankSceneBuilder.Build(baseInput with { HasRobotPosition = false, RobotHeading = 0.3 });
+        Assert.Equal(without.Segments.Count, none.Segments.Count);
+        Assert.DoesNotContain(none.Markers, m => m.RadiusWorld == 0.4);
+    }
+
+    [Theory]
+    [InlineData(Math.PI / 2, Math.PI / 2, 0)]            // 맵 +y를 보는 로봇, 맵이 도면 대비 +90° 회전 → 도면 +x
+    [InlineData(0, Math.PI / 2, -Math.PI / 2)]           // 맵 +x → 도면 −y
+    [InlineData(3.0, -3.0, 6.0 - 2 * Math.PI)]           // 차가 π를 넘으면 (−π, π]로 감음
+    [InlineData(-3.0, 3.0, -6.0 + 2 * Math.PI)]
+    public void MapThetaToDrawing_SubtractsCalibrationYaw_AndWraps(double thetaMap, double yaw, double expected)
+    {
+        Assert.Equal(expected, TankViewModel.MapThetaToDrawing(thetaMap, yaw), 9);
+    }
+
+    [Fact]
     public void Renderer_SortsFarFacesFirst_AndOverlaysLast()
     {
         var cam = new Camera3 { Target = Pt3.Zero, Distance = 30, PitchDeg = 20, YawDeg = 180 };   // -x 쪽에서 봄

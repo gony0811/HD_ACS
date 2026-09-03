@@ -112,6 +112,8 @@ public sealed partial class TankViewModel : ObservableObject
     [ObservableProperty] private double? _robotX;
     [ObservableProperty] private double? _robotY;
     [ObservableProperty] private string? _robotMapId;
+    /// <summary>로봇 heading — 맵 프레임(rad, VDA agvPosition.theta). null=미보고.</summary>
+    [ObservableProperty] private double? _robotTheta;
 
     // ── 수동 이동 (층 격리 뷰 바닥 그리드 클릭 → goto Order) — 이동 테스트용 ──
     /// <summary>켜면 층 바닥 그리드 클릭이 해당 지점으로 수동 이동을 명령한다 (오조작 방지 토글).</summary>
@@ -275,12 +277,24 @@ public sealed partial class TankViewModel : ObservableObject
     public double RobotDrawingY { get; private set; }
     /// <summary>로봇 층의 주행 평면 z (level_z) — 마커를 그 층 높이에 표시.</summary>
     public double RobotDrawingZ { get; private set; }
+    /// <summary>도면 프레임 heading(rad, x축 기준 CCW). 위치와 같은 규칙으로 T_W_D yaw를 뺀 값(미보정 층은 원시 theta). null=theta 미보고 → 화살표 생략.</summary>
+    public double? RobotDrawingTheta { get; private set; }
+
+    /// <summary>맵 heading → 도면 heading. 위치가 drawing = R(−yaw)·(map − t)이므로 방향은 theta − yaw. 결과는 (−π, π]로 정규화.</summary>
+    public static double MapThetaToDrawing(double thetaMap, double calYaw)
+    {
+        double t = thetaMap - calYaw;
+        t = Math.IEEERemainder(t, 2 * Math.PI);   // (−π, π]
+        if (t <= -Math.PI) t += 2 * Math.PI;
+        return t;
+    }
 
     private void OnRobotState(object? sender, RobotStateDto s)
     {
         _lastRobotId = s.RobotId;
         RobotX = s.ReportedX;
         RobotY = s.ReportedY;
+        RobotTheta = s.ReportedTheta;
         RobotMapId = s.ReportedMapId;
         UpdateRobotDrawingPose();
         OnPropertyChanged(nameof(HasRobotPosition));
@@ -291,6 +305,7 @@ public sealed partial class TankViewModel : ObservableObject
     {
         double mx = RobotX ?? 0, my = RobotY ?? 0;
         double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표
+        double? dTheta = RobotTheta;   // 폴백: 미보정 → 원시 heading
         if (RobotMapId is { } mapId)
         {
             if (_calByMapId.TryGetValue(mapId, out var c))
@@ -300,6 +315,7 @@ public sealed partial class TankViewModel : ObservableObject
                 double cos = Math.Cos(-c.Yaw), sin = Math.Sin(-c.Yaw);
                 dx = cos * px - sin * py;
                 dy = sin * px + cos * py;
+                if (RobotTheta is double th) dTheta = MapThetaToDrawing(th, c.Yaw);
             }
             else if (!_calMissing.Contains(mapId))
             {
@@ -316,8 +332,10 @@ public sealed partial class TankViewModel : ObservableObject
         }
         RobotDrawingX = dx;
         RobotDrawingY = dy;
+        RobotDrawingTheta = dTheta;
         OnPropertyChanged(nameof(RobotDrawingX));
         OnPropertyChanged(nameof(RobotDrawingY));
+        OnPropertyChanged(nameof(RobotDrawingTheta));
     }
 
     private async Task LoadCalibrationAsync(string mapId)

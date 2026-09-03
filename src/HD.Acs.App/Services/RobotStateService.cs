@@ -113,7 +113,8 @@ public sealed class RobotStateService
         await _hub.Clients.All.SendAsync("RobotState", new
         {
             robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY, ctx.BatteryPct,
-            state.OrderId, state.LastNodeId, state.Driving, Errors = state.Errors.Count
+            state.OrderId, state.LastNodeId, state.Driving, Errors = state.Errors.Count,
+            ctx.ReportedTheta   // 맵 프레임 heading(rad) — UI가 T_W_D yaw 보정 후 3D 방향 화살표로 표시
         }, ct);
 
         // TASK 단위 진행률 푸시 — SaveChanges 이후(종결 상태 반영분)를 집계해 전파.

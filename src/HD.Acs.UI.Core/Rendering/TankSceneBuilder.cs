@@ -16,7 +16,8 @@ public sealed record TankSceneInput(
     Func<Guid, string?> TaskStatusOf,
     bool HasRobotPosition,
     Pt3 RobotPosition,
-    Pt3? MoveMarker = null)
+    Pt3? MoveMarker = null,
+    double? RobotHeading = null)   // 도면 프레임 heading(rad). null=화살표 생략
 {
     public bool IsolateLevel => SelectedLevel is not null;
 }
@@ -28,6 +29,12 @@ public sealed record TankSceneInput(
 public static class TankSceneBuilder
 {
     public const double HighlightOffsetM = 0.02;
+    /// <summary>로봇 heading 화살표(바닥면) — 마커 원(0.4m) 밖으로 나오는 축 길이·화살촉 치수[m].</summary>
+    public const double HeadingShaftM = 0.85;
+    public const double HeadingTipM = 1.25;
+    public const double HeadingHeadBaseM = 0.8;
+    public const double HeadingHeadHalfWidthM = 0.28;
+    public const double HeadingLiftM = 0.05;   // 바닥 격자 위로 살짝 띄움(z-fighting 회피)
 
     private static readonly Rgba EdgeColor = Rgba.FromRgb(0xEA, 0xF2, 0xF8);
     private static readonly Rgba BandFill = Rgba.FromArgb(0xE0, 0xF5, 0xB0, 0x41);
@@ -51,10 +58,28 @@ public static class TankSceneBuilder
         AddOverlays(scene, input);
         AddFloorGrid(scene, input);
         if (input.HasRobotPosition)
+        {
+            if (input.RobotHeading is double heading) AddRobotHeading(scene, input.RobotPosition, heading);
             scene.Markers.Add(new Marker3(input.RobotPosition + new Pt3(0, 0, 0.4), RobotColor, RadiusWorld: 0.4, Stroke: Rgba.FromRgb(0xFF, 0xFF, 0xFF)));
+        }
         if (input.MoveMarker is { } mm)
             scene.Markers.Add(new Marker3(mm, MoveMarkerColor, RadiusWorld: 0.25, Stroke: Rgba.FromRgb(0xFF, 0xFF, 0xFF)));
         return scene;
+    }
+
+    /// <summary>
+    /// 로봇 heading 화살표 — 주행 평면(로봇 z) 위에 축(Segment3)+삼각 화살촉(Face3, 셰이딩 없음)을 그린다.
+    /// 마커 원은 오버레이(항상 위)라 축이 원 중심에서 나오는 것처럼 보인다. heading은 도면 프레임 rad(x축 기준 CCW).
+    /// </summary>
+    public static void AddRobotHeading(Scene3 scene, Pt3 robot, double headingRad)
+    {
+        var dir = new Pt3(Math.Cos(headingRad), Math.Sin(headingRad), 0);
+        var perp = new Pt3(-dir.Y, dir.X, 0);
+        var o = robot + new Pt3(0, 0, HeadingLiftM);
+        scene.Segments.Add(new Segment3(o, o + dir * HeadingShaftM, RobotColor, Thickness: 2.5));
+        scene.Faces.Add(new Face3(
+            new[] { o + dir * HeadingTipM, o + dir * HeadingHeadBaseM + perp * HeadingHeadHalfWidthM, o + dir * HeadingHeadBaseM - perp * HeadingHeadHalfWidthM },
+            RobotColor, LabelWhite, StrokeThickness: 1.0, Shade: false));
     }
 
     /// <summary>층 격리 모드의 바닥 클릭 평면 — z와 (x0,y0,x1,y1) 사각 범위. 격리 모드가 아니거나 지오메트리 없으면 null.</summary>

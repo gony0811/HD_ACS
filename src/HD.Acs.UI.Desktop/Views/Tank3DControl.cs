@@ -71,7 +71,7 @@ public sealed class Tank3DControl : Control
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TankViewModel.RobotDrawingX) or nameof(TankViewModel.RobotDrawingY)
-            or nameof(TankViewModel.RobotDrawingZ) or nameof(TankViewModel.HasRobotPosition)
+            or nameof(TankViewModel.RobotDrawingZ) or nameof(TankViewModel.RobotDrawingTheta) or nameof(TankViewModel.HasRobotPosition)
             or nameof(TankViewModel.ShowOverlays) or nameof(TankViewModel.ManualMoveMode))
             Rebuild();
     }
@@ -90,7 +90,7 @@ public sealed class Tank3DControl : Control
             _vm.Overlays.ToArray(), _vm.ShowOverlays, _vm.SelectedLevel,
             _vm.WorkItemStatusOf, _vm.TaskStatusOf,
             _vm.HasRobotPosition, new Pt3(_vm.RobotDrawingX, _vm.RobotDrawingY, _vm.RobotDrawingZ),
-            _moveMarker);
+            _moveMarker, _vm.RobotDrawingTheta);
         _scene = TankSceneBuilder.Build(_input);
         InvalidateVisual();
     }

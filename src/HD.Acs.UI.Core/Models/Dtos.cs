@@ -37,7 +37,8 @@ public sealed record RobotStateDto(
     string? OrderId,
     string? LastNodeId,
     bool Driving,
-    int Errors);
+    int Errors,
+    double? ReportedTheta = null);   // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
 
 /// <summary>SignalR "RobotConnection" 푸시. ConnectionState: ONLINE | OFFLINE | CONNECTIONBROKEN</summary>
 public sealed record RobotConnectionDto(
