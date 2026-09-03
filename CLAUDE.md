@@ -65,7 +65,7 @@ HD_ACS는 위 하드웨어를 직접 제어하는 로봇 컨트롤러가 아니�
 ## 기술 스택 (Tech Stack)
 
 - **관제 서버**: C# / ASP.NET Core — REST API + SignalR(실시간 푸시)
-- **주 운영 UI**: WPF 데스크톱 앱 (화물창 3D 뷰 + 전개도) — macOS 대응을 위해 **Avalonia 이행 진행 중**(docs/UI_CROSS_PLATFORM_REVIEW.md, Phase 0 공용 코어 분리 완료)
+- **주 운영 UI**: 데스크톱 앱 (화물창 3D 뷰 + 전개도) — **Avalonia 11 크로스플랫폼 헤드(HD.Acs.UI.Desktop, Win/macOS/Linux)로 이행 중**(ADR-005 개정, docs/UI_CROSS_PLATFORM_REVIEW.md). 공용 코어 HD.Acs.UI.Core를 WPF 헤드(HD.Acs.UI, 기존)와 공유하며, 3D 뷰(Phase 3) 완료 시까지 WPF 헤드 병행 유지
 - **보조 UI**: Web 대시보드, 태블릿 (REST API + SignalR 공용)
 - **로봇 통신**: VDA 5050 over MQTT (로봇 측 통합 운영 S/W와 연동, 온보드 실행형)
 - **메시징**: MQTT 브로커 (서버 내 배치, 제품 선정 미결)
@@ -95,7 +95,7 @@ HD_ACS/
 │   ├── INSPECTION_SCENARIO.md # 검사 시나리오 모델/상태 머신
 │   ├── TANK_WALL_LAYOUT.md    # 화물창 전개도 구성·벽면 naming rule (위치 주소 체계 기준)
 │   ├── TANK_RENDERING.md      # 선창 도면 렌더링 방법 (3D 셸·전개도·좌표 3단·역투영)
-│   ├── UI_CROSS_PLATFORM_REVIEW.md # UI macOS 대응 검토서 (WPF 결합 범위·대안 비교·Avalonia 이행안, 제안 단계)
+│   ├── UI_CROSS_PLATFORM_REVIEW.md # UI macOS 대응 검토서 → Avalonia 이행 기록 (Phase 0·1 완료, 3D=Phase 3)
 │   ├── GRAPH_DATA_MODEL.md    # 그래프 자료구조·DB 설계 (VDA 5050 Order 생성 기반)
 │   ├── DB_SCHEMA.md           # DB 스키마 카탈로그 (28테이블+2뷰, ERD)
 │   └── GLOSSARY.md            # 용어 정의
@@ -115,11 +115,19 @@ HD_ACS/
     │   ├── Primitives/            # Pt2 · Rgba (System.Windows.Point/Color 대체)
     │   └── Rendering/             # Plot2D (전개도 폴리곤 투영 공용)
     ├── HD.Acs.UI.Core.Tests/  # UI.Core xUnit (상태색 골든·투영·SignalR 디스패처 마샬링)
-    └── HD.Acs.UI/             # WPF 운영 앱 헤드 (Telerik UI for WPF·Fluent + HelixToolkit 3D, UI.Core 참조)
-        ├── Infrastructure/        # 컨버터(PointsConverter·WorkStatusToBrush) · RgbaExtensions
-        ├── Services/              # WPF 어댑터: ProjectDialogService(Win32) · WpfUiDispatcher · WpfDialogService
-        ├── Views/                 # UserControl (Telerik 컨트롤) · TankView(3D+전개도)
-        └── MainWindow.xaml        # 모드 탭 셸 (운영/계획/이력)
+    ├── HD.Acs.UI/             # WPF 운영 앱 헤드 (Windows 전용 — Telerik UI for WPF·Fluent + HelixToolkit 3D, UI.Core 참조)
+    │   ├── Infrastructure/        # 컨버터(PointsConverter·WorkStatusToBrush) · RgbaExtensions
+    │   ├── Services/              # WPF 어댑터: ProjectDialogService(Win32) · WpfUiDispatcher · WpfDialogService
+    │   ├── Views/                 # UserControl (Telerik 컨트롤) · TankView(3D+전개도)
+    │   └── MainWindow.xaml        # 모드 탭 셸 (운영/계획/이력)
+    ├── HD.Acs.UI.Desktop/     # Avalonia 11 크로스플랫폼 운영 앱 헤드 (Win/macOS/Linux, Fluent Dark, UI.Core 참조)
+    │   ├── AppHost.cs             # Generic Host DI (WPF와 동일 등록 + Avalonia 어댑터) — 테스트가 재사용
+    │   ├── Services/              # AvaloniaUiDispatcher · AvaloniaDialogService(MessageDialog) · AvaloniaProjectDialogService(StorageProvider)
+    │   ├── Infrastructure/        # 컨버터: EnumEquals·WorkStatusToBrush·Points·Point·KindToBrush·BoolToCursor
+    │   ├── Themes/                # Brushes.axaml(WPF와 동일 키) · Controls.axaml(클래스 스타일)
+    │   ├── Views/                 # 전 뷰 axaml (DataGrid·NumericUpDown 등 내장 컨트롤) · TankView 3D 탭은 Phase 3 플레이스홀더
+    │   └── MainWindow.axaml       # 모드 탭 셸 (운영/계획/이력)
+    └── HD.Acs.UI.Desktop.Tests/ # Avalonia.Headless.XUnit 스모크 (셸 로드·모드 전환·DataGrid·바인딩 경로 0오류)
 ```
 
 ## Claude 작업 가이드라인
@@ -136,6 +144,7 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 
 ## 변경 이력
 
+- 2026-09-03: **Avalonia 크로스플랫폼 헤드 신설(이행 Phase 1, 원안 Phase 2 전개도 포함)** — `src/HD.Acs.UI.Desktop`(Avalonia 11.3.20 + Fluent Dark + DataGrid 11.3.13, net8.0; 이름은 `HD.Acs.UI.Avalonia`가 `Avalonia.*` 참조를 가리는 C# 함정 때문에 Desktop). `AppHost`(WPF와 동일 DI + Avalonia 어댑터 3종: UiDispatcher·DialogService[자체 MessageDialog]·ProjectDialogService[StorageProvider *.hdacs]), Brushes.axaml(동일 18키)·Controls.axaml(클래스 셀렉터), 컨버터 6종(DataTrigger는 KindToBrush/BoolToCursor로 대체). 뷰 13종 이식: 셸(Menu·모드 ToggleButton·비상정지)·운영(DataGrid RowDetails 드릴다운·층 레일)·계획(시나리오/영역·작업/캘리브레이션, ESC KeyBindings)·AreaLayoutView(LayoutTransformControl 줌·터널링 휠·좌/우클릭 픽)·TankView 전개도 탭·NewProjectDialog(`ShowDialog<bool>`)·MessageDialog. **3D 탭은 Phase 3 플레이스홀더**. 코어 변경: `IProjectDialogService` 비동기 계약(WPF 구현 Task 래핑 → **WPF 헤드 재빌드 필요**), `TaskSeg` Pt2 파생 속성(Line StartPoint/EndPoint). 검증: `HD.Acs.UI.Desktop.Tests`(Avalonia.Headless.XUnit) 5건 통과 — 셸 로드·모드 전환·DataGrid 6개 컬럼·전 모드/탭 실체화 후 바인딩 경로 오류 0건·다이얼로그 생성; UI.Core.Tests 16건 유지; Linux 빌드 0 error. **ADR-005 개정**(Avalonia 이행·공용 코어·3D 소프트웨어 투영·WPF 병행 유지) + Q5″ 등재. 실제 화면은 사용자 Windows/mac에서 `dotnet run --project src/HD.Acs.UI.Desktop` 확인 필요
 - 2026-09-03: **UI 공용 코어 추출(Avalonia 이행 Phase 0)** — 신규 `HD.Acs.UI.Core`(net8.0, 프레임워크 중립): Models 2·Services 9·ViewModels 10을 `git mv`(네임스페이스 `HD.Acs.UI.*` 유지로 WPF 헤드 변경 최소화). WPF 결합 절단: `Pt2`/`Rgba` 중립 타입(AreaPoly.Points·FacePlot.Outline·FaceOutline/ActiveBand·StatusColors/WeldLineColor), `IUiDispatcher`(MonitoringClient의 Dispatcher 대체, 생성자 주입), `IDialogService`(ShellViewModel MessageBox 4곳 → ShowErrorAsync/ConfirmAsync), 렌더 레코드 `PlotShapes.cs` 분리, `Rendering/Plot2D`로 두 VM의 폴리곤 투영 중복 제거. WPF 헤드: `WpfUiDispatcher`·`WpfDialogService`·`RgbaExtensions.ToMediaColor/ToBrush`·`PointsConverter`(XAML `Points=` 7곳) + DI 2건 + ProjectReference, MainWindow `xmlns:vm`에 assembly 지정. `HD.Acs.UI.Core.Tests` 신설(상태색 골든 12·투영 3·SignalR 디스패처 1 = 16건 통과, Linux 샌드박스 dotnet 8 SDK). UI.Core는 도메인 Core 미참조(API-First 경계). **WPF 헤드는 Linux에서 빌드 불가(net8.0-windows+Telerik 피드)라 Windows 빌드·회귀 확인 필요**. 후속: Phase 1 Avalonia 헤드 골격
 - 2026-09-03: **UI macOS 대응 검토서 신설**(docs/UI_CROSS_PLATFORM_REVIEW.md, 제안 단계·코드 무변경) — HD.Acs.UI의 WPF/Telerik/Helix 결합 범위 진단(Models·API/SignalR 서비스·VM 7/10은 이미 중립, 결합은 XAML 13개·Telerik 168곳·TankView 3D 400줄·Dispatcher/Win32 대화상자/MessageBox/PointCollection·Color 소수 지점에 집중), 대안 5종 비교(Avalonia/MAUI/Uno/Web/가상화) 후 **Avalonia 11 + 공용 코어(HD.Acs.UI.Core) 분리** 권장, Telerik→Avalonia 컨트롤 대응표, 3D는 자체 소프트웨어 투영 렌더러 권장(씬 규모 수십 도형), 단계별 이행·검증·리스크. ADR-005 개정은 사용자 결정 후
 - 2026-09-03: **로봇 상태 위치 표시를 도면 좌표로 통일** — RobotStatusViewModel이 SignalR/API의 raw `agvPosition`(SLAM)을 그대로 표시하던 문제 수정. map별 유효 T_W_D를 조회해 `T_W_D⁻¹` 적용 후 도면 `(x,y)`만 표시하며, 캘리브레이션 없음/조회 실패 때 원시 좌표 폴백을 금지하고 명시 상태를 표시한다. 실시간 state 비동기 경합은 버전 토큰으로 차단하고 calibration은 10초 캐시해 2초 state 주기 API 폭주를 방지. 3D Tank 마커의 기존 역변환과 표시 계약 통일.

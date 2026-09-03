@@ -14,7 +14,14 @@ public sealed record AreaPoly(IReadOnlyList<Pt2> Points, double LabelX, double L
 
 /// <summary>작업(용접선) 선분(캔버스 px) — 끝점 마커·중점 배지 앵커 포함. Status=액션 상태(null=계획 표시, 주황).</summary>
 public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge,
-    string? Status = null);
+    string? Status = null)
+{
+    // 점 형태 파생값 — Line.StartPoint/EndPoint(Avalonia)처럼 Point를 요구하는 헤드용. WPF는 X1..Y2를 직접 바인딩.
+    public Pt2 Start => new(X1, Y1);
+    public Pt2 End => new(X2, Y2);
+    public Pt2 EndMarker => new(EndX, EndY);
+    public Pt2 Mid => new(MidX, MidY);
+}
 
 /// <summary>정차점 마커(영역 centroid, 캔버스 px).</summary>
 public sealed record StationMarker(double Left, double Top, string Label);

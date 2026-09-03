@@ -85,6 +85,13 @@
 - 실시간 상태 전파는 폴링이 아닌 **SignalR(WebSocket)** 허브로 다중 클라이언트에 푸시한다.
 - 3D/전개도 렌더링은 WPF 클라이언트 책임 (라이브러리 후보: HelixToolkit 등 — ⬜ Q5).
 
+**개정** (2026-09-03, macOS 운영 요구):
+- 주 운영 UI를 **Avalonia 11 크로스플랫폼 데스크톱 앱(Win/macOS/Linux)** 으로 이행한다. 검토·대안 비교·이행 단계는 `docs/UI_CROSS_PLATFORM_REVIEW.md`.
+- 구조: 프레임워크 중립 공용 코어 `HD.Acs.UI.Core`(Models·REST/SignalR 서비스·ViewModels, net8.0) + 헤드 2종 — `HD.Acs.UI`(WPF, 기존)와 `HD.Acs.UI.Desktop`(Avalonia, 신규). 두 헤드는 같은 VM을 바인딩하며 UI 스레드·대화상자는 `IUiDispatcher`/`IDialogService`/`IProjectDialogService` 추상화로 주입한다.
+- 컨트롤: Telerik(Avalonia 라인 없음)은 Avalonia 내장 컨트롤(DataGrid·NumericUpDown·TabControl 등)로 대체. 3D 뷰는 HelixToolkit 등가물이 없어 **코어의 순수 카메라·투영·깊이 정렬 + 2D DrawingContext 소프트웨어 투영 렌더러**로 구현한다(Phase 3, 씬 규모가 수십 도형이라 충분).
+- WPF 헤드는 Avalonia 헤드가 기능 동등성(3D 포함)에 도달할 때까지 유지하고, 이후 은퇴 여부를 결정한다(Telerik 라이선스·이중 유지보수 제거).
+- API-First·SignalR 푸시 원칙은 불변(두 헤드 모두 동일 계약만 사용).
+
 ---
 
 ## ADR-006. 기술 스택 및 유지보수 ✅
@@ -235,7 +242,8 @@
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |
 | Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ✅ 해소 — **HelixToolkit.Wpf** 확정 (HD.Acs.UI에 도입). UI 컨트롤 스위트는 Telerik UI for WPF(Fluent 테마), 전개도는 Canvas 기반 2D. UI DI는 백엔드와 일관되게 MS.DI(Generic Host) 사용 |
-| Q5′ | UI 프레임워크 재검토 | ADR-005, 009 | ✅ 해소 — 3D 요구 우선, WPF 확정 |
+| Q5′ | UI 프레임워크 재검토 | ADR-005, 009 | ✅ 해소 — 3D 요구 우선, WPF 확정 (2026-09-03 ADR-005 개정으로 대체) |
+| Q5″ | macOS 운영 대응 UI 프레임워크 | ADR-005 | ✅ 해소 — **Avalonia 11 + 공용 코어(HD.Acs.UI.Core)** 채택, 3D=소프트웨어 투영 렌더러(Phase 3). Phase 0(코어 분리)·Phase 1(Avalonia 헤드, 3D 제외 전 뷰) 완료 — `docs/UI_CROSS_PLATFORM_REVIEW.md` |
 | Q6 | 화물창 맵 데이터 소스 | ADR-008 | ⬜ CAD/도면 기반 vs SLAM 맵 기반 |
 | Q7 | 안전 요구사항 명세 (관제 정지의 위상) | ADR-007 | ⬜ 하드웨어 E-Stop 체계와의 관계 문서화 |
 | Q8 | 미션 오케스트레이터 구현 방식 | ADR-010 | ✅ 해소 — Stateless 상태머신 확정 |

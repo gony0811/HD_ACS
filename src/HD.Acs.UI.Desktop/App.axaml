@@ -1,0 +1,18 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.App"
+             RequestedThemeVariant="Dark">
+    <!-- Fluent 다크(WPF 헤드의 Telerik Fluent Dark에 대응) + DataGrid 테마 + 앱 공용 스타일 -->
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+        <StyleInclude Source="avares://HD.Acs.UI.Desktop/Themes/Controls.axaml" />
+    </Application.Styles>
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://HD.Acs.UI.Desktop/Themes/Brushes.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

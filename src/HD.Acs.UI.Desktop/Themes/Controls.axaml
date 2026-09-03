@@ -1,0 +1,77 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      앱 공용 컨트롤 스타일(클래스 셀렉터). WPF 뷰의 키 있는 Style(Card/CardHead/Lbl/TxtField/ModeTab)과
+      RadNumericUpDown·RadComboBox 암시 스타일을 Avalonia 클래스로 옮긴 것. 뷰에서 Classes="card" 식으로 사용.
+    -->
+
+    <!-- 상단 모드 탭 -->
+    <Style Selector="ToggleButton.modeTab">
+        <Setter Property="MinWidth" Value="72" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="1,0" />
+    </Style>
+
+    <!-- 비상정지 -->
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="#C0392B" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Padding" Value="14,6" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#E74C3C" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- 운영 화면 카드 -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+    </Style>
+    <Style Selector="TextBlock.cardHead">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <!-- 폼 -->
+    <Style Selector="TextBlock.lbl">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+        <Setter Property="MinWidth" Value="96" />
+    </Style>
+    <Style Selector="TextBox.field">
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="NumericUpDown.field">
+        <Setter Property="Width" Value="100" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="FormatString" Value="0.###" />
+        <Setter Property="Increment" Value="0.1" />
+    </Style>
+    <Style Selector="ComboBox.field">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.form">
+        <Setter Property="MinHeight" Value="30" />
+    </Style>
+
+    <!-- 그리드: 읽기 전용 목록 공통 -->
+    <Style Selector="DataGrid">
+        <Setter Property="GridLinesVisibility" Value="Horizontal" />
+        <Setter Property="HeadersVisibility" Value="Column" />
+        <Setter Property="CanUserReorderColumns" Value="False" />
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+    </Style>
+</Styles>

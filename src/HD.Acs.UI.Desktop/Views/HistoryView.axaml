@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.Views.HistoryView"
+             TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- 플레이스홀더: 이력 조회 백엔드(runs 목록·inspection_result 조회 API)가 아직 없다. -->
+    <Grid>
+        <Border MaxWidth="560" VerticalAlignment="Center" HorizontalAlignment="Center"
+                Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1" CornerRadius="12" Padding="28">
+            <StackPanel>
+                <TextBlock Text="이력 · 리포트" FontSize="18" FontWeight="Bold" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="검사 실행 이력과 용접선별 촬영 성공/실패 타임라인, 리포트 내보내기가 표시될 영역입니다." />
+                <Border Margin="0,18,0,0" Background="{DynamicResource AppInfoBgBrush}"
+                        BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="활성화에 필요한 후속 백엔드 작업" FontWeight="Bold"
+                                   Foreground="{DynamicResource AppInfoFgBrush}" />
+                        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" FontSize="12.5"
+                                   Text="① GET /api/runs — 과거 런 목록/필터 조회 (현재는 runId를 알아야 조회 가능)&#10;② hist.inspection_result 조회 엔드포인트 — 촬영 위치·시각·성공/실패 (데이터는 이미 기록 중)&#10;③ 용접선 타임라인 + 검사 리포트(PDF/CSV) 생성" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

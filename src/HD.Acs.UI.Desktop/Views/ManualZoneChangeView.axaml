@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.Views.ManualZoneChangeView">
+    <!-- DataContext = ManualZoneChangeViewModel -->
+    <StackPanel Margin="10" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <TextBlock Text="작업자 수동 층(존) 변경 · Operator 권한 [Q9]" FontWeight="Bold" Margin="0,0,0,2" />
+        <TextBlock Text="엘리베이터로 로봇을 이동시킨 뒤 현재 층을 지정합니다. 감사 로그에 기록됩니다."
+                   TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,10" />
+
+        <Grid Margin="0,0,0,6" ColumnDefinitions="Auto,*">
+            <TextBlock Text="로봇" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding RobotIds}"
+                      SelectedItem="{Binding SelectedRobotId}" />
+        </Grid>
+
+        <!-- 수동 지정 vs 로봇 보고 나란히 대조 -->
+        <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="8" Margin="0,4,0,8">
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="수동 지정 층" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="로봇 보고 층" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding ManualMapId}" FontSize="16" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ReportedMapId}" FontSize="16" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding ManualUpdatedBy, StringFormat='by {0}'}"
+                           Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" />
+            </Grid>
+        </Border>
+
+        <Border Background="{DynamicResource AppWarnBgBrush}" BorderBrush="{DynamicResource AppWarnBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6"
+                Margin="0,0,0,8" IsVisible="{Binding IsMismatch}">
+            <TextBlock Text="{Binding MismatchWarning}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
+        </Border>
+
+        <Grid Margin="0,0,0,6" ColumnDefinitions="Auto,*">
+            <TextBlock Text="지정 층" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Floors}"
+                      DisplayMemberBinding="{Binding Level}"
+                      SelectedItem="{Binding SelectedFloor}" />
+        </Grid>
+
+        <Grid Margin="0,0,0,8" ColumnDefinitions="*,*,*">
+            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                <TextBlock Text="X" />
+                <NumericUpDown Value="{Binding X}" FormatString="0.###" Increment="0.1" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="2,0">
+                <TextBlock Text="Y" />
+                <NumericUpDown Value="{Binding Y}" FormatString="0.###" Increment="0.1" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Margin="4,0,0,0">
+                <TextBlock Text="Theta" />
+                <NumericUpDown Value="{Binding Theta}" FormatString="0.###" Increment="0.1" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal">
+            <Button Content="층 지정 적용" Command="{Binding ApplyZoneChangeCommand}" Margin="0,0,6,0" />
+            <Button Content="새로고침" Command="{Binding RefreshContextCommand}" />
+        </StackPanel>
+
+        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,8,0,0" />
+    </StackPanel>
+</UserControl>

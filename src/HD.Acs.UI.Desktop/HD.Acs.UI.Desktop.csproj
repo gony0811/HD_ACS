@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    HD.Acs.UI.Desktop — Avalonia 11 크로스플랫폼 운영 앱 헤드 (Windows / macOS / Linux).
+    Models·Services·ViewModels는 HD.Acs.UI.Core(프레임워크 중립)를 그대로 공유하고,
+    이 프로젝트는 뷰(axaml)·Avalonia 어댑터(디스패처·대화상자·컨버터)만 가진다.
+    이름을 HD.Acs.UI.Avalonia로 짓지 않은 이유: C#에서 자기 네임스페이스 안의 `Avalonia.*` 참조가
+    프레임워크 네임스페이스 대신 자기 하위 네임스페이스로 해석되는 함정 회피.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HD.Acs.UI.Desktop</RootNamespace>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- 바인딩은 리플렉션 기본(WPF 뷰와 동일 표기). 컴파일 바인딩(x:DataType)은 후속 최적화 -->
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 브랜드 로고 등 이미지 자산 — avares://HD.Acs.UI.Desktop/Assets/... -->
+    <AvaloniaResource Include="Assets\**\*.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <!-- DataGrid 11.3.13 = 최신 11.x, 의존 Avalonia >= 11.3.13 -->
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.20" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HD.Acs.UI.Core\HD.Acs.UI.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

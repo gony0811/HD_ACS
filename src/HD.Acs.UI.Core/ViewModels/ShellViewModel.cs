@@ -108,10 +108,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NewProjectAsync()
     {
-        if (!_projectDialog.ShowNewProject()) return;   // 취소/실패 시 파일 미생성
+        if (!await _projectDialog.ShowNewProjectAsync()) return;   // 취소/실패 시 파일 미생성
         Mission.TankId = AreaPlanning.TankId;            // 시나리오 생성 대상 선창 동기화
         await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
-        var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
+        var path = await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
         await SaveToAsync(path);
     }
@@ -120,7 +120,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task OpenProjectAsync()
     {
-        var path = _projectDialog.PickOpenPath();
+        var path = await _projectDialog.PickOpenPathAsync();
         if (path is null) return;
         try
         {
@@ -159,7 +159,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task SaveProjectAsync()
     {
-        var path = _project.CurrentPath ?? _projectDialog.PickSavePath(AreaPlanning.TankId);
+        var path = _project.CurrentPath ?? await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) return;
         await SaveToAsync(path);
     }
@@ -168,7 +168,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task SaveProjectAsAsync()
     {
-        var path = _projectDialog.PickSavePath(AreaPlanning.TankId);
+        var path = await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) return;
         await SaveToAsync(path);
     }

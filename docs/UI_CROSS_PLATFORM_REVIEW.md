@@ -2,7 +2,7 @@
 
 ## 0. 배경
 
-> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(WPF 헤드 Windows 빌드 검증 대기)** — ADR-005 개정은 Phase 1 착수 시.
+> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(3D 제외 전 뷰 이식, 헤드리스 검증)** — ADR-005 개정 반영(2026-09-03). 다음: Phase 3 3D 소프트웨어 투영 렌더러.
 
 HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행된다.
 요구사항: **동일한 프로그램 구조(MVVM·Generic Host DI·REST/SignalR 계약 계층·운영/계획/이력 모드 셸)를 유지하면서 macOS에서도 운영** 가능하게 할 방법을 검토한다.
@@ -116,7 +116,9 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 5. WPF 헤드: `Infrastructure/Converters.cs`에 `Pt2→PointCollection`, `Rgba→Brush` 컨버터 추가, `WpfDispatcher`·`WpfDialogService` 어댑터, `App.xaml.cs` DI 등록. XAML 바인딩 경로는 변경 없음(컨버터만 삽입).
 6. 검증: WPF 빌드 0 error, 운영/계획 화면 회귀 확인.
 
-### Phase 1 — Avalonia 헤드 골격
+### Phase 1 — Avalonia 헤드 골격 — ✅ 2026-09-03 구현 (원안 Phase 2 전개도 캔버스 포함)
+실적: `src/HD.Acs.UI.Desktop/`(Avalonia 11.3.20 · Themes.Fluent Dark · Controls.DataGrid 11.3.13, net8.0, `HD.Acs.UI.Avalonia`가 아닌 이유=자기 네임스페이스가 `Avalonia.*` 참조를 가리는 C# 함정). 부트스트랩 `AppHost`(WPF App.xaml.cs와 동일 DI + `AvaloniaUiDispatcher`/`AvaloniaDialogService`(자체 MessageDialog)/`AvaloniaProjectDialogService`(NewProjectDialog + StorageProvider *.hdacs)), `Themes/Brushes.axaml`(WPF와 동일 18키)·`Controls.axaml`(클래스 셀렉터), 컨버터 6종(EnumEquals·WorkStatusToBrush·Points·Point·KindToBrush[DataTrigger 대체]·BoolToCursor). 뷰 13종 이식 — MainWindow(앱바·Menu·모드 ToggleButton·비상정지)·Operation·Planning·History·RobotStatus·Alarms·ManualZoneChange·Calibration·AreaManagement(KeyBindings ESC)·**AreaLayoutView**(LayoutTransformControl 줌·터널링 휠·PointerPressed 좌/우클릭·Cursor 바인딩)·**TankView**(헤더+전개도 탭 완전 이식, **3D 탭은 Phase 3 플레이스홀더**)·NewProjectDialog(`ShowDialog<bool>`)·MessageDialog. DataGrid 6개(RowDetails VisibleWhenSelected 포함, 삭제 버튼은 `$parent[DataGrid].DataContext.Cmd`). 코어 변경 2건: `IProjectDialogService` **비동기 계약**(WPF 구현은 Task 래핑 — **WPF 헤드 재빌드 필요**), `TaskSeg`에 `Start/End/Mid/EndMarker`(Pt2) 파생 속성(Avalonia Line은 StartPoint/EndPoint). 검증: `HD.Acs.UI.Desktop.Tests`(Avalonia.Headless.XUnit) 5건 통과 — 셸 로드·모드 전환·DataGrid 6개 컬럼 수·전 모드/탭 실체화 후 바인딩 경로 오류 0건(null 경로 경고 4건은 데이터 없음 상태 정상, FallbackValue 처리)·NewProjectDialog/MessageDialog 생성. Linux 샌드박스 빌드 0 error. 실제 화면 확인은 사용자(Windows/mac `dotnet run --project src/HD.Acs.UI.Desktop`).
+원안:
 1. `src/HD.Acs.UI.Avalonia/`(Avalonia 11.x Desktop 템플릿, `Avalonia.Controls.DataGrid`, `Avalonia.Themes.Fluent`). `App.axaml.cs`에 기존 `App.xaml.cs`와 동일한 Generic Host DI(코어 VM 싱글턴, `AvaloniaDispatcher`·`AvaloniaDialogService`·`AvaloniaProjectDialogService`).
 2. `MainWindow.axaml`: 앱바(로고·파일 메뉴/NativeMenu·모드 ToggleButton 3개·연결칩·비상정지)·상태바·본문 3뷰 `IsVisible` 전환 — 현행 `MainWindow.xaml` 1:1.
 3. `Themes/Brushes.axaml` 이식, Dark variant.

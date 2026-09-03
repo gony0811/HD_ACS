@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.Views.RobotStatusView"
+             TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = RobotStatusViewModel -->
+    <Grid Margin="10" RowDefinitions="Auto,Auto,*,Auto">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="로봇 선택" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox Width="180" ItemsSource="{Binding Robots}"
+                      DisplayMemberBinding="{Binding Name}"
+                      SelectedItem="{Binding SelectedRobot}" />
+        </StackPanel>
+
+        <Border Grid.Row="1" BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="0,0,0,1" Padding="0,0,0,8" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="{Binding SelectedRobot.RobotId, StringFormat='ID: {0}'}" FontWeight="Bold" />
+                <TextBlock Text="{Binding SelectedRobot.Manufacturer, StringFormat='제조사: {0}'}" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="배터리" Margin="0,0,0,2" />
+            <ProgressBar Minimum="0" Maximum="100" Height="18" Value="{Binding BatteryPct, FallbackValue=0}" />
+            <TextBlock Text="{Binding BatteryPct, StringFormat='{}{0:F0} %', FallbackValue='- %'}"
+                       HorizontalAlignment="Right" Margin="0,0,0,10" />
+
+            <TextBlock Text="{Binding ConnectionState, StringFormat='연결: {0}'}" />
+            <TextBlock Text="{Binding MapId, StringFormat='층(mapId): {0}'}" />
+            <TextBlock Text="{Binding Position, StringFormat='도면 위치: {0}'}" />
+            <TextBlock Text="{Binding Driving, StringFormat='주행중: {0}'}" />
+            <TextBlock Text="{Binding Errors, StringFormat='오류 수: {0}'}" Foreground="{DynamicResource AppErrorBrush}" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Text="{Binding StatusMessage}" TextWrapping="Wrap"
+                   Foreground="{DynamicResource AppErrorBrush}" Margin="0,8,0,0" />
+    </Grid>
+</UserControl>

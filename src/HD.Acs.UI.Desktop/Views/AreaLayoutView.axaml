@@ -1,0 +1,118 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+             x:Class="HD.Acs.UI.Desktop.Views.AreaLayoutView">
+    <!-- DataContext = AreaPlanningViewModel(상속). 선택 면 (u,v) 전개도 — 영역 폴리곤·정차 마커·작업 선분·입력 미리보기. -->
+    <UserControl.Resources>
+        <conv:PointsConverter x:Key="Pts" />
+        <conv:PointConverter x:Key="Pt" />
+        <conv:BoolToCursorConverter x:Key="PickCursor" />
+    </UserControl.Resources>
+    <DockPanel Margin="12" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="10,6" Margin="0,0,0,8" CornerRadius="3">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="{Binding SelectedWallInfo, StringFormat='벽면-로컬 (u,v): {0}'}" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"
+                               Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 입력 중=파란 점선 박스·주황 점선. 휠=확대/축소." />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="ZoomLabel" Text="100%" VerticalAlignment="Center" Margin="0,0,8,0" MinWidth="42" TextAlignment="Right" />
+                    <Button Content="－" Click="ZoomOut_Click" MinWidth="30" Margin="0,0,4,0" ToolTip.Tip="축소" />
+                    <Button Content="＋" Click="ZoomIn_Click" MinWidth="30" Margin="0,0,4,0" ToolTip.Tip="확대" />
+                    <Button Content="맞춤" Click="Fit_Click" MinWidth="44" ToolTip.Tip="전체 보기" />
+                </StackPanel>
+            </Grid>
+        </Border>
+        <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppCanvasBrush}">
+            <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="10">
+                <!-- 줌은 LayoutTransformControl(레이아웃 크기까지 반영 → 스크롤 범위가 함께 커짐) -->
+                <LayoutTransformControl x:Name="ZoomHost" HorizontalAlignment="Left" VerticalAlignment="Top">
+                    <Canvas x:Name="PlotCanvas" Width="600" Height="600" Background="Transparent"
+                            Cursor="{Binding PickMode, Converter={StaticResource PickCursor}}"
+                            PointerPressed="PlotCanvas_PointerPressed">
+                        <Rectangle Width="600" Height="600" Fill="{DynamicResource AppCanvasBrush}" Stroke="{DynamicResource AppBorderBrush}" StrokeThickness="1" />
+                        <!-- 면 전체(회색 음영·비활성) — 마구리(F/A)는 팔각, 그 외 직사각형 -->
+                        <Polygon Points="{Binding FaceOutline, Converter={StaticResource Pts}}" Fill="#33AAB0B7" Stroke="#95A5A6" StrokeThickness="1.2" />
+                        <!-- 선택 층 활성 밴드(밝게) -->
+                        <Polygon Points="{Binding ActiveBand, Converter={StaticResource Pts}}" Fill="#1A2ECC71" Stroke="#27AE60" StrokeThickness="1.4" />
+                        <!-- 타 층 영역(회색·비활성) -->
+                        <ItemsControl ItemsSource="{Binding InactiveAreaBoxes}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Polygon Points="{Binding Points, Converter={StaticResource Pts}}" Fill="#22808080" Stroke="#88999999" StrokeThickness="1" />
+                                        <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="10" Foreground="#7F8C8D" />
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 선택 층 영역(활성·녹색) -->
+                        <ItemsControl ItemsSource="{Binding AreaBoxes}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Polygon Points="{Binding Points, Converter={StaticResource Pts}}" Fill="#2627AE60" Stroke="#229954" StrokeThickness="1.2" />
+                                        <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="11" FontWeight="Bold" Foreground="#186A3B" />
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 입력 중 영역 미리보기 (파란 점선) -->
+                        <ItemsControl ItemsSource="{Binding DraftAreas}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Polygon Points="{Binding Points, Converter={StaticResource Pts}}" Fill="#1A2980B9" Stroke="#2980B9" StrokeThickness="1.5" StrokeDashArray="4,3" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 작업 용접선 + 끝점 + seq 배지 -->
+                        <ItemsControl ItemsSource="{Binding TaskSegments}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
+                                              Stroke="#E67E22" StrokeThickness="2.5" />
+                                        <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="8" Height="8" Fill="#CA6F1E" />
+                                        <Border Canvas.Left="{Binding MidX}" Canvas.Top="{Binding MidY}" Background="#FEF9E7" BorderBrush="#B7950B" BorderThickness="1" CornerRadius="2" Padding="2,0">
+                                            <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="#7D6608" />
+                                        </Border>
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 입력 중 용접선 미리보기 (점선) -->
+                        <ItemsControl ItemsSource="{Binding DraftSegments}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
+                                              Stroke="#D35400" StrokeThickness="2" StrokeDashArray="4,3" />
+                                        <Ellipse Canvas.Left="{Binding X1}" Canvas.Top="{Binding Y1}" Width="7" Height="7" Fill="#27AE60" />
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 정차점 = 영역 중심 (보라 채움) -->
+                        <ItemsControl ItemsSource="{Binding StationMarkers}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Ellipse Canvas.Left="{Binding Left}" Canvas.Top="{Binding Top}" Width="14" Height="14"
+                                                 Fill="#8E44AD" Stroke="White" StrokeThickness="1.5" ToolTip.Tip="{Binding Label}" />
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Canvas>
+                </LayoutTransformControl>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</UserControl>
