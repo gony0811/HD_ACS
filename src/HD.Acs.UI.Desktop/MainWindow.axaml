@@ -13,7 +13,7 @@
         <conv:EnumEqualsConverter x:Key="EnumEq" />
     </Window.Resources>
 
-    <!-- macOS 시스템 메뉴바(파일 메뉴) — 창 내 Menu와 같은 명령. Windows/Linux에서는 무시되고 창 내 Menu가 표시된다. -->
+    <!-- macOS 시스템 메뉴바(파일 메뉴, ⌘ 단축키) — 창 내 Menu와 같은 명령의 보조 경로. 창 내 Menu는 전 플랫폼에서 항상 표시. Windows/Linux에서는 무시된다. -->
     <NativeMenu.Menu>
         <NativeMenu>
             <NativeMenuItem Header="파일">
