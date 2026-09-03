@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using HD.Acs.UI.Infrastructure;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.ViewModels;
 using HelixToolkit.Wpf;
@@ -245,7 +246,8 @@ public partial class TankView : UserControl
             if (pts3d.Count >= 3)
             {
                 // work_item 상태색 (계획=녹, 대기=회, 배차=파랑, 완료=녹(진), 스킵·실패=빨강)
-                var (fillC, lineC) = ViewModels.TankViewModel.StatusColors(_vm.WorkItemStatusOf(a.AreaId));
+                var (fillR, lineR) = ViewModels.TankViewModel.StatusColors(_vm.WorkItemStatusOf(a.AreaId));
+                var fillC = fillR.ToMediaColor(); var lineC = lineR.ToMediaColor();
                 var areaFill = new DiffuseMaterial(new SolidColorBrush(fillC));
                 if (!linesByColor.TryGetValue(lineC, out var areaLines))
                     linesByColor[lineC] = areaLines = new LinesVisual3D { Color = lineC, Thickness = 2.0 };
@@ -261,7 +263,7 @@ public partial class TankView : UserControl
             {
                 if (!TryPoint(wall, t.StartU, t.StartV, out var s) || !TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
                 s += off; e += off;
-                var weldC = ViewModels.TankViewModel.WeldLineColor(_vm.TaskStatusOf(t.TaskId));
+                var weldC = ViewModels.TankViewModel.WeldLineColor(_vm.TaskStatusOf(t.TaskId)).ToMediaColor();
                 if (!weldByColor.TryGetValue(weldC, out var weldLines))
                     weldByColor[weldC] = weldLines = new LinesVisual3D { Color = weldC, Thickness = 3.0 };
                 weldLines.Points.Add(s); weldLines.Points.Add(e);

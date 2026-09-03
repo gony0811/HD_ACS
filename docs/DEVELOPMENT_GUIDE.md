@@ -117,7 +117,7 @@ HD_ACS 저장소 타임라인:
 | 좌표 변환 | `HD.Acs.Core/Geometry/DrawingTransform.cs` |
 | DB 스키마/엔티티 | `db/schema.sql` ↔ `HD.Acs.Data/Entities/*` + `AcsDbContext` (snake_case 매핑) — **양쪽 동시 갱신** |
 | 시뮬레이터 동작 | `HD.Acs.Simulator/Program.cs` / 검증 드라이버 `HD.Acs.SimTest/` |
-| UI 패널 추가 | `HD.Acs.UI/Views` + `ViewModels` + `App.xaml.cs` DI 등록 + `MainWindow.xaml` 도킹 + `IAcsApiClient` 계약 |
+| UI 패널 추가 | `HD.Acs.UI.Core/ViewModels`(프레임워크 중립 VM — System.Windows 금지) + `HD.Acs.UI/Views` + `App.xaml.cs` DI 등록 + `IAcsApiClient` 계약. UI 스레드·대화상자는 `Abstractions/IUiDispatcher·IDialogService` 경유 |
 
 ---
 
@@ -131,7 +131,7 @@ HD_ACS 저장소 타임라인:
 2. **작업 지시 예시**: "SPEC_PHASE2_ACS.md §4.2 기준으로 MissionService 릴리즈 payload에 T_W_D 적용과
    param_schema 검증을 구현해줘. 부록 A golden fixture와 필드 단위 일치하는 테스트 포함." —
    섹션 번호로 지시하면 사양서가 곧 요구사항 명세가 된다.
-3. **검증 루프**: 단위 테스트는 `dotnet test src/HD.Acs.Core.Tests`, 통신 검증은 `src/run_simtest.sh`.
+3. **검증 루프**: 단위 테스트는 `dotnet test src/HD.Acs.Core.Tests`·`dotnet test src/HD.Acs.UI.Core.Tests`, 통신 검증은 `src/run_simtest.sh`.
    payload 변경 시 SPEC 부록 A와의 golden test를 깨뜨리지 않는지 확인.
 4. **완료 후 의무**: 결정이 새로 내려지면 ADR 갱신, 인터페이스가 바뀌면 해당 docs/ 문서와 CLAUDE.md 변경 이력에 한 줄 추가.
    이 관행 덕분에 대화 기억이 사라져도 문서로 복원된다 — 이 가이드 자체가 그 산물이다.

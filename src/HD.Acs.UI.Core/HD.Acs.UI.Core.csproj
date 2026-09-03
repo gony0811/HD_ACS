@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    HD.Acs.UI.Core — UI 공용 코어(프레임워크 중립, net8.0).
+    Models(DTO)·Services(REST/SignalR/프로젝트 파일)·ViewModels(CommunityToolkit.Mvvm)를 담으며
+    WPF·Avalonia 등 어떤 UI 프레임워크 어셈블리도 참조하지 않는다 (net8.0 타깃 자체가 게이트).
+    UI 프레임워크가 제공해야 하는 것(UI 스레드 마샬링·대화상자)은 Abstractions/의 인터페이스로 주입받는다.
+    RootNamespace는 기존 HD.Acs.UI를 유지해 WPF 헤드의 XAML/코드 참조 변경을 최소화한다.
+    도메인 프로젝트(HD.Acs.Core)는 참조하지 않는다 — UI는 REST/SignalR 계약(API-First, ADR-005)만 사용.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HD.Acs.UI</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+  </ItemGroup>
+</Project>

@@ -1,8 +1,8 @@
 using System.IO;
 using System.Net.Http;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HD.Acs.UI.Abstractions;
 using HD.Acs.UI.Services;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +18,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly IAcsApiClient _api;
     private readonly IProjectService _project;
     private readonly IProjectDialogService _projectDialog;
+    private readonly IDialogService _dialog;
     private readonly string _operatorId;
     private const string BaseTitle = "HD_ACS — LNG 화물창 용접검사로봇 관제";
 
@@ -40,6 +41,7 @@ public sealed partial class ShellViewModel : ObservableObject
         IAcsApiClient api,
         IProjectService project,
         IProjectDialogService projectDialog,
+        IDialogService dialog,
         IOptions<AcsOptions> options,
         RobotStatusViewModel robotStatus,
         MissionViewModel mission,
@@ -53,6 +55,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _api = api;
         _project = project;
         _projectDialog = projectDialog;
+        _dialog = dialog;
         _operatorId = options.Value.OperatorId;
         RobotStatus = robotStatus;
         Mission = mission;
@@ -132,7 +135,7 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show(DescribeProjectFailure("열기", ex), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            await _dialog.ShowErrorAsync(DescribeProjectFailure("열기", ex), "오류");
         }
     }
 
@@ -180,7 +183,7 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show(DescribeProjectFailure("저장", ex), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            await _dialog.ShowErrorAsync(DescribeProjectFailure("저장", ex), "오류");
         }
     }
 
@@ -195,11 +198,11 @@ public sealed partial class ShellViewModel : ObservableObject
         var robot = RobotStatus.SelectedRobot;
         if (robot is null) return;
 
-        var confirm = MessageBox.Show(
+        var confirm = await _dialog.ConfirmAsync(
             $"로봇 '{robot.RobotId}' 비상정지를 실행합니다.\n" +
             "※ 기능적 정지(VDA 5050)이며 안전규격 정지는 로봇측 하드웨어입니다. [ADR-007]\n계속하시겠습니까?",
-            "비상정지 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.Yes) return;
+            "비상정지 확인");
+        if (!confirm) return;
 
         try
         {
@@ -208,7 +211,7 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"비상정지 전송 실패: {ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            await _dialog.ShowErrorAsync($"비상정지 전송 실패: {ex.Message}", "오류");
         }
     }
 

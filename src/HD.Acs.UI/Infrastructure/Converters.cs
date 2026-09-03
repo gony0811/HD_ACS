@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Media;
+using HD.Acs.UI.Primitives;
 
 namespace HD.Acs.UI.Infrastructure;
 
@@ -62,9 +64,7 @@ public sealed class WorkStatusToBrushConverter : IValueConverter
             "weldstroke" => ViewModels.TankViewModel.WeldLineColor(status),   // 상태 없으면 계획 기본 주황
             _ => ViewModels.TankViewModel.StatusColors(status).Line,
         };
-        var brush = new System.Windows.Media.SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
+        return color.ToBrush();   // 코어 Rgba → WPF Brush(Freeze)
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
@@ -88,6 +88,25 @@ public sealed class NormalizedToCanvasConverter : IValueConverter
             if (parts.Length > 1 && double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var b)) box = b;
         }
         return norm * canvas - box / 2;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}
+
+/// <summary>
+/// 코어 중립 점 목록(IReadOnlyList&lt;Pt2&gt;) → WPF PointCollection. VM이 프레임워크 타입을 노출하지 않기 위한 어댑터.
+/// Polygon.Points 바인딩(전개도 면 윤곽·활성 밴드·영역 폴리곤)에 사용.
+/// </summary>
+public sealed class PointsConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var pc = new PointCollection();
+        if (value is IEnumerable<Pt2> pts)
+            foreach (var p in pts) pc.Add(new Point(p.X, p.Y));
+        pc.Freeze();
+        return pc;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>

@@ -8,15 +8,16 @@
     <RootNamespace>HD.Acs.UI</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
+    <!-- MVVM·SignalR·HttpClient는 HD.Acs.UI.Core(프레임워크 중립 코어)가 참조 — 이 프로젝트는 WPF 뷰·어댑터만 -->
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <!-- 3D 화물창 뷰 (Q5 확정: HelixToolkit). 3.1.2 = net8.0-windows 정식 타깃 -->
     <PackageReference Include="HelixToolkit.Wpf" Version="3.1.2" />
     <!-- Telerik UI for WPF (Fluent 테마 포함) — 전용 피드(nuget.telerik.com)에서 복원.
          버전은 보유 라이선스에 맞춰 조정할 것. -->
     <PackageReference Include="Telerik.UI.for.Wpf.AllControls.Xaml" Version="2025.3.813" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HD.Acs.UI.Core\HD.Acs.UI.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">

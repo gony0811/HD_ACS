@@ -65,7 +65,7 @@ HD_ACS는 위 하드웨어를 직접 제어하는 로봇 컨트롤러가 아니�
 ## 기술 스택 (Tech Stack)
 
 - **관제 서버**: C# / ASP.NET Core — REST API + SignalR(실시간 푸시)
-- **주 운영 UI**: WPF 데스크톱 앱 (화물창 3D 뷰 + 전개도)
+- **주 운영 UI**: WPF 데스크톱 앱 (화물창 3D 뷰 + 전개도) — macOS 대응을 위해 **Avalonia 이행 진행 중**(docs/UI_CROSS_PLATFORM_REVIEW.md, Phase 0 공용 코어 분리 완료)
 - **보조 UI**: Web 대시보드, 태블릿 (REST API + SignalR 공용)
 - **로봇 통신**: VDA 5050 over MQTT (로봇 측 통합 운영 S/W와 연동, 온보드 실행형)
 - **메시징**: MQTT 브로커 (서버 내 배치, 제품 선정 미결)
@@ -107,12 +107,19 @@ HD_ACS/
     ├── HD.Acs.Vda5050/        # VDA 5050 메시지·마스터 MQTT 클라이언트·OrderBuilder
     ├── HD.Acs.App/            # ASP.NET Core 호스트 — REST + SignalR + VDA 브릿지 [ADR-011]
     ├── HD.Acs.Simulator/      # VDA 5050 로봇(HD_AMR) 시뮬레이터
-    └── HD.Acs.UI/             # WPF 운영 앱 (Telerik UI for WPF·Fluent + HelixToolkit 3D, MVVM/Generic Host DI)
-        ├── Models/                # 백엔드 페이로드 미러 DTO
-        ├── Services/              # IAcsApiClient(REST) · IMonitoringClient(SignalR) · TankLayout
-        ├── ViewModels/            # Shell + 로봇상태/미션/알람/수동층변경/Tank (CommunityToolkit.Mvvm)
+    ├── HD.Acs.UI.Core/        # UI 공용 코어 (net8.0, 프레임워크 중립 — WPF/Avalonia 헤드가 공유, 도메인 Core 미참조)
+    │   ├── Models/                # 백엔드 페이로드 미러 DTO · ProjectDoc(.hdacs)
+    │   ├── Services/              # IAcsApiClient(REST) · IMonitoringClient(SignalR) · ProjectService · TankLayout
+    │   ├── ViewModels/            # Shell + 로봇상태/미션/알람/수동층변경/계획/Tank (CommunityToolkit.Mvvm) · PlotShapes 렌더 레코드
+    │   ├── Abstractions/          # IUiDispatcher(UI 스레드) · IDialogService(오류/확인) — 헤드가 구현
+    │   ├── Primitives/            # Pt2 · Rgba (System.Windows.Point/Color 대체)
+    │   └── Rendering/             # Plot2D (전개도 폴리곤 투영 공용)
+    ├── HD.Acs.UI.Core.Tests/  # UI.Core xUnit (상태색 골든·투영·SignalR 디스패처 마샬링)
+    └── HD.Acs.UI/             # WPF 운영 앱 헤드 (Telerik UI for WPF·Fluent + HelixToolkit 3D, UI.Core 참조)
+        ├── Infrastructure/        # 컨버터(PointsConverter·WorkStatusToBrush) · RgbaExtensions
+        ├── Services/              # WPF 어댑터: ProjectDialogService(Win32) · WpfUiDispatcher · WpfDialogService
         ├── Views/                 # UserControl (Telerik 컨트롤) · TankView(3D+전개도)
-        └── MainWindow.xaml        # RadDocking 셸 (좌: 화물창 뷰, 우: 운영 패널)
+        └── MainWindow.xaml        # 모드 탭 셸 (운영/계획/이력)
 ```
 
 ## Claude 작업 가이드라인
@@ -129,6 +136,7 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 
 ## 변경 이력
 
+- 2026-09-03: **UI 공용 코어 추출(Avalonia 이행 Phase 0)** — 신규 `HD.Acs.UI.Core`(net8.0, 프레임워크 중립): Models 2·Services 9·ViewModels 10을 `git mv`(네임스페이스 `HD.Acs.UI.*` 유지로 WPF 헤드 변경 최소화). WPF 결합 절단: `Pt2`/`Rgba` 중립 타입(AreaPoly.Points·FacePlot.Outline·FaceOutline/ActiveBand·StatusColors/WeldLineColor), `IUiDispatcher`(MonitoringClient의 Dispatcher 대체, 생성자 주입), `IDialogService`(ShellViewModel MessageBox 4곳 → ShowErrorAsync/ConfirmAsync), 렌더 레코드 `PlotShapes.cs` 분리, `Rendering/Plot2D`로 두 VM의 폴리곤 투영 중복 제거. WPF 헤드: `WpfUiDispatcher`·`WpfDialogService`·`RgbaExtensions.ToMediaColor/ToBrush`·`PointsConverter`(XAML `Points=` 7곳) + DI 2건 + ProjectReference, MainWindow `xmlns:vm`에 assembly 지정. `HD.Acs.UI.Core.Tests` 신설(상태색 골든 12·투영 3·SignalR 디스패처 1 = 16건 통과, Linux 샌드박스 dotnet 8 SDK). UI.Core는 도메인 Core 미참조(API-First 경계). **WPF 헤드는 Linux에서 빌드 불가(net8.0-windows+Telerik 피드)라 Windows 빌드·회귀 확인 필요**. 후속: Phase 1 Avalonia 헤드 골격
 - 2026-09-03: **UI macOS 대응 검토서 신설**(docs/UI_CROSS_PLATFORM_REVIEW.md, 제안 단계·코드 무변경) — HD.Acs.UI의 WPF/Telerik/Helix 결합 범위 진단(Models·API/SignalR 서비스·VM 7/10은 이미 중립, 결합은 XAML 13개·Telerik 168곳·TankView 3D 400줄·Dispatcher/Win32 대화상자/MessageBox/PointCollection·Color 소수 지점에 집중), 대안 5종 비교(Avalonia/MAUI/Uno/Web/가상화) 후 **Avalonia 11 + 공용 코어(HD.Acs.UI.Core) 분리** 권장, Telerik→Avalonia 컨트롤 대응표, 3D는 자체 소프트웨어 투영 렌더러 권장(씬 규모 수십 도형), 단계별 이행·검증·리스크. ADR-005 개정은 사용자 결정 후
 - 2026-09-03: **로봇 상태 위치 표시를 도면 좌표로 통일** — RobotStatusViewModel이 SignalR/API의 raw `agvPosition`(SLAM)을 그대로 표시하던 문제 수정. map별 유효 T_W_D를 조회해 `T_W_D⁻¹` 적용 후 도면 `(x,y)`만 표시하며, 캘리브레이션 없음/조회 실패 때 원시 좌표 폴백을 금지하고 명시 상태를 표시한다. 실시간 state 비동기 경합은 버전 토큰으로 차단하고 calibration은 10초 캐시해 2초 state 주기 API 폭주를 방지. 3D Tank 마커의 기존 역변환과 표시 계약 통일.
 - 2026-09-03: **층별 ref.map 자동 등록** — 프로젝트/선창 geometry 등록 시 `level_z.Length`를 층 수 정본으로 `{tankId}-L1..Ln` 누락 map을 멱등 생성(version=1, 기존 map/version/calibration 보존). 서버 기동 시 기존 geometry도 백필하여 업그레이드 전 DB의 빈 map 문제를 자동 복구한다. 동일 tank/level에 비표준 mapId가 있으면 덮어쓰지 않고 명시적으로 거부. 현행 CT1 geometry `[0,3.2,6.4,9.6]`에 CT1-L1~L4 4건 백필 완료. goto는 map 등록 후에도 유효 T_W_D가 없으면 계속 안전 차단한다. App 빌드 0 error, Core.Tests 55건 통과.

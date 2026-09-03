@@ -1,8 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using HD.Acs.UI.Models;
+using HD.Acs.UI.Primitives;
+using HD.Acs.UI.Rendering;
 using HD.Acs.UI.Services;
 
 namespace HD.Acs.UI.ViewModels;
@@ -61,25 +62,25 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>상태 → (채움, 외곽선) 색 — 전개도(브러시 컨버터)·3D(material)·상태 배지가 공유하는 단일 매핑.
     /// 영역(work_item): null=계획(녹) / PENDING=회 / DISPATCHED=파랑 / DONE=녹(진) / SKIPPED·FAILED=빨강.
     /// 용접라인(액션): PLANNED·WAITING=회 / RUNNING=파랑 / FINISHED=녹(진) / FAILED=빨강.</summary>
-    public static (System.Windows.Media.Color Fill, System.Windows.Media.Color Line) StatusColors(string? status) => status switch
+    public static (Rgba Fill, Rgba Line) StatusColors(string? status) => status switch
     {
         "PENDING" or "PLANNED" or "WAITING" =>
-            (System.Windows.Media.Color.FromArgb(0x26, 0x80, 0x8A, 0x94), System.Windows.Media.Color.FromRgb(0x80, 0x8A, 0x94)),
+            (Rgba.FromArgb(0x26, 0x80, 0x8A, 0x94), Rgba.FromRgb(0x80, 0x8A, 0x94)),
         "DISPATCHED" or "RUNNING" =>
-            (System.Windows.Media.Color.FromArgb(0x38, 0x2E, 0x86, 0xDE), System.Windows.Media.Color.FromRgb(0x2E, 0x86, 0xDE)),
+            (Rgba.FromArgb(0x38, 0x2E, 0x86, 0xDE), Rgba.FromRgb(0x2E, 0x86, 0xDE)),
         "DONE" or "FINISHED" =>
-            (System.Windows.Media.Color.FromArgb(0x40, 0x27, 0xAE, 0x60), System.Windows.Media.Color.FromRgb(0x2E, 0xCC, 0x71)),
+            (Rgba.FromArgb(0x40, 0x27, 0xAE, 0x60), Rgba.FromRgb(0x2E, 0xCC, 0x71)),
         "FAILED" or "SKIPPED" =>
-            (System.Windows.Media.Color.FromArgb(0x38, 0xE7, 0x4C, 0x3C), System.Windows.Media.Color.FromRgb(0xE7, 0x4C, 0x3C)),
-        _ => (System.Windows.Media.Color.FromArgb(0x26, 0x27, 0xAE, 0x60), System.Windows.Media.Color.FromRgb(0x22, 0x99, 0x54)),
+            (Rgba.FromArgb(0x38, 0xE7, 0x4C, 0x3C), Rgba.FromRgb(0xE7, 0x4C, 0x3C)),
+        _ => (Rgba.FromArgb(0x26, 0x27, 0xAE, 0x60), Rgba.FromRgb(0x22, 0x99, 0x54)),
     };
 
     /// <summary>용접선 외곽 색 — 상태 없으면 계획 기본 주황(#E67E22), 있으면 상태색.</summary>
-    public static System.Windows.Media.Color WeldLineColor(string? status) =>
-        status is null ? System.Windows.Media.Color.FromRgb(0xE6, 0x7E, 0x22) : StatusColors(status).Line;
+    public static Rgba WeldLineColor(string? status) =>
+        status is null ? Rgba.FromRgb(0xE6, 0x7E, 0x22) : StatusColors(status).Line;
 
     /// <summary>전개도 탭 — 면별 2D 도면(실제 비율 형상 + 영역·작업 오버레이, 이미 캔버스 px로 투영).</summary>
-    public sealed record FacePlot(string Code, string Dim, PointCollection Outline,
+    public sealed record FacePlot(string Code, string Dim, IReadOnlyList<Pt2> Outline,
         IReadOnlyList<AreaPoly> Areas, IReadOnlyList<TaskSeg> Tasks);
     public ObservableCollection<FacePlot> FacePlots { get; } = new();
 
@@ -201,12 +202,7 @@ public sealed partial class TankViewModel : ObservableObject
             if (w.ULen <= 0 || w.VLen <= 0) continue;
             double scale = Math.Min((CellW - 2 * CellMargin) / w.ULen, (CellH - 2 * CellMargin) / w.VLen);
             (double x, double y) Proj(double u, double v) => (CellMargin + u * scale, CellMargin + (w.VLen - v) * scale);
-            PointCollection PC(IEnumerable<double[]> uv)
-            {
-                var pc = new PointCollection();
-                foreach (var p in uv) { var (x, y) = Proj(p[0], p[1]); pc.Add(new System.Windows.Point(x, y)); }
-                return pc;
-            }
+            Pt2[] PC(IEnumerable<double[]> uv) => Plot2D.ProjectCorners(uv, Proj);
 
             var outline = PC(FaceOutlineUv(w));
 
@@ -218,7 +214,7 @@ public sealed partial class TankViewModel : ObservableObject
                 {
                     var corners = ov.Area.Corners ?? RectUv(ov.Area.UMin, ov.Area.VMin, ov.Area.UMax, ov.Area.VMax);
                     var pc = PC(corners);
-                    double cx = pc.Count > 0 ? pc.Average(p => p.X) : 0, cy = pc.Count > 0 ? pc.Average(p => p.Y) : 0;
+                    var (cx, cy) = Plot2D.Centroid(pc);
                     areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
                     foreach (var t in ov.Tasks)
                     {

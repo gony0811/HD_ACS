@@ -2,7 +2,7 @@
 
 ## 0. 배경
 
-> 작성일 2026-09-03 · 상태 **검토(제안)** — ADR-005 개정 여부는 미결. 본 문서는 결정 자료이며 코드 변경을 포함하지 않는다.
+> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(WPF 헤드 Windows 빌드 검증 대기)** — ADR-005 개정은 Phase 1 착수 시.
 
 HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행된다.
 요구사항: **동일한 프로그램 구조(MVVM·Generic Host DI·REST/SignalR 계약 계층·운영/계획/이력 모드 셸)를 유지하면서 macOS에서도 운영** 가능하게 할 방법을 검토한다.
@@ -106,7 +106,9 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 
 ## 4. 단계별 이행(안)
 
-### Phase 0 — 공용 코어 추출 (WPF 무변경 동작)
+### Phase 0 — 공용 코어 추출 (WPF 무변경 동작) — ✅ 2026-09-03 구현
+실적: `HD.Acs.UI.Core`(net8.0) 신설 — Models 2·Services 9·ViewModels 10 이동(네임스페이스 `HD.Acs.UI.*` 유지), `Primitives/Pt2·Rgba`, `Abstractions/IUiDispatcher·IDialogService`, `Rendering/Plot2D`(두 VM의 폴리곤 투영 중복 제거), `ViewModels/PlotShapes.cs`(렌더 레코드 분리). WPF 헤드는 `WpfUiDispatcher`·`WpfDialogService`·`RgbaExtensions`·`PointsConverter` 어댑터 + XAML `Points=` 7곳 컨버터 삽입 + DI 2건. `HD.Acs.UI.Core.Tests` 16건 통과, 코어 소스에 System.Windows/Telerik/Helix 참조 0. UI.Core는 도메인 `HD.Acs.Core`를 참조하지 않는다(API-First 경계). 잔여: WPF 헤드 Windows 빌드·회귀 확인.
+원안:
 1. `src/HD.Acs.UI.Core/HD.Acs.UI.Core.csproj`(net8.0) 신설: CommunityToolkit.Mvvm 8.3.2 · SignalR.Client 8.0.8 · Extensions.Http/Options 참조. `HD.Acs.sln`에 추가(겸사 `HD.Acs.SimTest` 미등재 확인).
 2. `Models/`, `Services/`(ProjectDialogService 제외) 이동. `MonitoringClient`의 Dispatcher를 `IUiDispatcher`로 치환.
 3. `Abstractions/IUiDispatcher.cs`, `IDialogService.cs` 신설. `ShellViewModel` MessageBox 4곳 → `IDialogService`.
