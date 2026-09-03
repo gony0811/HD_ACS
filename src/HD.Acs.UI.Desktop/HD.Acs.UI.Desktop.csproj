@@ -12,6 +12,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HD.Acs.UI.Desktop</RootNamespace>
+    <AssemblyName>HD.Acs.UI.Desktop</AssemblyName>
+    <Version>0.1.0</Version>
+    <Product>HD_ACS 관제</Product>
+    <Company>HD현대중공업</Company>
+    <!-- 배포(tools/publish_desktop.sh): 자체 포함 publish → macOS .app 번들 / Windows·Linux 폴더 -->
+    <SatelliteResourceLanguages>en;ko</SatelliteResourceLanguages>
+    <InvariantGlobalization>false</InvariantGlobalization>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <!-- 바인딩은 리플렉션 기본(WPF 뷰와 동일 표기). 컴파일 바인딩(x:DataType)은 후속 최적화 -->
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
@@ -36,6 +43,10 @@
     <ProjectReference Include="..\HD.Acs.UI.Core\HD.Acs.UI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- macOS 번들 템플릿은 빌드 산출물이 아니라 publish 스크립트가 읽는다 -->
+    <None Remove="macos\**" />
+  </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

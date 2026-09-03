@@ -13,6 +13,26 @@
         <conv:EnumEqualsConverter x:Key="EnumEq" />
     </Window.Resources>
 
+    <!-- macOS 시스템 메뉴바(파일 메뉴) — 창 내 Menu와 같은 명령. Windows/Linux에서는 무시되고 창 내 Menu가 표시된다. -->
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="파일">
+                <NativeMenu>
+                    <NativeMenuItem Header="새 프로젝트…" Command="{Binding NewProjectCommand}" Gesture="Cmd+N" />
+                    <NativeMenuItem Header="열기…" Command="{Binding OpenProjectCommand}" Gesture="Cmd+O" />
+                    <NativeMenuItemSeparator />
+                    <NativeMenuItem Header="저장" Command="{Binding SaveProjectCommand}" Gesture="Cmd+S" />
+                    <NativeMenuItem Header="다른 이름으로 저장…" Command="{Binding SaveProjectAsCommand}" Gesture="Cmd+Shift+S" />
+                </NativeMenu>
+            </NativeMenuItem>
+            <NativeMenuItem Header="운영">
+                <NativeMenu>
+                    <NativeMenuItem Header="■ 비상정지" Command="{Binding EmergencyStopCommand}" />
+                </NativeMenu>
+            </NativeMenuItem>
+        </NativeMenu>
+    </NativeMenu.Menu>
+
     <DockPanel>
         <!-- ── 앱바 ── -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="12,7">
@@ -21,7 +41,7 @@
                        Source="avares://HD.Acs.UI.Desktop/Assets/HHI_white2_ko.png"
                        RenderOptions.BitmapInterpolationMode="HighQuality"
                        ToolTip.Tip="HD_ACS — HD현대중공업 LNG 화물창 검사 관제" />
-                <Menu DockPanel.Dock="Left" Background="Transparent" VerticalAlignment="Center" Margin="14,0,0,0">
+                <Menu x:Name="FileMenu" DockPanel.Dock="Left" Background="Transparent" VerticalAlignment="Center" Margin="14,0,0,0">
                     <MenuItem Header="파일(_F)">
                         <MenuItem Header="새 프로젝트(_N)…" Command="{Binding NewProjectCommand}" />
                         <MenuItem Header="열기(_O)…" Command="{Binding OpenProjectCommand}" />

@@ -159,6 +159,36 @@ dotnet run --project HD.Acs.UI
 로봇 상태 / 미션 / 알람 / 수동 층 변경 / **캘리브레이션(기준점 캡처)** / **슬라이싱(seam→스테이션 시각화)**.
 상단 툴바에 비상정지 버튼. UI는 REST+SignalR만 사용한다(API-First — 서버에 직접 접근하는 로직 없음).
 
+### 4.6 크로스플랫폼 UI(HD.Acs.UI.Desktop, Avalonia) 실행 — Windows / macOS / Linux
+
+WPF UI와 같은 화면(운영/계획/이력, 3D·전개도)을 Win/mac/Linux에서 제공하는 헤드. 서버(App)는 그대로 Windows 현장 서버에 두고 UI만 원격 PC/Mac에서 띄운다.
+
+**개발 실행** (.NET 8 SDK만 필요, 어느 OS든 동일)
+```bash
+cd src
+dotnet run --project HD.Acs.UI.Desktop
+```
+
+**서버 주소 지정** — 실행 파일 옆 `appsettings.json` 의 `Acs:BaseUrl`(기본 `http://localhost:5199`) 또는 환경변수:
+```bash
+Acs__BaseUrl=http://192.168.0.10:5199 dotnet run --project HD.Acs.UI.Desktop     # mac/Linux
+$env:Acs__BaseUrl="http://192.168.0.10:5199"; dotnet run --project HD.Acs.UI.Desktop   # Windows PowerShell
+```
+
+**배포 산출물 만들기** (`tools/publish_desktop.sh`, 자체 포함 publish — 대상 PC에 .NET 설치 불필요)
+```bash
+tools/publish_desktop.sh osx-arm64   # Apple Silicon → artifacts/desktop/osx-arm64/HD_ACS.app (+ .zip)
+tools/publish_desktop.sh osx-x64     # Intel Mac
+tools/publish_desktop.sh win-x64     # Windows 폴더 (또는 tools\publish_desktop.ps1)
+tools/publish_desktop.sh linux-x64
+```
+- Telerik 피드에 접근할 수 없는 PC(자격증명 없음)에서는 `HDACS_NUGET_SOURCE=https://api.nuget.org/v3/index.json` 을 붙인다 — Desktop 헤드는 공개 패키지만 쓴다.
+- macOS 번들은 `Contents/MacOS/` 에 실행 파일·어셈블리·`appsettings.json` 을 두므로 **번들 안의 appsettings.json 을 편집해 서버 주소를 바꾼다**(또는 환경변수).
+- 서명: 기본 ad-hoc(`codesign -s -`) — **같은 Mac에서 만든 번들은 그대로 실행**된다. 다른 Mac으로 배포하면 Gatekeeper가 차단하므로 ① Finder에서 우클릭 ▸ 열기(1회) 또는 `xattr -dr com.apple.quarantine HD_ACS.app`, ② 정식 배포는 `HDACS_SIGN_IDENTITY="Developer ID Application: …"` 로 서명 후 notarization(`xcrun notarytool submit`). 폐쇄망 현장은 ①로 충분.
+- 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
+- macOS에서는 파일 메뉴가 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장)에 뜨고 창 안의 메뉴는 숨겨진다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
+- 3D 뷰 조작: 좌드래그 회전 · 우드래그(또는 휠 클릭 드래그) 이동 · 휠 확대/축소 · 우상단 "맞춤". 트랙패드는 두 손가락 스크롤=줌.
+
 ---
 
 ## 5. 운영 워크플로우 (도면 기반 검사 한 사이클)

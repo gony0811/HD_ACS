@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  HD_ACS.app 번들 메타데이터 템플릿 — tools/publish_desktop.sh 가 {VERSION} 을 채워 Contents/Info.plist 로 복사한다.
+  CFBundleExecutable 은 dotnet publish 산출 실행 파일 이름(HD.Acs.UI.Desktop)과 일치해야 한다.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>HD_ACS</string>
+    <key>CFBundleDisplayName</key>
+    <string>HD_ACS 관제</string>
+    <key>CFBundleIdentifier</key>
+    <string>kr.co.hd.acs.desktop</string>
+    <key>CFBundleVersion</key>
+    <string>{VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{VERSION}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>HD.Acs.UI.Desktop</string>
+    <key>CFBundleIconFile</key>
+    <string>HD_ACS.icns</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Apache License 2.0</string>
+</dict>
+</plist>

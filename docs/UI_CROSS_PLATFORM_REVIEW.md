@@ -2,7 +2,7 @@
 
 ## 0. 배경
 
-> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(전 뷰 이식) · Phase 3 완료(3D 소프트웨어 투영 렌더러)** — ADR-005 개정 반영(2026-09-03). 다음: Phase 4 macOS 패키징, Phase 5 WPF 헤드 처분 결정.
+> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(전 뷰 이식) · Phase 3 완료(3D 소프트웨어 투영 렌더러) · Phase 4 완료(macOS 패키징)** — ADR-005 개정 반영(2026-09-03). 남은 것: Phase 5 WPF 헤드 처분 결정(사용자).
 
 HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행된다.
 요구사항: **동일한 프로그램 구조(MVVM·Generic Host DI·REST/SignalR 계약 계층·운영/계획/이력 모드 셸)를 유지하면서 macOS에서도 운영** 가능하게 할 방법을 검토한다.
@@ -135,7 +135,9 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 2. Avalonia `Tank3DControl : Control` — `Render(DrawingContext)`에서 투영·그리기, 포인터 드래그=오빗/휠=줌, 수동 이동 모드 클릭=광선-바닥평면 교차 → `TankViewModel.RequestMoveAsync`.
 3. 로봇 마커·상태색 material은 `StatusColors(Rgba)` 재사용.
 
-### Phase 4 — macOS 패키징·운영
+### Phase 4 — macOS 패키징·운영 — ✅ 2026-09-03 구현
+실적: `tools/publish_desktop.sh`(osx-arm64/osx-x64 → `HD_ACS.app`+zip, win-x64/linux-x64 → 폴더; 자체 포함 publish, `Info.plist` 템플릿 `src/HD.Acs.UI.Desktop/macos/`에서 버전 치환, PkgInfo, iconutil 있을 때 .icns, codesign ad-hoc 기본·`HDACS_SIGN_IDENTITY`로 Developer ID) + `tools/publish_desktop.ps1`(Windows). csproj에 Version 0.1.0·Product·Company. macOS 시스템 메뉴바 `NativeMenu`(파일 ⌘N/⌘O/⌘S/⌘⇧S·운영 비상정지, 창 내 Menu는 mac에서 숨김). 한글 글리프 폴백 `FontManagerOptions.FontFallbacks`(Apple SD Gothic Neo·맑은 고딕·Noto CJK·나눔). 서버 주소는 번들 내 appsettings.json 또는 `Acs__BaseUrl` 환경변수. MANUAL §4.6 신설. 검증: Linux 샌드박스에서 osx-arm64 교차 publish → .app 구조(Contents/MacOS·Info.plist·PkgInfo) 생성 확인, linux-x64 폴더 publish 확인(codesign·iconutil은 mac 전용이라 생략됨). notarization은 범위 외(폐쇄망은 ad-hoc + quarantine 해제로 충분).
+원안:
 - `dotnet publish -c Release -r osx-arm64 --self-contained`(+ `osx-x64` 필요 시), `.app` 번들(Info.plist, 아이콘) + 코드서명(폐쇄망 배포는 ad-hoc 서명으로 시작, 외부 배포 시 notarization). `appsettings.json` BaseUrl=현장 서버 :5199. 한글 폰트는 시스템 폰트(Apple SD Gothic Neo) 자동.
 - `.hdacs` 프로젝트 파일은 GZip+JSON이라 Win↔mac 왕복 호환(경로 구분자 의존 없음 확인됨).
 
