@@ -96,10 +96,10 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
-        double x, double y, double theta, CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/robots/{robotId}/zone",
-            new { MapId = mapId, UserId = userId, X = x, Y = y, Theta = theta }, ct);
+            new { MapId = mapId, UserId = userId }, ct);
         resp.EnsureSuccessStatusCode();
     }
 

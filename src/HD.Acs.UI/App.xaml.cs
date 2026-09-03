@@ -1,4 +1,5 @@
 using System.Windows;
+using HD.Acs.UI.Abstractions;
 using HD.Acs.UI.Services;
 using HD.Acs.UI.ViewModels;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +12,7 @@ namespace HD.Acs.UI;
 
 /// <summary>
 /// 애플리케이션 부트스트랩 — Generic Host 기반 DI(MS.DI로 백엔드와 일관) + Telerik Fluent 테마.
+/// Models·Services·ViewModels는 HD.Acs.UI.Core(프레임워크 중립)에 있고, 이 프로젝트는 WPF 뷰와 어댑터만 가진다.
 /// API-First(ADR-005): UI는 REST(IAcsApiClient) + SignalR(IMonitoringClient)로만 서버와 통신.
 /// </summary>
 public partial class App : Application
@@ -38,6 +40,10 @@ public partial class App : Application
             // 기본 100초는 서버 두절 시 버튼이 무반응으로 보이는 시간 — 폐쇄망 LAN에서 10초면 충분
             http.Timeout = TimeSpan.FromSeconds(10);
         });
+
+        // UI 프레임워크 어댑터(HD.Acs.UI.Core 추상화의 WPF 구현) — UI 스레드 마샬링·메시지 대화상자
+        builder.Services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
+        builder.Services.AddSingleton<IDialogService, WpfDialogService>();
 
         // SignalR 실시간 푸시 (연결 상태 공유 필요 → 싱글턴)
         builder.Services.AddSingleton<IMonitoringClient, MonitoringClient>();

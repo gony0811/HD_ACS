@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="HD.Acs.UI.Desktop.Views.MessageDialog"
+        Width="460" SizeToContent="Height" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBrush}"
+        TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- IDialogService용 단순 메시지 창 — 오류 안내(확인) / 예·아니오 확인. WPF MessageBox 대체. -->
+    <StackPanel Margin="20">
+        <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="13" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="YesButton" Content="예" MinWidth="80" MinHeight="30" Margin="0,0,8,0" Click="Yes_Click" />
+            <Button x:Name="NoButton" Content="아니오" MinWidth="80" MinHeight="30" Click="No_Click" />
+            <Button x:Name="OkButton" Content="확인" MinWidth="80" MinHeight="30" Click="Yes_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

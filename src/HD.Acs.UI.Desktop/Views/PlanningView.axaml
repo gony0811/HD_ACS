@@ -1,0 +1,116 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:HD.Acs.UI.Desktop.Views"
+             x:Class="HD.Acs.UI.Desktop.Views.PlanningView"
+             TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = ShellViewModel. 계획 = 영역·작업 정의 + 시나리오 관리 + 도면→맵 캘리브레이션.
+         시나리오 목록/생성/삭제는 운영 콤보와 동일한 Mission.Scenarios를 공유 → 자동 동기화. -->
+    <TabControl x:Name="Tabs" Margin="8">
+        <TabItem Header="영역 · 작업">
+            <views:AreaManagementView DataContext="{Binding AreaPlanning}" />
+        </TabItem>
+        <TabItem Header="시나리오">
+            <Grid Margin="14" MaxWidth="1180" HorizontalAlignment="Left"
+                  ColumnDefinitions="*,420" RowDefinitions="Auto,Auto,*,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="검사 시나리오 관리" FontWeight="Bold" FontSize="14" Margin="0,0,0,8" />
+
+                <!-- 생성/삭제 툴바 -->
+                <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="이름" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBox Width="240" MinHeight="30" VerticalContentAlignment="Center"
+                                 Text="{Binding Mission.NewScenarioName}" />
+                        <Button Content="생성" MinHeight="30" MinWidth="80" Margin="8,0,0,0"
+                                Command="{Binding Mission.CreateScenarioCommand}" />
+                        <Button Content="삭제" MinHeight="30" MinWidth="80" Margin="16,0,0,0"
+                                Command="{Binding Mission.DeleteScenarioCommand}" />
+                        <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11.5"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   Text="{Binding Mission.TankId, StringFormat='대상 선창: {0}'}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 시나리오 목록 (운영 콤보와 동일 소스) -->
+                <DataGrid Grid.Row="2" Grid.Column="0" x:Name="ScenarioGrid" ItemsSource="{Binding Mission.Scenarios}"
+                          SelectedItem="{Binding Mission.SelectedScenario}"
+                          AutoGenerateColumns="False" IsReadOnly="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="이름" Binding="{Binding Name}" Width="*" />
+                        <DataGridTextColumn Header="Ver" Binding="{Binding Version}" Width="60" />
+                        <DataGridTextColumn Header="상태" Binding="{Binding Status}" Width="110" />
+                        <DataGridTextColumn Header="선창" Binding="{Binding TankId}" Width="90" />
+                        <DataGridTextColumn Header="대상" Binding="{Binding TargetText}" Width="90" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,8,0,0" TextWrapping="Wrap" FontSize="12"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="{Binding Mission.StatusMessage}" />
+
+                <!-- 부분 검사 계획: 선택 시나리오의 검사 대상 영역 (대상 0개 = 선창 전체) -->
+                <Border Grid.Row="0" Grid.RowSpan="4" Grid.Column="1" Margin="12,0,0,0"
+                        Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="10">
+                    <Grid RowDefinitions="Auto,Auto,*,Auto">
+                        <TextBlock Grid.Row="0" Text="검사 대상 영역 (부분 검사 계획)" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Grid.Row="1" Margin="0,0,0,6" FontSize="11.5"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   Text="{Binding Mission.ScenarioAreaSummary}" />
+                        <!-- 좌: 선창 영역 풀 [+] / 우: 검사 대상 [−] -->
+                        <Grid Grid.Row="2" ColumnDefinitions="*,8,*" RowDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="선창 영역" FontSize="11" FontWeight="Bold"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="검사 대상" FontSize="11" FontWeight="Bold"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
+                            <ScrollViewer Grid.Row="1" Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Mission.AvailableAreas}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,1">
+                                                <Button Content="+" Width="24" Height="22" Padding="0" FontWeight="Bold"
+                                                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                                        ToolTip.Tip="검사 대상에 추가"
+                                                        Command="{Binding $parent[UserControl].DataContext.Mission.AddScenarioAreaCommand}"
+                                                        CommandParameter="{Binding}" />
+                                                <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <ScrollViewer Grid.Row="1" Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Mission.SelectedAreas}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,1">
+                                                <Button Content="−" Width="24" Height="22" Padding="0" FontWeight="Bold"
+                                                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                                        ToolTip.Tip="대상에서 제거"
+                                                        Command="{Binding $parent[UserControl].DataContext.Mission.RemoveScenarioAreaCommand}"
+                                                        CommandParameter="{Binding}" />
+                                                <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                           Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                        <Button Grid.Row="3" Content="대상 저장" MinHeight="30" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="110"
+                                ToolTip.Tip="대상 목록만 검사(run 시작 시 전개). 대상 0개 = 선창 전체 검사"
+                                Command="{Binding Mission.SaveScenarioAreasCommand}" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </TabItem>
+        <TabItem Header="캘리브레이션 (T_W_D)">
+            <views:CalibrationView DataContext="{Binding Calibration}" />
+        </TabItem>
+    </TabControl>
+</UserControl>

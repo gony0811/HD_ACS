@@ -1,0 +1,96 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:HD.Acs.UI.Desktop.Views"
+        xmlns:vm="using:HD.Acs.UI.ViewModels"
+        xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+        x:Class="HD.Acs.UI.Desktop.MainWindow"
+        Title="{Binding WindowTitle}" Width="1440" Height="900"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppWindowBrush}"
+        TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = ShellViewModel (App에서 주입). 셸 = 앱바(브랜드·파일 메뉴·모드 탭·연결칩·비상정지) + 모드별 워크스페이스. -->
+    <Window.Resources>
+        <conv:EnumEqualsConverter x:Key="EnumEq" />
+    </Window.Resources>
+
+    <!-- macOS 시스템 메뉴바(파일 메뉴) — 창 내 Menu와 같은 명령. Windows/Linux에서는 무시되고 창 내 Menu가 표시된다. -->
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="파일">
+                <NativeMenu>
+                    <NativeMenuItem Header="새 프로젝트…" Command="{Binding NewProjectCommand}" Gesture="Cmd+N" />
+                    <NativeMenuItem Header="열기…" Command="{Binding OpenProjectCommand}" Gesture="Cmd+O" />
+                    <NativeMenuItemSeparator />
+                    <NativeMenuItem Header="저장" Command="{Binding SaveProjectCommand}" Gesture="Cmd+S" />
+                    <NativeMenuItem Header="다른 이름으로 저장…" Command="{Binding SaveProjectAsCommand}" Gesture="Cmd+Shift+S" />
+                </NativeMenu>
+            </NativeMenuItem>
+            <NativeMenuItem Header="운영">
+                <NativeMenu>
+                    <NativeMenuItem Header="■ 비상정지" Command="{Binding EmergencyStopCommand}" />
+                </NativeMenu>
+            </NativeMenuItem>
+        </NativeMenu>
+    </NativeMenu.Menu>
+
+    <DockPanel>
+        <!-- ── 앱바 ── -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBrush}" Padding="12,7">
+            <DockPanel LastChildFill="True">
+                <Image DockPanel.Dock="Left" VerticalAlignment="Center" Height="26" Margin="0,0,4,0"
+                       Source="avares://HD.Acs.UI.Desktop/Assets/HHI_white2_ko.png"
+                       RenderOptions.BitmapInterpolationMode="HighQuality"
+                       ToolTip.Tip="HD_ACS — HD현대중공업 LNG 화물창 검사 관제" />
+                <Menu x:Name="FileMenu" DockPanel.Dock="Left" Background="Transparent" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <MenuItem Header="파일(_F)">
+                        <MenuItem Header="새 프로젝트(_N)…" Command="{Binding NewProjectCommand}" />
+                        <MenuItem Header="열기(_O)…" Command="{Binding OpenProjectCommand}" />
+                        <Separator />
+                        <MenuItem Header="저장(_S)" Command="{Binding SaveProjectCommand}" />
+                        <MenuItem Header="다른 이름으로 저장(_A)…" Command="{Binding SaveProjectAsCommand}" />
+                    </MenuItem>
+                </Menu>
+
+                <!-- 우측 클러스터: 연결 상태칩 + 비상정지 -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border CornerRadius="20" Padding="10,4" Margin="0,0,10,0"
+                            Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource AppGoodBrush}" VerticalAlignment="Center" Margin="0,0,7,0" />
+                            <TextBlock Text="{Binding ConnectionText}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+                        </StackPanel>
+                    </Border>
+                    <Button Classes="danger" Content="■ 비상정지" Command="{Binding EmergencyStopCommand}" />
+                </StackPanel>
+
+                <!-- 중앙: 모드 탭 -->
+                <Border HorizontalAlignment="Center" CornerRadius="9" Padding="3" Margin="16,0"
+                        Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton Classes="modeTab" Content="운영" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Operation}"
+                                      IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Operation, Mode=OneWay}" />
+                        <ToggleButton Classes="modeTab" Content="계획" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Planning}"
+                                      IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Planning, Mode=OneWay}" />
+                        <ToggleButton Classes="modeTab" Content="이력" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.History}"
+                                      IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=History, Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
+            </DockPanel>
+        </Border>
+
+        <!-- ── 하단 상태바 ── -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource AppHeaderBrush}" Padding="12,4">
+            <TextBlock Text="{Binding ConnectionText}" Foreground="{DynamicResource AppTextBrush}" FontSize="12" />
+        </Border>
+
+        <!-- ── 본문: 모드별 워크스페이스(모두 로드 유지, IsVisible 전환 → SignalR 구독·상태 보존) ── -->
+        <Grid>
+            <views:OperationView x:Name="OperationView" IsVisible="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Operation}" />
+            <views:PlanningView  x:Name="PlanningView"  IsVisible="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Planning}" />
+            <views:HistoryView   x:Name="HistoryView"   IsVisible="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=History}" />
+        </Grid>
+    </DockPanel>
+</Window>

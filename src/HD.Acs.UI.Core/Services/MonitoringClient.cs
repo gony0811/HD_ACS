@@ -1,4 +1,4 @@
-using System.Windows.Threading;
+using HD.Acs.UI.Abstractions;
 using HD.Acs.UI.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -8,11 +8,11 @@ namespace HD.Acs.UI.Services;
 
 /// <summary>
 /// SignalR 모니터링 허브 클라이언트. 기존 MainWindow code-behind의 연결 로직을 이관한 것.
-/// WithAutomaticReconnect로 두절 내성(ADR-002)을 확보하고, 수신 페이로드를 Dispatcher로 마샬링해 이벤트로 전파한다.
+/// WithAutomaticReconnect로 두절 내성(ADR-002)을 확보하고, 수신 페이로드를 IUiDispatcher(UI 스레드)로 마샬링해 이벤트로 전파한다.
 /// </summary>
 public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
 {
-    private readonly Dispatcher _dispatcher;
+    private readonly IUiDispatcher _dispatcher;
     private readonly ILogger<MonitoringClient> _log;
     private readonly HubConnection _hub;
 
@@ -27,10 +27,9 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
     public event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;
     public event EventHandler<AlarmDto>? AlarmRaised;
 
-    public MonitoringClient(IOptions<AcsOptions> options, ILogger<MonitoringClient> log)
+    public MonitoringClient(IOptions<AcsOptions> options, ILogger<MonitoringClient> log, IUiDispatcher dispatcher)
     {
-        _dispatcher = System.Windows.Application.Current?.Dispatcher
-                      ?? Dispatcher.CurrentDispatcher;
+        _dispatcher = dispatcher;
         _log = log;
 
         var baseUrl = options.Value.BaseUrl.TrimEnd('/');
@@ -72,13 +71,13 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
     private void Raise<T>(EventHandler<T>? handler, T payload)
     {
         if (handler is null) return;
-        _dispatcher.InvokeAsync(() => handler(this, payload));
+        _dispatcher.Post(() => handler(this, payload));
     }
 
     private void SetStatus(HubStatus status)
     {
         Status = status;
-        _dispatcher.InvokeAsync(() => StatusChanged?.Invoke(this, status));
+        _dispatcher.Post(() => StatusChanged?.Invoke(this, status));
     }
 
     public async ValueTask DisposeAsync() => await _hub.DisposeAsync();

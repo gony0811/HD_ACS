@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.Views.AlarmsView">
+    <!-- DataContext = AlarmsViewModel -->
+    <Grid Margin="10" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <DataGrid x:Name="AlarmGrid" ItemsSource="{Binding Alarms}" IsVisible="{Binding HasAlarms}"
+                  AutoGenerateColumns="False" IsReadOnly="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="심각도" Binding="{Binding Severity}" Width="80" />
+                <DataGridTextColumn Header="코드" Binding="{Binding AlarmCode}" Width="110" />
+                <DataGridTextColumn Header="로봇" Binding="{Binding RobotId}" Width="90" />
+                <DataGridTextColumn Header="내용" Binding="{Binding Title}" Width="*" />
+                <DataGridTextColumn Header="발생시각" Binding="{Binding RaisedAt}" Width="150" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="{DynamicResource AppMutedTextBrush}" MaxWidth="280" TextAlignment="Center"
+                   IsVisible="{Binding !HasAlarms}" />
+    </Grid>
+</UserControl>

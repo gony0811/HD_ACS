@@ -5,7 +5,7 @@ using Microsoft.Win32;
 
 namespace HD.Acs.UI.Services;
 
-/// <summary>IProjectDialogService의 WPF 구현.</summary>
+/// <summary>IProjectDialogService의 WPF 구현 — 동기 대화상자를 Task로 감싼다(계약은 Avalonia와 공유되어 비동기).</summary>
 public sealed class ProjectDialogService : IProjectDialogService
 {
     private const string Filter = "HD_ACS 프로젝트 (*.hdacs)|*.hdacs|모든 파일 (*.*)|*.*";
@@ -14,17 +14,17 @@ public sealed class ProjectDialogService : IProjectDialogService
 
     public ProjectDialogService(AreaPlanningViewModel areaPlanning) => _areaPlanning = areaPlanning;
 
-    public bool ShowNewProject()
+    public Task<bool> ShowNewProjectAsync()
     {
         var dialog = new NewProjectDialog
         {
             DataContext = _areaPlanning,
             Owner = Application.Current.MainWindow,
         };
-        return dialog.ShowDialog() == true;
+        return Task.FromResult(dialog.ShowDialog() == true);
     }
 
-    public string? PickSavePath(string? suggestedFileName = null)
+    public Task<string?> PickSavePathAsync(string? suggestedFileName = null)
     {
         var dlg = new SaveFileDialog
         {
@@ -33,10 +33,10 @@ public sealed class ProjectDialogService : IProjectDialogService
             AddExtension = true,
             FileName = suggestedFileName ?? "새 프로젝트",
         };
-        return dlg.ShowDialog(Application.Current.MainWindow) == true ? dlg.FileName : null;
+        return Task.FromResult(dlg.ShowDialog(Application.Current.MainWindow) == true ? dlg.FileName : null);
     }
 
-    public string? PickOpenPath()
+    public Task<string?> PickOpenPathAsync()
     {
         var dlg = new OpenFileDialog
         {
@@ -44,6 +44,6 @@ public sealed class ProjectDialogService : IProjectDialogService
             DefaultExt = ProjectService.Extension,
             CheckFileExists = true,
         };
-        return dlg.ShowDialog(Application.Current.MainWindow) == true ? dlg.FileName : null;
+        return Task.FromResult(dlg.ShowDialog(Application.Current.MainWindow) == true ? dlg.FileName : null);
     }
 }

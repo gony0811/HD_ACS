@@ -14,6 +14,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.UI", "HD.Acs.UI\HD.A
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.Core.Tests", "HD.Acs.Core.Tests\HD.Acs.Core.Tests.csproj", "{A1000001-0000-0000-0000-000000000007}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.UI.Core", "HD.Acs.UI.Core\HD.Acs.UI.Core.csproj", "{A1000001-0000-0000-0000-000000000008}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.UI.Core.Tests", "HD.Acs.UI.Core.Tests\HD.Acs.UI.Core.Tests.csproj", "{A1000001-0000-0000-0000-000000000009}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.UI.Desktop", "HD.Acs.UI.Desktop\HD.Acs.UI.Desktop.csproj", "{A1000001-0000-0000-0000-000000000010}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HD.Acs.UI.Desktop.Tests", "HD.Acs.UI.Desktop.Tests\HD.Acs.UI.Desktop.Tests.csproj", "{A1000001-0000-0000-0000-000000000011}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +56,21 @@ Global
 		{A1000001-0000-0000-0000-000000000007}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1000001-0000-0000-0000-000000000007}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1000001-0000-0000-0000-000000000007}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000008}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000008}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000008}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000008}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000009}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000009}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000009}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000009}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000010}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000010}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000010}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000010}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000011}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000011}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-000000000011}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-000000000011}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

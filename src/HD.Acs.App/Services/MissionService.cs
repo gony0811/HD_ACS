@@ -307,9 +307,9 @@ public sealed class MissionService
         await _db.SaveChangesAsync(ct);
     }
 
-    /// <summary>작업자 수동 층(존) 변경 [Q9] — 감사 로그 + initPosition 전송</summary>
+    /// <summary>작업자 수동 층(존) 지정 [Q9] — AMR이 자체 initPose 후 보고하는 mapId를 검증한다.</summary>
     public async Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
-        double x, double y, double theta, CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         var ctx = await _db.RobotContexts.FindAsync(new object[] { robotId }, ct)
                   ?? _db.RobotContexts.Add(new RobotContextEntity { RobotId = robotId }).Entity;
@@ -320,14 +320,10 @@ public sealed class MissionService
         _db.AuditLogs.Add(new AuditLogEntity
         {
             UserId = userId, Action = "MANUAL_ZONE_CHANGE", Target = robotId,
-            Detail = JsonSerializer.Serialize(new { mapId, x, y, theta })
+            Detail = JsonSerializer.Serialize(new { mapId })
         });
         await _db.SaveChangesAsync(ct);
-
-        var robot = await _db.Robots.AsNoTracking().FirstAsync(r => r.RobotId == robotId, ct);
-        await _vda.InitPositionAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber),
-            mapId, x, y, theta, ct);
-        // 이후 로봇 state의 agvPosition.mapId 확인 → TryReleaseNextMissionAsync가 게이트 통과
+        // AMR 자체 initPose 이후 state의 agvPosition.mapId 확인 → 릴리스 게이트 통과
     }
 
     /// <summary>Task.Position(도면 jsonb) → WeldDrawingData. seam 벡터·wall_code 추출. [SPEC v2: 법선 제거]</summary>

@@ -1,0 +1,61 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="HD.Acs.UI.Desktop.Views.NewProjectDialog"
+        Title="새 프로젝트 — 선창 3D 정의" Width="540" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False" ShowInTaskbar="False"
+        Background="{DynamicResource AppWindowBrush}"
+        TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = AreaPlanningViewModel(공유 싱글턴). 확인 시 선창 등록 성공하면 Close(true). -->
+    <StackPanel Margin="18">
+        <TextBlock Text="① 선창 3D 정의 (팔각 단면)" FontWeight="Bold" FontSize="14" Margin="0,0,0,4" />
+        <TextBlock Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="치수 입력 → 확인 시 10면 자동 생성(B/SL/PL/SM/PM/SU/PU/T/F/A) 후 프로젝트 파일을 만듭니다. 원점=바닥 중심, x=길이·y=폭(+좌현)·z=상방, 바닥 z=0(m). 각도=수평면 기준(°)." />
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+            <TextBlock Text="Tank" Classes="lbl" />
+            <TextBox Width="110" Classes="field" Text="{Binding TankId}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="L / w_floor" Classes="lbl" />
+            <NumericUpDown Classes="field" Value="{Binding LengthL}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" Value="{Binding WFloor}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="θ_low° / h_low" Classes="lbl" />
+            <NumericUpDown Classes="field" Value="{Binding ThetaLowDeg}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" Value="{Binding HLow}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="h_wall" Classes="lbl" />
+            <NumericUpDown Classes="field" Value="{Binding HWall}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="θ_up° / h_up" Classes="lbl" />
+            <NumericUpDown Classes="field" Value="{Binding ThetaUpDeg}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" Value="{Binding HUp}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="level_z" Classes="lbl" ToolTip.Tip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
+            <TextBox Width="200" Classes="field" Text="{Binding LevelZText}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="reach_z min,max" Classes="lbl"
+                       ToolTip.Tip="(선택) 플랫폼 기준 코봇 도달 밴드 상대높이. 비우면 밴드=층 경계 그대로." />
+            <TextBox Width="97" Classes="field" Text="{Binding ReachZMinText}" Margin="0,0,6,0" />
+            <TextBox Width="97" Classes="field" Text="{Binding ReachZMaxText}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="원점보정 ox,oy" Classes="lbl" />
+            <NumericUpDown Classes="field" Value="{Binding OriginOx}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" Value="{Binding OriginOy}" />
+        </StackPanel>
+
+        <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,2,0,4" FontSize="12" />
+        <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" IsVisible="False" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="OkButton" Content="확인 · 선창 생성" MinWidth="130" MinHeight="32" Margin="0,0,8,0" Click="Ok_Click" />
+            <Button Content="취소" MinWidth="80" MinHeight="32" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

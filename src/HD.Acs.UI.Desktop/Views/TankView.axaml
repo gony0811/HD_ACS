@@ -1,0 +1,104 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+             xmlns:views="using:HD.Acs.UI.Desktop.Views"
+             x:Class="HD.Acs.UI.Desktop.Views.TankView">
+    <!-- DataContext = TankViewModel. 3D 뷰=소프트웨어 투영 렌더러(Tank3DControl), 전개도 탭=면별 2D 캔버스. -->
+    <UserControl.Resources>
+        <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
+        <conv:PointsConverter x:Key="Pts" />
+        <conv:PointConverter x:Key="Pt" />
+    </UserControl.Resources>
+    <DockPanel TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <!-- 뷰 모드(전체/L1~L4) + 오버레이·수동 이동 토글 + 로봇 위치 -->
+        <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="뷰" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox Width="90" ItemsSource="{Binding ViewModes}" SelectedItem="{Binding SelectedViewMode}" />
+                <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
+                          IsChecked="{Binding ShowOverlays}" />
+                <CheckBox Content="수동 이동(그리드 클릭)" VerticalAlignment="Center" Margin="16,0,0,0"
+                          IsEnabled="{Binding IsolateLevel}"
+                          ToolTip.Tip="층(L1~L4) 선택 시 바닥 그리드가 표시됩니다 — 클릭 지점으로 로봇 이동 명령(이동 테스트용). 진행 중 run이 있으면 거부됩니다."
+                          IsChecked="{Binding ManualMoveMode}" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="{Binding MoveStatus}" />
+                <TextBlock Margin="16,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotMapId, StringFormat='로봇 층: {0}'}" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotX, StringFormat='X: {0:F2}', FallbackValue='X: -'}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding RobotY, StringFormat='Y: {0:F2}', FallbackValue='Y: -'}" />
+            </StackPanel>
+        </Border>
+
+        <TabControl x:Name="TankTabs">
+            <TabItem Header="3D 뷰">
+                <!-- 소프트웨어 투영 렌더러(코어 Camera3·SceneRenderer·TankSceneBuilder) — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 좌클릭=goto -->
+                <Grid>
+                    <views:Tank3DControl x:Name="Tank3D" />
+                    <Button Content="맞춤" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Padding="8,2" FontSize="11"
+                            Opacity="0.85" Click="ZoomExtents_Click" ToolTip.Tip="전체 형상에 맞춤" />
+                    <TextBlock HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,4" FontSize="10.5"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
+                               Text="좌드래그 회전 · 우드래그 이동 · 휠 확대/축소" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="전개도">
+                <!-- 면별 2D 도면 그리드 — 각 면 실제 비율 형상(마구리 F/A=팔각) + 영역·작업 오버레이 -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource AppWindowBrush}">
+                    <ItemsControl x:Name="FacePlotList" ItemsSource="{Binding FacePlots}" Margin="8">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="6" Padding="6" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource AppSurfaceBrush}">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                            <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" />
+                                            <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" Margin="8,2,0,0" />
+                                        </StackPanel>
+                                        <Canvas Width="240" Height="150" Background="{DynamicResource AppCanvasBrush}">
+                                            <Polygon Points="{Binding Outline, Converter={StaticResource Pts}}" Fill="#0F2E86C1" Stroke="#5D6D7E" StrokeThickness="1.2" />
+                                            <!-- 영역(4점 폴리곤) — work_item 상태색 -->
+                                            <ItemsControl ItemsSource="{Binding Areas}">
+                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Canvas>
+                                                            <Polygon Points="{Binding Points, Converter={StaticResource Pts}}"
+                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}"
+                                                                     Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}"
+                                                                     StrokeThickness="1" />
+                                                            <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="9" FontWeight="Bold"
+                                                                       Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                        </Canvas>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <!-- 작업 용접선 — 액션 상태색(계획=주황) -->
+                                            <ItemsControl ItemsSource="{Binding Tasks}">
+                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Canvas>
+                                                            <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}" StrokeThickness="2"
+                                                                  Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
+                                                            <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="6" Height="6"
+                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
+                                                        </Canvas>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Canvas>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

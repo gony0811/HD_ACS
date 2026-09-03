@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AvaloniaProject">
+    <option name="projectPerEditor">
+      <map>
+        <entry key="HD.Acs.UI.Desktop/MainWindow.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+        <entry key="HD.Acs.UI.Desktop/Views/AreaLayoutView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+        <entry key="HD.Acs.UI.Desktop/Views/ManualZoneChangeView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+        <entry key="HD.Acs.UI.Desktop/Views/OperationView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+      </map>
+    </option>
+  </component>
+</project>

@@ -469,7 +469,7 @@ app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService
 // 작업자 수동 층(존) 변경 [Q9] — Operator 권한 필요 (TODO: 인증 미들웨어)
 app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeRequest req, MissionService missions) =>
 {
-    await missions.ManualZoneChangeAsync(robotId, req.MapId, req.UserId, req.X, req.Y, req.Theta);
+    await missions.ManualZoneChangeAsync(robotId, req.MapId, req.UserId);
     return Results.Ok();
 });
 
@@ -644,7 +644,7 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
 app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
-public sealed record ZoneChangeRequest(string MapId, string UserId, double X, double Y, double Theta);
+public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, string? UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);

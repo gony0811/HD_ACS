@@ -1,23 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HD.Acs.UI.Models;
+using HD.Acs.UI.Primitives;
+using HD.Acs.UI.Rendering;
 using HD.Acs.UI.Services;
 using Microsoft.Extensions.Options;
 
 namespace HD.Acs.UI.ViewModels;
 
-/// <summary>(u,v) 캔버스 도형 — 좌표는 이미 캔버스 px로 투영됨.</summary>
-public sealed record AreaBox(double Left, double Top, double Width, double Height, string Label);
-/// <summary>임의 4점 영역 폴리곤(캔버스 px) — Points=투영된 꼭짓점, 라벨 앵커. Status=work_item 상태(null=계획 표시).</summary>
-public sealed record AreaPoly(PointCollection Points, double LabelX, double LabelY, string Label, string? Status = null);
-public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge,
-    string? Status = null);   // 액션 상태(운영 중 용접선 색) — null=계획 표시(주황)
-public sealed record StationMarker(double Left, double Top, string Label);
-/// <summary>층 필터 선택 항목 [SPEC v3.1 §9]. Level=1-based, Label="L1".</summary>
-public sealed record LevelOption(int Level, string Label);
+// 캔버스 렌더 레코드(AreaPoly/TaskSeg/StationMarker/LevelOption)는 PlotShapes.cs — TankViewModel과 공유.
 
 /// <summary>
 /// 선창 3D 정의(§2/§3) + 영역·검사 작업 (u,v) 등록(§4) [SPEC v3].
@@ -68,9 +61,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private string _derivedText = "-";
 
     // 선택 면 경계 폴리곤(캔버스 px) — 면 전체(회색 음영). 마구리(F/A)는 팔각, 그 외 직사각형.
-    [ObservableProperty] private PointCollection _faceOutline = new();
+    [ObservableProperty] private IReadOnlyList<Pt2> _faceOutline = Array.Empty<Pt2>();
     // 선택 층 활성 밴드 폴리곤(캔버스 px) — 면 전체 위에 활성(밝게) 오버레이.
-    [ObservableProperty] private PointCollection _activeBand = new();
+    [ObservableProperty] private IReadOnlyList<Pt2> _activeBand = Array.Empty<Pt2>();
     private double _derB, _derWCeil, _derH;   // 파생값(전폭·천장폭·전체높이) — 마구리 팔각 윤곽용
 
     // ── 층 필터 (v3.1 §9 — 선택 층에서 도달 가능한 면만 노출) ──
@@ -294,16 +287,14 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         // 코너 배열(면-전체 v) → 캔버스 폴리곤 + 라벨 앵커(centroid).
         AreaPoly Poly(double[][] corners, string label)
         {
-            var pc = new PointCollection(corners.Length);
-            double cx = 0, cy = 0;
-            foreach (var p in corners) { var (x, y) = Proj(p[0], p[1]); pc.Add(new System.Windows.Point(x, y)); cx += x; cy += y; }
-            int n = Math.Max(1, corners.Length);
-            return new AreaPoly(pc, cx / n, cy / n, label);
+            var pts = Plot2D.ProjectCorners(corners, Proj);
+            var c = Plot2D.Centroid(pts);
+            return new AreaPoly(pts, c.X, c.Y, label);
         }
 
         // 면 전체(회색 음영) + 선택 층 활성 밴드(밝게)
-        FaceOutline = ProjectPolygon(FaceClipPolygon(w, 0, w.VLen), Proj);
-        ActiveBand = SliceH > 1e-9 ? ProjectPolygon(FaceClipPolygon(w, off, off + SliceH), Proj) : new PointCollection();
+        FaceOutline = Plot2D.ProjectPolygon(FaceClipPolygon(w, 0, w.VLen), Proj);
+        ActiveBand = SliceH > 1e-9 ? Plot2D.ProjectPolygon(FaceClipPolygon(w, off, off + SliceH), Proj) : Array.Empty<Pt2>();
 
         // 영역: 그 면 모든 층(면-전체 v 코너). 선택 층=활성(녹색), 타 층=비활성(회색).
         int? sel = SelectedLevel?.Level;
@@ -374,14 +365,6 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             case 2: C3U = u; C3V = v; break;
             default: C4U = u; C4V = v; break;
         }
-    }
-
-    /// <summary>(u,v) 폴리곤을 캔버스 px로 투영.</summary>
-    private static PointCollection ProjectPolygon(IReadOnlyList<(double u, double v)> uv, Func<double, double, (double x, double y)> proj)
-    {
-        var pc = new PointCollection(uv.Count);
-        foreach (var (u, v) in uv) { var (x, y) = proj(u, v); pc.Add(new System.Windows.Point(x, y)); }
-        return pc;
     }
 
     /// <summary>

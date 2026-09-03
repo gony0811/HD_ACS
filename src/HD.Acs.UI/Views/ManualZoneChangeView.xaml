@@ -58,26 +58,6 @@
                                  SelectedItem="{Binding SelectedFloor, Mode=TwoWay}" />
         </Grid>
 
-        <Grid Margin="0,0,0,8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Margin="0,0,4,0">
-                <TextBlock Text="X" />
-                <telerik:RadNumericUpDown Value="{Binding X, Mode=TwoWay}" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Margin="2,0">
-                <TextBlock Text="Y" />
-                <telerik:RadNumericUpDown Value="{Binding Y, Mode=TwoWay}" />
-            </StackPanel>
-            <StackPanel Grid.Column="2" Margin="4,0,0,0">
-                <TextBlock Text="Theta" />
-                <telerik:RadNumericUpDown Value="{Binding Theta, Mode=TwoWay}" />
-            </StackPanel>
-        </Grid>
-
         <StackPanel Orientation="Horizontal">
             <telerik:RadButton Content="층 지정 적용" Command="{Binding ApplyZoneChangeCommand}" Margin="0,0,6,0" />
             <telerik:RadButton Content="새로고침" Command="{Binding RefreshContextCommand}" />

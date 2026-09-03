@@ -282,3 +282,16 @@ u 값이 유효 범위 안이라 어떤 검증에도 걸리지 않는다.
 - `TANK_WALL_LAYOUT.md` — 전개도 구성(§1), 벽면 코드 naming rule(§2), 층 구조(§4)
 - `surface_id_enum.docx` — Surface ID / Surface Type 대외 정본
 - `ARCHITECTURE_DECISIONS.md` — ADR-005(UI·API 계층), ADR-012(좌표 프레임)
+
+
+---
+
+## 부록 — Avalonia 헤드(HD.Acs.UI.Desktop) 3D 렌더링 (2026-09-03)
+
+크로스플랫폼 헤드는 HelixToolkit 대신 **코어의 소프트웨어 투영 렌더러**로 3D 뷰를 그린다(ADR-005 개정, `docs/UI_CROSS_PLATFORM_REVIEW.md` Phase 3).
+
+- 형상 정본: `HD.Acs.UI.Core/Rendering/TankShape.cs` — 면 프레임 (u,v)→3D(`TryPoint`/`Corners`), 마구리 팔각 반폭 `HalfWidth(g,z)`·`BulkheadPolygon`(z-밴드 클리핑), 면 타입 색 `FaceColor`. 본문 3중복 중 3D(WPF `TankView.HalfWidth`) 복사본의 이관본이며, 2D 전개도 복사본 2개는 잔존.
+- 씬: `TankSceneBuilder.Build(TankSceneInput)` — 셸(전체 모드만 반투명 채움, 격리 모드 와이어) → 층 밴드(외부향 0.02m) → 오버레이(외부향 0.03m, 상태색) → 바닥 히트 평면+1m 격자(격리 모드) → 로봇/이동 마커. 레이어 오프셋 규칙은 본문과 동일.
+- 투영: `Camera3`(오빗 카메라, z-up, 수직 FOV 45°) + `SceneRenderer.Render` → 화면 px 그리기 목록(면·선은 시선 깊이 내림차순 페인터 정렬, 마커·라벨은 오버레이). 면은 법선·광원 내적으로 플랫 셰이딩(0.65~1.0). 반투명은 2D 알파 블렌딩이라 WPF 3D의 반투명 깊이 컬링 문제가 없다.
+- 바닥 클릭: `Camera3.HitPlaneZ`(화면 점의 시선 광선과 z=층 주행면 교차) → `TankSceneBuilder.FloorPlane` 사각 범위 검사 → `TankViewModel.RequestMoveAsync`.
+- 헤드: `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`가 `DrawingContext`로 그리고 포인터(오빗/팬/줌)를 처리한다. VM `ViewChanged` 시 `ZoomExtents`(WPF와 동일 동작).

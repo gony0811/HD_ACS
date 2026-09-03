@@ -24,11 +24,6 @@ public sealed partial class ManualZoneChangeViewModel : ObservableObject
     [ObservableProperty] private TankFloor? _selectedFloor;
     [ObservableProperty] private RobotContextDto? _context;
 
-    // 층 진입 초기 자세(initPosition 근거) — 기본 0, 필요 시 편집
-    [ObservableProperty] private double _x;
-    [ObservableProperty] private double _y;
-    [ObservableProperty] private double _theta;
-
     [ObservableProperty] private string? _statusMessage;
 
     public ManualZoneChangeViewModel(IAcsApiClient api, IMonitoringClient monitoring, IOptions<AcsOptions> options)
@@ -95,7 +90,7 @@ public sealed partial class ManualZoneChangeViewModel : ObservableObject
         if (SelectedRobotId is null || SelectedFloor is null) return;
         try
         {
-            await _api.ManualZoneChangeAsync(SelectedRobotId, SelectedFloor.MapId, _operatorId, X, Y, Theta);
+            await _api.ManualZoneChangeAsync(SelectedRobotId, SelectedFloor.MapId, _operatorId);
             StatusMessage = $"수동 층 변경 요청: {SelectedFloor.Level} ({SelectedFloor.MapId}) — 작업자 {_operatorId}";
             await RefreshContextAsync();
         }

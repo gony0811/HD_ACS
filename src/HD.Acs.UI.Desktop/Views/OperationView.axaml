@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:HD.Acs.UI.Desktop.Views"
+             xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+             x:Class="HD.Acs.UI.Desktop.Views.OperationView"
+             TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = ShellViewModel (상위에서 상속). 하위 뷰는 Shell 자식 VM에 바인딩. -->
+    <UserControl.Resources>
+        <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
+        <conv:KindToBrushConverter x:Key="KindBrush" />
+    </UserControl.Resources>
+
+    <Grid Margin="8" ColumnDefinitions="320,*,340">
+        <!-- ── 좌: 로봇 카드 + (층 진행 / 작업 현황 / 수동 층 변경) ── -->
+        <Grid Grid.Column="0" Margin="0,0,8,0" RowDefinitions="Auto,*">
+            <Border Grid.Row="0" Classes="card" Margin="0,0,0,8">
+                <StackPanel>
+                    <TextBlock Text="로봇 상태" Classes="cardHead" FontSize="11" />
+                    <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
+                    <views:RobotStatusView DataContext="{Binding RobotStatus}" />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="1" Classes="card">
+                <TabControl x:Name="LeftTabs">
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="층 진행" Classes="cardHead" FontSize="11" />
+                        </TabItem.Header>
+                        <Grid RowDefinitions="Auto,*">
+                            <StackPanel Grid.Row="0" Margin="12,10,12,6">
+                                <TextBlock Text="{Binding Mission.ProgressSummary}" FontWeight="Bold" FontSize="14" />
+                                <!-- TASK 단위 진행률 (완료/전체·%) -->
+                                <TextBlock Margin="0,6,0,0" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           Text="{Binding Mission.TaskProgressSummary}" />
+                                <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="1"
+                                             Value="{Binding Mission.TaskProgressFraction, Mode=OneWay}"
+                                             Background="{DynamicResource AppWindowBrush}"
+                                             Foreground="{DynamicResource AppAccentBrush}" />
+                            </StackPanel>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="8,0,8,8">
+                                <ItemsControl ItemsSource="{Binding Mission.FloorProgress}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,6" Padding="9,8" CornerRadius="8"
+                                                    Background="{DynamicResource AppWindowBrush}"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                                                <Grid ColumnDefinitions="36,*,Auto">
+                                                    <Border Grid.Column="0" CornerRadius="7" Padding="0,4" VerticalAlignment="Center"
+                                                            Background="{DynamicResource AppAccentSoftBrush}">
+                                                        <TextBlock Text="{Binding Level}" FontWeight="Bold" FontSize="12"
+                                                                   HorizontalAlignment="Center"
+                                                                   Foreground="{DynamicResource AppAccentBrush}" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="10,0">
+                                                        <TextBlock Text="{Binding State}" FontSize="12.5" FontWeight="SemiBold" />
+                                                        <!-- 상태별 채움색: done=Good / fail=Error / wait=Muted / 그 외 Accent (KindToBrushConverter) -->
+                                                        <ProgressBar Height="5" Margin="0,5,0,0" Minimum="0" Maximum="1"
+                                                                     Value="{Binding Fraction, Mode=OneWay}"
+                                                                     Background="{DynamicResource AppWindowBrush}"
+                                                                     Foreground="{Binding Kind, Converter={StaticResource KindBrush}, ConverterParameter=bar}" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="2" VerticalAlignment="Center" FontSize="10.5" FontWeight="Bold"
+                                                               Text="{Binding Kind}"
+                                                               Foreground="{Binding Kind, Converter={StaticResource KindBrush}, ConverterParameter=text}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </TabItem>
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="작업 현황" FontSize="11" />
+                        </TabItem.Header>
+                        <!-- 실행 큐(work_item) 모니터링 — WorkItemProgress 푸시로 실시간 갱신 [INSPECTION_SCENARIO §3.1] -->
+                        <Grid RowDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0" Margin="12,10,12,6" FontWeight="Bold" FontSize="14"
+                                       Text="{Binding Mission.WorkSummary}" />
+                            <DataGrid Grid.Row="1" x:Name="WorkItemGrid" Margin="6,0,6,6"
+                                      ItemsSource="{Binding Mission.WorkItems}"
+                                      AutoGenerateColumns="False" IsReadOnly="True" FontSize="11"
+                                      RowDetailsVisibilityMode="VisibleWhenSelected">
+                                <!-- 행 확장: 선택한 영역의 용접라인(TASK/액션) 현황 드릴다운 -->
+                                <DataGrid.RowDetailsTemplate>
+                                    <DataTemplate>
+                                        <ItemsControl ItemsSource="{Binding Tasks}" Margin="24,4,8,6">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,1" ColumnDefinitions="24,*,Auto,Auto">
+                                                        <TextBlock Grid.Column="0" Text="{Binding Seq}" FontSize="10" FontWeight="Bold"
+                                                                   Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="11"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        <Border Grid.Column="2" CornerRadius="3" Padding="6,1" Margin="4,0"
+                                                                Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
+                                                            <TextBlock Text="{Binding Status}" FontSize="9" FontWeight="Bold"
+                                                                       Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                        </Border>
+                                                        <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="9" MaxWidth="120"
+                                                                   Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </DataTemplate>
+                                </DataGrid.RowDetailsTemplate>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#" Binding="{Binding Seq}" Width="36" />
+                                    <DataGridTextColumn Header="영역" Binding="{Binding AreaName}" Width="*" />
+                                    <DataGridTextColumn Header="층" Binding="{Binding Level}" Width="36" />
+                                    <DataGridTemplateColumn Header="상태" Width="86">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Border CornerRadius="3" Padding="6,1" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                        Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
+                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold"
+                                                               Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="재시도" Binding="{Binding Attempts}" Width="52" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="수동 층 변경" FontSize="11" />
+                        </TabItem.Header>
+                        <views:ManualZoneChangeView DataContext="{Binding ManualZoneChange}" />
+                    </TabItem>
+                </TabControl>
+            </Border>
+        </Grid>
+
+        <!-- ── 중앙: 공간 히어로(3D/전개도) + 미션 컨트롤 바 ── -->
+        <Grid Grid.Column="1" Margin="0,0,8,0" RowDefinitions="*,Auto">
+            <Border Grid.Row="0" Classes="card" Padding="1">
+                <views:TankView DataContext="{Binding Tank}" />
+            </Border>
+            <Border Grid.Row="1" Classes="card" Margin="0,8,0,0" Padding="10">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+                    <ComboBox Grid.Column="0" Width="180" MinHeight="30" Margin="0,0,6,0"
+                              ItemsSource="{Binding Mission.Scenarios}" DisplayMemberBinding="{Binding Name}"
+                              SelectedItem="{Binding Mission.SelectedScenario}" />
+                    <ComboBox Grid.Column="1" Width="120" MinHeight="30" Margin="0,0,10,0"
+                              ItemsSource="{Binding Mission.RobotIds}"
+                              SelectedItem="{Binding Mission.SelectedRobotId}" />
+                    <Button Grid.Column="2" Content="미션 시작" MinHeight="30" Margin="0,0,6,0"
+                            Command="{Binding Mission.StartRunCommand}" />
+                    <Button Grid.Column="3" Content="이어하기" MinHeight="30" Margin="0,0,6,0"
+                            ToolTip.Tip="가장 최근 미완료 run 재개 — 완료·스킵된 영역은 건너뛰고 남은 작업만 재배차"
+                            Command="{Binding Mission.ResumeRunCommand}" />
+                    <Button Grid.Column="4" Content="중단" MinHeight="30" Margin="0,0,6,0"
+                            ToolTip.Tip="후속 배차 중지(진행 중 정차는 완주). 즉시 정지는 ■비상정지"
+                            Command="{Binding Mission.AbortRunCommand}" />
+                    <Button Grid.Column="5" Content="다음 층 릴리스" MinHeight="30" Margin="0,0,6,0"
+                            Command="{Binding Mission.ReleaseNextCommand}" />
+                    <Button Grid.Column="6" Content="새로고침" MinHeight="30"
+                            Command="{Binding Mission.RefreshCurrentRunCommand}" />
+                    <TextBlock Grid.Column="7" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource AppMutedTextBrush}" FontSize="12"
+                               Text="{Binding Mission.StatusMessage}" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ── 우: 알람·이벤트 피드 ── -->
+        <Border Grid.Column="2" Classes="card">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <TextBlock Grid.Row="0" Text="알람 · 이벤트" Classes="cardHead" />
+                <Border Grid.Row="1" Height="1" Background="{DynamicResource AppBorderBrush}" />
+                <views:AlarmsView Grid.Row="2" DataContext="{Binding Alarms}" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

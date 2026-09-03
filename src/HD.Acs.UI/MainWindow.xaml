@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
         xmlns:views="clr-namespace:HD.Acs.UI.Views"
-        xmlns:vm="clr-namespace:HD.Acs.UI.ViewModels"
+        xmlns:vm="clr-namespace:HD.Acs.UI.ViewModels;assembly=HD.Acs.UI.Core"
         xmlns:conv="clr-namespace:HD.Acs.UI.Infrastructure"
         Title="{Binding WindowTitle}" Width="1440" Height="900"
         WindowStartupLocation="CenterScreen"
