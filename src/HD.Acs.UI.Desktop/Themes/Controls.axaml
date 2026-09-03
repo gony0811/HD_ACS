@@ -67,6 +67,18 @@
         <Setter Property="MinHeight" Value="30" />
     </Style>
 
+    <!-- 탭 헤더: Fluent 기본(FontSize 24·Padding 12,8)이 운영 콘솔에 과대 → 앱 전역을 모드 탭(13.5)과 일관된 13px로 통일
+         (운영 LeftTabs·계획 Tabs·TankView TankTabs 모두 적용) -->
+    <Style Selector="TabItem">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <Style Selector="TabControl">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
     <!-- 그리드: 읽기 전용 목록 공통 -->
     <Style Selector="DataGrid">
         <Setter Property="GridLinesVisibility" Value="Horizontal" />
