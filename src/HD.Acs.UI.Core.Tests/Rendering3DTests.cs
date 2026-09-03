@@ -138,19 +138,22 @@ public class Rendering3DTests
         var without = TankSceneBuilder.Build(baseInput);
         var with = TankSceneBuilder.Build(baseInput with { RobotHeading = Math.PI / 2 });   // 도면 +y 방향
 
-        // theta 없음 → 원만. 있음 → 축 1선분 + 화살촉 1면(셰이딩 없음) 추가
-        Assert.Equal(without.Segments.Count + 1, with.Segments.Count);
-        Assert.Equal(without.Faces.Count + 1, with.Faces.Count);
-        var head = Assert.Single(with.Faces, f => !f.Shade && f.Points.Count == 3);
-        var shaft = Assert.Single(with.Segments, s => s.Thickness == 2.5);
+        // theta 없음 → 원만. 있음 → 3D 화살표 = 축 프리즘 옆면 4 + 화살촉 사각뿔(밑면 1 + 옆면 4) = 9면, 선분은 그대로
+        Assert.Equal(without.Segments.Count, with.Segments.Count);
+        Assert.Equal(without.Faces.Count + 9, with.Faces.Count);
+        var arrow = with.Faces.Skip(without.Faces.Count).ToList();
+        Assert.Equal(4, arrow.Count(f => f.Points.Count == 3));   // 화살촉 옆면
+        Assert.Equal(5, arrow.Count(f => f.Points.Count == 4));   // 축 4 + 화살촉 밑면 1
+        Assert.All(arrow, f => Assert.True(f.Shade));             // 입체감 = 플랫 셰이딩
 
-        // +y heading: 축 끝·화살촉 끝이 로봇 위치에서 +y로 나감(x 동일), 바닥에서 살짝 띄움
-        Assert.Equal(2, shaft.B.X, 9);
-        Assert.Equal(1 + TankSceneBuilder.HeadingShaftM, shaft.B.Y, 9);
-        Assert.Equal(TankSceneBuilder.HeadingLiftM, shaft.B.Z, 9);
-        var tip = head.Points.MaxBy(p => p.Y);
+        // +y heading: 마커 원 중심 높이(z+0.4)에서 +y로 뻗고, 끝점 x는 로봇 x와 같다
+        var pts = arrow.SelectMany(f => f.Points).ToList();
+        var tip = pts.MaxBy(p => p.Y);
         Assert.Equal(1 + TankSceneBuilder.HeadingTipM, tip.Y, 9);
         Assert.Equal(2, tip.X, 9);
+        Assert.Equal(TankSceneBuilder.RobotMarkerLiftM, tip.Z, 9);
+        Assert.Equal(1, pts.Min(p => p.Y), 9);                                   // 축 시작 = 원 중심
+        Assert.Equal(TankSceneBuilder.HeadingHeadHalfM, pts.Max(p => p.X) - 2, 9); // 화살촉 반폭
 
         // 위치 없음 → heading이 있어도 아무것도 그리지 않음
         var none = TankSceneBuilder.Build(baseInput with { HasRobotPosition = false, RobotHeading = 0.3 });

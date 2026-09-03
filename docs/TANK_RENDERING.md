@@ -154,8 +154,9 @@ z를 `[zLo, zHi]`로 클리핑한 뒤 챔퍼 무릎(`hLow`, `hLow+hWall`)이 구
 **heading(방향) 화살표 (2026-09-03, Avalonia 헤드)** — SignalR `RobotState`가 `ReportedTheta`(VDA `agvPosition.theta`, 맵 프레임 rad)를
 함께 싣고, `TankViewModel.MapThetaToDrawing(theta, yaw) = theta − yaw`((−π, π] 정규화)로 도면 heading을 만든다(위치 변환이
 R(−yaw)이므로 방향 벡터도 −yaw 회전; 미보정 층은 원시 theta 폴백, theta 미보고=null이면 화살표 생략).
-`TankSceneBuilder.AddRobotHeading`이 로봇 z+0.05m 바닥면에 축(`Segment3`, 0.85m)+삼각 화살촉(`Face3`, 끝 1.25m·밑변 0.8m·반폭 0.28m,
-셰이딩 없음)을 그린다. 마커 원은 오버레이(항상 위)라 축이 원 중심에서 나오는 것처럼 보인다. 같은 값이 로봇 상태 카드
+`TankSceneBuilder.AddRobotHeading`이 **마커 원 중심(로봇 z+0.4m)에서 heading 방향으로 수평하게 뻗는 3D 화살표**를 그린다:
+사각 프리즘 축(길이 0.9m·반두께 0.06m, 옆면 4) + 사각뿔 화살촉(끝 1.35m·밑면 반폭 0.2m, 밑면 1+옆면 4) — 9면 모두 플랫 셰이딩으로
+입체감을 준다(바닥 투영이 아니라 공중의 실체 형상, 사용자 요청). 마커 원은 오버레이(항상 위)라 축이 원 중심에서 나오는 것처럼 보인다. 같은 값이 로봇 상태 카드
 "방향(도면 x축 기준): n°"에도 표시된다. WPF 헤드(Helix)는 원 마커만 유지(Phase 5 처분 결정까지 미이식).
 
 ---
