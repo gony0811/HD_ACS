@@ -495,6 +495,7 @@ app.MapPost("/api/robots/{robotId}/goto",
     catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
     var (mx, my) = t.DrawingToMap(req.XDrawing, req.YDrawing);
+    double? mapTheta = req.ThetaDrawing is double drawingTheta ? t.DrawingYawToMap(drawingTheta) : null;
     var orderId = Guid.NewGuid().ToString();
     var order = new HD.Acs.Vda5050.Messages.Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
     order.Nodes.Add(new HD.Acs.Vda5050.Messages.OrderNode
@@ -502,16 +503,16 @@ app.MapPost("/api/robots/{robotId}/goto",
         NodeId = $"GOTO-{orderId[..8]}", SequenceId = 0, Released = true,
         NodePosition = new HD.Acs.Vda5050.Messages.NodePosition
         {
-            X = mx, Y = my, MapId = mapId,   // theta 미지정 — 도착 방향 자유
+            X = mx, Y = my, Theta = mapTheta, MapId = mapId,
             AllowedDeviationXY = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08),
             AllowedDeviationTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07),
         },
     });
     await vda.PublishOrderAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber), order);
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
-        { UserId = req.UserId ?? "", Action = "MANUAL_GOTO", Target = $"{robotId} → {mapId} ({mx:F2},{my:F2})" });
+        { UserId = req.UserId ?? "", Action = "MANUAL_GOTO", Target = $"{robotId} → {mapId} ({mx:F2},{my:F2},{mapTheta?.ToString("F3") ?? "free"})" });
     await db.SaveChangesAsync();
-    return Results.Ok(new { orderId, mapId, mapX = mx, mapY = my });
+    return Results.Ok(new { orderId, mapId, mapX = mx, mapY = my, mapTheta });
 });
 
 // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1] ──────────────────────────
@@ -615,7 +616,7 @@ app.Run();
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
-public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, string? UserId);
+public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);

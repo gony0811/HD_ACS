@@ -106,6 +106,9 @@ public class Rendering3DTests
 
         // 격리 모드: 셸 채움 없음(3면 모두 Fill=null) + 층 밴드 1면(채움) + 영역 1면 + 바닥 히트 평면 1면
         Assert.Equal(3, scene.Faces.Count(f => f.Fill is null));
+        Assert.Contains(scene.Faces, f => f.Fill is { } c
+            && c.A == TankSceneBuilder.LevelHighlightAlpha
+            && c.R == 0xF5 && c.G == 0xB0 && c.B == 0x41);   // 선택 층: 옅은 황금색 채움
         Assert.Contains(scene.Faces, f => f.Fill == TankViewModel.StatusColors("DISPATCHED").Fill);
         Assert.Contains(scene.Faces, f => f.Points.Count == 4 && f.Fill is { } c && c.A == 0x16);   // 바닥 히트 평면
         Assert.Contains(scene.Segments, s => s.Color == TankViewModel.WeldLineColor("RUNNING") && s.Thickness == 3.0);
@@ -159,6 +162,21 @@ public class Rendering3DTests
         var none = TankSceneBuilder.Build(baseInput with { HasRobotPosition = false, RobotHeading = 0.3 });
         Assert.Equal(without.Segments.Count, none.Segments.Count);
         Assert.DoesNotContain(none.Markers, m => m.RadiusWorld == 0.4);
+    }
+
+    [Fact]
+    public void SceneBuilder_MoveHeading_EmitsPurpleDirectionArrow()
+    {
+        var input = new TankSceneInput(Walls(), Array.Empty<WallDto>(), Geometry(),
+            Array.Empty<TankViewModel.AreaOverlay>(), false, 1, _ => null, _ => null,
+            HasRobotPosition: false, RobotPosition: Pt3.Zero,
+            MoveMarker: new Pt3(2, 3, 0.25), MoveHeading: 0);
+
+        var scene = TankSceneBuilder.Build(input);
+
+        Assert.Contains(scene.Markers, marker => marker.Center == new Pt3(2, 3, 0.25) && marker.RadiusWorld == 0.25);
+        Assert.Equal(9, scene.Faces.Count(face => face.Fill is { } c && c.R == 0x9B && c.G == 0x59 && c.B == 0xB6));
+        Assert.Contains(scene.Faces.SelectMany(face => face.Points), point => Math.Abs(point.X - 3.35) < 1e-9);
     }
 
     [Theory]

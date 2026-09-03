@@ -119,22 +119,49 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>켜면 층 바닥 그리드 클릭이 해당 지점으로 수동 이동을 명령한다 (오조작 방지 토글).</summary>
     [ObservableProperty] private bool _manualMoveMode;
     [ObservableProperty] private string? _moveStatus;
+    [ObservableProperty] private Pt3? _moveMarker;
+    [ObservableProperty] private double? _moveHeading;
     private string? _lastRobotId;   // 최근 state 보고 로봇 — 단일 로봇 MVP
 
-    /// <summary>바닥 그리드 클릭 지점(도면 x,y)으로 이동 명령. 뷰 코드비하인드가 호출.</summary>
-    public async Task RequestMoveAsync(double xDrawing, double yDrawing)
+    public bool HasMoveMarker => MoveMarker is not null;
+
+    /// <summary>수동 이동 도착 판정 허용 오차[m] — VDA 5050 allowedDeviationXY(0.08m)를 안정적으로 포함하는 15cm.</summary>
+    public const double MoveArrivalThresholdM = 0.15;
+
+    /// <summary>바닥 그리드의 도면 위치와 선택 방향으로 이동 명령. 방향 null은 기존의 자유 정차.</summary>
+    public async Task RequestMoveAsync(double xDrawing, double yDrawing, double? thetaDrawing = null, double? zDrawing = null)
     {
         if (SelectedLevel is not int level) return;
         if (_lastRobotId is not { } robotId) { MoveStatus = "로봇 보고 없음 — 연결 확인"; return; }
+
+        double z = zDrawing ?? (Geometry?.LevelZ is { } lz && level - 1 >= 0 && level - 1 < lz.Length ? lz[level - 1] : 0.0);
+        MoveMarker = new Pt3(xDrawing, yDrawing, z + 0.25);
+        MoveHeading = thetaDrawing;
+
         try
         {
-            await _api.GotoAsync(robotId, level, xDrawing, yDrawing);
-            MoveStatus = $"이동 명령: ({xDrawing:F2}, {yDrawing:F2}) → {robotId}";
+            await _api.GotoAsync(robotId, level, xDrawing, yDrawing, thetaDrawing);
+            string heading = thetaDrawing is double theta ? $", 방향 {theta * 180.0 / Math.PI:F0}°" : ", 방향 자유";
+            MoveStatus = $"이동 명령: ({xDrawing:F2}, {yDrawing:F2}{heading}) → {robotId}";
         }
         catch (Exception ex)
         {
             MoveStatus = $"이동 실패: {ex.Message}";
+            ClearMoveTarget();
         }
+    }
+
+    /// <summary>수동 이동 목적지 마커 및 방향 화살표를 제거한다.</summary>
+    public void ClearMoveTarget()
+    {
+        if (MoveMarker is null && MoveHeading is null) return;
+        MoveMarker = null;
+        MoveHeading = null;
+    }
+
+    partial void OnManualMoveModeChanged(bool value)
+    {
+        if (!value) ClearMoveTarget();
     }
 
     public bool HasRobotPosition => RobotX is not null && RobotY is not null;
@@ -297,8 +324,28 @@ public sealed partial class TankViewModel : ObservableObject
         RobotTheta = s.ReportedTheta;
         RobotMapId = s.ReportedMapId;
         UpdateRobotDrawingPose();
+        CheckMoveArrival();
         OnPropertyChanged(nameof(HasRobotPosition));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));
+    }
+
+    /// <summary>
+    /// 수동 이동 목적지가 있을 때, AMR이 목적지에 도착(허용 오차 0.15m 이내)하면 목적지 마커/화살표를 소멸시킨다.
+    /// </summary>
+    private void CheckMoveArrival()
+    {
+        if (MoveMarker is not { } target) return;
+        if (!HasRobotPosition || !RobotOnSelectedFloor) return;
+
+        double dx = RobotDrawingX - target.X;
+        double dy = RobotDrawingY - target.Y;
+        double dist = Math.Sqrt(dx * dx + dy * dy);
+
+        if (dist <= MoveArrivalThresholdM)
+        {
+            ClearMoveTarget();
+            MoveStatus = $"수동 이동 완료: ({RobotDrawingX:F2}, {RobotDrawingY:F2}) 도착";
+        }
     }
 
     private void UpdateRobotDrawingPose()
@@ -352,6 +399,7 @@ public sealed partial class TankViewModel : ObservableObject
 
     partial void OnSelectedViewModeChanged(string value)
     {
+        ClearMoveTarget();
         OnPropertyChanged(nameof(SelectedLevel));
         OnPropertyChanged(nameof(IsolateLevel));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));

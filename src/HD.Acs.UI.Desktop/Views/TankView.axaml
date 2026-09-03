@@ -17,9 +17,9 @@
                 <ComboBox Width="90" ItemsSource="{Binding ViewModes}" SelectedItem="{Binding SelectedViewMode}" />
                 <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsChecked="{Binding ShowOverlays}" />
-                <CheckBox Content="수동 이동(그리드 클릭)" VerticalAlignment="Center" Margin="16,0,0,0"
-                          IsEnabled="{Binding IsolateLevel}"
-                          ToolTip.Tip="층(L1~L4) 선택 시 바닥 그리드가 표시됩니다 — 클릭 지점으로 로봇 이동 명령(이동 테스트용). 진행 중 run이 있으면 거부됩니다."
+                <CheckBox Content="수동 이동(위치→방향 드래그)" VerticalAlignment="Center" Margin="16,0,0,0"
+                           IsEnabled="{Binding IsolateLevel}"
+                          ToolTip.Tip="바닥의 정차 위치에서 원하는 방향으로 드래그하세요. 짧게 클릭하면 방향 자유로 이동합니다."
                           IsChecked="{Binding ManualMoveMode}" />
                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource AppMutedTextBrush}"
@@ -35,7 +35,7 @@
 
         <TabControl x:Name="TankTabs">
             <TabItem Header="3D 뷰">
-                <!-- 소프트웨어 투영 렌더러(코어 Camera3·SceneRenderer·TankSceneBuilder) — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 좌클릭=goto -->
+                <!-- 소프트웨어 투영 렌더러 — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 위치→방향 드래그=goto -->
                 <Grid>
                     <views:Tank3DControl x:Name="Tank3D" />
                     <Button Content="맞춤" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Padding="8,2" FontSize="11"
