@@ -18,9 +18,9 @@
                                      SelectedItem="{Binding SelectedViewMode, Mode=TwoWay}" />
                 <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsChecked="{Binding ShowOverlays, Mode=TwoWay}" />
-                <CheckBox Content="수동 이동(그리드 클릭)" VerticalAlignment="Center" Margin="16,0,0,0"
+                <CheckBox Content="수동 이동(위치→방향 드래그)" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsEnabled="{Binding IsolateLevel}"
-                          ToolTip="층(L1~L4) 선택 시 바닥 그리드가 표시됩니다 — 클릭 지점으로 로봇 이동 명령(이동 테스트용). 진행 중 run이 있으면 거부됩니다."
+                          ToolTip="바닥의 정차 위치에서 원하는 방향으로 드래그하세요. 짧게 클릭하면 방향 자유로 이동합니다."
                           IsChecked="{Binding ManualMoveMode, Mode=TwoWay}" />
                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource AppMutedTextBrush}"
@@ -37,7 +37,11 @@
         <telerik:RadTabControl>
             <telerik:RadTabItem Header="3D 뷰">
                 <helix:HelixViewport3D x:Name="Viewport" ZoomExtentsWhenLoaded="True"
-                                       ShowCoordinateSystem="True" Background="#1B2631">
+                                       ShowCoordinateSystem="True" ShowViewCube="True"
+                                       ViewCubeFrontText="우현" ViewCubeBackText="좌현"
+                                       ViewCubeLeftText="선미" ViewCubeRightText="선수"
+                                       ViewCubeTopText="상" ViewCubeBottomText="하"
+                                       Background="#1B2631">
                     <helix:SunLight />
                     <helix:GridLinesVisual3D Width="40" Length="40" MajorDistance="5" MinorDistance="1"
                                              Thickness="0.03" Fill="#5D6D7E" />

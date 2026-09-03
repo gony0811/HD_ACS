@@ -186,8 +186,9 @@ tools/publish_desktop.sh linux-x64
 - macOS 번들은 `Contents/MacOS/` 에 실행 파일·어셈블리·`appsettings.json` 을 두므로 **번들 안의 appsettings.json 을 편집해 서버 주소를 바꾼다**(또는 환경변수).
 - 서명: 기본 ad-hoc(`codesign -s -`) — **같은 Mac에서 만든 번들은 그대로 실행**된다. 다른 Mac으로 배포하면 Gatekeeper가 차단하므로 ① Finder에서 우클릭 ▸ 열기(1회) 또는 `xattr -dr com.apple.quarantine HD_ACS.app`, ② 정식 배포는 `HDACS_SIGN_IDENTITY="Developer ID Application: …"` 로 서명 후 notarization(`xcrun notarytool submit`). 폐쇄망 현장은 ①로 충분.
 - 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
-- macOS에서는 파일 메뉴가 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장)에 뜨고 창 안의 메뉴는 숨겨진다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
+- 파일 메뉴(새 프로젝트·열기·저장·다른 이름으로 저장)는 전 플랫폼에서 창 상단 앱바에 표시된다. macOS에서는 추가로 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장·⌘⇧S 다른 이름으로 저장)에도 같은 명령이 뜬다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
 - 3D 뷰 조작: 좌드래그 회전 · 우드래그(또는 휠 클릭 드래그) 이동 · 휠 확대/축소 · 우상단 "맞춤". 트랙패드는 두 손가락 스크롤=줌.
+- 3D 뷰의 로봇 마커(빨간 원) 중심에서 **3D 방향 화살표**(축+화살촉, 입체)가 뻗어 나온다 — AMR이 보고한 heading(VDA `agvPosition.theta`)을 층 캘리브레이션(T_W_D) yaw로 보정한 도면 방향. theta를 보고하지 않는 동안(부팅 직후 등)은 원만 보인다. 같은 값은 로봇 상태 카드 "방향(도면 x축 기준)"에 도 단위로 표시된다.
 
 ---
 
@@ -243,10 +244,11 @@ AMR에서 새 층의 initPose 실행 → UI **수동 층 변경** 패널(또는 
 `POST /api/runs/{runId}/release-next`로 다음 층 미션 릴리즈.
 
 **수동 이동(이동 테스트)**: TankView에서 층(L1~L4)을 선택하면 그 층 주행 평면에 **1m 바닥 그리드**가 표시된다.
-상단 "수동 이동(그리드 클릭)" 체크 후 그리드를 클릭하면 그 지점(도면 좌표→T_W_D 변환)으로 **액션 없는 단일 노드 Order**가
-발행되어 로봇이 이동한다(보라 마커=목표점). 진행 중 run이 있거나 로봇이 다른 층이면 409로 거부(오조작 방지).
+상단 "수동 이동(위치→방향 드래그)" 체크 후 정차 위치에서 원하는 방향으로 드래그하면 위치와 정차 방향이
+도면 좌표→T_W_D 변환되어 **액션 없는 단일 노드 Order**로 발행된다(보라 원·화살표=목표 pose).
+짧게 클릭하면 이전과 같이 방향 자유 이동이다. 진행 중 run이 있거나 로봇이 다른 층이면 409로 거부(오조작 방지).
 해당 맵 버전의 유효 T_W_D가 없으면 잘못된 좌표 발행을 막기 위해 400으로 거부한다.
-API: `POST /api/robots/{id}/goto { level, xDrawing, yDrawing }`.
+API: `POST /api/robots/{id}/goto { level, xDrawing, yDrawing, thetaDrawing? }`.
 
 로봇 상태 패널과 선창 3D 마커의 위치는 AMR이 보고한 SLAM 좌표를 해당 층의 `T_W_D⁻¹`로 변환한
 **도면 좌표**로 표시한다. 유효한 캘리브레이션이 없으면 SLAM 원시 좌표로 폴백하지 않고
@@ -289,7 +291,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/robots/{robotId}/context` | 로봇 컨텍스트 — 보고 pose(ReportedX/Y/Theta), 층(mapId), 온라인 여부 |
 | `POST /api/robots/{robotId}/zone` | 수동 층 지정 — `{ mapId, userId }`; AMR 보고 mapId 검증 게이트 설정 |
 | `POST /api/robots/{robotId}/emergency-stop` | 비상정지 — `{ userId }` (활성 run 자동 중단) |
-| `POST /api/robots/{robotId}/goto` | 수동 이동(이동 테스트) — `{ level, xDrawing, yDrawing }` 도면 좌표→T_W_D→액션 없는 단일 노드 Order. 진행 run/타층 409 |
+| `POST /api/robots/{robotId}/goto` | 수동 이동 — `{ level, xDrawing, yDrawing, thetaDrawing? }` 도면 pose→T_W_D→액션 없는 단일 노드 Order. 진행 run/타층 409 |
 
 ### 캘리브레이션 (T_W_D)
 | 메서드/경로 | 설명 |

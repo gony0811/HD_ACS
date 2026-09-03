@@ -164,6 +164,8 @@ async Task ExecuteOrderAsync(Vda5050Order order)
                 state.AgvPosition!.X = node.NodePosition.X;
                 state.AgvPosition.Y = node.NodePosition.Y;
                 state.AgvPosition.MapId = node.NodePosition.MapId;
+                // 정차각(theta)도 반영 — ACS 3D 뷰의 heading 화살표 검증용(실 AMR은 도착 자세를 보고)
+                if (node.NodePosition.Theta is double th) state.AgvPosition.Theta = th;
             }
             Console.WriteLine($"[SIM] 노드 도착: {node.NodeId}");
 

@@ -106,6 +106,9 @@ public class Rendering3DTests
 
         // 격리 모드: 셸 채움 없음(3면 모두 Fill=null) + 층 밴드 1면(채움) + 영역 1면 + 바닥 히트 평면 1면
         Assert.Equal(3, scene.Faces.Count(f => f.Fill is null));
+        Assert.Contains(scene.Faces, f => f.Fill is { } c
+            && c.A == TankSceneBuilder.LevelHighlightAlpha
+            && c.R == 0xF5 && c.G == 0xB0 && c.B == 0x41);   // 선택 층: 옅은 황금색 채움
         Assert.Contains(scene.Faces, f => f.Fill == TankViewModel.StatusColors("DISPATCHED").Fill);
         Assert.Contains(scene.Faces, f => f.Points.Count == 4 && f.Fill is { } c && c.A == 0x16);   // 바닥 히트 평면
         Assert.Contains(scene.Segments, s => s.Color == TankViewModel.WeldLineColor("RUNNING") && s.Thickness == 3.0);
@@ -124,6 +127,66 @@ public class Rendering3DTests
         var all = TankSceneBuilder.Build(input with { SelectedLevel = null, LevelWalls = Array.Empty<WallDto>() });
         Assert.Equal(3, all.Faces.Count(f => f.Fill is not null && f.Shade));
         Assert.Null(TankSceneBuilder.FloorPlane(input with { SelectedLevel = null }));
+    }
+
+    [Fact]
+    public void SceneBuilder_RobotHeading_EmitsArrowOnlyWhenKnown()
+    {
+        var g = Geometry();
+        var walls = Walls();
+        var baseInput = new TankSceneInput(walls, Array.Empty<WallDto>(), g, Array.Empty<TankViewModel.AreaOverlay>(),
+            ShowOverlays: false, SelectedLevel: null, _ => null, _ => null,
+            HasRobotPosition: true, RobotPosition: new Pt3(2, 1, 0));
+
+        var without = TankSceneBuilder.Build(baseInput);
+        var with = TankSceneBuilder.Build(baseInput with { RobotHeading = Math.PI / 2 });   // 도면 +y 방향
+
+        // theta 없음 → 원만. 있음 → 3D 화살표 = 축 프리즘 옆면 4 + 화살촉 사각뿔(밑면 1 + 옆면 4) = 9면, 선분은 그대로
+        Assert.Equal(without.Segments.Count, with.Segments.Count);
+        Assert.Equal(without.Faces.Count + 9, with.Faces.Count);
+        var arrow = with.Faces.Skip(without.Faces.Count).ToList();
+        Assert.Equal(4, arrow.Count(f => f.Points.Count == 3));   // 화살촉 옆면
+        Assert.Equal(5, arrow.Count(f => f.Points.Count == 4));   // 축 4 + 화살촉 밑면 1
+        Assert.All(arrow, f => Assert.True(f.Shade));             // 입체감 = 플랫 셰이딩
+
+        // +y heading: 마커 원 중심 높이(z+0.4)에서 +y로 뻗고, 끝점 x는 로봇 x와 같다
+        var pts = arrow.SelectMany(f => f.Points).ToList();
+        var tip = pts.MaxBy(p => p.Y);
+        Assert.Equal(1 + TankSceneBuilder.HeadingTipM, tip.Y, 9);
+        Assert.Equal(2, tip.X, 9);
+        Assert.Equal(TankSceneBuilder.RobotMarkerLiftM, tip.Z, 9);
+        Assert.Equal(1, pts.Min(p => p.Y), 9);                                   // 축 시작 = 원 중심
+        Assert.Equal(TankSceneBuilder.HeadingHeadHalfM, pts.Max(p => p.X) - 2, 9); // 화살촉 반폭
+
+        // 위치 없음 → heading이 있어도 아무것도 그리지 않음
+        var none = TankSceneBuilder.Build(baseInput with { HasRobotPosition = false, RobotHeading = 0.3 });
+        Assert.Equal(without.Segments.Count, none.Segments.Count);
+        Assert.DoesNotContain(none.Markers, m => m.RadiusWorld == 0.4);
+    }
+
+    [Fact]
+    public void SceneBuilder_MoveHeading_EmitsPurpleDirectionArrow()
+    {
+        var input = new TankSceneInput(Walls(), Array.Empty<WallDto>(), Geometry(),
+            Array.Empty<TankViewModel.AreaOverlay>(), false, 1, _ => null, _ => null,
+            HasRobotPosition: false, RobotPosition: Pt3.Zero,
+            MoveMarker: new Pt3(2, 3, 0.25), MoveHeading: 0);
+
+        var scene = TankSceneBuilder.Build(input);
+
+        Assert.Contains(scene.Markers, marker => marker.Center == new Pt3(2, 3, 0.25) && marker.RadiusWorld == 0.25);
+        Assert.Equal(9, scene.Faces.Count(face => face.Fill is { } c && c.R == 0x9B && c.G == 0x59 && c.B == 0xB6));
+        Assert.Contains(scene.Faces.SelectMany(face => face.Points), point => Math.Abs(point.X - 3.35) < 1e-9);
+    }
+
+    [Theory]
+    [InlineData(Math.PI / 2, Math.PI / 2, 0)]            // 맵 +y를 보는 로봇, 맵이 도면 대비 +90° 회전 → 도면 +x
+    [InlineData(0, Math.PI / 2, -Math.PI / 2)]           // 맵 +x → 도면 −y
+    [InlineData(3.0, -3.0, 6.0 - 2 * Math.PI)]           // 차가 π를 넘으면 (−π, π]로 감음
+    [InlineData(-3.0, 3.0, -6.0 + 2 * Math.PI)]
+    public void MapThetaToDrawing_SubtractsCalibrationYaw_AndWraps(double thetaMap, double yaw, double expected)
+    {
+        Assert.Equal(expected, TankViewModel.MapThetaToDrawing(thetaMap, yaw), 9);
     }
 
     [Fact]

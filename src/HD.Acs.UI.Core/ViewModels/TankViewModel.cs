@@ -112,27 +112,56 @@ public sealed partial class TankViewModel : ObservableObject
     [ObservableProperty] private double? _robotX;
     [ObservableProperty] private double? _robotY;
     [ObservableProperty] private string? _robotMapId;
+    /// <summary>로봇 heading — 맵 프레임(rad, VDA agvPosition.theta). null=미보고.</summary>
+    [ObservableProperty] private double? _robotTheta;
 
     // ── 수동 이동 (층 격리 뷰 바닥 그리드 클릭 → goto Order) — 이동 테스트용 ──
     /// <summary>켜면 층 바닥 그리드 클릭이 해당 지점으로 수동 이동을 명령한다 (오조작 방지 토글).</summary>
     [ObservableProperty] private bool _manualMoveMode;
     [ObservableProperty] private string? _moveStatus;
+    [ObservableProperty] private Pt3? _moveMarker;
+    [ObservableProperty] private double? _moveHeading;
     private string? _lastRobotId;   // 최근 state 보고 로봇 — 단일 로봇 MVP
 
-    /// <summary>바닥 그리드 클릭 지점(도면 x,y)으로 이동 명령. 뷰 코드비하인드가 호출.</summary>
-    public async Task RequestMoveAsync(double xDrawing, double yDrawing)
+    public bool HasMoveMarker => MoveMarker is not null;
+
+    /// <summary>수동 이동 도착 판정 허용 오차[m] — VDA 5050 allowedDeviationXY(0.08m)를 안정적으로 포함하는 15cm.</summary>
+    public const double MoveArrivalThresholdM = 0.15;
+
+    /// <summary>바닥 그리드의 도면 위치와 선택 방향으로 이동 명령. 방향 null은 기존의 자유 정차.</summary>
+    public async Task RequestMoveAsync(double xDrawing, double yDrawing, double? thetaDrawing = null, double? zDrawing = null)
     {
         if (SelectedLevel is not int level) return;
         if (_lastRobotId is not { } robotId) { MoveStatus = "로봇 보고 없음 — 연결 확인"; return; }
+
+        double z = zDrawing ?? (Geometry?.LevelZ is { } lz && level - 1 >= 0 && level - 1 < lz.Length ? lz[level - 1] : 0.0);
+        MoveMarker = new Pt3(xDrawing, yDrawing, z + 0.25);
+        MoveHeading = thetaDrawing;
+
         try
         {
-            await _api.GotoAsync(robotId, level, xDrawing, yDrawing);
-            MoveStatus = $"이동 명령: ({xDrawing:F2}, {yDrawing:F2}) → {robotId}";
+            await _api.GotoAsync(robotId, level, xDrawing, yDrawing, thetaDrawing);
+            string heading = thetaDrawing is double theta ? $", 방향 {theta * 180.0 / Math.PI:F0}°" : ", 방향 자유";
+            MoveStatus = $"이동 명령: ({xDrawing:F2}, {yDrawing:F2}{heading}) → {robotId}";
         }
         catch (Exception ex)
         {
             MoveStatus = $"이동 실패: {ex.Message}";
+            ClearMoveTarget();
         }
+    }
+
+    /// <summary>수동 이동 목적지 마커 및 방향 화살표를 제거한다.</summary>
+    public void ClearMoveTarget()
+    {
+        if (MoveMarker is null && MoveHeading is null) return;
+        MoveMarker = null;
+        MoveHeading = null;
+    }
+
+    partial void OnManualMoveModeChanged(bool value)
+    {
+        if (!value) ClearMoveTarget();
     }
 
     public bool HasRobotPosition => RobotX is not null && RobotY is not null;
@@ -275,22 +304,55 @@ public sealed partial class TankViewModel : ObservableObject
     public double RobotDrawingY { get; private set; }
     /// <summary>로봇 층의 주행 평면 z (level_z) — 마커를 그 층 높이에 표시.</summary>
     public double RobotDrawingZ { get; private set; }
+    /// <summary>도면 프레임 heading(rad, x축 기준 CCW). 위치와 같은 규칙으로 T_W_D yaw를 뺀 값(미보정 층은 원시 theta). null=theta 미보고 → 화살표 생략.</summary>
+    public double? RobotDrawingTheta { get; private set; }
+
+    /// <summary>맵 heading → 도면 heading. 위치가 drawing = R(−yaw)·(map − t)이므로 방향은 theta − yaw. 결과는 (−π, π]로 정규화.</summary>
+    public static double MapThetaToDrawing(double thetaMap, double calYaw)
+    {
+        double t = thetaMap - calYaw;
+        t = Math.IEEERemainder(t, 2 * Math.PI);   // (−π, π]
+        if (t <= -Math.PI) t += 2 * Math.PI;
+        return t;
+    }
 
     private void OnRobotState(object? sender, RobotStateDto s)
     {
         _lastRobotId = s.RobotId;
         RobotX = s.ReportedX;
         RobotY = s.ReportedY;
+        RobotTheta = s.ReportedTheta;
         RobotMapId = s.ReportedMapId;
         UpdateRobotDrawingPose();
+        CheckMoveArrival();
         OnPropertyChanged(nameof(HasRobotPosition));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));
+    }
+
+    /// <summary>
+    /// 수동 이동 목적지가 있을 때, AMR이 목적지에 도착(허용 오차 0.15m 이내)하면 목적지 마커/화살표를 소멸시킨다.
+    /// </summary>
+    private void CheckMoveArrival()
+    {
+        if (MoveMarker is not { } target) return;
+        if (!HasRobotPosition || !RobotOnSelectedFloor) return;
+
+        double dx = RobotDrawingX - target.X;
+        double dy = RobotDrawingY - target.Y;
+        double dist = Math.Sqrt(dx * dx + dy * dy);
+
+        if (dist <= MoveArrivalThresholdM)
+        {
+            ClearMoveTarget();
+            MoveStatus = $"수동 이동 완료: ({RobotDrawingX:F2}, {RobotDrawingY:F2}) 도착";
+        }
     }
 
     private void UpdateRobotDrawingPose()
     {
         double mx = RobotX ?? 0, my = RobotY ?? 0;
         double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표
+        double? dTheta = RobotTheta;   // 폴백: 미보정 → 원시 heading
         if (RobotMapId is { } mapId)
         {
             if (_calByMapId.TryGetValue(mapId, out var c))
@@ -300,6 +362,7 @@ public sealed partial class TankViewModel : ObservableObject
                 double cos = Math.Cos(-c.Yaw), sin = Math.Sin(-c.Yaw);
                 dx = cos * px - sin * py;
                 dy = sin * px + cos * py;
+                if (RobotTheta is double th) dTheta = MapThetaToDrawing(th, c.Yaw);
             }
             else if (!_calMissing.Contains(mapId))
             {
@@ -316,8 +379,10 @@ public sealed partial class TankViewModel : ObservableObject
         }
         RobotDrawingX = dx;
         RobotDrawingY = dy;
+        RobotDrawingTheta = dTheta;
         OnPropertyChanged(nameof(RobotDrawingX));
         OnPropertyChanged(nameof(RobotDrawingY));
+        OnPropertyChanged(nameof(RobotDrawingTheta));
     }
 
     private async Task LoadCalibrationAsync(string mapId)
@@ -334,6 +399,7 @@ public sealed partial class TankViewModel : ObservableObject
 
     partial void OnSelectedViewModeChanged(string value)
     {
+        ClearMoveTarget();
         OnPropertyChanged(nameof(SelectedLevel));
         OnPropertyChanged(nameof(IsolateLevel));
         OnPropertyChanged(nameof(RobotOnSelectedFloor));

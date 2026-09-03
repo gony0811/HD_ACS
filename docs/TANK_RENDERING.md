@@ -151,6 +151,14 @@ z를 `[zLo, zHi]`로 클리핑한 뒤 챔퍼 무릎(`hLow`, `hLow+hWall`)이 구
 층별 캘리브레이션을 `GET /api/maps/{mapId}/calibration`으로 1회 캐시(미보정 층은 원시 좌표 폴백,
 프로젝트 로드 시 캐시 무효화). z도 로봇 층의 주행 평면 높이(`level_z[n-1]`)로 표시된다.
 
+**heading(방향) 화살표 (2026-09-03, Avalonia 헤드)** — SignalR `RobotState`가 `ReportedTheta`(VDA `agvPosition.theta`, 맵 프레임 rad)를
+함께 싣고, `TankViewModel.MapThetaToDrawing(theta, yaw) = theta − yaw`((−π, π] 정규화)로 도면 heading을 만든다(위치 변환이
+R(−yaw)이므로 방향 벡터도 −yaw 회전; 미보정 층은 원시 theta 폴백, theta 미보고=null이면 화살표 생략).
+`TankSceneBuilder.AddRobotHeading`이 **마커 원 중심(로봇 z+0.4m)에서 heading 방향으로 수평하게 뻗는 3D 화살표**를 그린다:
+사각 프리즘 축(길이 0.9m·반두께 0.06m, 옆면 4) + 사각뿔 화살촉(끝 1.35m·밑면 반폭 0.2m, 밑면 1+옆면 4) — 9면 모두 플랫 셰이딩으로
+입체감을 준다(바닥 투영이 아니라 공중의 실체 형상, 사용자 요청). 마커 원은 오버레이(항상 위)라 축이 원 중심에서 나오는 것처럼 보인다. 같은 값이 로봇 상태 카드
+"방향(도면 x축 기준): n°"에도 표시된다. WPF 헤드(Helix)는 원 마커만 유지(Phase 5 처분 결정까지 미이식).
+
 ---
 
 ## 6. 전개도
@@ -291,7 +299,7 @@ u 값이 유효 범위 안이라 어떤 검증에도 걸리지 않는다.
 크로스플랫폼 헤드는 HelixToolkit 대신 **코어의 소프트웨어 투영 렌더러**로 3D 뷰를 그린다(ADR-005 개정, `docs/UI_CROSS_PLATFORM_REVIEW.md` Phase 3).
 
 - 형상 정본: `HD.Acs.UI.Core/Rendering/TankShape.cs` — 면 프레임 (u,v)→3D(`TryPoint`/`Corners`), 마구리 팔각 반폭 `HalfWidth(g,z)`·`BulkheadPolygon`(z-밴드 클리핑), 면 타입 색 `FaceColor`. 본문 3중복 중 3D(WPF `TankView.HalfWidth`) 복사본의 이관본이며, 2D 전개도 복사본 2개는 잔존.
-- 씬: `TankSceneBuilder.Build(TankSceneInput)` — 셸(전체 모드만 반투명 채움, 격리 모드 와이어) → 층 밴드(외부향 0.02m) → 오버레이(외부향 0.03m, 상태색) → 바닥 히트 평면+1m 격자(격리 모드) → 로봇/이동 마커. 레이어 오프셋 규칙은 본문과 동일.
+- 씬: `TankSceneBuilder.Build(TankSceneInput)` — 셸(전체 모드만 반투명 채움, 격리 모드 와이어) → 층 밴드(외부향 0.02m) → 오버레이(외부향 0.03m, 상태색) → 바닥 히트 평면+1m 격자(격리 모드) → 로봇 heading 화살표(바닥면 z+0.05m, §5.6) → 로봇/이동 마커. 레이어 오프셋 규칙은 본문과 동일.
 - 투영: `Camera3`(오빗 카메라, z-up, 수직 FOV 45°) + `SceneRenderer.Render` → 화면 px 그리기 목록(면·선은 시선 깊이 내림차순 페인터 정렬, 마커·라벨은 오버레이). 면은 법선·광원 내적으로 플랫 셰이딩(0.65~1.0). 반투명은 2D 알파 블렌딩이라 WPF 3D의 반투명 깊이 컬링 문제가 없다.
 - 바닥 클릭: `Camera3.HitPlaneZ`(화면 점의 시선 광선과 z=층 주행면 교차) → `TankSceneBuilder.FloorPlane` 사각 범위 검사 → `TankViewModel.RequestMoveAsync`.
 - 헤드: `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`가 `DrawingContext`로 그리고 포인터(오빗/팬/줌)를 처리한다. VM `ViewChanged` 시 `ZoomExtents`(WPF와 동일 동작).

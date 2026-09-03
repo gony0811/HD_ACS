@@ -28,6 +28,7 @@
             <TextBlock Text="{Binding ConnectionState, StringFormat='연결: {0}'}" />
             <TextBlock Text="{Binding MapId, StringFormat='층(mapId): {0}'}" />
             <TextBlock Text="{Binding Position, StringFormat='도면 위치: {0}'}" />
+            <TextBlock Text="{Binding Heading, StringFormat='방향(도면 x축 기준): {0}'}" />
             <TextBlock Text="{Binding Driving, StringFormat='주행중: {0}'}" />
             <TextBlock Text="{Binding Errors, StringFormat='오류 수: {0}'}" Foreground="{DynamicResource AppErrorBrush}" />
         </StackPanel>

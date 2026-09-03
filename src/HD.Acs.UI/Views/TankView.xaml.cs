@@ -25,32 +25,71 @@ public partial class TankView : UserControl
     // 수동 이동: 바닥 그리드 클릭 판정용 히트 평면(층 격리 모드에서만 생성)
     private GeometryModel3D? _gridHitModel;
     private double _gridZ;
+    private Point3D? _manualMoveStart;
+    private Point3D? _manualMoveCurrent;
 
     public TankView()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Viewport.MouseLeftButtonDown += OnViewportMouseDown;
+        Viewport.MouseMove += OnViewportMouseMove;
+        Viewport.MouseLeftButtonUp += OnViewportMouseUp;
     }
 
-    /// <summary>수동 이동 모드에서 바닥 그리드 클릭 → 도면 (x,y)로 goto 명령.</summary>
+    /// <summary>수동 이동 모드에서 바닥의 정차 위치를 누르고 방향으로 드래그한다.</summary>
     private void OnViewportMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (_vm is null || !_vm.ManualMoveMode || _gridHitModel is null) return;
-        var hits = Viewport.Viewport.FindHits(e.GetPosition(Viewport));
-        var hit = hits.FirstOrDefault(h => ReferenceEquals(h.Model, _gridHitModel));
-        if (hit is null) return;
-
-        var p = hit.Position;
-        PlaceMoveMarker(p);
-        _ = _vm.RequestMoveAsync(p.X, p.Y);
+        if (HitFloor(e.GetPosition(Viewport)) is not { } p) return;
+        _manualMoveStart = _manualMoveCurrent = p;
+        PlaceMoveMarker(p, null);
+        Viewport.CaptureMouse();
+        e.Handled = true;
     }
 
-    private void PlaceMoveMarker(Point3D p)
+    private void OnViewportMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_manualMoveStart is not { } start || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed) return;
+        if (HitFloor(e.GetPosition(Viewport)) is not { } current) return;
+        _manualMoveCurrent = current;
+        double dx = current.X - start.X, dy = current.Y - start.Y;
+        double? theta = dx * dx + dy * dy >= 0.0025 ? Math.Atan2(dy, dx) : null;
+        PlaceMoveMarker(start, theta);
+    }
+
+    private void OnViewportMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_manualMoveStart is not { } start) return;
+        if (HitFloor(e.GetPosition(Viewport)) is { } current) _manualMoveCurrent = current;
+        var end = _manualMoveCurrent ?? start;
+        double dx = end.X - start.X, dy = end.Y - start.Y;
+        double? theta = dx * dx + dy * dy >= 0.0025 ? Math.Atan2(dy, dx) : null;
+        _manualMoveStart = _manualMoveCurrent = null;
+        Viewport.ReleaseMouseCapture();
+        if (_vm is not null) _ = _vm.RequestMoveAsync(start.X, start.Y, theta, _gridZ);
+        e.Handled = true;
+    }
+
+    private Point3D? HitFloor(System.Windows.Point screen)
+    {
+        if (_vm is null || !_vm.ManualMoveMode || _gridHitModel is null) return null;
+        var hit = Viewport.Viewport.FindHits(screen).FirstOrDefault(h => ReferenceEquals(h.Model, _gridHitModel));
+        return hit?.Position;
+    }
+
+    private void PlaceMoveMarker(Point3D p, double? theta)
     {
         MoveMarker.Children.Clear();
         MoveMarker.Children.Add(new SphereVisual3D
         { Center = new Point3D(p.X, p.Y, _gridZ + 0.25), Radius = 0.25, Fill = new SolidColorBrush(Color.FromRgb(0x9B, 0x59, 0xB6)) });
+        if (theta is not double heading) return;
+        MoveMarker.Children.Add(new ArrowVisual3D
+        {
+            Point1 = new Point3D(p.X, p.Y, _gridZ + 0.25),
+            Point2 = new Point3D(p.X + 1.35 * Math.Cos(heading), p.Y + 1.35 * Math.Sin(heading), _gridZ + 0.25),
+            Diameter = 0.12, HeadLength = 0.35,
+            Fill = new SolidColorBrush(Color.FromRgb(0x9B, 0x59, 0xB6)),
+        });
     }
 
     private void OnDataContextChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e)
@@ -113,6 +152,16 @@ public partial class TankView : UserControl
             or nameof(TankViewModel.RobotDrawingY)
             or nameof(TankViewModel.HasRobotPosition))
             UpdateRobotMarker();
+        if (e.PropertyName is nameof(TankViewModel.MoveMarker) or nameof(TankViewModel.MoveHeading))
+            UpdateMoveMarker();
+    }
+
+    private void UpdateMoveMarker()
+    {
+        if (_vm?.MoveMarker is { } mm)
+            PlaceMoveMarker(new Point3D(mm.X, mm.Y, mm.Z), _vm.MoveHeading);
+        else
+            MoveMarker.Children.Clear();
     }
 
     private void UpdateRobotMarker()
@@ -172,10 +221,10 @@ public partial class TankView : UserControl
         LevelHighlight.Children.Clear();
         if (_vm is null || _vm.LevelWalls.Count == 0) return;
 
-        // 밝은 골드: 불투명 근접 확산 + 발광(EmissiveMaterial)으로 조명·블렌드 순서와 무관하게 또렷.
+        // 선택 면은 유지하되 내부 로봇/방향 마커가 보이도록 옅은 골드로 표시.
         var fill = new MaterialGroup();
-        fill.Children.Add(new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0xE0, 0xF5, 0xB0, 0x41))));
-        fill.Children.Add(new EmissiveMaterial(new SolidColorBrush(Color.FromArgb(0x66, 0xF1, 0xC4, 0x0F))));
+        fill.Children.Add(new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(0x40, 0xF5, 0xB0, 0x41))));
+        fill.Children.Add(new EmissiveMaterial(new SolidColorBrush(Color.FromArgb(0x18, 0xF1, 0xC4, 0x0F))));
 
         var group = new Model3DGroup();
         var outline = new LinesVisual3D { Color = Color.FromRgb(0xF3, 0x9C, 0x12), Thickness = 3.0 };

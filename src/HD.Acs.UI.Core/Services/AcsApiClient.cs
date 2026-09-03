@@ -72,10 +72,11 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 400(재개 불가)·409(다른 활성 run) 메시지 노출
     }
 
-    public async Task GotoAsync(string robotId, int level, double xDrawing, double yDrawing, CancellationToken ct = default)
+    public async Task GotoAsync(string robotId, int level, double xDrawing, double yDrawing,
+        double? thetaDrawing = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/robots/{Uri.EscapeDataString(robotId)}/goto",
-            new { Level = level, XDrawing = xDrawing, YDrawing = yDrawing, UserId = "operator" }, ct);
+            new { Level = level, XDrawing = xDrawing, YDrawing = yDrawing, ThetaDrawing = thetaDrawing, UserId = "operator" }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(진행 run/타층)·400(T_W_D)의 {error} 메시지 노출
     }
 
