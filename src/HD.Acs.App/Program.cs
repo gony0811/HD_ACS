@@ -52,6 +52,37 @@ builder.Services.AddSignalR();
 
 var app = builder.Build();
 
+// ── 기동 시드: ref.map 층 4행 (CT1-L1~L4) ─────────────────────────────
+// mapId는 UI TankLayout.Floors·VDA nodePosition.mapId와 동일 문자열이어야 한다.
+// schema.sql에도 동일 시드가 있으나, 현장 서버처럼 DB에 직접 접근할 수 없는 배포에서는
+// 이 기동 시드가 유일한 적용 경로다. 기존 행은 보존(맵버전 증가·비활성 맵 훼손 금지 [§2.5]).
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+        const string seedTankId = "CT1";
+        var existingMapIds = await db.Maps.AsNoTracking()
+            .Where(m => m.TankId == seedTankId).Select(m => m.MapId).ToListAsync();
+        for (int level = 1; level <= 4; level++)
+        {
+            var mapId = $"{seedTankId}-L{level}";
+            if (!existingMapIds.Contains(mapId))
+                db.Maps.Add(new MapEntity { MapId = mapId, TankId = seedTankId, Level = level, Name = $"{seedTankId} L{level}" });
+        }
+        if (db.ChangeTracker.HasChanges())
+        {
+            await db.SaveChangesAsync();
+            app.Logger.LogInformation("ref.map 기동 시드 적용: {TankId} L1~L4", seedTankId);
+        }
+    }
+    catch (Exception ex)
+    {
+        // DB 미기동 등으로 시드 실패해도 앱은 뜬다(두절 내성 ADR-002) — 캘리브레이션은 맵 행 생길 때까지 404.
+        app.Logger.LogWarning(ex, "ref.map 기동 시드 실패 — DB 연결 확인 필요");
+    }
+}
+
 // 전역 예외 핸들러 — 처리되지 않은 예외를 { error } JSON(500)으로 변환해 UI에 원인을 노출.
 // DB 저장 오류(DbUpdateException)는 스키마 드리프트가 흔한 원인이므로 힌트를 덧붙인다.
 // (typed Results.BadRequest/Conflict 는 예외가 아니므로 영향 없음)

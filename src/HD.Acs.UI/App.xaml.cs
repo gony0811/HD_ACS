@@ -35,6 +35,8 @@ public partial class App : Application
         {
             var opts = sp.GetRequiredService<IOptions<AcsOptions>>().Value;
             http.BaseAddress = new Uri(opts.BaseUrl);
+            // 기본 100초는 서버 두절 시 버튼이 무반응으로 보이는 시간 — 폐쇄망 LAN에서 10초면 충분
+            http.Timeout = TimeSpan.FromSeconds(10);
         });
 
         // SignalR 실시간 푸시 (연결 상태 공유 필요 → 싱글턴)

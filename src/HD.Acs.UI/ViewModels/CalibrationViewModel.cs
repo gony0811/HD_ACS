@@ -103,6 +103,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
     private async Task CapturePointAsync()
     {
         if (SelectedMapId is null) return;
+        StatusMessage = "캡처 요청 중…";
         try
         {
             var pt = await _api.CaptureCalibrationPointAsync(SelectedMapId, DrawingX, DrawingY, Unit, _operatorId);
@@ -137,6 +138,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
     private async Task SolveAsync()
     {
         if (SelectedMapId is null) return;
+        StatusMessage = "계산 중…";
         try
         {
             SolveResult = await _api.SolveCalibrationAsync(SelectedMapId);

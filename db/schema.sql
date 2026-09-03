@@ -315,6 +315,15 @@ INSERT INTO ref.robot (robot_id, name, manufacturer, serial_number) VALUES
 ON CONFLICT (robot_id) DO UPDATE SET
   manufacturer = EXCLUDED.manufacturer, serial_number = EXCLUDED.serial_number;
 
+-- 맵(층) 시드 — map_id는 UI TankLayout.Floors·VDA nodePosition.mapId와 동일 문자열이어야 한다.
+-- App 기동 시에도 동일 시드를 적용하므로(Program.cs) 이 INSERT는 신규 DB 재현성용.
+INSERT INTO ref.map (map_id, tank_id, level, name) VALUES
+  ('CT1-L1', 'CT1', 1, 'CT1 L1'),
+  ('CT1-L2', 'CT1', 2, 'CT1 L2'),
+  ('CT1-L3', 'CT1', 3, 'CT1 L3'),
+  ('CT1-L4', 'CT1', 4, 'CT1 L4')
+ON CONFLICT (map_id) DO NOTHING;
+
 -- ═══════════════════════════ ④ 런타임 (run) ═══════════════════════════
 
 -- 시나리오 실행 단위: 층 단위 미션들의 시퀀스 [GRAPH_DATA_MODEL 8.4]
