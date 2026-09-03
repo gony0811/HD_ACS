@@ -10,6 +10,8 @@ namespace HD.Acs.UI.ViewModels;
 public sealed partial class RobotStatusViewModel : ObservableObject
 {
     private readonly IAcsApiClient _api;
+    private readonly Dictionary<string, (MapCalibrationDto? Calibration, DateTimeOffset LoadedAt)> _calibrations = new();
+    private int _positionUpdateVersion;
 
     public ObservableCollection<RobotDto> Robots { get; } = new();
 
@@ -50,15 +52,17 @@ public sealed partial class RobotStatusViewModel : ObservableObject
 
     private async Task LoadContextAsync()
     {
-        if (SelectedRobot is null) return;
+        if (SelectedRobot is not { } robot) return;
         try
         {
-            var ctx = await _api.GetRobotContextAsync(SelectedRobot.RobotId);
+            var ctx = await _api.GetRobotContextAsync(robot.RobotId);
+            if (SelectedRobot?.RobotId != robot.RobotId) return;
             if (ctx is null) { ResetLive(); return; }
             BatteryPct = ctx.BatteryPct;
             ConnectionState = ctx.ConnectionState ?? "-";
             MapId = ctx.ReportedMapId ?? "-";
-            Position = FormatPosition(ctx.ReportedX, ctx.ReportedY);
+            await UpdateDrawingPositionAsync(
+                robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY);
         }
         catch (Exception ex)
         {
@@ -71,7 +75,7 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         if (s.RobotId != SelectedRobot?.RobotId) return;
         BatteryPct = s.BatteryPct;
         MapId = s.ReportedMapId ?? "-";
-        Position = FormatPosition(s.ReportedX, s.ReportedY);
+        _ = UpdateDrawingPositionAsync(s.RobotId, s.ReportedMapId, s.ReportedX, s.ReportedY);
         Driving = s.Driving;
         Errors = s.Errors;
     }
@@ -84,7 +88,54 @@ public sealed partial class RobotStatusViewModel : ObservableObject
 
     private void ResetLive()
     {
+        Interlocked.Increment(ref _positionUpdateVersion);
         BatteryPct = null; ConnectionState = "-"; Position = "-"; MapId = "-"; Driving = false; Errors = 0;
+    }
+
+    /// <summary>state의 SLAM 맵 좌표를 현재 map의 T_W_D 역변환으로 도면 좌표화한다.</summary>
+    private async Task UpdateDrawingPositionAsync(
+        string robotId, string? mapId, double? mapX, double? mapY)
+    {
+        int version = Interlocked.Increment(ref _positionUpdateVersion);
+        if (mapId is null || mapX is null || mapY is null)
+        {
+            if (version == _positionUpdateVersion) Position = "-";
+            return;
+        }
+
+        try
+        {
+            MapCalibrationDto? cal;
+            if (_calibrations.TryGetValue(mapId, out var cached)
+                && DateTimeOffset.UtcNow - cached.LoadedAt < TimeSpan.FromSeconds(10))
+            {
+                cal = cached.Calibration;
+            }
+            else
+            {
+                cal = await _api.GetCalibrationAsync(mapId);
+                _calibrations[mapId] = (cal, DateTimeOffset.UtcNow);
+            }
+
+            if (version != _positionUpdateVersion || SelectedRobot?.RobotId != robotId) return;
+            if (cal is null)
+            {
+                Position = "캘리브레이션 없음";
+                return;
+            }
+
+            // drawing = R(-yaw) * (map - translation)
+            double px = mapX.Value - cal.Tx, py = mapY.Value - cal.Ty;
+            double cos = Math.Cos(cal.YawRad), sin = Math.Sin(cal.YawRad);
+            double drawingX = cos * px + sin * py;
+            double drawingY = -sin * px + cos * py;
+            Position = FormatPosition(drawingX, drawingY);
+        }
+        catch
+        {
+            if (version == _positionUpdateVersion && SelectedRobot?.RobotId == robotId)
+                Position = "좌표 변환 실패";
+        }
     }
 
     private static string FormatPosition(double? x, double? y) =>

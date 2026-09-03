@@ -73,6 +73,11 @@ public sealed class VdaBridgeService : BackgroundService
 
             if (resetCount > 0)
                 _log.LogInformation("서버 기동 시 로봇 연결 상태 {Count}건을 OFFLINE으로 초기화", resetCount);
+
+            var mapCount = await scope.ServiceProvider.GetRequiredService<TankGeometryService>()
+                .EnsureAllMapsAsync(ct);
+            if (mapCount > 0)
+                _log.LogInformation("서버 기동 시 누락된 층별 map {Count}건 자동 등록", mapCount);
         }
 
         // 최초 접속뿐 아니라 운전 중 브로커/네트워크 두절도 재접속한다. CleanSession이므로

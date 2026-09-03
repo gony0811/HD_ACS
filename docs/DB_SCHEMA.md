@@ -8,7 +8,7 @@
 
 | 계층 | 테이블 | 역할 | 근거 |
 |---|---|---|---|
-| **ref 그래프** | ref.map | 맵 = 화물창 × 층 (mapId='CT1-L1') | 층=맵 모델 |
+| **ref 그래프** | ref.map | 맵 = 화물창 × 층 (mapId='CT1-L1'). geometry 등록/프로젝트 불러오기 및 서버 기동 시 `level_z` 기준 누락분 자동 생성(기존 version·calibration 보존) | 층=맵 모델 |
 | | ref.node | 정차/경유 노드 (좌표, 허용편차, ELEVATOR 포함) | VDA 5050 |
 | | ref.edge | 주행 간선 (TRAVEL / MANUAL_TRANSFER) | Q9 수동 이송 |
 | | ref.zone / ref.zone_member | 층·구역 계층 (FLOOR/AREA/RESTRICTED…) | 4층 슬라이스 |
