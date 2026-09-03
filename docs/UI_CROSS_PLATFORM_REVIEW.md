@@ -2,7 +2,7 @@
 
 ## 0. 배경
 
-> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(3D 제외 전 뷰 이식, 헤드리스 검증)** — ADR-005 개정 반영(2026-09-03). 다음: Phase 3 3D 소프트웨어 투영 렌더러.
+> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(전 뷰 이식) · Phase 3 완료(3D 소프트웨어 투영 렌더러)** — ADR-005 개정 반영(2026-09-03). 다음: Phase 4 macOS 패키징, Phase 5 WPF 헤드 처분 결정.
 
 HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행된다.
 요구사항: **동일한 프로그램 구조(MVVM·Generic Host DI·REST/SignalR 계약 계층·운영/계획/이력 모드 셸)를 유지하면서 macOS에서도 운영** 가능하게 할 방법을 검토한다.
@@ -128,7 +128,9 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 ### Phase 2 — 전개도 캔버스
 - `AreaLayoutView.axaml`(+픽 모드·ESC·우클릭 해제·커서), `TankView.axaml` 전개도 탭(WrapPanel 셀 격자). 코어 `FaceProjection` 결과(`Pt2[]`)를 `Points` 컨버터로 바인딩.
 
-### Phase 3 — 3D 뷰(소프트웨어 투영)
+### Phase 3 — 3D 뷰(소프트웨어 투영) — ✅ 2026-09-03 구현
+실적: 코어 `Primitives/Pt3`, `Rendering/Camera3`(오빗·원근 투영·Unproject·평면 교차·Pan/Zoom/ZoomExtents[종횡비 고려]), `Rendering/Scene3`(Face3/Segment3/Marker3[px 또는 m 반지름]/Label3 + `SceneRenderer` 페인터 깊이 정렬·플랫 셰이딩), `Rendering/TankShape`(TryPoint/Corners/HalfWidth/BulkheadPolygon/FaceColor — WPF TankView.xaml.cs에서 이관, 3D 형상 정본), `Rendering/TankSceneBuilder`(셸·층 밴드·영역/용접선 오버레이·바닥 격자·로봇/이동 마커, VM 의존 없는 `TankSceneInput` 스냅샷, `FloorPlane` 히트 평면). Desktop `Views/Tank3DControl`(DrawingContext 렌더, 좌드래그 오빗·우/중드래그 팬·휠 줌·수동 이동 모드 좌클릭 goto, ViewChanged 시 ZoomExtents) + TankView 3D 탭 교체(맞춤 버튼). 검증: Core.Tests 22건(카메라 투영/역투영 왕복/ZoomExtents 포함, 팔각 8정점·밴드 클리핑, 씬 구성, 깊이 정렬), Desktop 헤드리스 6건(3D 컨트롤 그리기 목록 생성). 반투명 면은 2D 알파 블렌딩이라 WPF 3D의 깊이 컬링 문제(격리 모드 채움 생략 이유)가 없으나 동일 규칙 유지. 3중복 반폭 함수 중 3D 복사본은 코어로 단일화, 2D 전개도 복사본 2개(TankViewModel.FaceOutlineUv·AreaPlanningViewModel.HalfWidthU)는 입력 상태 기반이라 잔존.
+원안:
 1. 코어 `Rendering/Camera3.cs`(오빗·줌·팬·ZoomExtents), `Scene3.cs`(면·선·점·라벨 프리미티브 + 깊이 정렬), `TankSceneBuilder.cs`(현행 `TankView.xaml.cs`의 BuildShell/BuildLevelHighlight/BuildOverlays/BuildFloorGrid를 프리미티브 생성으로 이식 — `BulkheadPolygon`·`PolygonMesh`·`NormalOffset` 로직 승계).
 2. Avalonia `Tank3DControl : Control` — `Render(DrawingContext)`에서 투영·그리기, 포인터 드래그=오빗/휠=줌, 수동 이동 모드 클릭=광선-바닥평면 교차 → `TankViewModel.RequestMoveAsync`.
 3. 로봇 마커·상태색 material은 `StatusColors(Rgba)` 재사용.

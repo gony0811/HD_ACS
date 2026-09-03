@@ -6,6 +6,7 @@ using Avalonia.Logging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using HD.Acs.UI.Desktop.Views;
+using HD.Acs.UI.Rendering;
 using HD.Acs.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -150,6 +151,23 @@ public class ShellSmokeTests
         // 존재하지 않는 속성/명령 경로(오타)는 반드시 0건. (null 중간 경로 경고는 데이터 없음 상태에서 정상)
         var pathErrors = log.Messages.Where(m => m.Contains("Could not find", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.True(pathErrors.Count == 0, "바인딩 경로 오류:\n" + string.Join("\n", pathErrors));
+    }
+
+    [AvaloniaFact]
+    public void Tank3DControl_RendersDrawList_WithoutData()
+    {
+        var (host, window, _) = CreateShell();
+        using (host)
+        {
+            var tank3d = window.GetVisualDescendants().OfType<Tank3DControl>().First();
+            var draws = tank3d.BuildDrawList(800, 600);
+            // 데이터 없음 → 지면 참조 격자(9+9 선분)만. 예외 없이 투영·정렬됨.
+            Assert.Equal(18, draws.Count);
+            Assert.All(draws, d => Assert.IsType<Segment2>(d));
+            tank3d.InvalidateVisual();
+            Dispatcher.UIThread.RunJobs();
+            window.Close();
+        }
     }
 
     [AvaloniaFact]

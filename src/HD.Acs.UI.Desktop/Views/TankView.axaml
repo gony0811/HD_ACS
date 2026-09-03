@@ -1,8 +1,9 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+             xmlns:views="using:HD.Acs.UI.Desktop.Views"
              x:Class="HD.Acs.UI.Desktop.Views.TankView">
-    <!-- DataContext = TankViewModel. 3D 뷰는 Phase 3(소프트웨어 투영 렌더러)에서 구현 — 여기서는 플레이스홀더. 전개도 탭은 완전 이식. -->
+    <!-- DataContext = TankViewModel. 3D 뷰=소프트웨어 투영 렌더러(Tank3DControl), 전개도 탭=면별 2D 캔버스. -->
     <UserControl.Resources>
         <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
         <conv:PointsConverter x:Key="Pts" />
@@ -34,15 +35,15 @@
 
         <TabControl x:Name="TankTabs">
             <TabItem Header="3D 뷰">
-                <!-- Phase 3: 코어 Rendering/(카메라·투영·깊이 정렬) + Tank3DControl(DrawingContext) 로 대체 예정 -->
-                <Border Background="#1B2631">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
-                        <TextBlock Text="3D 화물창 뷰" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" />
-                        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"
-                                   Foreground="{DynamicResource AppMutedTextBrush}"
-                                   Text="크로스플랫폼 헤드의 3D 뷰(팔각 프리즘 셸·층 밴드·영역/용접선 오버레이·로봇 마커·바닥 그리드 클릭 이동)는 이행 Phase 3에서 소프트웨어 투영 렌더러로 구현됩니다. 전개도 탭은 사용 가능합니다." />
-                    </StackPanel>
-                </Border>
+                <!-- 소프트웨어 투영 렌더러(코어 Camera3·SceneRenderer·TankSceneBuilder) — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 좌클릭=goto -->
+                <Grid>
+                    <views:Tank3DControl x:Name="Tank3D" />
+                    <Button Content="맞춤" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Padding="8,2" FontSize="11"
+                            Opacity="0.85" Click="ZoomExtents_Click" ToolTip.Tip="전체 형상에 맞춤" />
+                    <TextBlock HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,4" FontSize="10.5"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
+                               Text="좌드래그 회전 · 우드래그 이동 · 휠 확대/축소" />
+                </Grid>
             </TabItem>
 
             <TabItem Header="전개도">
