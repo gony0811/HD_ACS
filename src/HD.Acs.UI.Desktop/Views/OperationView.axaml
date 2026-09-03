@@ -15,7 +15,7 @@
         <Grid Grid.Column="0" Margin="0,0,8,0" RowDefinitions="Auto,*">
             <Border Grid.Row="0" Classes="card" Margin="0,0,0,8">
                 <StackPanel>
-                    <TextBlock Text="로봇 상태" Classes="cardHead" />
+                    <TextBlock Text="로봇 상태" Classes="cardHead" FontSize="11" />
                     <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
                     <views:RobotStatusView DataContext="{Binding RobotStatus}" />
                 </StackPanel>
@@ -23,7 +23,10 @@
 
             <Border Grid.Row="1" Classes="card">
                 <TabControl x:Name="LeftTabs">
-                    <TabItem Header="층 진행">
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="층 진행" Classes="cardHead" FontSize="11" />
+                        </TabItem.Header>
                         <Grid RowDefinitions="Auto,*">
                             <StackPanel Grid.Row="0" Margin="12,10,12,6">
                                 <TextBlock Text="{Binding Mission.ProgressSummary}" FontWeight="Bold" FontSize="14" />
@@ -69,7 +72,10 @@
                             </ScrollViewer>
                         </Grid>
                     </TabItem>
-                    <TabItem Header="작업 현황">
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="작업 현황" FontSize="11" />
+                        </TabItem.Header>
                         <!-- 실행 큐(work_item) 모니터링 — WorkItemProgress 푸시로 실시간 갱신 [INSPECTION_SCENARIO §3.1] -->
                         <Grid RowDefinitions="Auto,*">
                             <TextBlock Grid.Row="0" Margin="12,10,12,6" FontWeight="Bold" FontSize="14"
@@ -123,7 +129,10 @@
                             </DataGrid>
                         </Grid>
                     </TabItem>
-                    <TabItem Header="수동 층 변경">
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="수동 층 변경" FontSize="11" />
+                        </TabItem.Header>
                         <views:ManualZoneChangeView DataContext="{Binding ManualZoneChange}" />
                     </TabItem>
                 </TabControl>

@@ -26,7 +26,7 @@ public interface IAcsApiClient
     /// <summary>수동 이동(goto) — 도면 좌표를 서버가 T_W_D로 변환해 액션 없는 단일 노드 Order 발행. 이동 테스트용.</summary>
     Task GotoAsync(string robotId, int level, double xDrawing, double yDrawing, CancellationToken ct = default);
     Task ManualZoneChangeAsync(string robotId, string mapId, string userId,
-        double x, double y, double theta, CancellationToken ct = default);
+        CancellationToken ct = default);
     Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default);
 
     // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────

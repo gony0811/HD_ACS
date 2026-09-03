@@ -239,7 +239,7 @@ POST /api/runs                       { "scenarioId": "...", "robotId": "AMR-01" 
 Order 발행 [Q9]. Order는 두절 내성을 위해 전체 Base 선릴리즈된다 [ADR-002] — 통신이 끊겨도 로봇은 계속 실행한다.
 
 **층 전환(수동 절차)**: 한 층 완료 → `WAITING_FLOOR_TRANSFER` → 작업자가 엘리베이터로 로봇 이송 →
-UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 새 층·위치 지정(initPosition 발행) →
+AMR에서 새 층의 initPose 실행 → UI **수동 층 변경** 패널(또는 `POST /api/robots/{robotId}/zone`)로 목표 층 지정 →
 `POST /api/runs/{runId}/release-next`로 다음 층 미션 릴리즈.
 
 **수동 이동(이동 테스트)**: TankView에서 층(L1~L4)을 선택하면 그 층 주행 평면에 **1m 바닥 그리드**가 표시된다.
@@ -287,7 +287,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 |---|---|
 | `GET /api/robots` | 로봇 목록 |
 | `GET /api/robots/{robotId}/context` | 로봇 컨텍스트 — 보고 pose(ReportedX/Y/Theta), 층(mapId), 온라인 여부 |
-| `POST /api/robots/{robotId}/zone` | 수동 층 변경 — `{ mapId, userId, x, y, theta }` → initPosition |
+| `POST /api/robots/{robotId}/zone` | 수동 층 지정 — `{ mapId, userId }`; AMR 보고 mapId 검증 게이트 설정 |
 | `POST /api/robots/{robotId}/emergency-stop` | 비상정지 — `{ userId }` (활성 run 자동 중단) |
 | `POST /api/robots/{robotId}/goto` | 수동 이동(이동 테스트) — `{ level, xDrawing, yDrawing }` 도면 좌표→T_W_D→액션 없는 단일 노드 Order. 진행 run/타층 409 |
 

@@ -101,26 +101,6 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
             Actions = { new VdaAction { ActionType = "emergencyStop", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
         }, ct);
 
-    /// <summary>수동 층 변경 후 재측위 지원 [Q9] — 새 mapId + 초기 포즈 전달</summary>
-    public Task InitPositionAsync(RobotRef robot, string mapId, double x, double y, double theta, CancellationToken ct = default)
-        => PublishInstantActionsAsync(robot, new Vda5050InstantActions
-        {
-            Actions =
-            {
-                new VdaAction
-                {
-                    ActionType = "initPosition", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD",
-                    ActionParameters =
-                    {
-                        new ActionParameter { Key = "mapId", Value = mapId },
-                        new ActionParameter { Key = "x", Value = x },
-                        new ActionParameter { Key = "y", Value = y },
-                        new ActionParameter { Key = "theta", Value = theta },
-                    }
-                }
-            }
-        }, ct);
-
     private void Stamp(Vda5050Header msg, RobotRef robot, string topic)
     {
         lock (_headerIdByTopic)
