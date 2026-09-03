@@ -95,6 +95,7 @@ HD_ACS/
 │   ├── INSPECTION_SCENARIO.md # 검사 시나리오 모델/상태 머신
 │   ├── TANK_WALL_LAYOUT.md    # 화물창 전개도 구성·벽면 naming rule (위치 주소 체계 기준)
 │   ├── TANK_RENDERING.md      # 선창 도면 렌더링 방법 (3D 셸·전개도·좌표 3단·역투영)
+│   ├── UI_CROSS_PLATFORM_REVIEW.md # UI macOS 대응 검토서 (WPF 결합 범위·대안 비교·Avalonia 이행안, 제안 단계)
 │   ├── GRAPH_DATA_MODEL.md    # 그래프 자료구조·DB 설계 (VDA 5050 Order 생성 기반)
 │   ├── DB_SCHEMA.md           # DB 스키마 카탈로그 (28테이블+2뷰, ERD)
 │   └── GLOSSARY.md            # 용어 정의
@@ -128,6 +129,7 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 
 ## 변경 이력
 
+- 2026-09-03: **UI macOS 대응 검토서 신설**(docs/UI_CROSS_PLATFORM_REVIEW.md, 제안 단계·코드 무변경) — HD.Acs.UI의 WPF/Telerik/Helix 결합 범위 진단(Models·API/SignalR 서비스·VM 7/10은 이미 중립, 결합은 XAML 13개·Telerik 168곳·TankView 3D 400줄·Dispatcher/Win32 대화상자/MessageBox/PointCollection·Color 소수 지점에 집중), 대안 5종 비교(Avalonia/MAUI/Uno/Web/가상화) 후 **Avalonia 11 + 공용 코어(HD.Acs.UI.Core) 분리** 권장, Telerik→Avalonia 컨트롤 대응표, 3D는 자체 소프트웨어 투영 렌더러 권장(씬 규모 수십 도형), 단계별 이행·검증·리스크. ADR-005 개정은 사용자 결정 후
 - 2026-09-03: **로봇 상태 위치 표시를 도면 좌표로 통일** — RobotStatusViewModel이 SignalR/API의 raw `agvPosition`(SLAM)을 그대로 표시하던 문제 수정. map별 유효 T_W_D를 조회해 `T_W_D⁻¹` 적용 후 도면 `(x,y)`만 표시하며, 캘리브레이션 없음/조회 실패 때 원시 좌표 폴백을 금지하고 명시 상태를 표시한다. 실시간 state 비동기 경합은 버전 토큰으로 차단하고 calibration은 10초 캐시해 2초 state 주기 API 폭주를 방지. 3D Tank 마커의 기존 역변환과 표시 계약 통일.
 - 2026-09-03: **층별 ref.map 자동 등록** — 프로젝트/선창 geometry 등록 시 `level_z.Length`를 층 수 정본으로 `{tankId}-L1..Ln` 누락 map을 멱등 생성(version=1, 기존 map/version/calibration 보존). 서버 기동 시 기존 geometry도 백필하여 업그레이드 전 DB의 빈 map 문제를 자동 복구한다. 동일 tank/level에 비표준 mapId가 있으면 덮어쓰지 않고 명시적으로 거부. 현행 CT1 geometry `[0,3.2,6.4,9.6]`에 CT1-L1~L4 4건 백필 완료. goto는 map 등록 후에도 유효 T_W_D가 없으면 계속 안전 차단한다. App 빌드 0 error, Core.Tests 55건 통과.
 - 2026-09-03: **ACS 생존신호(N12) 승인·구현** — VDA 사양서 v1.2에 ACS 전용 `uagv/v2/HD_ACS/hd-acs-master/connection` 계약 추가(QoS 1·retain, 접속/재접속 ONLINE, 정상 종료 OFFLINE, 비정상 두절 Last Will CONNECTIONBROKEN). `Vda5050MasterClient`가 CONNECT 시 ACS LWT를 등록하고 생존 상태를 발행하며, `VdaBridgeService`는 운전 중 MQTT 두절도 5초 간격 재접속하고 CleanSession에 따라 활성 로봇 state/connection 토픽을 재구독한다. 서버 정상 종료는 재접속 루프 중단→OFFLINE 발행→DISCONNECT 순서. 토픽 identity 단위 테스트 추가(Core.Tests 총 55건 통과). HD_AMR은 ACS connection 구독·상태 처리가 필요하다.
