@@ -57,7 +57,7 @@
                             Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="8" Height="8" Fill="{DynamicResource AppGoodBrush}" VerticalAlignment="Center" Margin="0,0,7,0" />
-                            <TextBlock Text="{Binding ConnectionText}" FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <TextBlock Text="{Binding ConnectionText}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
                         </StackPanel>
                     </Border>
                     <Button Classes="danger" Content="■ 비상정지" Command="{Binding EmergencyStopCommand}" />
@@ -67,13 +67,13 @@
                 <Border HorizontalAlignment="Center" CornerRadius="9" Padding="3" Margin="16,0"
                         Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
                     <StackPanel Orientation="Horizontal">
-                        <ToggleButton Classes="modeTab" Content="운영"
+                        <ToggleButton Classes="modeTab" Content="운영" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                       Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Operation}"
                                       IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Operation, Mode=OneWay}" />
-                        <ToggleButton Classes="modeTab" Content="계획"
+                        <ToggleButton Classes="modeTab" Content="계획" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                       Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.Planning}"
                                       IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=Planning, Mode=OneWay}" />
-                        <ToggleButton Classes="modeTab" Content="이력"
+                        <ToggleButton Classes="modeTab" Content="이력" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                       Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:AppMode.History}"
                                       IsChecked="{Binding CurrentMode, Converter={StaticResource EnumEq}, ConverterParameter=History, Mode=OneWay}" />
                     </StackPanel>
