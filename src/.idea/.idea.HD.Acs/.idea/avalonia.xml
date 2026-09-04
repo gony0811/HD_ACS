@@ -6,7 +6,9 @@
         <entry key="HD.Acs.UI.Desktop/MainWindow.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
         <entry key="HD.Acs.UI.Desktop/Views/AreaLayoutView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
         <entry key="HD.Acs.UI.Desktop/Views/ManualZoneChangeView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+        <entry key="HD.Acs.UI.Desktop/Views/NewProjectDialog.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
         <entry key="HD.Acs.UI.Desktop/Views/OperationView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
+        <entry key="HD.Acs.UI.Desktop/Views/TankView.axaml" value="HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj" />
       </map>
     </option>
   </component>
