@@ -17,26 +17,26 @@
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="L / w_floor" Classes="lbl" />
-            <NumericUpDown Classes="field" Value="{Binding LengthL}" Margin="0,0,6,0" />
-            <NumericUpDown Classes="field" Value="{Binding WFloor}" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding LengthL}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding WFloor}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="θ_low° / h_low" Classes="lbl" />
-            <NumericUpDown Classes="field" Value="{Binding ThetaLowDeg}" Margin="0,0,6,0" />
-            <NumericUpDown Classes="field" Value="{Binding HLow}" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding ThetaLowDeg}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding HLow}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="h_wall" Classes="lbl" />
-            <NumericUpDown Classes="field" Value="{Binding HWall}" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding HWall}" />    
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="θ_up° / h_up" Classes="lbl" />
-            <NumericUpDown Classes="field" Value="{Binding ThetaUpDeg}" Margin="0,0,6,0" />
-            <NumericUpDown Classes="field" Value="{Binding HUp}" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding ThetaUpDeg}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding HUp}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="level_z" Classes="lbl" ToolTip.Tip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
-            <TextBox Width="200" Classes="field" Text="{Binding LevelZText}" />
+            <TextBox Width="150" Classes="field" Text="{Binding LevelZText}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="reach_z min,max" Classes="lbl"
@@ -46,8 +46,8 @@
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="원점보정 ox,oy" Classes="lbl" />
-            <NumericUpDown Classes="field" Value="{Binding OriginOx}" Margin="0,0,6,0" />
-            <NumericUpDown Classes="field" Value="{Binding OriginOy}" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding OriginOx}" Margin="0,0,6,0" />
+            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding OriginOy}" />
         </StackPanel>
 
         <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,2,0,4" FontSize="12" />
