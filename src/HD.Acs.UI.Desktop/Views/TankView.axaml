@@ -17,7 +17,7 @@
                 <ComboBox Width="90" ItemsSource="{Binding ViewModes}" SelectedItem="{Binding SelectedViewMode}" />
                 <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsChecked="{Binding ShowOverlays}" />
-                <CheckBox Content="수동 이동(위치→방향 드래그)" VerticalAlignment="Center" Margin="16,0,0,0"
+                <CheckBox Content="수동 이동" VerticalAlignment="Center" Margin="16,0,0,0"
                            IsEnabled="{Binding IsolateLevel}"
                           ToolTip.Tip="바닥의 정차 위치에서 원하는 방향으로 드래그하세요. 짧게 클릭하면 방향 자유로 이동합니다."
                           IsChecked="{Binding ManualMoveMode}" />
