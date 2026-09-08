@@ -19,12 +19,16 @@ public sealed class RobotStateService
     private readonly IHubContext<MonitoringHub> _hub;
     private readonly InspectionDispatcher _dispatcher;
     private readonly ProgressService _progress;
+    private readonly RobotErrorTracker _errorTracker;
+    private readonly MissionService _missions;
     private readonly ILogger<RobotStateService> _log;
 
     public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
-        InspectionDispatcher dispatcher, ProgressService progress, ILogger<RobotStateService> log)
+        InspectionDispatcher dispatcher, ProgressService progress,
+        RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log)
     {
-        _db = db; _hub = hub; _dispatcher = dispatcher; _progress = progress; _log = log;
+        _db = db; _hub = hub; _dispatcher = dispatcher; _progress = progress;
+        _errorTracker = errorTracker; _missions = missions; _log = log;
     }
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
@@ -110,6 +114,10 @@ public sealed class RobotStateService
         }
 
         await _db.SaveChangesAsync(ct);
+
+        // ── errors[] 유형별 소비 [VDA 사양서 §6.4 확정 7종, N6/N11] ──
+        await HandleRobotErrorsAsync(robot, state, ct);
+
         await _hub.Clients.All.SendAsync("RobotState", new
         {
             robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY, ctx.BatteryPct,
@@ -169,6 +177,70 @@ public sealed class RobotStateService
         machine.Fire(trigger);
         await _hub.Clients.All.SendAsync("MissionProgress",
             new { mission.MissionId, mission.State }, ct);
+    }
+
+    /// <summary>
+    /// state.errors 유형별 정책 [§6.4]:
+    /// - orderValidationError → 거부된 정차를 실패 집계(재시도→스킵) + ORDER_REJECTED 알람 (orderId 대조로 멱등)
+    /// - emergencyStopActive(신규 등장) → 활성 run 자동 중단 (AMR측 정지 — ACS발 비상정지와 동일 방어)
+    /// - localizationLost / equipmentError / batteryLow(신규 등장) → 알람 기록 (같은 유형 반복 보고는 무시)
+    /// - drivingFailed / inspectionFailed → 별도 처리 없음(액션 FAILED 종결 경로가 정책 수행)
+    /// </summary>
+    private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state, CancellationToken ct)
+    {
+        var appeared = _errorTracker.Update(robot.RobotId, state.Errors.Select(e => e.ErrorType));
+        if (state.Errors.Count == 0) return;
+
+        foreach (var e in state.Errors.Where(e =>
+                     string.Equals(e.ErrorType, "orderValidationError", StringComparison.OrdinalIgnoreCase)))
+            await _dispatcher.HandleOrderRejectedAsync(robot.RobotId, e.ErrorDescription, ct);
+
+        // 비상정지는 edge가 아니라 **활성 상태 기준** — 정지 보고 중에 시작된 run도 중단되어야 한다(멱등: 중단 후 재검색 무일치)
+        if (state.Errors.Any(e => string.Equals(e.ErrorType, "emergencyStopActive", StringComparison.OrdinalIgnoreCase)))
+        {
+            var active = await _db.ScenarioRuns.AsNoTracking()
+                .Where(r => r.RobotId == robot.RobotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
+                .Select(r => (Guid?)r.RunId).FirstOrDefaultAsync(ct);
+            if (active is Guid runId)
+            {
+                try { await _missions.AbortRunAsync(runId, ct); } catch (RunStateException) { /* 이미 종결 — 무해 */ }
+                _log.LogWarning("로봇 {Robot} AMR측 비상정지 보고 중 — run {Run} 자동 중단.", robot.RobotId, runId);
+            }
+        }
+
+        foreach (var type in appeared)
+        {
+            var err = state.Errors.First(e => string.Equals(e.ErrorType, type, StringComparison.OrdinalIgnoreCase));
+            switch (type.ToLowerInvariant())
+            {
+                case "emergencystopactive":
+                    AddErrorAlarm("EMERGENCY_STOP", robot.RobotId, "AMR측 비상정지(기능 정지) 보고", err);
+                    break;
+                case "localizationlost":
+                    AddErrorAlarm("LOCALIZATION_LOST", robot.RobotId, "측위 상실 — 재시도 무의미, 재측위/수동 개입 필요", err);
+                    break;
+                case "equipmenterror":
+                    AddErrorAlarm("EQUIPMENT_ERROR", robot.RobotId, "온보드 장비 이상", err);
+                    break;
+                case "batterylow":
+                    AddErrorAlarm("BATTERY_LOW", robot.RobotId, "배터리 부족", err);
+                    break;
+                // drivingFailed/inspectionFailed/orderValidationError: 위 또는 액션 종결 경로에서 처리
+            }
+        }
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private void AddErrorAlarm(string code, string robotId, string title, VdaError err)
+    {
+        _db.Alarms.Add(new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = robotId,
+            Detail = System.Text.Json.JsonSerializer.Serialize(new
+            { severity = err.ErrorLevel, title, err.ErrorType, err.ErrorDescription }),
+            RaisedAt = DateTimeOffset.UtcNow,
+        });
+        _log.LogWarning("알람 {Code} — robot={Robot} {Type}: {Desc}", code, robotId, err.ErrorType, err.ErrorDescription);
     }
 
     private Task RecordInspectionResultAsync(MissionEntity mission, Data.Entities.OrderActionEntity oa,

@@ -143,6 +143,7 @@ ACS는 **greedy 최근접 동적 배차**를 사용한다. 층(맵) 안의 미�
 
 > **액션 없는 Order(수동 이동)**: ACS는 이동 테스트·수동 이동용으로 `actions: []`(빈 배열)인 단일 노드 Order를 발행할 수 있다.
 > AMR은 **노드 도달만으로 완결** 처리한다(actionStates는 빈 배열 유지).
+> 이 경우 `theta`는 **미지정(null) 가능** — 검사 정차가 아니므로 §4.4의 "벽 정면 방향" 전제가 적용되지 않으며, 도착 방향은 자유다.
 
 ### 4.2 메시지 스키마 (ACS 발행 필드)
 
@@ -251,7 +252,9 @@ AMR이 수신한 Order를 실행할 수 없는 경우(모르는 `mapId`, 필수 
 - `state.errors[]`에 거부 사실을 보고한다 — ACS 제안: `errorType: "orderValidationError"`(N6 코드 체계와 함께 확정), `errorLevel: "WARNING"`, `errorDescription`에 거부된 orderId와 사유.
 - 개별 **액션** 파라미터만 문제인 경우는 Order 거부가 아니라 해당 액션을 `actionStatus: "FAILED"`로 보고한다 (§9.5 재시도 정책 경로 — 시뮬레이터의 `FAIL;reason=PARAM(...)` 계약이 이 케이스).
 
-> ※구현: 현행 ACS는 Order 거부의 자동 감지·재배차가 미구현이다(거부되면 해당 정차가 DISPATCHED로 남음 — 운영자 개입 필요). N11 확정 후 errors 기반 자동 처리 추가 예정. AMR은 위 계약대로 보고하면 된다.
+> ※구현(2026-09-01 반영 완료): ACS는 `orderValidationError` 수신 시 description의 orderId를 현재 배차와 대조해
+> **거부된 정차를 자동으로 실패 집계**(재시도→스킵 정책 + ORDER_REJECTED 알람)한다 — DISPATCHED 정체 없음.
+> N11 계약대로 **description에 거부된 orderId를 반드시 명시**할 것(대조 키).
 
 **4.5.3 취소(cancelOrder) — 미사용**
 
@@ -407,7 +410,10 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 > 회신 전까지 온보드는 확실히 판별 가능한 것만 보고한다 — `emergencyStopActive`(자기가 정지시켰으므로 자명),
 > `orderValidationError`(온보드 자체 검증), `inspectionFailed`(검사 S/W 결과). 주행·측위 계열은 회신 후 채운다.
 
-> ※구현: 재시도 N회→스킵→알람 정책은 **actionStatus=FAILED 기준으로 동작**(2026-08-28 E2E 검증 — 재큐잉·SKIPPED·INSPECTION_SKIPPED 알람). errors의 **유형 코드별** 정책 분기는 코드 체계 협의(N6) 후 구현 예정 — 현행은 건수만 UI 전파. 계약상 AMR은 위 형식으로 보고하면 된다.
+> ※구현(2026-09-01 유형별 분기 반영 완료): 재시도→스킵→알람은 actionStatus=FAILED 기준으로 동작하고, 추가로 errors를 유형별로 소비한다 —
+> `orderValidationError`→거부 정차 자동 실패 집계(§4.5.2) / `emergencyStopActive`→**활성 run 자동 중단**(보고 지속 중 시작된 run 포함) /
+> `localizationLost`·`equipmentError`·`batteryLow`→알람 기록(같은 유형의 반복 보고는 1회만 — "최신 1건 유지" 규칙에 edge 검출로 대응) /
+> `drivingFailed`·`inspectionFailed`→액션 FAILED 종결 경로가 정책 수행. E2E 검증 완료.
 
 ---
 
@@ -550,7 +556,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 ### 8.3 직렬화 규칙
 
 - `actionParameters[].value`는 **JSON object/number/string 그대로** 직렬화가 기본.
-- AMR 파서가 문자열 value만 수용한다면 `position`/`params`를 JSON 문자열로 발행하는 폴백을 협의로 채택할 수 있다 `[협의 N7]` (※구현: 폴백 스위치는 ACS 미구현 — 필요 판정 시 추가).
+- 문자열 폴백은 **불요 확정**(N7 회신 — AMR이 object·문자열 재파싱 모두 수용). ACS는 항상 object로 발행하며 폴백 스위치는 구현하지 않는다.
 
 ### 8.4 골든 예시 (액션 전문)
 

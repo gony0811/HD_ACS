@@ -40,6 +40,13 @@ var failJobRefs = (Environment.GetEnvironmentVariable("SIM_FAIL_JOB_REFS") ?? ""
 var driveFailMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_DRIVE_FAIL_MAX"), out var df) ? df : 0;
 var driveFailCount = 0;
 
+// Order 거부 주입 — 처음 N개 Order를 §4.5.2대로 거부: 폐기(state 필드 미갱신) + errors orderValidationError
+var rejectMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_REJECT_MAX"), out var rj) ? rj : 0;
+var rejectCount = 0;
+
+// 상시 오류 주입 — 모든 state에 해당 errorType 포함 (예: localizationLost, emergencyStopActive — §6.4 분기 검증용)
+var raiseErrorType = Environment.GetEnvironmentVariable("SIM_RAISE_ERROR");
+
 // 실행 시간 (ms) — 테스트 고속화를 위해 환경변수로 조절 가능
 var travelMs = int.TryParse(Environment.GetEnvironmentVariable("SIM_TRAVEL_MS"), out var t1) ? t1 : 800;
 var fullMs   = int.TryParse(Environment.GetEnvironmentVariable("SIM_FULL_MS"),   out var t2) ? t2 : 1200;
@@ -57,6 +64,7 @@ var options = new MqttClientOptionsBuilder()
     .WithWillPayload(JsonSerializer.Serialize(new Vda5050Connection
         { ConnectionState = "CONNECTIONBROKEN", Manufacturer = robot.Manufacturer, SerialNumber = robot.SerialNumber }))
     .WithWillRetain(true)
+    .WithWillQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)   // 사양서 §2.4: Will QoS 1
     .Build();
 
 var state = new Vda5050State
@@ -79,7 +87,24 @@ client.ApplicationMessageReceivedAsync += async e =>
     var payload = e.ApplicationMessage.ConvertPayloadToString();
     if (e.ApplicationMessage.Topic.EndsWith("/order"))
     {
-        currentOrder = JsonSerializer.Deserialize<Vda5050Order>(payload);
+        var incoming = JsonSerializer.Deserialize<Vda5050Order>(payload)!;
+
+        // Order 거부 주입 [§4.5.2]: 폐기(이전 orderId·actionStates 유지 보고) + orderValidationError(description에 orderId)
+        if (rejectCount < rejectMax)
+        {
+            rejectCount++;
+            state.Errors.RemoveAll(er => er.ErrorType == "orderValidationError");
+            state.Errors.Add(new VdaError
+            {
+                ErrorType = "orderValidationError", ErrorLevel = "WARNING",
+                ErrorDescription = $"Order 거부(주입 {rejectCount}/{rejectMax}): orderId={incoming.OrderId} 사유=validation",
+            });
+            Console.WriteLine($"[SIM] Order 거부(주입): {incoming.OrderId} — 폐기, errors 보고");
+            _ = PublishStateAsync();
+            return;
+        }
+
+        currentOrder = incoming;
         Console.WriteLine($"[SIM] Order 수신: {currentOrder?.OrderId} (nodes={currentOrder?.Nodes.Count})");
         _ = Task.Run(() => ExecuteOrderAsync(currentOrder!));
     }
@@ -205,7 +230,7 @@ async Task ExecuteActionAsync(VdaAction action)
             Console.WriteLine($"[SIM]   파라미터 위반: {string.Join(", ", violations)}");
             state.Errors.Add(new VdaError
             {
-                ErrorType = "paramValidation", ErrorLevel = "WARNING",
+                ErrorType = "inspectionFailed", ErrorLevel = "WARNING",   // §6.4 확정 7종 코드 — 액션 단위 실패
                 ErrorDescription = $"{action.ActionId}: {string.Join(",", violations)}"
             });
             Fail(actionState, $"PARAM({string.Join(",", violations)})");
@@ -247,6 +272,11 @@ void Fail(ActionState actionState, string reason)
 
 async Task PublishStateAsync()
 {
+    // 상시 오류 주입 — 같은 유형 최신 1건 유지 규칙(§6.4) 준수
+    if (!string.IsNullOrWhiteSpace(raiseErrorType) && !state.Errors.Any(er => er.ErrorType == raiseErrorType))
+        state.Errors.Add(new VdaError
+        { ErrorType = raiseErrorType, ErrorLevel = "WARNING", ErrorDescription = $"주입 오류({raiseErrorType})" });
+
     state.HeaderId = ++headerId;
     state.Timestamp = Vda5050Header.NowIso();   // 밀리초+Z [SPEC §3 N2]
     await PublishAsync(stateTopic, state);

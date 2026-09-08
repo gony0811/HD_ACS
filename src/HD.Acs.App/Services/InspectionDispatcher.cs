@@ -361,5 +361,52 @@ public sealed class InspectionDispatcher
         await DispatchNextAsync(mission.RunId, ct);
     }
 
+    // ── Order 거부(orderValidationError) 자동 처리 [VDA 사양서 §4.5.2, N11 확정] ──────
+    /// <summary>
+    /// AMR이 Order를 거부(폐기 + errors 보고)하면 배차만 된 정차가 DISPATCHED로 정체한다.
+    /// 거부 errorDescription의 orderId를 현재 DISPATCHED work_item과 대조해 실패로 집계(재시도→스킵 정책)하고
+    /// ORDER_REJECTED 알람을 기록한다. orderId 불일치/처리 완료면 false — 반복 state 수신에 멱등.
+    /// </summary>
+    public async Task<bool> HandleOrderRejectedAsync(string robotId, string? errorDescription, CancellationToken ct)
+    {
+        var run = await _db.ScenarioRuns.Include(r => r.Missions)
+            .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
+            .FirstOrDefaultAsync(ct);
+        if (run is null) return false;
+
+        var wi = await _db.WorkItems
+            .FirstOrDefaultAsync(w => w.RunId == run.RunId && w.Status == "DISPATCHED", ct);
+        if (wi?.OrderId is not { } rejectedOrderId) return false;
+
+        // N11 계약: description에 거부된 orderId 명시 — 대조 실패면 이번 정차의 거부가 아님(구 오류 잔존 등)
+        if (errorDescription is null || !errorDescription.Contains(rejectedOrderId, StringComparison.OrdinalIgnoreCase))
+        {
+            _log.LogWarning("Run {Run}: orderValidationError 수신했으나 description에 현재 orderId({Order}) 없음 — 무시. desc={Desc}",
+                run.RunId, rejectedOrderId, errorDescription);
+            return false;
+        }
+
+        // 미실행 액션들을 FAILED로 종결(거부=폐기, 실행 없음) 후 기존 실패 정책(재시도→스킵) 경로 재사용
+        var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId && a.Status != "FINISHED").ToListAsync(ct);
+        foreach (var a in acts)
+        {
+            a.Status = "FAILED";
+            a.Result = JsonSerializer.Serialize(new { ActionStatus = "FAILED", ResultDescription = "orderValidationError(Order 거부)" });
+        }
+        _db.Alarms.Add(new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = "ORDER_REJECTED", RobotId = robotId,
+            Detail = JsonSerializer.Serialize(new { severity = "WARNING", title = "Order 거부(AMR 검증 실패)", orderId = rejectedOrderId, description = errorDescription }),
+            RaisedAt = DateTimeOffset.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+        _log.LogWarning("Run {Run}: Order {Order} 거부(orderValidationError) — 실패 정책 적용. desc={Desc}",
+            run.RunId, rejectedOrderId, errorDescription);
+
+        var mission = run.Missions.FirstOrDefault(m => m.OrderId == rejectedOrderId);
+        if (mission is not null) await HandleStopOutcomeAsync(mission, ct);
+        return true;
+    }
+
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
 }
