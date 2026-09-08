@@ -27,6 +27,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // ListenHost 기본은 localhost(로컬 UI 전용) — 원격 UI/태블릿이 붙어야 하면 "0.0.0.0"으로 전환 [SW-34].
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
+<<<<<<< Updated upstream
 builder.WebHost.UseUrls($"http://0.0.0.0:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 =======
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
@@ -46,6 +47,7 @@ builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD
 builder.Services.AddScoped<InspectionDispatcher>();
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RobotStateService>();
+builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<InspectionDispatcher>();
