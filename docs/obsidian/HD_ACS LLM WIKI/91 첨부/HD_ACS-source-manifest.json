@@ -1,0 +1,66 @@
+{
+  "as_of": "2026-09-07",
+  "git_head": "d72ce7ef6d663a6fb54ec27b48885c2452ed4d12",
+  "sources": [
+    {
+      "path": "docs/PROJECT_OVERVIEW.md",
+      "sha256": "46a3c49a0fa1d7cbb0dd4470c6bfd9a90064acf1eb289e241119b22c7f56a805"
+    },
+    {
+      "path": "docs/DEVELOPMENT_GUIDE.md",
+      "sha256": "31f1c788b450dabc125899ac691aeedacd09cf0d4050cc2dfa1d8e71eacaa76e"
+    },
+    {
+      "path": "docs/SPEC_AREA_TASK_MANUAL.md",
+      "sha256": "bb25c1bd861b615abdbc51e1f101d74dfa77009e397cbe776d24db2dd6bf0b2b"
+    },
+    {
+      "path": "docs/UI_CROSS_PLATFORM_REVIEW.md",
+      "sha256": "59bc57670ee10dcd885165ab05b9270826aa58ba1faca2bd19317392cf6d33b2"
+    },
+    {
+      "path": "docs/TANK_WALL_LAYOUT.md",
+      "sha256": "66d73ceed9aa22d9237c3a9cdfabae3646c88589a694a20925ec20d331a63c2d"
+    },
+    {
+      "path": "docs/VDA5050_INTERFACE_SPEC.md",
+      "sha256": "5b0fe510489f58ba9c6b549185940a434defd50b889ac9e4e71b5873a856a41b"
+    },
+    {
+      "path": "src/HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj",
+      "sha256": "c26a0adf156744ea511f9ea3598414db0e9c4e21ec841f1922c787d98cc78762"
+    },
+    {
+      "path": "src/HD.Acs.UI.Desktop/Views/AreaManagementView.axaml",
+      "sha256": "e51441d56196eb45fa1d8fed46dfd25b15d8688974348337f0b0fe86bc639a86"
+    },
+    {
+      "path": "src/HD.Acs.UI.Core/ViewModels/AreaPlanningViewModel.cs",
+      "sha256": "75607eb7d746211d4fb0f5b204bd03ca54c03b967f1e4f839bf21805dbd44b5d"
+    },
+    {
+      "path": "src/HD.Acs.UI.Core/Services/AcsApiClient.cs",
+      "sha256": "aa391a371d96ded9779b168be88084a3ce9a4169f1940d429710ec5bc6d10e4c"
+    },
+    {
+      "path": "src/HD.Acs.Core/Planning/TankGeometry.cs",
+      "sha256": "afb8e15ff4364ca8b9864f03effa4e37fdc9faa4a2b5fb4c9340cbcd49397c51"
+    },
+    {
+      "path": "tools/analyze_dxf_regions.py",
+      "sha256": "50bdd6c8477f70997430b2c9c3beb834a992ea5a2853f4bad2e928304981004d"
+    },
+    {
+      "path": "tools/build_dxf_area_preview.py",
+      "sha256": "710f614e918482065112a55a6bee08e706898143fbb5a5f4c5c4de0c13358b2b"
+    },
+    {
+      "path": "drawing/area-preview/area-task-coordinates.json",
+      "sha256": "85d8dab54f3d80d64e1ba87c138c0a66a3c639ccba3046449a410cf58018cbca"
+    },
+    {
+      "path": "drawing/area-preview/area-task-preview.html",
+      "sha256": "33f021ba244b6b933a1b324a73a186c8fdce5bc183534692b9db8ae12b764522"
+    }
+  ]
+}

@@ -44,35 +44,38 @@
                         <TextBlock Text="사각형 4점 (면 로컬 u,v) — 숫자 입력 또는 [도면에서 4점 선택] 후 캔버스를 순서대로 4번 클릭(우클릭=해제)" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="P1 u,v" Classes="lbl" />
-                            <NumericUpDown Classes="field" Value="{Binding C1U}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding C1V}" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C1U}" Margin="0,0,6,0" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C1V}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="P2 u,v" Classes="lbl" />
-                            <NumericUpDown Classes="field" Value="{Binding C2U}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding C2V}" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C2U}" Margin="0,0,6,0" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C2V}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="P3 u,v" Classes="lbl" />
-                            <NumericUpDown Classes="field" Value="{Binding C3U}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding C3V}" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C3U}" Margin="0,0,6,0" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C3V}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="P4 u,v" Classes="lbl" />
-                            <NumericUpDown Classes="field" Value="{Binding C4U}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding C4V}" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C4U}" Margin="0,0,6,0" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C4V}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6"
                                     ToolTip.Tip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(0.8m). 바닥/천장(B/T) 면은 적용 불가 — 수동 지정 사용.">
                             <TextBlock Text="정차 이격[m]" Classes="lbl" />
-                            <NumericUpDown Classes="field" Minimum="0" Value="{Binding StationStandoffM}" />
+                            <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Value="{Binding StationStandoffM}" />
                         </StackPanel>
                         <CheckBox Content="정차 수동 지정 (전역 x,y,θ) — 바닥/천장(B/T) 면은 필수" IsChecked="{Binding StationOverride}" Margin="0,0,0,4" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
-                            <TextBlock Text="x,y,θ" Classes="lbl" />
-                            <NumericUpDown Classes="field" Value="{Binding StationX}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding StationY}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" Value="{Binding StationTheta}" />
+                            <TextBlock Text="x,y" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationX}" Margin="0,0,6,0" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationY}" Margin="0,0,6,0" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
+                            <TextBlock Text="θ" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationTheta}" />
                         </StackPanel>
                         <Button Classes="form" Content="영역 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
                     </StackPanel>

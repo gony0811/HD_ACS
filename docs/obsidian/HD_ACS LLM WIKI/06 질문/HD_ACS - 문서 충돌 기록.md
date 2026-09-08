@@ -1,0 +1,26 @@
+---
+project: HD_ACS
+type: conflicts
+status: open
+updated: 2026-09-07
+tags:
+  - hd-acs
+  - llm-wiki
+---
+
+# 문서 충돌 기록
+
+오래된 설명을 삭제해 이력을 지우지 않고 현재 기준과 구분합니다.
+
+| 충돌 | 현재 읽는 기준 | 후속 조치 |
+|---|---|---|
+| PROJECT_OVERVIEW의 ROS2/REST 후보 vs VDA 확정 | 인터페이스 사양 v1.2의 단일 HD_AMR·VDA/MQTT 계약 | 원문 개요 최신화 |
+| DEVELOPMENT_GUIDE의 WPF UI·3D 골격 설명 vs Avalonia 완료 기록 | 최신 Desktop 코드와 UI 크로스플랫폼 검토서 | 과거 상태 날짜 명시 |
+| 자동 SeamSlicer 보류 vs 이번 DXF 분석 | 기존 운영 경로는 수동; 이번 도구는 검토용 prototype | 통합 시 새 결정 필요 |
+| 대화 초기 400 피치 vs 사용자 확인 360 | 360 | 400은 폐기된 가정으로 보존 |
+| 대화 초기 MinWidth=100 vs 현재 코드=150 | 현재 코드 150 | 검증 결과도 버전별 구분 |
+| A면 U 방향의 원문 차이 | 임의 통일하지 않음 | 기준 문서 대조 필요 |
+
+위키의 요약이 원본 계약을 대신하지 않습니다. 사실·계약·사용자 요구가 충돌하면 해당 종류의 근거를 나눠 기록합니다.
+
+관련: [[HD_ACS - 근거 목록]] · [[HD_ACS - 현재 상태]] · [[HD_ACS - 미해결 질문]]
