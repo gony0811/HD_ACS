@@ -166,6 +166,10 @@ public sealed partial class TankViewModel : ObservableObject
 
     public bool HasRobotPosition => RobotX is not null && RobotY is not null;
 
+    /// <summary>도면 마커 표시 가능 여부 — 위치 보고 + 해당 층 유효 T_W_D 적용 완료 시에만 true.
+    /// 미보정 층은 원시(맵) 좌표를 도면에 그대로 찍지 않고 마커를 숨긴다(위치 카드의 "캘리브레이션 없음" 표시와 일관).</summary>
+    public bool RobotMarkerVisible => HasRobotPosition && _robotPoseCalibrated;
+
     /// <summary>선택 뷰 층에 로봇이 있는지 — 다른 층이면 마커를 흐리게. "전체"면 항상 표시(비교 안 함).</summary>
     public bool RobotOnSelectedFloor =>
         SelectedLevel is null ||
@@ -298,6 +302,7 @@ public sealed partial class TankViewModel : ObservableObject
     // 로봇 보고는 맵 좌표, 3D 씬은 도면 좌표 — 역변환 없이 찍으면 T_W_D(tx,ty,yaw)만큼 어긋나 보인다.
     private readonly Dictionary<string, (double Tx, double Ty, double Yaw)> _calByMapId = new();
     private readonly HashSet<string> _calMissing = new();   // 미보정 층 — 재조회 폭주 방지
+    private bool _robotPoseCalibrated;   // 현재 마커 좌표가 유효 T_W_D로 변환된 값인지(원시좌표 폴백이면 false → 마커 숨김)
 
     /// <summary>마커용 도면 좌표. 캘리브레이션 미보정 층은 원시(맵) 좌표 폴백.</summary>
     public double RobotDrawingX { get; private set; }
@@ -351,8 +356,9 @@ public sealed partial class TankViewModel : ObservableObject
     private void UpdateRobotDrawingPose()
     {
         double mx = RobotX ?? 0, my = RobotY ?? 0;
-        double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표
+        double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표(마커는 RobotMarkerVisible=false로 숨김)
         double? dTheta = RobotTheta;   // 폴백: 미보정 → 원시 heading
+        bool calibrated = false;
         if (RobotMapId is { } mapId)
         {
             if (_calByMapId.TryGetValue(mapId, out var c))
@@ -363,6 +369,7 @@ public sealed partial class TankViewModel : ObservableObject
                 dx = cos * px - sin * py;
                 dy = sin * px + cos * py;
                 if (RobotTheta is double th) dTheta = MapThetaToDrawing(th, c.Yaw);
+                calibrated = true;
             }
             else if (!_calMissing.Contains(mapId))
             {
@@ -380,9 +387,11 @@ public sealed partial class TankViewModel : ObservableObject
         RobotDrawingX = dx;
         RobotDrawingY = dy;
         RobotDrawingTheta = dTheta;
+        _robotPoseCalibrated = calibrated;
         OnPropertyChanged(nameof(RobotDrawingX));
         OnPropertyChanged(nameof(RobotDrawingY));
         OnPropertyChanged(nameof(RobotDrawingTheta));
+        OnPropertyChanged(nameof(RobotMarkerVisible));
     }
 
     private async Task LoadCalibrationAsync(string mapId)

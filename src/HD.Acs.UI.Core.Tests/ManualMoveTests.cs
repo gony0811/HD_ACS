@@ -193,6 +193,16 @@ public class ManualMoveTests
     }
 
     [Fact]
+    public void RobotMarkerVisible_UncalibratedMap_IsFalseEvenWithPosition()
+    {
+        // FakeAcsApiClient.GetCalibrationAsync 는 null(미보정) 반환 → 원시좌표 폴백 상태.
+        var (vm, _, _) = CreateVm();   // CT1-L1 에 로봇 상태 주입됨
+
+        Assert.True(vm.HasRobotPosition);      // 위치 보고는 있으나
+        Assert.False(vm.RobotMarkerVisible);   // 유효 T_W_D 미적용이라 마커는 숨김(원시좌표 미표시)
+    }
+
+    [Fact]
     public async Task RequestMoveAsync_ApiFails_ClearsMarker()
     {
         var (vm, api, _) = CreateVm();
