@@ -33,6 +33,18 @@
             </StackPanel>
         </Border>
 
+        <Border DockPanel.Dock="Top" Padding="8" IsVisible="{Binding ManualMoveMode}" IsEnabled="{Binding IsolateLevel}">
+            <WrapPanel>
+                <TextBlock Text="도면 X (m)" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <NumericUpDown Width="120" Value="{Binding ManualDrawingX}" FormatString="0.00" Increment="0.01" Margin="0,0,12,0" />
+                <TextBlock Text="도면 Y (m)" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <NumericUpDown Width="120" Value="{Binding ManualDrawingY}" FormatString="0.00" Increment="0.01" Margin="0,0,12,0" />
+                <TextBlock Text="방향 (°)" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <NumericUpDown Width="100" Value="{Binding ManualHeadingDegrees}" FormatString="0.0" Increment="1" ToolTip.Tip="도면 기준 각도. 비워두면 방향 자유." Margin="0,0,12,0" />
+                <Button Content="입력 좌표로 이동" Command="{Binding MoveToCoordinatesCommand}" />
+            </WrapPanel>
+        </Border>
+
         <TabControl x:Name="TankTabs">
             <TabItem Header="3D 뷰">
                 <!-- 소프트웨어 투영 렌더러 — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 위치→방향 드래그=goto -->

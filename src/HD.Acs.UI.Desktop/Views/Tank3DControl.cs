@@ -37,6 +37,7 @@ public sealed class Tank3DControl : Control
     private Point _lastPointer, _pressPointer;
     private PointerUpdateKind _dragButton;
     private bool _dragging;
+    private Point? _hoverPoint;
 
     public Tank3DControl()
     {
@@ -139,6 +140,17 @@ public sealed class Tank3DControl : Control
             }
         }
         DrawOrientationCube(ctx, b.Width);
+        if (_vm?.ManualMoveMode == true && _hoverPoint is { } cursor
+            && TryHitFloor(cursor, requireInside: true) is { } floor)
+        {
+            var text = new FormattedText($"X: {floor.X:F2} m   Y: {floor.Y:F2} m",
+                CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, _typeface, 12, Brushes.White);
+            double x = Math.Max(4, Math.Min(cursor.X + 16, b.Width - text.Width - 16));
+            double y = Math.Max(4, Math.Min(cursor.Y + 20, b.Height - text.Height - 12));
+            ctx.FillRectangle(Brush(Rgba.FromArgb(0xEE, 0x12, 0x1B, 0x22)),
+                new Rect(x - 4, y - 3, text.Width + 8, text.Height + 6));
+            ctx.DrawText(text, new Point(x, y));
+        }
     }
 
     /// <summary>Helix ViewCube에 대응하는 선창 도면 좌표계. +X=선수, -X=선미, +Y=좌현, -Y=우현.</summary>
@@ -224,6 +236,8 @@ public sealed class Tank3DControl : Control
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
+        _hoverPoint = e.GetPosition(this);
+        if (_vm?.ManualMoveMode == true) InvalidateVisual();
         if (!ReferenceEquals(e.Pointer.Captured, this)) return;
         var p = e.GetPosition(this);
         var dx = p.X - _lastPointer.X; var dy = p.Y - _lastPointer.Y;
@@ -268,6 +282,13 @@ public sealed class Tank3DControl : Control
             return;
         }
         if (_dragging || _dragButton != PointerUpdateKind.LeftButtonPressed) return;
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        _hoverPoint = null;
+        InvalidateVisual();
     }
 
     private Pt3? TryHitFloor(Point screen, bool requireInside)

@@ -2,13 +2,24 @@
 project: HD_ACS
 type: sources
 status: snapshot
-updated: 2026-09-07
+updated: 2026-09-08
 tags:
   - hd-acs
   - llm-wiki
 ---
 
 # 근거 목록
+
+[[HD_ACS - 캘리브레이션 작업 절차서]]: 2026-09-08 GenerateWalls, DrawingTransform, calibration API, TankViewModel 캐시 코드를 재확인. HEAD 39f5f1d 및 작업 트리 기준이며 이전 snapshot의 hash나 운영 DB 값을 갱신한 것은 아닙니다.
+
+## 2026-09-08 추가 근거
+
+이 대화의 사용자 요청, 수정 코드와 빌드 출력에 근거합니다. 이전 snapshot과 SHA256 목록은 그대로 두며 이번 수정의 hash로 간주하지 않습니다.
+
+- 캘리브레이션: `CalibrationViewModel.cs`, Desktop/WPF `CalibrationView`, `IAcsApiClient.cs`, `AcsApiClient.cs`, App `Program.cs`.
+- 수동 이동: `TankViewModel.cs`, Desktop `TankView.axaml`, `Tank3DControl.cs`.
+- 검증: 캘리브레이션 Desktop/App 빌드 성공; 수동 이동 Desktop 빌드 성공(NU1900 경고 1). 실장비 명령 미실행.
+- 상세: [[HD_ACS - 2026-09-08 개발일지]] · [[HD_ACS - Desktop UI]].
 
 이 위키는 아래 로컬 자료와 이번 사용자 대화를 바탕으로 작성했습니다. 인터넷 조사나 전 시스템 재검증은 수행하지 않았습니다.
 

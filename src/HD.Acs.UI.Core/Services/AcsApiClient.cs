@@ -113,10 +113,11 @@ public sealed class AcsApiClient : IAcsApiClient
 
     // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     public async Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
-        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default)
+        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default,
+        double? mapX = null, double? mapY = null)
     {
         var resp = await _http.PostAsJsonAsync($"/api/maps/{mapId}/calibration/points",
-            new { DrawingX = drawingX, DrawingY = drawingY, Unit = unit, UserId = userId }, ct);
+            new { DrawingX = drawingX, DrawingY = drawingY, Unit = unit, UserId = userId, MapX = mapX, MapY = mapY }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 404/409의 {error} 메시지를 예외로 노출
         return (await resp.Content.ReadFromJsonAsync<CalibrationPointDto>(ct))!;
     }

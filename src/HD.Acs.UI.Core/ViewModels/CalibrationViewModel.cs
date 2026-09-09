@@ -25,6 +25,8 @@ public sealed partial class CalibrationViewModel : ObservableObject
     [ObservableProperty] private double _drawingX;
     [ObservableProperty] private double _drawingY;
     [ObservableProperty] private string _unit = "m";
+    [ObservableProperty] private double? _mapX;
+    [ObservableProperty] private double? _mapY;
 
     [ObservableProperty] private MapCalibrationDto? _calibration;      // 저장된 유효 T_W_D
     [ObservableProperty] private CalibrationSolveResultDto? _solveResult;
@@ -97,16 +99,31 @@ public sealed partial class CalibrationViewModel : ObservableObject
         }
     }
 
-    private bool CanCapture() => SelectedMapId is not null;
+    private bool CanCapture() => RobotReady;
 
     [RelayCommand(CanExecute = nameof(CanCapture))]
+    private void CaptureRobotPosition()
+    {
+        MapX = RobotReportedX;
+        MapY = RobotReportedY;
+        StatusMessage = "AMR 위치를 캡처했습니다. 맵 X/Y를 확인·수정한 뒤 기준점 저장을 누르세요.";
+    }
+
+    private bool CanSavePoint() => SelectedMapId is not null
+        && MapX is double x && double.IsFinite(x) && MapY is double y && double.IsFinite(y)
+        && double.IsFinite(DrawingX) && double.IsFinite(DrawingY);
+
+    [RelayCommand(CanExecute = nameof(CanSavePoint))]
     private async Task CapturePointAsync()
     {
         if (SelectedMapId is null) return;
         StatusMessage = "캡처 요청 중…";
         try
         {
-            var pt = await _api.CaptureCalibrationPointAsync(SelectedMapId, DrawingX, DrawingY, Unit, _operatorId);
+            var mapId = SelectedMapId;
+            var pt = await _api.CaptureCalibrationPointAsync(mapId, DrawingX, DrawingY, Unit, _operatorId,
+                mapX: MapX, mapY: MapY);
+            if (SelectedMapId != mapId) return;
             Points.Add(pt);
             StatusMessage = $"캡처: 도면({pt.DrawingXM:F3},{pt.DrawingYM:F3}) ↔ 맵({pt.MapX:F3},{pt.MapY:F3})";
         }
@@ -166,15 +183,22 @@ public sealed partial class CalibrationViewModel : ObservableObject
     partial void OnSelectedFloorChanged(TankFloor? value)
     {
         RobotReportedMapId = null; RobotReportedX = null; RobotReportedY = null;
+        MapX = null; MapY = null;
+        CaptureRobotPositionCommand.NotifyCanExecuteChanged();
         CapturePointCommand.NotifyCanExecuteChanged();
         _ = RefreshAsync();
     }
 
     partial void OnCalibrationChanged(MapCalibrationDto? value) => RaiseDerived();
+    partial void OnMapXChanged(double? value) => CapturePointCommand.NotifyCanExecuteChanged();
+    partial void OnMapYChanged(double? value) => CapturePointCommand.NotifyCanExecuteChanged();
+    partial void OnDrawingXChanged(double value) => CapturePointCommand.NotifyCanExecuteChanged();
+    partial void OnDrawingYChanged(double value) => CapturePointCommand.NotifyCanExecuteChanged();
     partial void OnSolveResultChanged(CalibrationSolveResultDto? value) => RaiseDerived();
 
     private void RaiseDerived()
     {
+        CaptureRobotPositionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(RobotReady));
         OnPropertyChanged(nameof(ReadinessText));
         OnPropertyChanged(nameof(HasWarning));

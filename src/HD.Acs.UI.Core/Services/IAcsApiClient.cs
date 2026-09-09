@@ -32,7 +32,8 @@ public interface IAcsApiClient
 
     // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
-        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default);
+        double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default,
+        double? mapX = null, double? mapY = null);
     Task<IReadOnlyList<CalibrationPointDto>> GetCalibrationPointsAsync(string mapId, CancellationToken ct = default);
     Task DeleteCalibrationPointAsync(string mapId, Guid pointId, CancellationToken ct = default);
     Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default);

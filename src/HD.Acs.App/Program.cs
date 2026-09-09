@@ -568,8 +568,12 @@ app.MapPost("/api/maps/{mapId}/calibration/points",
         .Where(c => c.ReportedMapId == mapId)
         .OrderByDescending(c => c.ReportedAt)
         .FirstOrDefaultAsync();
-    if (ctx is null || ctx.ReportedX is not double rx || ctx.ReportedY is not double ry)
+    if (req.MapX.HasValue != req.MapY.HasValue)
+        return Results.BadRequest(new { error = "맵 X/Y는 함께 입력해야 합니다." });
+    if ((req.MapX ?? ctx?.ReportedX) is not double rx || (req.MapY ?? ctx?.ReportedY) is not double ry)
         return Results.Conflict(new { error = $"'{mapId}' 층을 보고 중인 로봇 위치가 없습니다. (로봇 ReportedMapId≠mapId)" });
+    if (!double.IsFinite(rx) || !double.IsFinite(ry) || !double.IsFinite(req.DrawingX) || !double.IsFinite(req.DrawingY))
+        return Results.BadRequest(new { error = "좌표는 유한한 숫자여야 합니다." });
 
     double dx = req.Unit == "mm" ? req.DrawingX / 1000.0 : req.DrawingX;
     double dy = req.Unit == "mm" ? req.DrawingY / 1000.0 : req.DrawingY;
@@ -655,7 +659,8 @@ public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);
-public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId);
+public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId,
+    double? MapX = null, double? MapY = null);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);

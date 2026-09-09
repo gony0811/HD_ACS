@@ -118,6 +118,27 @@ public sealed partial class TankViewModel : ObservableObject
     // ── 수동 이동 (층 격리 뷰 바닥 그리드 클릭 → goto Order) — 이동 테스트용 ──
     /// <summary>켜면 층 바닥 그리드 클릭이 해당 지점으로 수동 이동을 명령한다 (오조작 방지 토글).</summary>
     [ObservableProperty] private bool _manualMoveMode;
+    [ObservableProperty] private double _manualDrawingX;
+    [ObservableProperty] private double _manualDrawingY;
+    [ObservableProperty] private double? _manualHeadingDegrees;
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task MoveToCoordinatesAsync()
+    {
+        if (!ManualMoveMode || SelectedLevel is not int level) return;
+        if (!double.IsFinite(ManualDrawingX) || !double.IsFinite(ManualDrawingY)
+            || (ManualHeadingDegrees is double angle && !double.IsFinite(angle)))
+        { MoveStatus = "유효한 좌표와 방향을 입력하세요."; return; }
+        if (Geometry is not { } g || g.LevelZ is not { } levels || level < 1 || level > levels.Length)
+        { MoveStatus = "선택 층의 도면 정보를 불러온 뒤 이동하세요."; return; }
+        double z = levels[level - 1];
+        double halfWidth = HD.Acs.UI.Rendering.TankShape.HalfWidth(g, z);
+        if (Math.Abs(ManualDrawingX - g.OriginOx) > g.LengthL / 2
+            || Math.Abs(ManualDrawingY - g.OriginOy) > halfWidth)
+        { MoveStatus = "선택 층의 바닥 범위 안에 있는 도면 좌표를 입력하세요."; return; }
+        await RequestMoveAsync(ManualDrawingX, ManualDrawingY,
+            ManualHeadingDegrees is double degrees ? degrees * Math.PI / 180 : null, z);
+    }
     [ObservableProperty] private string? _moveStatus;
     [ObservableProperty] private Pt3? _moveMarker;
     [ObservableProperty] private double? _moveHeading;

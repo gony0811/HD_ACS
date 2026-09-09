@@ -6,7 +6,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,6">
             <TextBlock Text="도면→맵 캘리브레이션 (T_W_D) · Operator" FontWeight="Bold" />
             <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}"
-                       Text="로봇을 도면상 알려진 기준점으로 이동시킨 뒤, 그 점의 도면 좌표를 입력하고 '현재 위치 캡처'를 누르세요. 2~3점 캡처 후 '계산'." />
+                       Text="도면 좌표 입력 → 현재 위치 캡처 → AMR 맵 X/Y 확인·수정 → 기준점 저장. 맵 좌표는 항상 m 단위입니다. 2~3점 저장 후 계산하세요." />
         </StackPanel>
 
         <!-- 층 선택 + 로봇 보고 준비 상태 -->
@@ -21,7 +21,8 @@
         </Border>
 
         <!-- 도면 좌표 입력 + 캡처 -->
-        <Grid Grid.Row="3" Margin="0,0,0,8" ColumnDefinitions="*,*,Auto,Auto">
+        <StackPanel Grid.Row="3" Margin="0,0,0,8">
+        <Grid ColumnDefinitions="*,*,Auto,Auto">
             <StackPanel Grid.Column="0" Margin="0,0,4,0">
                 <TextBlock Text="도면 X" />
                 <NumericUpDown Value="{Binding DrawingX}" FormatString="0.###" Increment="0.1" />
@@ -35,8 +36,20 @@
                 <ComboBox ItemsSource="{Binding Units}" SelectedItem="{Binding Unit}" Width="70" />
             </StackPanel>
             <Button Grid.Column="3" Content="현재 위치 캡처" VerticalAlignment="Bottom"
-                    Margin="6,0,0,0" Command="{Binding CapturePointCommand}" />
+                    Margin="6,0,0,0" Command="{Binding CaptureRobotPositionCommand}" />
         </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <StackPanel Width="130" Margin="0,0,8,0">
+                <TextBlock Text="AMR 맵 X (m)" />
+                <NumericUpDown Value="{Binding MapX, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel Width="130" Margin="0,0,8,0">
+                <TextBlock Text="AMR 맵 Y (m)" />
+                <NumericUpDown Value="{Binding MapY, Mode=TwoWay}" />
+            </StackPanel>
+            <Button Content="기준점 저장" VerticalAlignment="Bottom" Command="{Binding CapturePointCommand}" />
+        </StackPanel>
+        </StackPanel>
 
         <!-- 대응쌍 목록 -->
         <DataGrid Grid.Row="4" x:Name="PointGrid" ItemsSource="{Binding Points}"
