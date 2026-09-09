@@ -21,9 +21,13 @@ using MQTTnet.Protocol;
 //
 // 사용: dotnet run [brokerHost] [manufacturer] [serialNumber] [mapId]
 
+var initialMapId = args.ElementAtOrDefault(3) ?? "CT1-L1";
+var control = new SimulatorControlState(initialMapId, 95, 0, 0, 0);
+var simulatorTask = Task.Run(async () =>
+{
 var broker = args.ElementAtOrDefault(0) ?? "localhost";
 var robot = new RobotRef("AMR-01", args.ElementAtOrDefault(1) ?? "HHI", args.ElementAtOrDefault(2) ?? "AMR-01");
-var mapId = args.ElementAtOrDefault(3) ?? "CT1-L1";
+var mapId = initialMapId;
 var json = new JsonSerializerOptions { WriteIndented = false };
 
 // 실패 주입 대상 actionId 집합 [WP-4 §5.3]
@@ -141,11 +145,24 @@ await PublishAsync(connTopic, new Vda5050Connection
 Console.WriteLine($"[SIM] {robot.SerialNumber} ONLINE (map={mapId}, broker={broker}, " +
                   $"failInject={failActionIds.Count}건)");
 
-// 주기 state 보고 (2초)
-while (true)
+// 주기 state 보고 (2초). UI 변경 요청은 다음 주기를 기다리지 않고 즉시 반영·발행한다.
+while (!control.CancellationToken.IsCancellationRequested)
 {
+    while (control.TryTakeUpdate(out var update))
+    {
+        state.AgvPosition!.MapId = update.MapId;
+        state.AgvPosition.X = update.X;
+        state.AgvPosition.Y = update.Y;
+        state.AgvPosition.Theta = update.Theta;
+        state.AgvPosition.PositionInitialized = true;
+        state.BatteryState ??= new BatteryState();
+        state.BatteryState.BatteryCharge = update.BatteryPct;
+        Console.WriteLine($"[SIM] UI 상태 변경 → map={update.MapId}, " +
+                          $"SLAM=({update.X:F3}, {update.Y:F3}, {update.Theta:F3} rad), " +
+                          $"battery={update.BatteryPct:F1}%");
+    }
     await PublishStateAsync();
-    await Task.Delay(2000);
+    await control.WaitForUpdateAsync(TimeSpan.FromSeconds(2));
 }
 
 async Task ExecuteOrderAsync(Vda5050Order order)
@@ -280,6 +297,10 @@ async Task PublishStateAsync()
     state.HeaderId = ++headerId;
     state.Timestamp = Vda5050Header.NowIso();   // 밀리초+Z [SPEC §3 N2]
     await PublishAsync(stateTopic, state);
+    if (state.AgvPosition is { } position && state.BatteryState is { } battery)
+        control.ReportPublished(new SimulatorStateSnapshot(
+            position.MapId ?? "", battery.BatteryCharge,
+            position.X, position.Y, position.Theta, state.Timestamp));
 }
 
 // initPosition actionParameters 안전 파싱 — Value는 object(역직렬화 시 JsonElement)일 수 있음
@@ -317,6 +338,12 @@ async Task PublishAsync<T>(string topic, T payload, bool retain = false)
         .Build();
     await client.PublishAsync(msg);
 }
+});
+
+SimulatorUi.Run(control);
+control.Stop();
+try { await simulatorTask; }
+catch (OperationCanceledException) { }
 
 /// <summary>
 /// startWeldInspection actionParameters 검증기 [SPEC_PHASE2_ACS.md §4.1 param_schema 필수 필드].
