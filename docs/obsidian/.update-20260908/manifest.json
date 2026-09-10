@@ -1,0 +1,52 @@
+[
+  {
+    "path": "05 진행/HD_ACS - 2026-09-08 현장평가.md",
+    "before": null,
+    "after": "edf7a7ceeb4e984e9270a26173970e2f7f6464e3689d7e555cf953236d54a3d4"
+  },
+  {
+    "path": "03 기능/HD_ACS - L2 도면 SLAM 캘리브레이션.md",
+    "before": null,
+    "after": "2738bbb09f8e7a52507a86bd61ebdecfee60971cece1252d829c36a128128014"
+  },
+  {
+    "path": "90 근거/HD_ACS - 2026-09-08 현장 메모 원문.md",
+    "before": null,
+    "after": "c293421808e76405fd69d1801bfaf9e0226931450bf0c2aa864388e4a3b68f9c"
+  },
+  {
+    "path": "HD_ACS - 홈.md",
+    "before": "cf90656d7e9ee1b5a422964aec6df6eb2265cde643be0713d1ee1e3dd983742e",
+    "after": "f5091faeca14ec4b9569027c507785788e691a07045d5468b099e9ec9aa3be30"
+  },
+  {
+    "path": "01 프로젝트/HD_ACS - 현재 상태.md",
+    "before": "4d07765bb31807f3e3d251fa2202544e62d7ebbd59b6b4b5a95d46a8e5c74f9a",
+    "after": "a75ba65d875f7bcbe6aaf2684b7413fb69c9928c809fa029071febd589089618"
+  },
+  {
+    "path": "05 진행/HD_ACS - 다음 작업.md",
+    "before": "20baebd711e29b2788940642827228649cda331bcec3594662e9cc137444c098",
+    "after": "25bb81a6fa7d001bf8c47daf01f244dc981f19a6ea26422bf3d4a6c5e5b565df"
+  },
+  {
+    "path": "02 설계/HD_ACS - 좌표계와 10개 면.md",
+    "before": "417aadd1112dc2ee63d8bf6eef4cd5d4995de08b0fee3ed794fee37dbd33ae42",
+    "after": "842d4710d737f2774845aa9693ea6c647d4865f8615f40e6114378b35eb7b8ef"
+  },
+  {
+    "path": "06 질문/HD_ACS - 미해결 질문.md",
+    "before": "c22487e882af421ad96578fe8798a799321b95dcc6734f5b11e0b6e8eb70eaa6",
+    "after": "66f10e3fdf25ecc707765c8e57f0742d1343a8f42e9f8f33aec7624e347bc442"
+  },
+  {
+    "path": "06 질문/HD_ACS - 문서 충돌 기록.md",
+    "before": "53b407dc879130e5fbf4171f4e84bb1d3b58de28b1ac0ff04f91c1bb081a206f",
+    "after": "e18925e495a66627a14edbade7cf61b2a9b07b8027f26e7dc9963a5778351523"
+  },
+  {
+    "path": "90 근거/HD_ACS - 근거 목록.md",
+    "before": "52794b2600705c1c09655414f75d7cd749289f6b19ef7c78e6d5b2960b6a447d",
+    "after": "95c7ccdfb5015c4551f090b36d052cae9c871d350d59742b13a6c926326c87cc"
+  }
+]
