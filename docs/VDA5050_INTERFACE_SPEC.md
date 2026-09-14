@@ -663,6 +663,18 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 
 **(5) 현행 상태 각주.** HD_AMR `Vda5050OrderExecutor`는 노드 도달 후 액션을 `RUNNING → FINISHED "stub"`로만 보고하며 `actionParameters`를 해석하지 않는다. 실제 검사는 HD_AMR 자체 로컬 `InspectionProfile`(온보드 UI 티칭)로 수행된다. 본 §8.5.1 반영 = **HD_AMR 2차 과제**이며, 그때 ACS `(wall_code, seamType)` → 로컬 레시피 매핑을 붙인다.
 
+**(6) `seamType`(라인 형태) vs `Surface`(경유점 촬영 키) — 레벨 구분.** 둘은 다른 개념이며 계층이 다르다. **혼동 금지.**
+
+| 구분 | `seamType` | `Surface` |
+|---|---|---|
+| 의미 | 용접라인의 **형태**(`LINE`/`CROSS`/`CORNER`) | 경유점의 **표면 형상**(Flat/Corner/Corrugation) |
+| 단위 | 용접라인 1개 | 레시피 내 **경유점 1개** |
+| 결정 주체 | **HD_ACS** — 계획 단계에서 **도면으로 추출** → 액션 전달 | **HD_AMR** — 레시피 내부(티칭/유도) |
+| 용도 | AMR이 **어떤 레시피를 로딩**할지 선택 | 경유점마다 **촬영/조명 선택** |
+| 전송 | VDA `params.seamType`로 전송 | **전송 안 함**(AMR 내부 값) |
+
+→ ACS 책임은 `seamType`(+`wall_code`)까지다. 레시피를 로딩한 뒤 각 경유점의 `Surface`(Flat/Corner/Corrugation)에 따라 **조명·촬영을 선택**하는 것은 전적으로 HD_AMR 몫이며, ACS는 `Surface`를 알 필요도 보낼 필요도 없다.
+
 ---
 
 ## 9. 운영 시퀀스
