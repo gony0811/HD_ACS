@@ -96,6 +96,10 @@
                             <NumericUpDown Classes="field" Value="{Binding EndU}" Margin="0,0,6,0" />
                             <NumericUpDown Classes="field" Value="{Binding EndV}" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="용접라인 타입" Classes="lbl" />
+                            <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}" />
+                        </StackPanel>
                         <Button Classes="form" Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
                     </StackPanel>
                 </Border>

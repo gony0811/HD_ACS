@@ -138,7 +138,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType":            { "enum": ["LINE", "POLYLINE"] },
+        "seamType":            { "enum": ["LINE", "CROSS", "CORNER"] },
         "points":              { "type": "array" },
         "sectionDxfId":        { "type": "string" },
         "inspectionProfileId": { "type": "string" },
