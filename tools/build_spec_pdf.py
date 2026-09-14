@@ -101,9 +101,14 @@ def build_html(md_path, mermaid_js, title):
 
 
 def render_pdf(html_path, out_path, header):
+    import os
     from playwright.sync_api import sync_playwright
+    # 사전 설치된 Chromium을 쓰는 환경(예: PLAYWRIGHT_BROWSERS_PATH)에서
+    # 리비전 불일치로 'playwright install'을 요구할 때, 실행 파일 경로를 직접 지정한다.
+    exe = os.environ.get("PW_CHROMIUM_EXECUTABLE")
+    launch_kw = {"executable_path": exe} if exe else {}
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        b = p.chromium.launch(**launch_kw)
         pg = b.new_page()
         pg.goto("file://" + str(html_path.resolve()), wait_until="load")
         pg.wait_for_function("window.__done === true", timeout=90000)
