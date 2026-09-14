@@ -67,6 +67,8 @@
 
 액션은 `startWeldInspection` 하나 유지, `profileId` enum으로 검사 타입을 구분한다.
 
+> **명칭 정합**: 본 문서의 `profileId`는 VDA 계약의 `params.inspectionProfileId`([VDA5050_INTERFACE_SPEC](VDA5050_INTERFACE_SPEC.md) §8.5) 계열이다. 단, VDA `inspectionProfileId`는 원래 "촬영/측정 프로파일" 의미라 축이 다르므로, 실제 계약 반영 방식(재정의 / 신규 `inspectionType` 필드 / 문서 참조)은 **N13 협의 확정 대기** — 현재는 제안이다.
+
 | profileId | 형상 | 대상 Wall ID | 비고 |
 |-----------|------|--------------|------|
 | `LINE-FLOOR` | 직선 | `B` | 바닥 |
