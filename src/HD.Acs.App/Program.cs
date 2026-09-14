@@ -75,11 +75,15 @@ using (var scope = app.Services.CreateScope())
             await db.SaveChangesAsync();
             app.Logger.LogInformation("ref.map 기동 시드 적용: {TankId} L1~L4", seedTankId);
         }
+
+        // ref.action_catalog param_schema (startWeldInspection) 기동 시드 — 현장 배포에서
+        // db/migrations 수동 적용을 잊어도 앱 바이너리 배포만으로 계약(seamType enum 등)이 반영된다.
+        await ActionCatalogSeed.EnsureAsync(db, app.Logger);
     }
     catch (Exception ex)
     {
         // DB 미기동 등으로 시드 실패해도 앱은 뜬다(두절 내성 ADR-002) — 캘리브레이션은 맵 행 생길 때까지 404.
-        app.Logger.LogWarning(ex, "ref.map 기동 시드 실패 — DB 연결 확인 필요");
+        app.Logger.LogWarning(ex, "기동 시드 실패 — DB 연결 확인 필요");
     }
 }
 
