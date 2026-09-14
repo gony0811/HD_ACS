@@ -116,7 +116,7 @@
 
 - 면별 도면: `drawing/2D도면/WALL {B,SL,PL,SM,PM,SU,PU,T,F,A}.dxf` — 용접선 정본(KC-2B).
 - 주요 레이어: `KC-2B Membrane Sheet(UM)`(용접선 후보 + 코로게이션), `KC-2B Steel Wall`(면 경계).
-- 관련 문서: [VDA5050_INTERFACE_SPEC](VDA5050_INTERFACE_SPEC.md) §4.4(정차점)·§8.1(seamType), [TANK_WALL_LAYOUT](TANK_WALL_LAYOUT.md), [INSPECTION_SCENARIO](INSPECTION_SCENARIO.md).
+- 관련 문서: [VDA5050_INTERFACE_SPEC](VDA5050_INTERFACE_SPEC.md) §4.4(정차점)·§8.1(seamType)·**§8.5(타입 카탈로그)·§8.5.1(`seamType`×`wall_code`→레시피 매핑)**, [TANK_WALL_LAYOUT](TANK_WALL_LAYOUT.md), [INSPECTION_SCENARIO](INSPECTION_SCENARIO.md).
 
 ---
 
