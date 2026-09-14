@@ -105,8 +105,17 @@ docker exec dev-postgres psql -U postgres -d hdacs -c "SELECT robot_id, manufact
 cd D:\Github\HD_ACS\src
 dotnet build HD.Acs.App\HD.Acs.App.csproj
 dotnet build HD.Acs.Simulator\HD.Acs.Simulator.csproj
-# 단위 테스트 53건 통과 확인
+# 단위 테스트 통과 확인
 dotnet test  HD.Acs.Core.Tests\HD.Acs.Core.Tests.csproj
+```
+
+**macOS/Linux(또는 Telerik 없는 PC)** 는 WPF 헤드(`HD.Acs.UI`, `net8.0-windows`)가 복원 단계에서 실패해
+`HD.Acs.sln` 전체 빌드가 중단된다. WPF만 제외한 **솔루션 필터**로 빌드·테스트한다:
+
+```bash
+cd src
+dotnet build HD.Acs.CrossPlatform.slnf     # App·Simulator·Avalonia 헤드·테스트 3종 (WPF 제외 10개)
+dotnet test  HD.Acs.CrossPlatform.slnf
 ```
 
 ### 4.2 UI (Windows 전용, Telerik 자격증명 필요)
@@ -128,7 +137,7 @@ dotnet build HD.Acs.UI\HD.Acs.UI.csproj
 |---|---|---|
 | `ConnectionStrings:Default` | Host=localhost;Port=5432;Database=hdacs;Username=postgres;Password=postgres | DB가 다른 호스트/계정일 때 |
 | `Acs:Mqtt:Host` / `Port` | localhost / 1883 | 브로커가 다른 호스트일 때 |
-| `Acs:Api:ListenHost` | localhost | **다른 PC의 UI가 접속**하면 `0.0.0.0`으로 (방화벽 5199 인바운드 허용) |
+| `Acs:Api:ListenHost` | 0.0.0.0 | 저장소 기본값은 **다른 PC의 UI 접속 허용**(방화벽 5199 인바운드 허용 필요). 로컬 UI만 쓰면 `localhost`로 (코드 폴백값도 localhost) |
 | `Acs:Api:ListenPort` | **5199** | 유지 권장 (5100 금지 — CS01_P 충돌) |
 | `Acs:Area:StationStandoffM` | 0.8 | 정차 이격 기본값 — 로봇 치수 확정(N10) 시 조정 |
 | `Acs:Dispatch:MaxRetries` | 2 | 실패 재시도 상한 |

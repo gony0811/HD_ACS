@@ -22,28 +22,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = AppContext.BaseDirectory,
 });
 
-// Kestrel 리스닝 포트 = Acs:Api:ListenPort (기본 5199). UI(REST/SignalR)가 http://localhost:5199 로 붙는다.
-// Kestrel 리스닝 = http://{Acs:Api:ListenHost}:{Acs:Api:ListenPort} (기본 localhost:5199).
-// ListenHost 기본은 localhost(로컬 UI 전용) — 원격 UI/태블릿이 붙어야 하면 "0.0.0.0"으로 전환 [SW-34].
+// Kestrel 리스닝 = http://{Acs:Api:ListenHost}:{Acs:Api:ListenPort} (코드 기본 localhost:5199).
+// ListenHost는 appsettings.json에서 지정 — "0.0.0.0"이면 다른 PC의 UI/태블릿이 이 PC IP로 접속 가능,
+// "localhost"면 로컬 UI 전용 [SW-34]. 하드코딩하지 않고 설정으로만 전환한다.
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
-<<<<<<< Updated upstream
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
-=======
-
-//<<<<<<< Updated upstream
-//builder.WebHost.UseUrls($"http://0.0.0.0:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
-//=======
-//builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
-//>>>>>>> Stashed changes
-
-// 5199는 이 PC에서만 열림
-//builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
-
-// 다른 PC에서 이 PC IP로 접속 가능.
-
-builder.WebHost.UseUrls($"http://0.0.0.0:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
->>>>>>> Stashed changes
 
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
@@ -61,9 +45,6 @@ builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
-builder.Services.AddScoped<ProgressService>();
-builder.Services.AddScoped<InspectionDispatcher>();
-builder.Services.AddSingleton<IInspectionOrderingPolicy, GreedyNearestPolicy>();  // 순수 정책(무상태)
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();

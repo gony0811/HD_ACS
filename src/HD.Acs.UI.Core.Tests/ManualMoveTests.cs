@@ -62,7 +62,7 @@ public class ManualMoveTests
         public Task<bool> ReleaseNextMissionAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ManualZoneChangeAsync(string robotId, string mapId, string userId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task EmergencyStopAsync(string robotId, string userId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId, double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId, double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default, double? mapX = null, double? mapY = null) => throw new NotImplementedException();
         public Task<IReadOnlyList<CalibrationPointDto>> GetCalibrationPointsAsync(string mapId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task DeleteCalibrationPointAsync(string mapId, Guid pointId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default) => throw new NotImplementedException();
