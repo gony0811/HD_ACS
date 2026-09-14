@@ -93,6 +93,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _endU = 1.0;
     [ObservableProperty] private double _endV;
 
+    // 용접라인 형태(seamType) — 도면에서 추출한 형태를 운영자가 지정. VDA §8.5.1 카탈로그(제안).
+    // CROSS/CORNER는 HD_AMR 미확정([협의 N13])이라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
+    public IReadOnlyList<string> SeamTypes { get; } = new[] { "LINE", "CROSS", "CORNER" };
+    [ObservableProperty] private string _selectedSeamType = "LINE";
+
     // 선택 층 로컬 v 오프셋 — (0,0)=그 층 도달 구간 좌하단. VM은 로컬 v로 동작, API 경계에서 ±VOff.
     private double VOff => SelectedWall?.ReachableVBand is { Length: 2 } b ? b[0] : 0;
     private double SliceH => SelectedWall?.ReachableVBand is { Length: 2 } b ? b[1] - b[0] : SelectedWall?.VLen ?? 0;
@@ -206,8 +211,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장
         try
         {
-            int seq = await _api.CreateAreaTaskAsync(a.AreaId, StartU, StartV + off, EndU, EndV + off, "LINE", "DXF-1", "PROF-1", _operatorId);
-            StatusMessage = $"작업 등록: seq {seq} ({StartU},{StartV})–({EndU},{EndV})(로컬)";
+            int seq = await _api.CreateAreaTaskAsync(a.AreaId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, "DXF-1", "PROF-1", _operatorId);
+            StatusMessage = $"작업 등록: seq {seq} [{SelectedSeamType}] ({StartU},{StartV})–({EndU},{EndV})(로컬)";
             await LoadTasksAndProjectAsync();
             await RefreshAreasAsync();
         }

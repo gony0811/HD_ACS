@@ -129,6 +129,10 @@
                             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding EndU, Mode=TwoWay}" Margin="0,0,6,0" />
                             <telerik:RadNumericUpDown Width="100" Height="Auto" Value="{Binding EndV, Mode=TwoWay}" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="용접라인 타입" Style="{StaticResource Lbl}" />
+                            <telerik:RadComboBox Width="120" Height="Auto" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType, Mode=TwoWay}" />
+                        </StackPanel>
                         <telerik:RadButton Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
                     </StackPanel>
                 </Border>

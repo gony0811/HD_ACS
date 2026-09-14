@@ -9,7 +9,8 @@
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호)는 2026-09-03 승인. N13(검사 타입 카탈로그)은 2026-09-14 제안(계약 무변경) |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
 | 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·승인 완료** `[N12]` |
-| 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)**. **기존 계약(§8.1/§8.2/§8.4)은 무변경** (제안 확정 후 반영) |
+| 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)** |
+| 개정 1.3a | 2026-09-14 — **`seamType` enum 확장 ACS 선반영**: 계획 UI(③ 검사 작업 등록) seamType 드롭다운 추가에 맞춰 §8.1/§8.2·등록 게이트·`param_schema`가 `LINE`·`CROSS`·`CORNER`를 수용·발행(`POLYLINE` 거부). **`CROSS`/`CORNER`는 HD_AMR 실행 미구현(스텁) — 계획 데이터 전달만**, 레시피 실행은 N13 확정 후 2차 연동 |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -492,7 +493,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `jobRef` | 작업 역추적 키 (사람이 읽는 ID — AMR은 로깅 외 해석 불요) |
 | `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, z는 통과 |
 | `position.drawingPos` | 도면 좌표 echo — tank/level/wall_code + **u,v(벽면-로컬)** + x,y,z(도면). `wall_code`가 **티칭 자세 선택 키** |
-| `params.seamType` | **`LINE` 한정** (2026-08-29 AMR 회신 §5.1 — POLYLINE은 2점 계약으로 세그먼트 방향 불명이라 AMR이 액션 FAILED 처리). 꺾인 용접선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `params.points` 기반 POLYLINE 확장은 후속 협의. **형상 값 `CROSS`/`CORNER` 확장 + `wall_code` 조합 레시피 매핑 제안은 §8.5.1** |
+| `params.seamType` | 용접라인 형태 — **`LINE`·`CROSS`·`CORNER`** (2026-09-14 ACS 선반영, §8.5.1). `LINE`=직선 구간(현행), `CROSS`=4점 십자, `CORNER`=3점 코너. **`CROSS`/`CORNER`는 HD_AMR 실행 미구현(스텁) — 계획 데이터로 전달만**, 레시피 실행은 N13 확정 후 2차 연동. `POLYLINE`은 여전히 거부(2026-08-29 AMR 회신 §5.1 — 2점 계약으로 세그먼트 방향 불명이라 AMR이 FAILED). 꺾인 직선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `wall_code` 조합 레시피 매핑은 §8.5.1 |
 | `params.sectionDxfId` | 단면 프로파일 참조 ID |
 | `params.inspectionProfileId` | 검사(촬영/측정) 프로파일 ID (검사 타입 분류·레시피 계약은 §8.5 참고 — 제안, 현행 자유 문자열 무변경) |
 | `params.standoffMm` | 표면 이격 거리 [mm] |
@@ -532,7 +533,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType": { "enum": ["LINE", "POLYLINE"] },
+        "seamType": { "enum": ["LINE", "CROSS", "CORNER"] },
         "points": { "type": "array" },
         "sectionDxfId": { "type": "string" },
         "inspectionProfileId": { "type": "string" },
@@ -631,10 +632,10 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `seamType` | 의미 | 상태 |
 |---|---|---|
 | `LINE` | 직선 용접선 구간 | 현행 |
-| `CROSS` | 4점 십자 교차 | 신규(제안) |
-| `CORNER` | 3점 코너(삼면) | 신규(제안) |
+| `CROSS` | 4점 십자 교차 | ACS 수용·발행(2026-09-14) / AMR 실행 미구현 |
+| `CORNER` | 3점 코너(삼면) | ACS 수용·발행(2026-09-14) / AMR 실행 미구현 |
 
-> enum 확장은 계약 변경이므로 **N13 확정 후 §8.1/§8.2에 반영**한다. 확정 전 ACS는 `LINE`만 발행(현행 무변경).
+> **ACS 선반영(2026-09-14).** 계획 UI(③ 검사 작업 등록)에 seamType 드롭다운을 추가하면서 ACS 측은 이 enum 확장을 **먼저 적용**했다 — 등록 게이트·`param_schema`(§8.2)가 `LINE`·`CROSS`·`CORNER`를 수용하고 그 값을 그대로 발행한다(`POLYLINE`은 거부). 단 HD_AMR의 `startWeldInspection`은 여전히 **스텁**이라 `CROSS`/`CORNER`의 실제 검사 시퀀스는 미실행 — 값은 **계획 데이터로 저장·전달만** 된다. 레시피 매핑·실행(2차 연동)은 아래 규칙대로 **N13 확정 후** HD_AMR이 구현한다.
 
 **(2) `wall_code` → 면 자세 매핑.** `wall_code`는 10개 면 코드(`B`/`SL`/`PL`/`SM`/`PM`/`SU`/`PU`/`T`/`F`/`A`, `TankGeometry` 정본).
 
@@ -757,7 +758,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (영역별 조정) | ⏸ **보류** — 로봇 치수·코봇 리치 확정 후 회신, 잠정 0.8 m 수용 |
 | N11 | Order 거부 보고 방식 | 폐기 + `orderValidationError` | ✅ 동의 (§4.5.2 그대로 구현) |
 | N12 | ACS 생존 신호 | ACS 전용 `connection` 토픽 + ONLINE/OFFLINE/Last Will, QoS 1·retain (§7.2) | ✅ **승인** (2026-09-03) |
-| N13 | 검사 타입 카탈로그·레시피 계약 | 검사 타입 11종(§8.5) + **`seamType`(LINE/CROSS/CORNER 확장) × `wall_code` → 레시피 매핑(§8.5.1)** + HD_AMR 타입별 레시피 라이브러리 운용. enum 확장·매핑 확정 후 §8.1/§8.2 반영 | ⏳ **대기** — 제안(2026-09-14), 계약 무변경 |
+| N13 | 검사 타입 카탈로그·레시피 계약 | 검사 타입 11종(§8.5) + **`seamType`(LINE/CROSS/CORNER 확장) × `wall_code` → 레시피 매핑(§8.5.1)** + HD_AMR 타입별 레시피 라이브러리 운용 | ⏳ **대기** — `seamType` enum 확장은 **ACS 선반영(2026-09-14, §8.1/§8.2)**: ACS가 3종 수용·발행(POLYLINE 거부). HD_AMR **레시피 매핑·실행은 미구현**(스텁) — `CROSS`/`CORNER`는 계획 데이터 전달만, 2차 연동 대기 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
