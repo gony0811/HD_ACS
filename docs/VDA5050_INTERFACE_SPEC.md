@@ -9,7 +9,7 @@
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호)는 2026-09-03 승인. N13(검사 타입 카탈로그)은 2026-09-14 제안(계약 무변경) |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
 | 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·승인 완료** `[N12]` |
-| 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재. **기존 계약(§8.1/§8.2/§8.4)은 무변경** (제안 확정 후 반영) |
+| 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)**. **기존 계약(§8.1/§8.2/§8.4)은 무변경** (제안 확정 후 반영) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -906,3 +906,23 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 - `errors[]` 는 **확실히 판별 가능한 것만** 보고한다 — `emergencyStopActive`(온보드가 스스로 정지시킨 경우), `orderValidationError`(온보드 자체 검증), `inspectionFailed`(검사 S/W 결과). 주행·측위 계열(`drivingFailed`·`localizationLost`)은 D-9 회신 후 채운다.
 - 층 전환은 **현행 수동 절차(§9.2 시퀀스)를 그대로 유지**하되 `initPosition` 이행부만 비워 둔다. 게이트 자체(ACS 가 `mapId` 일치 확인 후에만 Order 발행)는 계약이므로 변경 없다.
 - D-13 이 확정될 때까지 **`POST /robot/task/clear` 를 Order 교체 시퀀스에 넣지 않는다** — 동작이 불명확한 호출을 안전 경로에 두는 것은 안전 쪽이 아니다.
+
+### D.3 검사 레시피 경유점 `Surface` 유도 (온보드 구현 — 비계약)
+
+> `Surface`(Flat/Corner/Corrugation)는 §8.5.1 (6)에서 정리한 대로 **AMR 레시피 내부의 경유점별 촬영/조명 선택 키**이며 **ACS 계약과 무관**하다(ACS는 보내지 않는다). 본 절은 HD_AMR 온보드가 이를 유도하는 **현행 규칙**을 근거와 함께 남긴다. — 근거: `gony0811/HD_AMR` `Communication/Vision/VisionProtocol.cs`·`Service/Sequence/Steps/InspectionRunStep.cs`.
+
+**두 층의 "Surface"** — 이름은 비슷하나 역할이 다르다.
+
+| 구분 | 값 | 단위 | 산출 | 용도 |
+|---|---|---|---|---|
+| **SurfaceType** | `Flat`(0x00) / `Corner`(0x01) / `Corrugation`(0x02) | **경유점** | 아래 규칙(θ) + 수동 오버라이드 | 촬영/조명 프리셋 선택 |
+| **Surface ID** | 0x01~0x0A (바닥·천장·좌현벽·우현벽·전벽·후벽·하부좌/우챔퍼·상부좌/우챔퍼) | **면(작업물)** | 면 선택 | 면 식별·(u,v) 축 규약 (현재 전부 Type=Flat) |
+
+**SurfaceType 자동 유도 규칙 (현행 코드).**
+- 경유점 툴 각 **`|θ| ≥ CorrugThresholdDeg`**(프로필 파라미터) → **`Corrugation`**, 아니면 **`Flat`**.
+  - 근거: `InspectionRunStep.cs` — `Math.Abs(w.Theta) >= profile.CorrugThresholdDeg ? SurfaceType.Corrugation : SurfaceType.Flat`.
+  - 의미: 코로게이션 마루는 툴을 기울여(큰 |θ|) 대면하고, 평탄부는 θ≈0. 임계각은 프로필별 값(`CorrugThresholdDeg`, 짝 파라미터 `CorrugStepDeg`).
+- **`Corner`(0x01)** 는 enum에 정의돼 있으나 **현 자동 규칙은 Flat/Corrugation 이진 판정만** 한다. Corner는 **수동 오버라이드**(`SurfaceManual`, Inspection 페이지)로 지정.
+- 캡처 요청마다 `SurfaceType`(경유점) + `Surface ID`(면)를 함께 실어 비전 S/W로 전송한다(`CaptureReqPayload`).
+
+**연동 관점 (2차 과제).** ACS가 `seamType`(§8.5.1)로 **레시피를 선택**하면, 그 레시피의 **경유점들이 위 규칙으로 각자 `SurfaceType`을 얻어 촬영/조명을 고른다**. 즉 **`seamType`(라인) → 레시피 로딩 / `Surface`(경유점) → 촬영** 의 2단계가 성립한다(§8.5.1 (6)).
