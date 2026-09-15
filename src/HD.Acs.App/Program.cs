@@ -267,15 +267,18 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
-    // seamType = 용접라인 형태 카탈로그(VDA §8.5.1 제안, [협의 N13]). LINE·CROSS·CORNER 3종 허용.
-    // CROSS(4점 십자)·CORNER(3점 코너)는 HD_AMR 레시피 미확정 — 계획 데이터로 저장·전달만(실행 미동작).
+    // seamType = 용접라인 형태 카탈로그(VDA §8.5.1, [협의 N13]) — 카탈로그와 1:1 5종 허용:
+    //   LINE(직선) · CROSS3(3갈래 교차) · CROSS4(4갈래 十자 교차) · CORNER2(2면 코너) · CORNER3(3면 코너).
+    // CROSS/CORNER 계열은 HD_AMR 레시피 미확정 — 계획 데이터로 저장·전달만(실행 미동작).
     // POLYLINE 등 그 외 값은 계속 거부(꺾인 용접선은 세그먼트별 LINE으로 등록 — 같은 영역=정렬 공유).
     if (req.SeamType is { } st &&
         !(string.Equals(st, "LINE", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CROSS", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CORNER", StringComparison.OrdinalIgnoreCase)))
+          || string.Equals(st, "CROSS3", StringComparison.OrdinalIgnoreCase)
+          || string.Equals(st, "CROSS4", StringComparison.OrdinalIgnoreCase)
+          || string.Equals(st, "CORNER2", StringComparison.OrdinalIgnoreCase)
+          || string.Equals(st, "CORNER3", StringComparison.OrdinalIgnoreCase)))
         return Results.BadRequest(new
-        { error = $"seamType '{st}'은 지원하지 않습니다 — 허용: LINE·CROSS·CORNER(VDA §8.5.1). 꺾인 용접선은 세그먼트별 LINE으로 나눠 등록하세요." });
+        { error = $"seamType '{st}'은 지원하지 않습니다 — 허용: LINE·CROSS3·CROSS4·CORNER2·CORNER3(VDA §8.5.1). 꺾인 용접선은 세그먼트별 LINE으로 나눠 등록하세요." });
     var poly = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
     bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
     if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))

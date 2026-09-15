@@ -7,7 +7,7 @@
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 |
 | 작성일 | 2026-09-14 |
 | 관련 절 | 계약: 사양서 §8.1·§8.2·§8.4 / 규격: §8.5·§8.5.1 / Surface: 부록 D.3 / 카탈로그: `INSPECTION_TYPES.md` |
-| 협의 상태 | `[N13]` — enum(`LINE`/`CROSS`/`CORNER`)은 **ACS 선반영·발행 중**, HD_AMR 레시피 매핑·실행은 **미구현(본 문서 범위)** |
+| 협의 상태 | `[N13]` — enum(`LINE`/`CROSS3`/`CROSS4`/`CORNER2`/`CORNER3`, 5값·카탈로그 1:1)은 **ACS 선반영·발행 중**, HD_AMR 레시피 매핑·실행은 **미구현(본 문서 범위)** |
 
 > 이 문서는 사양서를 **재서술하지 않는다.** 계약의 정본은 `VDA5050_INTERFACE_SPEC.md`이며, 여기서는 HD_AMR이 2차 연동을 착수할 수 있도록 **무엇을 어디에 구현하는지**를 체크리스트로 정리한다. 표·필드의 최종 판정은 항상 사양서가 우선한다.
 
@@ -15,7 +15,7 @@
 
 ## 1. 목적·범위
 
-HD_ACS는 검사 계획 단계에서 도면으로부터 **용접라인 형태(`seamType`)**를 추출해 VDA 5050 `startWeldInspection` 액션으로 전달한다(현재 `LINE`·`CROSS`·`CORNER` 발행). HD_AMR은 이 액션을 받아 **형태·면 자세에 맞는 검사 레시피를 선택·실행**해야 한다.
+HD_ACS는 검사 계획 단계에서 도면으로부터 **용접라인 형태(`seamType`)**를 추출해 VDA 5050 `startWeldInspection` 액션으로 전달한다(현재 `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3` 5값 발행). HD_AMR은 이 액션을 받아 **형태·면 자세에 맞는 검사 레시피를 선택·실행**해야 한다.
 
 - **범위 안(본 문서):** HD_AMR이 `startWeldInspection`의 `actionParameters`를 해석하고, `(seamType, wall_code)` → 레시피를 유도해 실제 검사 시퀀스를 실행하도록 연동.
 - **범위 밖:** ACS의 계획·발행(이미 구현), 로봇 주행/정차(기존 VDA 계약), 촬영/측정 하드웨어 제어(HD_AMR 기존 자산).
@@ -38,7 +38,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 | `jobRef` | (문자열) | 로깅·역추적. 해석 불요 |
 | `position` | `seamStartW`·`seamEndW` [x,y,z] m (맵 좌표) | **툴 회전(수직/수평) 자동 유도** = `seamStartW→seamEndW` 벡터 (§4.4·§8.1) |
 | `position` | `drawingPos.wall_code` | **면 자세 판정 키** (10면 코드) → 레시피 선택 |
-| `params` | **`seamType`** ∈ `LINE`·`CROSS`·`CORNER` | **형상 판정 키** → 레시피 선택 |
+| `params` | **`seamType`** ∈ `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3` (5값, 카탈로그 1:1) | **형상 판정 키** → 레시피 선택 |
 | `params` | `sectionDxfId` | 단면 프로파일 참조(선택) |
 | `params` | `inspectionProfileId` | 촬영/측정 프리셋 ID (자유 문자열, **형태와 다른 축** — §8.5 개념 구분) |
 | `params` | `standoffMm`·`workingDistanceMm` | 이격/작업거리 |
@@ -73,12 +73,13 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 | `seamType` \ 면자세 | 바닥 | 천장 | 수직벽 | 하부챔퍼 | 상부챔퍼 |
 |---|---|---|---|---|---|
 | `LINE` | `LINE-FLOOR` | `LINE-CEIL` | `LINE-WALL` | `LINE-CHMR-LO` | `LINE-CHMR-UP` |
-| `CROSS` | `CROSS4-FLOOR` | `CROSS4-CEIL` | `CROSS4-WALL` | `CROSS4-CHMR-LO` | `CROSS4-CHMR-UP` |
+| `CROSS3` | `CROSS3-FLOOR` | `CROSS3-CEIL` | `CROSS3-WALL` | `CROSS3-CHMR-LO` | `CROSS3-CHMR-UP` |
+| `CROSS4` | `CROSS4-FLOOR` | `CROSS4-CEIL` | `CROSS4-WALL` | `CROSS4-CHMR-LO` | `CROSS4-CHMR-UP` |
 
-- `CORNER`: 삼면 코너 각도가 전부 (135°·90°·90°)로 균일 → **면 자세 무관 단일 레시피 `CORNER3`** (거울 필요 시 `wall_code`로 `CORNER3-L`/`CORNER3-R` 판별, 선택). 근거: `INSPECTION_TYPES.md` §7 마구리 도면 실측.
-- = 총 11종(코너 거울 분리 시 12).
+- `CORNER2`(2면 코너)·`CORNER3`(3면 코너): 코너 형상이라 면 자세 무관 — 각각 단일 레시피 `CORNER2`·`CORNER3`. 3면 코너는 각도가 전부 (135°·90°·90°)로 균일(거울 필요 시 `wall_code`로 `CORNER3-L`/`CORNER3-R` 판별, 선택). 근거: `INSPECTION_TYPES.md` §7 마구리 도면 실측. `CORNER2`의 이면각별 세분은 실측 확인 대상(§7).
+- = 면 위 형상 3×5 + 코너 2 = **17종**(코너 거울 분리 시 확대).
 - **툴 수직/수평 회전은 매핑표가 결정하지 않는다.** `seamStartW→seamEndW` 벡터에서 **자동 유도**(§4.4·§8.1). 매핑표는 **스캔 패턴·면 접근**만 결정.
-- **미지원/모순 조합**(예: `CORNER`+평면 `wall_code`, 미정의 `seamType`): 처리 방식은 §8.5.1 (4)·아래 §7(N13). 기본안 = 액션 FAILED + `orderValidationError`(계약 위반) 또는 `inspectionFailed`(실행 불가).
+- **미지원/모순 조합**(예: `CORNER2`/`CORNER3`+평면 `wall_code`, 미정의 `seamType`): 처리 방식은 §8.5.1 (4)·아래 §7(N13). 기본안 = 액션 FAILED + `orderValidationError`(계약 위반) 또는 `inspectionFailed`(실행 불가).
 
 ## 5. `seamType` ≠ `Surface` (혼동 금지)
 
@@ -86,7 +87,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 
 | 구분 | `seamType` | `Surface` |
 |---|---|---|
-| 의미 | 용접라인 **형태**(LINE/CROSS/CORNER) | 경유점 **표면 형상**(Flat/Corner/Corrugation) |
+| 의미 | 용접라인 **형태**(LINE/CROSS3/CROSS4/CORNER2/CORNER3) | 경유점 **표면 형상**(Flat/Corner/Corrugation) |
 | 단위 | 용접라인 1개 | 레시피 내 **경유점 1개** |
 | 주체 | **HD_ACS**(도면 추출) → 액션 전송 | **HD_AMR**(레시피 내부) |
 | 용도 | 어떤 **레시피를 로딩**할지 | 경유점별 **촬영/조명** 선택 |
@@ -109,8 +110,8 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 | # | 항목 | 선택지 | ACS 현재 |
 |---|---|---|---|
 | 1 | 형상 전달 방식 | `seamType` 명시 수신 / AMR이 도면 유도 | **명시 전송**(seamType 발행 중) |
-| 2 | `CROSS`(4점 십자) vs 직선 | 별도 레시피 / `LINE`에 통합 | 별도(`CROSS`) 발행 가능 |
-| 3 | `CORNER` 거울 L/R | 단일 `CORNER3` / `CORNER3-L`·`-R` 분리 | 단일 가정(거울은 `wall_code`로 판별 가능) |
+| 2 | `CROSS3`/`CROSS4`(3·4갈래 교차) vs 직선 | 별도 레시피 / `LINE`에 통합 | 별도(`CROSS3`·`CROSS4`) 발행 가능 |
+| 3 | `CORNER2`/`CORNER3` 세분·거울 L/R | 단일 / 이면각·거울 분리 | 2면·3면 분리 발행, 거울은 `wall_code`로 판별 가능 |
 | 4 | `inspectionProfileId` | 촬영/측정 프리셋 유지 / 형태와 통합 | **유지**(형태와 다른 축, 자유 문자열) |
 | 5 | 미지원 조합 errorType | `orderValidationError` / `inspectionFailed` | 미확정 — §8.5.1 (4) |
 
@@ -119,11 +120,11 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 ## 8. 수용 기준 (연동 완료 판정)
 
 - [ ] `startWeldInspection` 수신 시 `params.seamType`·`drawingPos.wall_code`를 파싱하고 **결정 로그**(수신값 → 선택 레시피 id)를 남긴다.
-- [ ] `LINE` 3종+`CROSS` 등 각 조합이 매핑표대로 레시피를 선택한다(§4).
+- [ ] `LINE`·`CROSS3`·`CROSS4` × 면 자세 + `CORNER2`·`CORNER3` 각 조합이 매핑표대로 레시피를 선택한다(§4).
 - [ ] 툴 수직/수평이 `seamStartW→seamEndW` 벡터로 유도된다(매핑표에 의존하지 않음).
 - [ ] **기존 `LINE` 검사 회귀 없음** — 스텁 제거 후에도 현행 LINE 검사 동작 동일.
 - [ ] 미지원 조합에서 조용한 오검사 없이 명시적 FAILED + errorType 보고.
-- [ ] 시뮬레이터/실장 E2E로 `CROSS`/`CORNER` 레시피 선택까지 확인(실제 촬영은 레시피 티칭 완료 후).
+- [ ] 시뮬레이터/실장 E2E로 `CROSS3`/`CROSS4`/`CORNER2`/`CORNER3` 레시피 선택까지 확인(실제 촬영은 레시피 티칭 완료 후).
 
 ---
 
