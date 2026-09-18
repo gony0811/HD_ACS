@@ -3,12 +3,19 @@ namespace HD.Acs.UI.Models;
 // 프로젝트 파일(.hdacs) 스냅샷 모델 — 선창 지오메트리 + 영역 + 작업 전체.
 // 이진 컨테이너(매직 헤더 + GZip + JSON)로 직렬화되며, 이 프로그램에서만 열 수 있다.
 
-/// <summary>프로젝트 파일 최상위 문서 — 현재 선창의 지오메트리·영역·작업 전체 스냅샷.</summary>
+/// <summary>프로젝트 파일 최상위 문서 — 현재 선창의 지오메트리·영역·작업·면별 CAD 전체 스냅샷.</summary>
 public sealed record ProjectDoc(
     int Version,
     string TankId,
     GeometryDoc Geometry,
-    AreaDoc[] Areas);
+    AreaDoc[] Areas,
+    FaceCadDoc[]? FaceCad = null);   // [.hdacs v3] 면별 CAD(DXF) 등록. 구파일(null)=미등록
+
+/// <summary>면(벽면)에 등록된 CAD(DXF)에서 추출·분류한 선분 스냅샷. 면-로컬 mm(bbox 좌하단=원점).</summary>
+public sealed record FaceCadDoc(string WallCode, string? SourceFile, FaceCadSeg[] Segments);
+
+/// <summary>CAD 선분 — 면-로컬 mm 시작/끝 + 분류(Kind = "WeldLine" | "Corrugation").</summary>
+public sealed record FaceCadSeg(double Ax, double Ay, double Bx, double By, string Kind);
 
 /// <summary>선창 3D 정의 파라미터 [SPEC v3 §2] — 면은 열기 시 재생성되므로 저장하지 않는다.</summary>
 public sealed record GeometryDoc(

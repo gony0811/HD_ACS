@@ -1,0 +1,111 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+        xmlns:views="using:HD.Acs.UI.Desktop.Views"
+        x:Class="HD.Acs.UI.Desktop.Views.FaceDrawWindow"
+        Width="1100" Height="760" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBrush}"
+        TextBlock.Foreground="{DynamicResource AppTextBrush}"
+        Title="면 드로잉">
+    <Window.Resources>
+        <conv:EnumEqualsConverter x:Key="EnumEq" />
+    </Window.Resources>
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+    </Window.KeyBindings>
+
+    <DockPanel>
+        <!-- 툴바 -->
+        <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
+            <WrapPanel>
+                <TextBlock Text="타입" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <RadioButton GroupName="type" Content="용접선" Margin="0,0,6,0"
+                             IsChecked="{Binding SelectedType, Converter={StaticResource EnumEq}, ConverterParameter=WeldLine}" />
+                <RadioButton GroupName="type" Content="Corrugation" Margin="0,0,16,0"
+                             IsChecked="{Binding SelectedType, Converter={StaticResource EnumEq}, ConverterParameter=Corrugation}" />
+
+                <TextBlock Text="모드" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <RadioButton GroupName="mode" Content="선" Margin="0,0,6,0"
+                             IsChecked="{Binding SelectedMode, Converter={StaticResource EnumEq}, ConverterParameter=Line}" />
+                <RadioButton GroupName="mode" Content="표" Margin="0,0,16,0"
+                             IsChecked="{Binding SelectedMode, Converter={StaticResource EnumEq}, ConverterParameter=Table}" />
+
+                <TextBlock Text="X간격" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <NumericUpDown Width="200" Value="{Binding PitchX}" Minimum="1" Increment="10" FormatString="0"
+                               IsEnabled="{Binding TableMode}" Margin="0,0,8,0" />
+                <TextBlock Text="Y간격" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <NumericUpDown Width="200" Value="{Binding PitchY}" Minimum="1" Increment="10" FormatString="0"
+                               IsEnabled="{Binding TableMode}" Margin="0,0,16,0" />
+
+                <TextBlock Text="이동단위 X" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <NumericUpDown Width="200" Value="{Binding StepX}" Minimum="0" Increment="1" FormatString="0" Margin="0,0,6,0"
+                               ToolTip.Tip="커서 스텝(mm). 0=연속. 가장 가까운 확정 끝점(없으면 면 좌하단) 기준으로 스텝 배수 거리에 스냅" />
+                <TextBlock Text="Y" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <NumericUpDown Width="200" Value="{Binding StepY}" Minimum="0" Increment="1" FormatString="0" Margin="0,0,4,0" />
+                <TextBlock Text="mm(0=연속)" VerticalAlignment="Center" Margin="0,0,16,0"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+
+                <ToggleButton Content="편집" IsChecked="{Binding EditMode}" Margin="0,0,6,0"
+                              ToolTip.Tip="켜면 좌클릭으로 선택·드래그 이동, Del 삭제" />
+                <Button Content="↶ 되돌리기" Command="{Binding UndoCommand}" Margin="0,0,4,0" />
+                <Button Content="↷ 다시실행" Command="{Binding RedoCommand}" Margin="0,0,12,0" />
+                <Button Content="선택 삭제" Command="{Binding DeleteSelectedCommand}" Margin="0,0,4,0" />
+                <Button Content="선택 격자 간격 적용" Command="{Binding ApplyPitchToSelectedCommand}" Margin="0,0,12,0"
+                        ToolTip.Tip="선택한 표(격자)를 현재 X/Y간격으로 재계산" />
+                <Button Content="표 끝선 연장" Command="{Binding ExtendGridsToFaceCommand}" Margin="0,0,4,0"
+                        ToolTip.Tip="표(격자)의 끝라인을 면 경계(그림판 끝)까지 연장 — 선택 표만, 없으면 모든 표. Corrugation을 면 끝까지 잇는다" />
+                <Button Content="좌우 반전" Command="{Binding MirrorHorizontalCommand}" Margin="0,0,4,0"
+                        ToolTip.Tip="면 정보 좌우 미러링(x축 중앙 기준) — 대칭 면 작업용" />
+                <Button Content="상하 반전" Command="{Binding MirrorVerticalCommand}" Margin="0,0,12,0"
+                        ToolTip.Tip="면 정보 상하 미러링(y축 중앙 기준)" />
+                <Button Content="종류 전환" Command="{Binding ToggleSelectedTypeCommand}" Margin="0,0,4,0"
+                        ToolTip.Tip="편집 모드에서 선택한 선의 분류를 용접선↔Corrugation으로 전환(CAD 자동분류 보정)" />
+                <Button Content="CAD 분류 저장" Command="{Binding SaveCadCommand}" Margin="0,0,12,0"
+                        ToolTip.Tip="현재 용접선/Corrugation 분류를 CAD 저장소에 반영(프로젝트 저장 시 .hdacs에 기록)" />
+            </WrapPanel>
+        </Border>
+
+        <!-- 상태/레이어/직렬화 바 -->
+        <Border DockPanel.Dock="Bottom" Padding="8" Background="{DynamicResource AppHeaderBrush}">
+            <StackPanel>
+                <WrapPanel>
+                    <CheckBox Content="용접선 표시" IsChecked="{Binding WeldVisible}" Margin="0,0,12,0" />
+                    <CheckBox Content="Corrugation 표시" IsChecked="{Binding CorrugationVisible}" Margin="0,0,12,0" />
+                    <CheckBox Content="교착점 표시" IsChecked="{Binding ShowIntersections}" Margin="0,0,16,0"
+                              ToolTip.Tip="용접선×용접선(적)·용접선×Corrugation 가로(녹)/세로(보라) 교차점 표시" />
+                    <Button Content="맞춤" Click="Fit_Click" Margin="0,0,8,0" />
+                    <Button Content="전체 지우기" Command="{Binding ClearAllCommand}" Margin="0,0,8,0" />
+                    <ToggleButton x:Name="JsonToggle" Content="직렬화 보기" Click="JsonToggle_Click" />
+                </WrapPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBlock FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" Text="{Binding HudCursor}" Margin="0,0,16,0" />
+                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AppAccentBrush}" Text="{Binding HudSnap}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" Text="{Binding HudRange}" Margin="0,0,16,0" />
+                    <TextBlock FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" Text="{Binding HudCells}" Margin="0,0,16,0" />
+                    <TextBlock FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" Text="{Binding HudCount}" Margin="0,0,16,0" />
+                    <TextBlock FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}" Text="{Binding HudCorner}" />
+                </StackPanel>
+                <TextBlock FontSize="12" Foreground="#1ABC9C" Text="{Binding HudPoint}" />
+                <TextBlock FontSize="12" Foreground="#F39C12" Text="{Binding HudIntersections}" />
+                <TextBlock FontSize="12" Foreground="#E74C3C" Text="{Binding HudWarning}" />
+                <Border x:Name="JsonPanel" IsVisible="False" Margin="0,6,0,0" MaxHeight="180">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <TextBox x:Name="JsonText" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas, monospace"
+                                 Background="{DynamicResource AppCanvasBrush}" />
+                    </ScrollViewer>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- 드로잉 캔버스 -->
+        <Grid>
+            <views:FaceDrawCanvas x:Name="Canvas" />
+            <TextBlock HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" FontSize="10.5"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       Text="좌클릭 그리기(2클릭 확정) · 우/중드래그 이동 · 휠 줌 · ALT 엣지스냅 · SHIFT 직교 · ESC 취소" />
+        </Grid>
+    </DockPanel>
+</Window>

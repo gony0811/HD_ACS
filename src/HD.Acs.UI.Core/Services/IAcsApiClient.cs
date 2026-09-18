@@ -76,6 +76,12 @@ public interface IAcsApiClient
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
 
+    // ── 면 CAD(DXF) 등록 [면별 용접선·Corrugation 선분, 면-로컬 mm] ──────────
+    Task<IReadOnlyList<FaceCadDto>> GetFaceCadAsync(string tankId, CancellationToken ct = default);
+    Task SaveFaceCadAsync(string tankId, string wallCode, string? sourceFile,
+        IReadOnlyList<FaceCadSeg> segments, string? userId = null, CancellationToken ct = default);
+    Task DeleteFaceCadAsync(string tankId, string wallCode, CancellationToken ct = default);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

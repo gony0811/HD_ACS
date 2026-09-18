@@ -28,6 +28,7 @@ public class AcsDbContext : DbContext
     public DbSet<WeldSeamEntity> WeldSeams => Set<WeldSeamEntity>();
     public DbSet<TankGeometryEntity> TankGeometries => Set<TankGeometryEntity>();
     public DbSet<WallEntity> Walls => Set<WallEntity>();
+    public DbSet<FaceCadEntity> FaceCads => Set<FaceCadEntity>();
     public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
     public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
     // run
@@ -113,6 +114,9 @@ public class AcsDbContext : DbContext
             e.Property(x => x.UAxis).HasColumnType("jsonb");
             e.Property(x => x.VAxis).HasColumnType("jsonb");
             e.Property(x => x.Normal).HasColumnType("jsonb"); });
+
+        mb.Entity<FaceCadEntity>(e => { e.ToTable("face_cad", "ref"); e.HasKey(x => new { x.TankId, x.WallCode });
+            e.Property(x => x.Segments).HasColumnType("jsonb"); });
 
         mb.Entity<InspectionAreaEntity>(e => { e.ToTable("inspection_area", "ref"); e.HasKey(x => x.AreaId);
             e.HasIndex(x => new { x.TankId, x.WallCode, x.Name }).IsUnique();

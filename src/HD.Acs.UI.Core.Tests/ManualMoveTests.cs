@@ -85,13 +85,16 @@ public class ManualMoveTests
         public Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV, string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AreaTaskDto>>(Array.Empty<AreaTaskDto>());
         public Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<FaceCadDto>> GetFaceCadAsync(string tankId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<FaceCadDto>>(Array.Empty<FaceCadDto>());
+        public Task SaveFaceCadAsync(string tankId, string wallCode, string? sourceFile, IReadOnlyList<FaceCadSeg> segments, string? userId = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteFaceCadAsync(string tankId, string wallCode, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static (TankViewModel vm, FakeAcsApiClient api, FakeMonitoringClient monitoring) CreateVm()
     {
         var api = new FakeAcsApiClient();
         var monitoring = new FakeMonitoringClient();
-        var vm = new TankViewModel(api, monitoring)
+        var vm = new TankViewModel(api, monitoring, new FaceCadStore())
         {
             SelectedViewMode = "L1",
             ManualMoveMode = true

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HD.Acs.UI.Drawing;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.Primitives;
 using HD.Acs.UI.Rendering;
@@ -19,15 +20,89 @@ namespace HD.Acs.UI.ViewModels;
 public sealed partial class AreaPlanningViewModel : ObservableObject
 {
     private readonly IAcsApiClient _api;
+    private readonly IFaceCadStore _faceCad;
     private readonly string _operatorId;
 
     public const double CanvasSize = 600;
     private const double Margin = 28;
 
-    public AreaPlanningViewModel(IAcsApiClient api, IOptions<AcsOptions> options)
+    public AreaPlanningViewModel(IAcsApiClient api, IFaceCadStore faceCad, IOptions<AcsOptions> options)
     {
         _api = api;
+        _faceCad = faceCad;
         _operatorId = options.Value.OperatorId;
+        EnsureCadRows();
+    }
+
+    // ── 새 프로젝트: 면별 CAD(DXF) 등록 [.hdacs 저장] ─────────────────────────
+    // 표준 10면. 팔각기둥/치수는 파라미터로 만들고(현행 유지), CAD는 면별 용접선·Corrugation 2D 상세만 채운다.
+    private static readonly string[] WallCodes = { "B", "SL", "PL", "SM", "PM", "SU", "PU", "T", "F", "A" };
+
+    /// <summary>새 프로젝트 팝업의 면별 CAD 등록 행(파일·분류 집계 표시).</summary>
+    public ObservableCollection<FaceCadRow> CadFaces { get; } = new();
+
+    private void EnsureCadRows()
+    {
+        if (CadFaces.Count == 0)
+            foreach (var c in WallCodes) CadFaces.Add(new FaceCadRow(c));
+    }
+
+    /// <summary>새 프로젝트 시작 — 면 CAD 저장소·표시 행 초기화(직전 프로젝트 잔재 제거).</summary>
+    public void ResetFaceCad()
+    {
+        _faceCad.Clear();
+        EnsureCadRows();
+        foreach (var r in CadFaces) r.SetUnregistered();
+    }
+
+    /// <summary>면에 DXF 파일 등록 — 멤브레인 레이어 선분 추출·1차 자동 분류 후 저장소에 넣고 행 갱신.</summary>
+    public void RegisterFaceCad(string wallCode, string path)
+    {
+        EnsureCadRows();
+        var row = CadFaces.FirstOrDefault(r => r.WallCode == wallCode);
+        try
+        {
+            var imp = DxfFaceImport.Load(wallCode, path);
+            if (imp.Segments.Count == 0)
+            {
+                row?.SetUnregistered();
+                _faceCad.Remove(wallCode);
+                StatusMessage = $"[{wallCode}] '{DxfFaceImport.MembraneLayer}' 레이어에서 용접라인을 찾지 못했습니다: {imp.SourceFile}";
+                return;
+            }
+            _faceCad.Set(new FaceCadDoc(wallCode, imp.SourceFile, imp.Segments.ToArray()));
+            row?.SetRegistered(imp.SourceFile, imp.WeldCount, imp.CorrCount);
+            StatusMessage = $"[{wallCode}] CAD 등록: {imp.SourceFile} — 용접라인 {imp.WeldCount} (Corrugation {imp.CorrCount} 제외)"
+                          + $" · 약 {imp.WidthMm:0}×{imp.HeightMm:0}mm";
+        }
+        catch (Exception ex)
+        {
+            row?.SetUnregistered();
+            _faceCad.Remove(wallCode);
+            StatusMessage = $"[{wallCode}] CAD 등록 실패: {ex.Message}";
+        }
+    }
+
+    /// <summary>면 CAD 등록 해제 — 캐시 제거 + (선창 등록돼 있으면) DB에서도 삭제.</summary>
+    public async void ClearFaceCad(string wallCode)
+    {
+        _faceCad.Remove(wallCode);
+        CadFaces.FirstOrDefault(r => r.WallCode == wallCode)?.SetUnregistered();
+        StatusMessage = $"[{wallCode}] CAD 등록 해제.";
+        try { await _api.DeleteFaceCadAsync(TankId, wallCode); }
+        catch { /* 선창 미등록/서버 미연결 — 캐시만 해제(등록 시 DB에 없음) */ }
+    }
+
+    /// <summary>캐시에 등록된 면 CAD를 DB(ref.face_cad)에 일괄 저장(선창 등록 직후 호출). 저장 건수 반환.</summary>
+    public async Task<int> FlushFaceCadAsync()
+    {
+        int n = 0;
+        foreach (var (wallCode, doc) in _faceCad.All)
+        {
+            try { await _api.SaveFaceCadAsync(TankId, wallCode, doc.SourceFile, doc.Segments, _operatorId); n++; }
+            catch (Exception ex) { StatusMessage = $"[{wallCode}] CAD DB 저장 실패: {ex.Message}"; }
+        }
+        return n;
     }
 
     public ObservableCollection<WallDto> Walls { get; } = new();
@@ -133,6 +208,56 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [RelayCommand]
     private async Task RegisterGeometryAsync() => await TryRegisterGeometryAsync();
 
+    /// <summary>마구리(A/F) 코드 — 팔각 단면을 도면에서 추출하는 대상.</summary>
+    private static readonly string[] BulkheadCodes = { "A", "F" };
+
+    /// <summary>
+    /// 도면(DXF)만으로 선창을 생성 — 파라미터 수기 입력 대체. 등록된 마구리(A/F) 면에서 팔각 단면을,
+    /// 측벽/바닥/천장 면 폭에서 길이(L)를 역산해 파라미터를 채운 뒤 기존 등록 경로로 면을 생성한다.
+    /// </summary>
+    public async Task<bool> TryReconstructGeometryFromCadAsync()
+    {
+        var bulk = BulkheadCodes.Select(c => _faceCad.Get(c)).FirstOrDefault(d => d is { Segments.Length: > 0 });
+        if (bulk is null)
+        {
+            StatusMessage = "마구리(A 또는 F) 면 DXF를 먼저 등록하세요 — 팔각 단면을 도면에서 추출합니다.";
+            return false;
+        }
+        var fit = TankReconstruct.FitOctagon(ToPoints(bulk));
+        if (fit is null)
+        {
+            StatusMessage = $"[{bulk.WallCode}] 도면에서 팔각 단면을 추출하지 못했습니다(외곽 경계 부족).";
+            return false;
+        }
+
+        // 길이 L = 비-마구리 면 중 최대 폭(측벽·바닥·천장은 선창 길이 방향으로 그려짐)
+        double lenMm = 0;
+        foreach (var (code, doc) in _faceCad.All)
+        {
+            if (BulkheadCodes.Contains(code)) continue;
+            if (TankReconstruct.Extent(ToPoints(doc)) is { } e) lenMm = Math.Max(lenMm, e.W);
+        }
+        if (lenMm < 1)
+        {
+            StatusMessage = "측벽/바닥/천장 면 DXF를 하나 이상 등록하세요 — 선창 길이(L)를 도면에서 얻습니다.";
+            return false;
+        }
+
+        const double s = 0.001;   // mm → m
+        LengthL = lenMm * s;
+        WFloor = fit.WFloor * s;
+        ThetaLowDeg = fit.ThetaLowDeg; HLow = fit.HLow * s;
+        HWall = fit.HWall * s;
+        ThetaUpDeg = fit.ThetaUpDeg; HUp = fit.HUp * s;
+        DerivedText = $"도면 추출: L {LengthL:0.##}m · 전폭 {fit.BeamB * s:0.##}m · 바닥폭 {WFloor:0.##} · 천장폭 {fit.WCeil * s:0.##}"
+                    + $" · 높이 {fit.HTotal * s:0.##}m (θ_low {ThetaLowDeg:0.#}° · θ_up {ThetaUpDeg:0.#}°)";
+
+        return await TryRegisterGeometryAsync();   // 기존 등록(면 생성)+CAD flush 재사용
+    }
+
+    private static IReadOnlyList<Pt2> ToPoints(FaceCadDoc doc) =>
+        doc.Segments.SelectMany(sg => new[] { new Pt2(sg.Ax, sg.Ay), new Pt2(sg.Bx, sg.By) }).ToList();
+
     /// <summary>선창 파라미터 등록(면 자동생성) 후 재로드. 성공 여부 반환 — 새 프로젝트 팝업이 결과를 사용.</summary>
     public async Task<bool> TryRegisterGeometryAsync()
     {
@@ -144,7 +269,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             int n = await _api.RegisterTankGeometryAsync(TankId, LengthL, WFloor, ThetaLowDeg, HLow,
                 HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax);
-            StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성";
+            // 선창 등록(tank_id 생성) 후에야 면 CAD를 DB(ref.face_cad)에 넣을 수 있다 — 대기 중 등록분 flush
+            int cadN = await FlushFaceCadAsync();
+            StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성"
+                          + (cadN > 0 ? $" · 면 CAD {cadN}건 DB 저장" : "");
             await LoadAsync();
             return true;
         }
@@ -460,4 +588,26 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private static double? ParseOptional(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null
         : double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
+}
+
+/// <summary>새 프로젝트 팝업의 면별 CAD 등록 행 — 벽면 코드·등록 여부·상태 문구.</summary>
+public sealed partial class FaceCadRow : ObservableObject
+{
+    public string WallCode { get; }
+    public FaceCadRow(string wallCode) => WallCode = wallCode;
+
+    [ObservableProperty] private bool _registered;
+    [ObservableProperty] private string _status = "미등록";
+
+    public void SetRegistered(string? file, int weld, int corr)
+    {
+        Registered = true;
+        Status = $"{file}  ·  용접라인 {weld} (Corr {corr} 제외)";
+    }
+
+    public void SetUnregistered()
+    {
+        Registered = false;
+        Status = "미등록";
+    }
 }

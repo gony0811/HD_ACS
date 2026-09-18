@@ -14,16 +14,18 @@ namespace HD.Acs.UI.Services;
 public sealed class ProjectService : IProjectService
 {
     public const string Extension = ".hdacs";
-    private const int FormatVersion = 2;   // v2: 영역 corners(임의 4점). v1(구파일)=bbox 사각형 폴백
+    private const int FormatVersion = 3;   // v3: 면별 CAD(DXF). v2: 영역 corners. v1(구파일)=bbox 폴백
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("HDACSPRJ"); // 8 bytes
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
     private readonly IAcsApiClient _api;
+    private readonly IFaceCadStore _faceCad;
     private readonly string _operatorId;
 
-    public ProjectService(IAcsApiClient api, IOptions<AcsOptions> options)
+    public ProjectService(IAcsApiClient api, IFaceCadStore faceCad, IOptions<AcsOptions> options)
     {
         _api = api;
+        _faceCad = faceCad;
         _operatorId = options.Value.OperatorId;
     }
 
@@ -47,11 +49,17 @@ public sealed class ProjectService : IProjectService
                 a.StationStandoffM));
         }
 
+        // 면별 CAD(DXF)는 DB(ref.face_cad)가 정본 — 저장 시 서버에서 조회해 파일에 담고 로컬 캐시도 동기화
+        var faceCads = await _api.GetFaceCadAsync(tankId, ct);
+        var faceDocs = faceCads.Select(f => new FaceCadDoc(f.WallCode, f.SourceFile, f.Segments)).ToArray();
+        _faceCad.LoadFrom(faceDocs);
+
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
                 geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
-            areaDocs.ToArray());
+            areaDocs.ToArray(),
+            faceDocs);
 
         await using (var fs = File.Create(path))
         {
@@ -101,6 +109,11 @@ public sealed class ProjectService : IProjectService
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);
         }
+
+        // 면별 CAD(DXF) 복원 — DB(ref.face_cad)에 재적재(선창 등록 후 tank_id 존재) 후 로컬 캐시 동기화
+        foreach (var f in doc.FaceCad ?? Array.Empty<FaceCadDoc>())
+            await _api.SaveFaceCadAsync(doc.TankId, f.WallCode, f.SourceFile, f.Segments, _operatorId, ct);
+        _faceCad.LoadFrom(doc.FaceCad);
 
         CurrentPath = path;
         return doc;

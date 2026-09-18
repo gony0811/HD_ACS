@@ -65,10 +65,13 @@
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="6" Padding="6" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource AppSurfaceBrush}">
+                                <Button Margin="6" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                        Click="FaceCell_Click" ToolTip.Tip="클릭하여 이 면에 용접선·Corrugation 드로잉 도구 열기">
+                                <Border Padding="6" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource AppSurfaceBrush}">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                             <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" />
+                                            <TextBlock Text="✎" FontSize="12" Margin="6,0,0,0" Foreground="{DynamicResource AppMutedTextBrush}" />
                                             <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" Margin="8,2,0,0" />
                                         </StackPanel>
                                         <Canvas Width="240" Height="150" Background="{DynamicResource AppCanvasBrush}">
@@ -106,6 +109,7 @@
                                         </Canvas>
                                     </StackPanel>
                                 </Border>
+                                </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

@@ -300,6 +300,26 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    // ── 면 CAD(DXF) 등록 ──
+    public async Task<IReadOnlyList<FaceCadDto>> GetFaceCadAsync(string tankId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<FaceCadDto>>($"/api/tanks/{Uri.EscapeDataString(tankId)}/faces/cad", ct) ?? new();
+
+    public async Task SaveFaceCadAsync(string tankId, string wallCode, string? sourceFile,
+        IReadOnlyList<FaceCadSeg> segments, string? userId = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync(
+            $"/api/tanks/{Uri.EscapeDataString(tankId)}/faces/{Uri.EscapeDataString(wallCode)}/cad",
+            new { SourceFile = sourceFile, Segments = segments, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 선창 미등록 400 등 메시지 노출
+    }
+
+    public async Task DeleteFaceCadAsync(string tankId, string wallCode, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync(
+            $"/api/tanks/{Uri.EscapeDataString(tankId)}/faces/{Uri.EscapeDataString(wallCode)}/cad", ct);
+        if (resp.StatusCode != System.Net.HttpStatusCode.NotFound) resp.EnsureSuccessStatusCode();
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using HD.Acs.UI.Drawing;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.Primitives;
 using HD.Acs.UI.Rendering;
@@ -82,6 +83,97 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>전개도 탭 — 면별 2D 도면(실제 비율 형상 + 영역·작업 오버레이, 이미 캔버스 px로 투영).</summary>
     public sealed record FacePlot(string Code, string Dim, IReadOnlyList<Pt2> Outline,
         IReadOnlyList<AreaPoly> Areas, IReadOnlyList<TaskSeg> Tasks);
+
+    /// <summary>전개도 면 클릭 → 그 면 크기(mm)로 드로잉 도구 VM 생성. 면 미로드/영길이면 null.
+    /// 면 치수는 도면 프레임 m 단위이므로 mm(×1000)로 변환한다(드로잉 도구는 실좌표 mm 계약).
+    /// A/F(마구리)는 실제 팔각 윤곽을, 그 외는 사각형을 전달하고, 각 변 너머 인접 면 코드도 함께 준다.</summary>
+    public FaceDrawingViewModel? CreateFaceDrawing(string wallCode)
+    {
+        var w = ShellWalls.FirstOrDefault(x => x.WallCode == wallCode);
+        if (w is null || w.ULen <= 0 || w.VLen <= 0) return null;
+        const double sc = 1000.0;   // m → mm
+
+        var uv = FaceOutlineUv(w);   // 면 경계 (u,v): F/A=팔각, 그 외=사각형
+        var outline = uv.Select(p => new Pt2(p[0] * sc, p[1] * sc)).ToList();
+        var labels = BuildEdgeLabels(w, uv, sc);
+        var vm = new FaceDrawingViewModel(wallCode, w.ULen * sc, w.VLen * sc, outline, labels);
+
+        // 등록된 CAD(DXF)가 있으면 그 면의 용접선·Corrugation 선분을 시드하고, 수동 보정→캐시+DB 반영 콜백을 연결
+        if (_faceCad.Get(wallCode) is { } cad)
+        {
+            vm.CadSourceFile = cad.SourceFile;
+            vm.SeedCad(cad.Segments);
+            vm.PersistCad = async segs =>
+            {
+                var arr = segs.ToArray();
+                _faceCad.Set(new FaceCadDoc(wallCode, cad.SourceFile, arr));   // 캐시 즉시 반영(오프라인에도 보존)
+                await _api.SaveFaceCadAsync(TankId, wallCode, cad.SourceFile, arr);   // DB 반영(실패 시 예외)
+            };
+        }
+        return vm;
+    }
+
+    /// <summary>면 경계 각 변 너머에 인접한 면을 3D 프레임 기하로 식별(공유 모서리 최근접). 변 중점(mm)·바깥 방향·코드 목록.</summary>
+    private IReadOnlyList<FaceEdgeLabel> BuildEdgeLabels(WallDto w, IReadOnlyList<double[]> uv, double sc)
+    {
+        var labels = new List<FaceEdgeLabel>();
+        if (w.Origin is null || w.UAxis is null || w.VAxis is null || uv.Count < 3) return labels;
+
+        // 다른 면들의 3D 경계 폴리곤 미리 계산
+        var others = ShellWalls
+            .Where(o => o.WallCode != w.WallCode && o.Origin is not null && o.UAxis is not null && o.VAxis is not null)
+            .Select(o => (o.WallCode, Poly: FaceOutlineUv(o).Select(p => To3D(o, p[0], p[1])).ToArray()))
+            .ToList();
+
+        double cx = uv.Average(p => p[0]), cy = uv.Average(p => p[1]);   // (u,v) 중심(바깥 방향 판정)
+        int n = uv.Count;
+        for (int i = 0; i < n; i++)
+        {
+            double[] a = uv[i], b = uv[(i + 1) % n];
+            double mu = (a[0] + b[0]) / 2, mv = (a[1] + b[1]) / 2;
+            var mid3 = To3D(w, mu, mv);
+
+            string? code = null; double best = double.MaxValue;
+            foreach (var (oc, poly) in others)
+            {
+                double d = DistToPolygonEdges(mid3, poly);
+                if (d < best) { best = d; code = oc; }
+            }
+            if (code is null) continue;
+
+            // 바깥 방향(u,v): 변에 수직이며 면 중심 반대쪽
+            double ex = b[0] - a[0], ey = b[1] - a[1];
+            double nx = ey, ny = -ex;
+            if ((mu - cx) * nx + (mv - cy) * ny < 0) { nx = -nx; ny = -ny; }
+            double len = Math.Sqrt(nx * nx + ny * ny); if (len < 1e-9) len = 1;
+            labels.Add(new FaceEdgeLabel(new Pt2(mu * sc, mv * sc), new Pt2(nx / len, ny / len), code));
+        }
+        return labels;
+    }
+
+    private static (double X, double Y, double Z) To3D(WallDto w, double u, double v) => (
+        w.Origin![0] + u * w.UAxis![0] + v * w.VAxis![0],
+        w.Origin[1] + u * w.UAxis[1] + v * w.VAxis[1],
+        w.Origin[2] + u * w.UAxis[2] + v * w.VAxis[2]);
+
+    /// <summary>점에서 폴리곤 각 변까지 최단거리(3D) — 인접 면은 모서리를 공유하므로 ≈0.</summary>
+    private static double DistToPolygonEdges((double X, double Y, double Z) p, (double X, double Y, double Z)[] poly)
+    {
+        double best = double.MaxValue;
+        for (int i = 0; i < poly.Length; i++)
+            best = Math.Min(best, DistPointSeg3D(p, poly[i], poly[(i + 1) % poly.Length]));
+        return best;
+    }
+
+    private static double DistPointSeg3D((double X, double Y, double Z) p, (double X, double Y, double Z) a, (double X, double Y, double Z) b)
+    {
+        double vx = b.X - a.X, vy = b.Y - a.Y, vz = b.Z - a.Z;
+        double wx = p.X - a.X, wy = p.Y - a.Y, wz = p.Z - a.Z;
+        double len2 = vx * vx + vy * vy + vz * vz;
+        double t = len2 < 1e-12 ? 0 : Math.Clamp((wx * vx + wy * vy + wz * vz) / len2, 0, 1);
+        double dx = p.X - (a.X + t * vx), dy = p.Y - (a.Y + t * vy), dz = p.Z - (a.Z + t * vz);
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
     public ObservableCollection<FacePlot> FacePlots { get; } = new();
 
     // 전개도 셀(면당) 렌더 크기(px)
@@ -196,14 +288,28 @@ public sealed partial class TankViewModel : ObservableObject
         SelectedLevel is null ||
         string.Equals(RobotMapId, $"{TankId}-L{SelectedLevel}", StringComparison.OrdinalIgnoreCase);
 
-    public TankViewModel(IAcsApiClient api, IMonitoringClient monitoring)
+    private readonly IFaceCadStore _faceCad;
+
+    public TankViewModel(IAcsApiClient api, IMonitoringClient monitoring, IFaceCadStore faceCad)
     {
         _api = api;
+        _faceCad = faceCad;
         monitoring.RobotStateReceived += OnRobotState;
     }
 
     /// <summary>선창 파라미터(팔각 치수·유도값). 마구리(F/A) 팔각 윤곽 렌더에 사용.</summary>
     public TankGeometryDto? Geometry { get; private set; }
+
+    /// <summary>DB(ref.face_cad)의 면 CAD를 로컬 캐시로 동기화(전개도 면 클릭 시드 원천). 실패 시 캐시 유지.</summary>
+    public async Task RefreshFaceCadAsync()
+    {
+        try
+        {
+            var cads = await _api.GetFaceCadAsync(TankId);
+            _faceCad.LoadFrom(cads.Select(f => new FaceCadDoc(f.WallCode, f.SourceFile, f.Segments)));
+        }
+        catch { /* 서버 미연결 — 기존 캐시 유지 */ }
+    }
 
     /// <summary>선창 면 전체를 불러와 3D 셸을 구성하고, 현재 뷰 모드 강조를 로드한다.</summary>
     public async Task LoadAsync()
@@ -215,6 +321,7 @@ public sealed partial class TankViewModel : ObservableObject
             var walls = await _api.GetWallsAsync(TankId);
             ShellWalls.Clear();
             foreach (var w in walls) ShellWalls.Add(w);
+            await RefreshFaceCadAsync();   // 면 CAD(ref.face_cad) 캐시 동기화 — 전개도 면 클릭 시드용
             await LoadOverlaysAsync();     // 영역·작업 로드 후 ViewChanged
             await LoadLevelWallsAsync();   // ViewChanged 발생(셸+강조 재빌드)
         }

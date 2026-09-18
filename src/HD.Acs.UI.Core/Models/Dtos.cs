@@ -258,6 +258,9 @@ public sealed record AreaTaskDto(
     double StartU, double StartV, double EndU, double EndV,
     string SectionDxfId, string ProfileId);
 
+/// <summary>면 CAD(DXF) 등록 조회 결과 — 면별 용접선·Corrugation 선분(면-로컬 mm).</summary>
+public sealed record FaceCadDto(string WallCode, string? SourceFile, FaceCadSeg[] Segments);
+
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
 public sealed record AlarmDto(

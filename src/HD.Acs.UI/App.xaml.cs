@@ -48,6 +48,8 @@ public partial class App : Application
         // SignalR 실시간 푸시 (연결 상태 공유 필요 → 싱글턴)
         builder.Services.AddSingleton<IMonitoringClient, MonitoringClient>();
 
+        // 면별 CAD(DXF) 등록 저장소 (프로젝트 파일에만 저장)
+        builder.Services.AddSingleton<IFaceCadStore, FaceCadStore>();
         // 프로젝트 파일(.hdacs) — 스냅샷 입출력 + 새 프로젝트/파일 대화상자
         builder.Services.AddSingleton<IProjectService, ProjectService>();
         builder.Services.AddSingleton<IProjectDialogService, ProjectDialogService>();

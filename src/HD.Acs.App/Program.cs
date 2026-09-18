@@ -183,6 +183,47 @@ app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankGeometrySer
 app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
     Results.Ok(await svc.GetWallsAsync(tankId, level)));
 
+// ── 면 CAD(DXF) 등록 [면별 용접선·Corrugation 선분, 면-로컬 mm] ──
+// jsonb 저장/조회 공통 옵션(camelCase·대소문자 무시) — {ax,ay,bx,by,kind} 라운드트립.
+var FaceCadJson = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+app.MapPut("/api/tanks/{tankId}/faces/{wallCode}/cad", async (string tankId, string wallCode, SaveFaceCadRequest req, AcsDbContext db) =>
+{
+    if (!await db.TankGeometries.AsNoTracking().AnyAsync(g => g.TankId == tankId))
+        return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {tankId} (파라미터를 먼저 등록하세요)." });
+
+    var segs = req.Segments ?? Array.Empty<FaceCadSegDto>();
+    int weld = segs.Count(s => string.Equals(s.Kind, "WeldLine", StringComparison.OrdinalIgnoreCase));
+    var json = System.Text.Json.JsonSerializer.Serialize(segs, FaceCadJson);
+
+    var row = await db.FaceCads.FirstOrDefaultAsync(x => x.TankId == tankId && x.WallCode == wallCode);
+    if (row is null) { row = new HD.Acs.Data.Entities.FaceCadEntity { TankId = tankId, WallCode = wallCode }; db.FaceCads.Add(row); }
+    row.SourceFile = req.SourceFile;
+    row.SegCount = segs.Length; row.WeldCount = weld; row.CorrCount = segs.Length - weld;
+    row.Segments = json; row.UpdatedBy = req.UserId; row.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { tankId, wallCode, segCount = row.SegCount, weldCount = row.WeldCount, corrCount = row.CorrCount });
+});
+
+app.MapGet("/api/tanks/{tankId}/faces/cad", async (string tankId, AcsDbContext db) =>
+{
+    var rows = await db.FaceCads.AsNoTracking().Where(x => x.TankId == tankId).ToListAsync();
+    return Results.Ok(rows.Select(r => new
+    {
+        wallCode = r.WallCode, sourceFile = r.SourceFile,
+        segCount = r.SegCount, weldCount = r.WeldCount, corrCount = r.CorrCount,
+        segments = System.Text.Json.JsonSerializer.Deserialize<FaceCadSegDto[]>(r.Segments, FaceCadJson) ?? Array.Empty<FaceCadSegDto>(),
+    }));
+});
+
+app.MapDelete("/api/tanks/{tankId}/faces/{wallCode}/cad", async (string tankId, string wallCode, AcsDbContext db) =>
+{
+    var row = await db.FaceCads.FirstOrDefaultAsync(x => x.TankId == tankId && x.WallCode == wallCode);
+    if (row is null) return Results.NotFound();
+    db.FaceCads.Remove(row);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { tankId, wallCode });
+});
+
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
 {
@@ -682,3 +723,6 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
     double[][]? Corners = null, double? StationStandoffM = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);
+// 면 CAD(DXF) 등록 — 면별 용접선·Corrugation 선분(면-로컬 mm). Kind=WeldLine|Corrugation.
+public sealed record SaveFaceCadRequest(string? SourceFile, FaceCadSegDto[]? Segments, string? UserId);
+public sealed record FaceCadSegDto(double Ax, double Ay, double Bx, double By, string Kind);

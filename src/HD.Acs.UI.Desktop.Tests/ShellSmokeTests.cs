@@ -179,8 +179,9 @@ public class ShellSmokeTests
             var dlg = new NewProjectDialog { DataContext = host.Services.GetRequiredService<AreaPlanningViewModel>() };
             dlg.Show();
             Dispatcher.UIThread.RunJobs();
-            Assert.Contains("선창 3D 정의", dlg.Title!);
-            Assert.True(dlg.GetVisualDescendants().OfType<NumericUpDown>().Count() >= 9);
+            Assert.Contains("선창 생성", dlg.Title!);   // 도면(DXF)에서 선창 생성
+            // 파라미터 수기 입력 대신 면별 CAD 등록 목록(파일… 버튼) — 10면
+            Assert.True(dlg.GetVisualDescendants().OfType<Button>().Count(b => (b.Content as string) == "파일…") >= 10);
             dlg.Close();
 
             var msg = new MessageDialog("본문", "제목", yesNo: true);

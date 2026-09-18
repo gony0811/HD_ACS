@@ -244,6 +244,23 @@ CREATE TABLE ref.wall (
   PRIMARY KEY (tank_id, wall_code)
 );
 
+-- ─────────────── 면 CAD(DXF) 등록 (ref) [면별 용접선·Corrugation 선분, 면-로컬 mm] ───────────────
+-- 새 프로젝트 시 각 면에 2D 도면(DXF)을 등록 → 멤브레인 레이어(KC-2B Membrane Sheet UM)에서 선분 추출·
+-- 자동 분류(길이 임계). 전개도 면 클릭 시 이 선분을 표시. 팔각기둥/면 치수는 파라미터가 정본(CAD는 2D 상세).
+-- 좌표=면-로컬 mm(bbox 좌하단=원점). segments=[{ax,ay,bx,by,kind}] kind=WeldLine|Corrugation.
+CREATE TABLE ref.face_cad (
+  tank_id     text NOT NULL REFERENCES ref.tank_geometry(tank_id) ON DELETE CASCADE,
+  wall_code   text NOT NULL,                 -- B/SL/PL/SM/PM/SU/PU/T/F/A
+  source_file text,
+  seg_count   int  NOT NULL DEFAULT 0,
+  weld_count  int  NOT NULL DEFAULT 0,
+  corr_count  int  NOT NULL DEFAULT 0,
+  segments    jsonb NOT NULL DEFAULT '[]',
+  updated_by  text,
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tank_id, wall_code)
+);
+
 -- ─────────────── 영역·검사 작업 (ref) [SPEC v3 §4: 벽면-로컬 (u,v) 등록] ───────────────
 -- 운영자가 면(ref.wall) 위 로컬 (u,v)로 영역·용접선을 등록. level=AMR 주행 층(mapId 결정).
 CREATE TABLE ref.inspection_area (

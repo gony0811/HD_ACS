@@ -174,6 +174,20 @@ public class WallEntity
     public string? Description { get; set; }
 }
 
+// 면 CAD(DXF) 등록 — 면별 용접선·Corrugation 선분(면-로컬 mm). (tank_id, wall_code) 단위. segments=jsonb.
+public class FaceCadEntity
+{
+    public string TankId { get; set; } = "";
+    public string WallCode { get; set; } = "";
+    public string? SourceFile { get; set; }
+    public int SegCount { get; set; }
+    public int WeldCount { get; set; }
+    public int CorrCount { get; set; }
+    public string Segments { get; set; } = "[]";   // jsonb [{ax,ay,bx,by,kind}]
+    public string? UpdatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 // 영역(Area) LAYER [SPEC v3 §4] — 면(ref.wall) 위 로컬 (u,v) 사각형. 영역 1개 = STATION 1개 = anchorGroup 1개.
 public class InspectionAreaEntity
 {
