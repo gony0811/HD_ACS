@@ -140,6 +140,8 @@ dotnet build HD.Acs.UI\HD.Acs.UI.csproj
 | `Acs:Api:ListenHost` | 0.0.0.0 | 저장소 기본값은 **다른 PC의 UI 접속 허용**(방화벽 5199 인바운드 허용 필요). 로컬 UI만 쓰면 `localhost`로 (코드 폴백값도 localhost) |
 | `Acs:Api:ListenPort` | **5199** | 유지 권장 (5100 금지 — CS01_P 충돌) |
 | `Acs:Area:StationStandoffM` | 0.8 | 정차 이격 기본값 — 로봇 치수 확정(N10) 시 조정 |
+| `Acs:Area:StandoffMm` | 400 | **툴 이격**(코봇 툴 ↔ 표면, mm) — VDA `params.standoffMm`으로 전달. 위 정차 이격(로봇 ↔ 벽면, m)과 **다른 파라미터**다 |
+| `Acs:Area:WorkingDistanceMm` | = `StandoffMm` | 작업 거리 힌트(mm) — VDA `params.workingDistanceMm`. 현장 전 액션 공통값이며 **실제 값은 HD_AMR 레시피가 우선**(VDA 사양서 §8.1) |
 | `Acs:Dispatch:MaxRetries` | 2 | 실패 재시도 상한 |
 | `Acs:Dispatch:AllowedDevXy` / `Theta` | 0.08 / 0.07 | 도착 판정 허용 오차 |
 

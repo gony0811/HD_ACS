@@ -197,6 +197,7 @@ CREATE TABLE ref.area_task (
 
 설정: 정차 이격 `Acs:Area:StationStandoffM`(기본 0.8 m) · 툴 이격 `Acs:Area:StandoffMm`(기본 400 mm, payload) ·
 `Acs:Area:WorkingDistanceMm`(기본 = StandoffMm). 정차 이격(로봇 위치)과 툴 이격(코봇-표면 거리)은 별개 파라미터다.
+툴 이격·작업거리는 **영역·작업별로 지정할 수 없는 현장 전역값**이며, 실제 작업거리는 HD_AMR 검사 레시피 소관이다(레시피 값 우선 — VDA5050_INTERFACE_SPEC §8.1).
 
 ## 6. payload 계약 (v2 확정안 유지 — wallNormalW 없음)
 

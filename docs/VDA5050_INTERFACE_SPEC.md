@@ -13,6 +13,7 @@
 | 개정 1.3a | 2026-09-14 — **`seamType` enum 확장 ACS 선반영**: 계획 UI(③ 검사 작업 등록) seamType 드롭다운 추가에 맞춰 §8.1/§8.2·등록 게이트·`param_schema`가 `LINE`·`CROSS`·`CORNER`를 수용·발행(`POLYLINE` 거부). **`CROSS`/`CORNER`는 HD_AMR 실행 미구현(스텁) — 계획 데이터 전달만**, 레시피 실행은 N13 확정 후 2차 연동 |
 | 개정 1.3b | 2026-09-15 — **`drawingPos.wall_code` 발행 값 도메인 명시**: §8.1/§8.2에 `wall_code`가 항상 `TankGeometry` 10개 면 코드(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`) 중 하나이며 `ref.inspection_area.wall_code`(FK→`ref.wall`)에서 온다는 계약 명문화. §8.4 골든 예시의 임의 표기 `W03`→실제 면 코드 `PM`으로 정정(계약·발행 로직 무변경, 문서 정합만) |
 | 개정 1.3c | 2026-09-15 — **`seamType` enum 5값 확장(카탈로그 1:1)**: 종전 3값 `LINE`·`CROSS`·`CORNER`를 `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`로 세분(CROSS=갈래 수 3/4, CORNER=접합 면 수 2/3). §8.1/§8.2 `param_schema`·등록 게이트·계획 UI 드롭다운·§8.5 카탈로그·§8.5.1 매핑·§10 N13 반영. **ACS 수용·발행·UI 지정만 구현**(`POLYLINE` 거부 유지) — HD_AMR 레시피 실행은 여전히 미구현(스텁), 계획 데이터 전달만 |
+| 개정 1.3d | 2026-09-19 — **`params.standoffMm`·`workingDistanceMm`의 출처·권위 관계 명문화**: 두 값이 ACS의 계산 결과가 아니라 현장 단위 전역 설정(`Acs:Area:StandoffMm`/`WorkingDistanceMm`) 상수이며, 실제 작업거리는 **HD_AMR 검사 레시피가 우선**임을 §8.1/§8.2에 기재. 정차 이격(`station_standoff_m`, `nodePosition` 반영)과의 구분도 함께. **계약 필드·타입·`required`·발행 로직 무변경(문서 정합만)** |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -504,12 +505,22 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `params.seamType` | 용접라인 형태 — **`LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`** (5값, 카탈로그 1:1, 2026-09-15 ACS 선반영, §8.5.1). `LINE`=직선 구간(현행), `CROSS3`=3갈래 교차, `CROSS4`=4갈래 十자 교차, `CORNER2`=2면 코너, `CORNER3`=3면 코너. **`CROSS*`/`CORNER*`는 HD_AMR 실행 미구현(스텁) — 계획 데이터로 전달만**, 레시피 실행은 N13 확정 후 2차 연동. `POLYLINE`은 여전히 거부(2026-08-29 AMR 회신 §5.1 — 2점 계약으로 세그먼트 방향 불명이라 AMR이 FAILED). 꺾인 직선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `wall_code` 조합 레시피 매핑은 §8.5.1 |
 | `params.sectionDxfId` | 단면 프로파일 참조 ID |
 | `params.inspectionProfileId` | 검사(촬영/측정) 프로파일 ID (검사 타입 분류·레시피 계약은 §8.5 참고 — 제안, 현행 자유 문자열 무변경) |
-| `params.standoffMm` | 표면 이격 거리 [mm] |
-| `params.workingDistanceMm` | (선택) 작업 거리 [mm] |
+| `params.standoffMm` | 표면 이격 거리 [mm] — **출처 = 현장 단위 전역 설정**(`Acs:Area:StandoffMm`, 기본 400). 영역·용접선·`seamType`별로 달라지지 않으며, 한 현장의 모든 액션에 같은 값이 실린다 |
+| `params.workingDistanceMm` | (선택) 작업 거리 [mm] — **출처 = 전역 설정**(`Acs:Area:WorkingDistanceMm`, 미지정 시 `standoffMm` 값을 그대로 복사). ACS는 검사 장비(카메라/측정기)의 광학 특성을 알지 못하므로 이 값은 **현장 기본값 힌트**이며, **실제 작업거리는 HD_AMR의 검사 레시피가 결정한다**(레시피 값 우선). AMR이 이 값을 무시해도 계약 위반이 아니다 |
 | `params.anchorGroupId` | 정렬(anchor) 공유 그룹 — **같은 그룹의 연속 액션은 사이에 주행이 없었다면 정렬 재수행 생략 가능** |
 | `params.seqInGroup` | 그룹 내 순번 (1부터) |
 
 `wallNormalW`(벽 법선)는 **전송하지 않는다** — 툴 자세는 AMR이 `wall_code` 티칭으로 결정한다.
+
+> **`standoffMm`·`workingDistanceMm`의 성격 (2026-09-19 명문화 — 계약 무변경)**
+> 이 두 값은 ACS가 도면·기하에서 계산하거나 측정한 값이 아니라, **운영자가 서버 설정 파일에 넣어 둔 현장 단위 상수**다
+> (`Acs:Area:StandoffMm` / `Acs:Area:WorkingDistanceMm`, 후자는 미지정 시 전자를 복사). 영역·작업·검사 타입별로 지정할 수단이 없고,
+> ACS는 AMR이 실제로 어떤 거리를 썼는지 회신받지도 소비하지도 않는다. 따라서 **검사 레시피가 자체 값을 가지고 있으면 그 값이 우선**이며,
+> 본 필드는 레시피에 값이 없을 때의 현장 기본값(폴백) 정도로 해석한다. 소유 주체의 최종 정리는 §8.5 `[협의 N13]`에서 함께 다룬다.
+>
+> **정차 이격(station standoff)과는 다른 파라미터다.** 정차 이격은 *로봇 중심 ↔ 벽면* 거리로 영역별 설정이 가능하며(`ref.inspection_area.station_standoff_m`,
+> 기본 `Acs:Area:StationStandoffM` = 0.8 m), `params`가 아니라 **`nodePosition`에 이미 반영**되어 전달된다(§4.4 참고).
+> `standoffMm`은 *코봇 툴 ↔ 표면* 거리로 층위가 다르다.
 
 ### 8.2 param_schema (JSON Schema draft-07 — ACS가 발행 직전 자체 검증)
 
@@ -558,6 +569,9 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 > ※`wall_code`는 스키마상 `{ "type": "string" }`(enum 미강제)이지만, 발행 값은 **항상 10개 면 코드**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`) 중 하나다 — 값 자체는 `ref.inspection_area.wall_code`(FK→`ref.wall`)에서 오므로 DB 제약이 도메인을 보장한다. AMR은 이 10종만 티칭 키로 대응하면 되며, 그 밖의 값이 오면 계약 위반(액션 FAILED + `orderValidationError`)으로 처리해도 무방하다.
 >
 > ※구현(2026-08-28 반영 완료): `drawingPos`의 `u`, `v`와 완전한 `params`(seamType·sectionDxfId·inspectionProfileId·standoffMm·workingDistanceMm·anchorGroupId·seqInGroup)를 ACS가 본 스키마대로 발행하며, **발행 전 자체 스키마 검증**(위반 시 run 시작 거부)도 동작한다. DB 포함 풀 E2E(시뮬레이터)로 검증 완료. AMR 파서는 방어적으로 u,v 부재도 수용 가능하게 구현해도 무방하다.
+>
+> ※`workingDistanceMm`는 `required` 배열에 없다(선택 필드). AMR 파서는 **부재를 정상으로 수용**해야 하며,
+> 존재하더라도 검사 레시피의 값으로 덮어써도 된다 — 값의 성격은 §8.1 표 아래 설명 참고.
 
 ### 8.3 직렬화 규칙
 
@@ -773,7 +787,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N10 | 정차 이격(standoff) 적정값 | 기본 0.8 m (영역별 조정) | ⏸ **보류** — 로봇 치수·코봇 리치 확정 후 회신, 잠정 0.8 m 수용 |
 | N11 | Order 거부 보고 방식 | 폐기 + `orderValidationError` | ✅ 동의 (§4.5.2 그대로 구현) |
 | N12 | ACS 생존 신호 | ACS 전용 `connection` 토픽 + ONLINE/OFFLINE/Last Will, QoS 1·retain (§7.2) | ✅ **승인** (2026-09-03) |
-| N13 | 검사 타입 카탈로그·레시피 계약 | 검사 형상 카탈로그 5종(§8.5, `seamType` 1:1) + **`seamType`(LINE/CROSS3/CROSS4/CORNER2/CORNER3) × `wall_code` → 레시피 매핑(§8.5.1)** + HD_AMR 타입별 레시피 라이브러리 운용 | ⏳ **대기** — `seamType` enum 5값 확장은 **ACS 선반영(2026-09-15, §8.1/§8.2)**: ACS가 5종 수용·발행·UI 지정(POLYLINE 거부). HD_AMR **레시피 매핑·실행은 미구현**(스텁) — `CROSS*`/`CORNER*`는 계획 데이터 전달만, 2차 연동 대기 |
+| N13 | 검사 타입 카탈로그·레시피 계약 | 검사 형상 카탈로그 5종(§8.5, `seamType` 1:1) + **`seamType`(LINE/CROSS3/CROSS4/CORNER2/CORNER3) × `wall_code` → 레시피 매핑(§8.5.1)** + HD_AMR 타입별 레시피 라이브러리 운용 + **이격·작업거리(`standoffMm`/`workingDistanceMm`)의 소유 주체 정리** (현행: ACS가 현장 전역 설정값을 전달, 레시피 우선 — §8.1) | ⏳ **대기** — `seamType` enum 5값 확장은 **ACS 선반영(2026-09-15, §8.1/§8.2)**: ACS가 5종 수용·발행·UI 지정(POLYLINE 거부). HD_AMR **레시피 매핑·실행은 미구현**(스텁) — `CROSS*`/`CORNER*`는 계획 데이터 전달만, 2차 연동 대기 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 

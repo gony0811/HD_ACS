@@ -41,7 +41,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 | `params` | **`seamType`** ∈ `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3` (5값, 카탈로그 1:1) | **형상 판정 키** → 레시피 선택 |
 | `params` | `sectionDxfId` | 단면 프로파일 참조(선택) |
 | `params` | `inspectionProfileId` | 촬영/측정 프리셋 ID (자유 문자열, **형태와 다른 축** — §8.5 개념 구분) |
-| `params` | `standoffMm`·`workingDistanceMm` | 이격/작업거리 |
+| `params` | `standoffMm`·`workingDistanceMm` | **현장 전역 설정 기본값**(모든 액션 동일 — ACS 설정 파일 상수이지 영역·용접선별 데이터가 아니다). **레시피에 값이 있으면 레시피 우선**, 없을 때의 폴백으로만 사용 (사양서 §8.1) |
 | `params` | `anchorGroupId`·`seqInGroup` | 정렬 공유 그룹·순번 (§8.1) |
 
 골든 예시(§8.4 발췌 — 정본은 사양서):
