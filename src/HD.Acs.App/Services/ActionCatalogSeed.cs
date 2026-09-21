@@ -74,7 +74,6 @@ public static class ActionCatalogSeed
     public static async Task EnsureAsync(AcsDbContext db, ILogger logger, CancellationToken ct = default)
     {
         const string actionType = "startWeldInspection";
-        var canonical = Normalize(StartWeldInspectionParamSchema);
 
         var row = await db.ActionCatalog.FirstOrDefaultAsync(x => x.ActionType == actionType, ct);
         if (row is null)
@@ -92,19 +91,21 @@ public static class ActionCatalogSeed
             return;
         }
 
-        if (Normalize(row.ParamSchema) != canonical)
+        if (!SameJson(row.ParamSchema, StartWeldInspectionParamSchema))
         {
             row.ParamSchema = StartWeldInspectionParamSchema;
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (VDA 사양서 개정 1.4 — taskId·attempt)", actionType);
+            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (VDA 사양서 개정 1.6 — taskId·attempt)", actionType);
         }
     }
 
-    // jsonb 저장 시 공백이 재포맷되므로, 문자열이 아닌 **의미상** 동일성으로 비교한다.
-    private static string? Normalize(string? json)
+    // jsonb 는 저장 시 공백뿐 아니라 **객체 키 순서까지 재정렬**한다(키 길이→사전순). 직렬화 문자열을 비교하면
+    // 내용이 같아도 항상 "다름"이 되어 부팅마다 갱신이 일어난다(실DB E2E에서 발견 — 2026-09-21).
+    // 그래서 구조적으로(키 순서 무관) 비교한다. 파싱 불가면 다름으로 보고 canonical 로 덮는다.
+    internal static bool SameJson(string? a, string? b)
     {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try { return JsonNode.Parse(json)?.ToJsonString(); }
-        catch (JsonException) { return json; }   // 파싱 불가 → 원문 비교(항상 갱신 유도)
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return string.IsNullOrWhiteSpace(a) == string.IsNullOrWhiteSpace(b);
+        try { return JsonNode.DeepEquals(JsonNode.Parse(a), JsonNode.Parse(b)); }
+        catch (JsonException) { return false; }
     }
 }

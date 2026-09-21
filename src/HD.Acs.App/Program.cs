@@ -111,7 +111,8 @@ using (var scope = app.Services.CreateScope())
 app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 {
     var ex = ctx.Features.Get<IExceptionHandlerFeature>()?.Error;
-    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    // 요청 본문 자체가 잘못된 경우(깨진 JSON·형식 안 맞는 GUID 등)는 클라이언트 오류 — 서버 오류(500)로 뭉개지 않는다 [SAIGE §5.1: 400 = 요청 값 검증 실패].
+    ctx.Response.StatusCode = ex is BadHttpRequestException bad ? bad.StatusCode : StatusCodes.Status500InternalServerError;
     var msg = ex is DbUpdateException
         ? $"DB 저장 실패 — 스키마가 최신인지 확인하세요 (db/schema.sql · db/migrations). 원인: {ex.InnerException?.Message ?? ex.Message}"
         : (ex?.Message ?? "서버 내부 오류");

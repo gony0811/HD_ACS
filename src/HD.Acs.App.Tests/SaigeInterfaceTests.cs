@@ -272,7 +272,10 @@ public class SaigeInterfaceTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            Requests.Add((request.RequestUri!.AbsolutePath, await request.Content!.ReadAsStringAsync(ct)));
+            // 실제 수신기처럼 Content-Length 기준으로 본문을 읽는다 — chunked(길이 미상)로 나가면 빈 본문이 된다(E2E 발견 결함의 회귀 방지).
+            Assert.NotNull(request.Content!.Headers.ContentLength);
+            Assert.Equal("application/json", request.Content.Headers.ContentType?.MediaType);
+            Requests.Add((request.RequestUri!.AbsolutePath, await request.Content.ReadAsStringAsync(ct)));
             return new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         }
     }

@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using HD.Acs.Core.Integration;
 using HD.Acs.Core.Planning;
@@ -143,7 +142,12 @@ public sealed class SaigeHealthReporter : BackgroundService
         {
             try
             {
-                using var resp = await client.PostAsJsonAsync(_opt.HealthPath, payload, SaigeJson.Options, ct);
+                // 본문을 미리 직렬화해 **Content-Length를 명시**한다. PostAsJsonAsync(JsonContent)는 길이를 모르는 스트림이라
+                // Transfer-Encoding: chunked 로 나가는데, Content-Length 만 읽는 수신기에서는 본문이 빈 것으로 처리된다
+                // (E2E에서 확인 — 2026-09-21). 수신기 구현에 기대지 않도록 고정 길이로 보낸다.
+                using var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(payload, SaigeJson.Options));
+                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+                using var resp = await client.PostAsync(_opt.HealthPath, content, ct);
                 if (resp.IsSuccessStatusCode) return new SendOutcome(SendKind.Ok, null);
 
                 int http = (int)resp.StatusCode;
