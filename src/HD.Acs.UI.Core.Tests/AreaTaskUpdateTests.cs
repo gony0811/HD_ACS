@@ -102,7 +102,7 @@ public class AreaTaskUpdateTests
                     ? Json(new { taskId = Task1 })
                     : Json(new { error = "용접선 시작/끝점이 영역(사각형) 내부가 아닙니다." }, PutStatus);
             }
-            if (path == "/api/areas")
+            if (path == "/api/internal/areas")
                 return Json(new[]
                 {
                     new
@@ -112,7 +112,7 @@ public class AreaTaskUpdateTests
                         uMin = 3.0, vMin = 3.0, uMax = 6.0, vMax = 4.6, sortOrder = 0, taskCount = 1,
                     },
                 });
-            if (path == $"/api/areas/{Area}/tasks")
+            if (path == $"/api/internal/areas/{Area}/tasks")
                 return Json(new[]
                 {
                     new { taskId = Task1, seq = 3, name = "W3", seamType = "CROSS4", startU = 3.2, startV = 3.3, endU = 5.8, endV = 3.3, sectionDxfId = "DXF-1", profileId = "PROF-1" },

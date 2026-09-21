@@ -127,14 +127,14 @@ public class ProjectIdentityTests : IDisposable
                 return Json(new { tankId = "CT1", wallsGenerated = 10 });
             }
 
-            if (path == "/api/tanks/CT1/geometry")
+            if (path == "/api/internal/tanks/CT1/geometry")
                 return Json(new
                 {
                     tankId = "CT1", lengthL = 45.0, wFloor = 8.2, thetaLowDeg = 45.0, hLow = 1.9, hWall = 5.4, thetaUpDeg = 45.0, hUp = 1.9,
                     levelZ = new[] { 0.0, 2.4, 4.8, 7.2 }, originOx = 0.0, originOy = 0.0,
                     derived = new { wLow = 1.9, b = 12.0, wUp = 1.9, wCeil = 8.2, h = 9.2 },
                 });
-            if (path == "/api/areas")
+            if (path == "/api/internal/areas")
                 return Json(new[]
                 {
                     new
@@ -144,7 +144,7 @@ public class ProjectIdentityTests : IDisposable
                         uMin = 3.0, vMin = 0.6, uMax = 6.0, vMax = 2.4, sortOrder = 0, taskCount = 2,
                     },
                 });
-            if (path == $"/api/areas/{AreaA}/tasks")
+            if (path == $"/api/internal/areas/{AreaA}/tasks")
                 return Json(new object[]
                 {
                     new { taskId = Task1, seq = 1, name = "W1", seamType = "LINE", startU = 3.2, startV = 0.9, endU = 5.8, endV = 0.9, sectionDxfId = "DXF-1", profileId = "PROF-1" },

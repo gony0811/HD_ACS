@@ -319,6 +319,12 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
 | `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
 | `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
+| `GET /api/tanks/{tankId}/geometry` | **[SAIGE §4.6.1 대외 계약]** 선창 파라미터+유도값 — **mm 정수**·각도 deg, `derived{beam,wCeil,height}`. 없는 선창 404 |
+| `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
+| `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
+| `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
+| `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
+| `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |

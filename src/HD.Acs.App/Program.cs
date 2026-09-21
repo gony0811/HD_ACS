@@ -44,6 +44,7 @@ builder.Services.AddScoped<InspectionDispatcher>();
 builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 TTL 캐시 [SAIGE §5.4]
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
+builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
@@ -194,10 +195,31 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
     { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
 });
 
-app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
+// ── 선창 형상 조회 — 같은 데이터를 두 규약으로 제공한다 ──
+//  · /api/…           = **대외(SAIGE) 계약** [SAIGE 연동 사양서 v2.6 §4.6]: mm 정수·wallId·outline. 조회 전용, 필드는 사양서가 정본.
+//  · /api/internal/…  = 운영 UI 전용: m 실수 + 화면용 부가 필드(법선·facingYaw·정차 오버라이드 등). 계약 아님 — UI와 함께 자유롭게 바뀐다.
+// 등록·수정·삭제(POST/PUT/DELETE)는 사양 범위 밖이라 /api/… 그대로(m 단위 입력).
+app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankShapeQueryService shape) =>
+    await shape.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound(new { error = $"tank '{tankId}' 없음" }));
+
+app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankShapeQueryService shape) =>
+{
+    if (level is < 1) return Results.BadRequest(new { error = "level 은 1 이상이어야 합니다 (1-based, 바닥 층 = 1)." });
+    return await shape.GetWallsAsync(tankId, level) is { } walls
+        ? Results.Ok(walls) : Results.NotFound(new { error = $"tank '{tankId}' 없음" });
+});
+
+app.MapGet("/api/areas", async (string? tankId, int? level, int? wallId, TankShapeQueryService shape) =>
+    Results.Ok(await shape.GetAreasAsync(tankId, level, wallId)));
+
+app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, TankShapeQueryService shape) =>
+    await shape.GetAreaTasksAsync(areaId) is { } tasks
+        ? Results.Ok(tasks) : Results.NotFound(new { error = $"area '{areaId}' 없음" }));
+
+app.MapGet("/api/internal/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
     await svc.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound());
 
-app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
+app.MapGet("/api/internal/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
     Results.Ok(await svc.GetWallsAsync(tankId, level)));
 
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
@@ -261,7 +283,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
 });
 
-app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
+app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
 {
     var q = db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == (tankId ?? "CT1"));
     if (wallCode is not null) q = q.Where(a => a.WallCode == wallCode);
@@ -313,7 +335,7 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     return Results.Ok(new { taskId = task.TaskId, seq });
 });
 
-app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
+app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
 {
     var tasks = await db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId).OrderBy(t => t.Seq).ToListAsync();
     return Results.Ok(tasks.Select(t => new
