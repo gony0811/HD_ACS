@@ -289,22 +289,9 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
-    // seamType = 용접라인 형태 카탈로그(VDA §8.5.1, [협의 N13]) — 카탈로그와 1:1 5종 허용:
-    //   LINE(직선) · CROSS3(3갈래 교차) · CROSS4(4갈래 十자 교차) · CORNER2(2면 코너) · CORNER3(3면 코너).
-    // CROSS/CORNER 계열은 HD_AMR 레시피 미확정 — 계획 데이터로 저장·전달만(실행 미동작).
-    // POLYLINE 등 그 외 값은 계속 거부(꺾인 용접선은 세그먼트별 LINE으로 등록 — 같은 영역=정렬 공유).
-    if (req.SeamType is { } st &&
-        !(string.Equals(st, "LINE", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CROSS3", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CROSS4", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CORNER2", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CORNER3", StringComparison.OrdinalIgnoreCase)))
-        return Results.BadRequest(new
-        { error = $"seamType '{st}'은 지원하지 않습니다 — 허용: LINE·CROSS3·CROSS4·CORNER2·CORNER3(VDA §8.5.1). 꺾인 용접선은 세그먼트별 LINE으로 나눠 등록하세요." });
-    var poly = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
-    bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
-    if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
-        return Results.BadRequest(new { error = "용접선 시작/끝점이 영역(사각형) 내부가 아닙니다." });
+    // seamType 5종·영역 내부 판정 — PUT과 공통 규칙(AreaTaskRules). CROSS/CORNER 계열은 계획 데이터로 저장·전달만.
+    if (AreaTaskRules.Validate(req.SeamType, a.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
+        return Results.BadRequest(new { error = violation });
     // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
     // 프로젝트 파일(.hdacs) 재적재 때 같은 값으로 복원해야 한다. 지정 시 그 값으로 등록하되, 이미 존재하면 거부(덮어쓰기 금지).
     if (req.TaskId == Guid.Empty)
@@ -316,7 +303,8 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
-        TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name, SeamType = req.SeamType ?? "LINE",
+        TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name,
+        SeamType = (req.SeamType ?? "LINE").ToUpperInvariant(),   // param_schema enum이 대문자 — 소문자 저장 시 run 시작 때 스키마 위반
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
         SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
@@ -332,6 +320,40 @@ app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db
     {
         t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId
     }));
+});
+
+// 검사 작업 수정 — **taskId를 유지한 채** 용접선 좌표·형태를 고친다 [SAIGE v2.6 §2.5/§10.2].
+// taskId는 도면·진행률·촬영 이미지(productId)를 잇는 영구 식별자라, 좌표를 고치려고 삭제→재생성하면 같은 용접선의 검사 이력이 끊긴다.
+// 좌표 4값은 필수(전체 교체), 나머지는 null=기존값 유지. 영역 이동(areaId 변경)은 지원하지 않는다 — 정차·anchorGroup이 바뀌는 별개 작업이다.
+// 진행 중 run에는 영향 없음: run은 시작 시점에 큐(work_item.actions)로 스냅샷되므로 수정분은 다음 run부터 반영된다.
+app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRequest req, AcsDbContext db) =>
+{
+    var t = await db.AreaTasks.FirstOrDefaultAsync(x => x.TaskId == taskId);
+    if (t is null) return Results.NotFound(new { error = $"area-task '{taskId}' 없음" });
+    var area = await db.InspectionAreas.AsNoTracking().FirstAsync(x => x.AreaId == t.AreaId);
+
+    if (AreaTaskRules.Validate(req.SeamType, area.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
+        return Results.BadRequest(new { error = violation });
+    if (req.Seq is < 1)
+        return Results.BadRequest(new { error = "seq 는 1 이상이어야 합니다 (seqInGroup 계약)." });
+    if (req.Seq is int newSeq && newSeq != t.Seq &&
+        await db.AreaTasks.AsNoTracking().AnyAsync(x => x.AreaId == t.AreaId && x.Seq == newSeq))
+        return Results.Conflict(new { error = $"영역 내 seq {newSeq} 가 이미 있습니다." });
+
+    t.StartU = req.StartU; t.StartV = req.StartV; t.EndU = req.EndU; t.EndV = req.EndV;
+    if (req.Seq is int s) t.Seq = s;
+    if (req.Name is not null) t.Name = req.Name.Length == 0 ? null : req.Name;   // "" = 이름 지움
+    if (req.SeamType is not null) t.SeamType = req.SeamType.ToUpperInvariant();
+    if (req.SectionDxfId is not null) t.SectionDxfId = req.SectionDxfId;
+    if (req.ProfileId is not null) t.ProfileId = req.ProfileId;
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_TASK_UPDATE", Target = taskId.ToString(),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new { t.AreaId, t.Seq, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new
+    { t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId });
 });
 
 app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext db) =>
@@ -739,3 +761,7 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
     Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+// 검사 작업 수정(PUT) — 좌표 4값 필수, 나머지 null=기존값 유지. taskId·areaId는 바뀌지 않는다.
+public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double EndU, double EndV,
+    int? Seq = null, string? Name = null, string? SeamType = null, string? SectionDxfId = null, string? ProfileId = null,
+    string? UserId = null);

@@ -133,7 +133,11 @@
                             <TextBlock Text="용접라인 타입" Style="{StaticResource Lbl}" />
                             <telerik:RadComboBox Width="120" Height="Auto" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType, Mode=TwoWay}" />
                         </StackPanel>
-                        <telerik:RadButton Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <telerik:RadButton Content="작업 등록" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
+                            <telerik:RadButton Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
+                                               ToolTip="작업 목록에서 선택한 용접선의 좌표·타입을 고칩니다. 삭제 후 재등록과 달리 taskId(검사 이력 키)가 유지됩니다." />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" />
@@ -178,7 +182,7 @@
 
             <DockPanel Grid.Row="2" MinHeight="120">
                 <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록" FontWeight="Bold" Margin="0,0,0,4" />
-                <telerik:RadGridView ItemsSource="{Binding AreaTasks}" AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="100">
+                <telerik:RadGridView ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" RowIndicatorVisibility="Collapsed" MinHeight="100">
                     <telerik:RadGridView.Columns>
                         <telerik:GridViewDataColumn Header="seq" DataMemberBinding="{Binding Seq}" Width="46" />
                         <telerik:GridViewDataColumn Header="시작 u" DataMemberBinding="{Binding StartU, StringFormat=N2}" Width="64" />

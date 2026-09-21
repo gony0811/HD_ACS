@@ -295,6 +295,17 @@ public sealed class AcsApiClient : IAcsApiClient
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
     }
 
+    public async Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
+        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/area-tasks/{taskId}", new
+        {
+            StartU = startU, StartV = startV, EndU = endU, EndV = endV,
+            SeamType = seamType, Seq = seq, Name = name, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
+    }
+
     public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/areas/{areaId}/tasks", ct) ?? new();
 
