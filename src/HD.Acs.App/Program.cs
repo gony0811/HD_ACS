@@ -42,12 +42,21 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD.Acs.Core.Planning.GreedyNearestPolicy>();
 builder.Services.AddScoped<InspectionDispatcher>();
 builder.Services.AddScoped<ProgressService>();
+builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
+
+// SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
+builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["Acs:Saige:BaseUrl"] ?? "http://localhost:8080");
+    c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Acs:Saige:TimeoutSec", 3));
+});
+builder.Services.AddHostedService<SaigeHealthReporter>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
@@ -79,6 +88,9 @@ using (var scope = app.Services.CreateScope())
         // ref.action_catalog param_schema (startWeldInspection) 기동 시드 — 현장 배포에서
         // db/migrations 수동 적용을 잊어도 앱 바이너리 배포만으로 계약(seamType enum 등)이 반영된다.
         await ActionCatalogSeed.EnsureAsync(db, app.Logger);
+
+        // alarm.spec 누락 코드 기동 시드 — 알람 FK 선행 조건 (SAIGE 전송 알람 등).
+        await AlarmSpecSeed.EnsureAsync(db, app.Logger);
     }
     catch (Exception ex)
     {
@@ -436,10 +448,33 @@ app.MapPost("/api/runs/{runId:guid}/release-next", async (Guid runId, MissionSer
     { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapGet("/api/runs/{runId:guid}", async (Guid runId, AcsDbContext db) =>
-    await db.ScenarioRuns.AsNoTracking().Include(r => r.Missions.OrderBy(m => m.Seq))
-        .FirstOrDefaultAsync(r => r.RunId == runId)
-        is { } run ? Results.Ok(run) : Results.NotFound());
+// ── Run 조회(pull) [SAIGE 연동 사양서 v2.6 §5] — SAIGE·운영 UI 공용, 조회 전용 ──
+// Run 목록 — 검사 개시 주체는 현장 운영자이므로 SAIGE는 이 API로 진행 중 Run을 발견한다 [§5.3].
+app.MapGet("/api/runs", async (string? status, string? tankId, int? limit, RunQueryService runs) =>
+{
+    if (status is not null && !RunQueryService.RunStates.Contains(status))
+        return Results.BadRequest(new { error = $"status '{status}' 는 허용값이 아닙니다 — {string.Join(" | ", RunQueryService.RunStates)}" });
+    if (limit is < 1 or > 500)
+        return Results.BadRequest(new { error = "limit 은 1~500 이어야 합니다." });
+    return Results.Ok(await runs.ListRunsAsync(status, tankId, limit ?? 50));
+});
+
+// Run 상세 — 상태 + 층별 미션 [§5.5]
+app.MapGet("/api/runs/{runId:guid}", async (Guid runId, RunQueryService runs) =>
+    await runs.GetRunAsync(runId) is { } run ? Results.Ok(run) : Results.NotFound(new { error = $"run '{runId}' 없음" }));
+
+// TASK별 결과 상세 — 종결 TASK의 최종 결과, taskId당 1건 [§5.6]
+app.MapGet("/api/runs/{runId:guid}/results", async (Guid runId, string? status, int? limit, int? offset, RunQueryService runs) =>
+{
+    if (status is not null && !RunQueryService.TaskStatuses.Contains(status))
+        return Results.BadRequest(new { error = $"status '{status}' 는 허용값이 아닙니다 — {string.Join(" | ", RunQueryService.TaskStatuses)}" });
+    if (limit is < 1 or > 1000)
+        return Results.BadRequest(new { error = "limit 은 1~1000 이어야 합니다." });
+    if (offset is < 0)
+        return Results.BadRequest(new { error = "offset 은 0 이상이어야 합니다." });
+    return await runs.GetResultsAsync(runId, status, limit ?? 100, offset ?? 0) is { } r
+        ? Results.Ok(r) : Results.NotFound(new { error = $"run '{runId}' 없음" });
+});
 
 // 검사 작업 큐 조회 (greedy 배차 상태 — 운영 화면 층 진행/오버레이 소스)
 app.MapGet("/api/runs/{runId:guid}/work-items", async (Guid runId, AcsDbContext db) =>

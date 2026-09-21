@@ -1,0 +1,243 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using HD.Acs.Core.Integration;
+using HD.Acs.Core.Planning;
+using HD.Acs.Data;
+using HD.Acs.Data.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace HD.Acs.App.Services;
+
+/// <summary>SAIGE 연동 설정 [Acs:Saige]. Enabled=false(기본)면 전송하지 않는다 — 폐쇄망 현장에서 주소 확정 후 켠다.</summary>
+public sealed class SaigeOptions
+{
+    public bool Enabled { get; set; }
+    public string BaseUrl { get; set; } = "http://localhost:8080";
+    public string HealthPath { get; set; } = "/agent/v3/external/robot-health-check";
+    public int IntervalSec { get; set; } = 5;            // 로봇 1대당 전송 주기 [§9.4]
+    public int TimeoutSec { get; set; } = 3;
+    public int MaxBackoffSec { get; set; } = 60;         // 503 백오프 상한 [§9.5]
+    public int AlarmAfterFailures { get; set; } = 12;    // 연속 실패 임계 — 초과 시 운영 알람 1회
+    public int InternalErrorRetries { get; set; } = 2;   // 500(50001) 제한적 재시도 횟수
+}
+
+/// <summary>
+/// 로봇 상태 전송 ACS → SAIGE [SAIGE 연동 사양서 v2.6 §9]. POST {BaseUrl}/agent/v3/external/robot-health-check.
+/// - 주기마다 DB의 **최신 스냅샷을 새로 만들어** 전송한다 — 큐를 쌓지 않으므로 SAIGE 장애가 길어져도
+///   밀린 과거 값이 몰려 나가지 않는다 [§9.4]. 재시도도 항상 최신 스냅샷이 대상이다 [§9.5].
+/// - 검사 진행(VDA 브릿지·디스패처)과 분리된 독립 호스티드 서비스 — 전송 실패가 검사에 영향을 주지 않는다.
+/// - 위치는 도면 좌표(mm)여야 하므로 보고 층의 유효 T_W_D가 없으면 그 로봇은 전송을 보류한다
+///   (원시 SLAM 좌표를 도면 좌표인 척 보내는 조용한 오표시 금지).
+/// </summary>
+public sealed class SaigeHealthReporter : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopes;
+    private readonly IHttpClientFactory _http;
+    private readonly RobotErrorTracker _errors;
+    private readonly SaigeOptions _opt;
+    private readonly ILogger<SaigeHealthReporter> _log;
+
+    private int _consecutiveFailures;
+    private bool _alarmRaised;
+    private DateTimeOffset _backoffUntil = DateTimeOffset.MinValue;
+    private readonly HashSet<string> _positionWarned = new();   // 위치 산출 불가 경고 edge (로봇별 1회)
+
+    public const string HttpClientName = "saige";
+
+    internal bool InBackoff => DateTimeOffset.UtcNow < _backoffUntil;
+    internal int ConsecutiveFailures => _consecutiveFailures;
+
+    public SaigeHealthReporter(IServiceScopeFactory scopes, IHttpClientFactory http,
+        RobotErrorTracker errors, IConfiguration config, ILogger<SaigeHealthReporter> log)
+    {
+        _scopes = scopes; _http = http; _errors = errors; _log = log;
+        _opt = config.GetSection("Acs:Saige").Get<SaigeOptions>() ?? new SaigeOptions();
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_opt.Enabled)
+        {
+            _log.LogInformation("SAIGE 로봇 상태 전송 비활성 (Acs:Saige:Enabled=false).");
+            return;
+        }
+        _log.LogInformation("SAIGE 로봇 상태 전송 시작: {Url}{Path} · {Sec}s 주기", _opt.BaseUrl, _opt.HealthPath, _opt.IntervalSec);
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, _opt.IntervalSec)));
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            if (InBackoff) continue;   // 503 백오프 중 — 이번 주기 건너뜀
+            try { await TickAsync(stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception ex) { _log.LogWarning(ex, "SAIGE 전송 주기 처리 실패(DB 등) — 다음 주기 재시도."); }
+        }
+    }
+
+    internal async Task TickAsync(CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+
+        var robots = await db.Robots.AsNoTracking().Select(r => r.RobotId).ToListAsync(ct);
+        foreach (var robotId in robots)   // 다중 로봇 = 로봇마다 개별 요청 [§9.4]
+        {
+            var payload = await BuildSnapshotAsync(db, robotId, ct);
+            if (payload is null) continue;
+            var outcome = await SendAsync(payload, ct);
+            await ApplyOutcomeAsync(db, robotId, outcome, ct);
+            if (outcome.Kind is SendKind.Backoff) break;   // SAIGE 자체가 불능 — 나머지 로봇도 이번 주기 생략
+        }
+    }
+
+    /// <summary>로봇 1대의 최신 스냅샷 [§9.1]. 도면 위치를 산출할 수 없으면 null(전송 보류).</summary>
+    internal async Task<SaigeRobotHealth?> BuildSnapshotAsync(AcsDbContext db, string robotId, CancellationToken ct)
+    {
+        var ctx = await db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
+        if (ctx?.ReportedMapId is not { } mapId || ctx.ReportedX is not double mx || ctx.ReportedY is not double my)
+            return Hold(robotId, "로봇 위치 보고 없음");
+        if (SaigeUnits.LevelFromMapId(mapId) is not int level)
+            return Hold(robotId, $"mapId '{mapId}'에서 층 번호를 유도할 수 없음");
+
+        var map = await db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct);
+        var cal = await db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
+            .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
+        if (map is null) return Hold(robotId, $"map '{mapId}' 미등록");
+        Core.Geometry.DrawingTransform tWd;
+        try { tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0); }
+        catch (CalibrationInvalidException ex) { return Hold(robotId, ex.Message); }
+        _positionWarned.Remove(robotId);
+
+        // 최근 run 기준 — 수행 중 정차 / 중단(잔여 보유) 여부
+        var run = await db.ScenarioRuns.AsNoTracking().Where(r => r.RobotId == robotId)
+            .OrderByDescending(r => r.StartedAt).Select(r => new { r.RunId, r.State }).FirstOrDefaultAsync(ct);
+        bool dispatched = run is not null && run.State == "RUNNING" &&
+            await db.WorkItems.AsNoTracking().AnyAsync(w => w.RunId == run.RunId && w.Status == "DISPATCHED", ct);
+        bool aborted = run is not null && run.State == "ABORTED" &&
+            await db.WorkItems.AsNoTracking().AnyAsync(w => w.RunId == run.RunId &&
+                (w.Status == "PENDING" || w.Status == "DISPATCHED"), ct);
+
+        var status = RobotHealth.Derive(new RobotHealthInput(
+            ctx.ConnectionState, _errors.HasActiveErrors(robotId), aborted, dispatched));
+        var (x, y, yaw) = RobotHealth.ToDrawingPosition(tWd, mx, my, ctx.ReportedTheta);
+
+        return new SaigeRobotHealth(
+            RobotId: robotId,
+            Status: status.ToString(),
+            Position: new SaigeRobotPosition(level, x, y, yaw),
+            Battery: (int)Math.Round(Math.Clamp(ctx.BatteryPct ?? 0, 0, 100)),
+            Rssi: -1,   // 로봇 보고 항목에 통신 감도 없음 — 미측정 고정값 [§9.3]
+            Timestamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    private SaigeRobotHealth? Hold(string robotId, string reason)
+    {
+        if (_positionWarned.Add(robotId))
+            _log.LogWarning("SAIGE 전송 보류 — robot={Robot}: {Reason} (해소되면 자동 재개)", robotId, reason);
+        return null;
+    }
+
+    private async Task<SendOutcome> SendAsync(SaigeRobotHealth payload, CancellationToken ct)
+    {
+        var client = _http.CreateClient(HttpClientName);
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var resp = await client.PostAsJsonAsync(_opt.HealthPath, payload, SaigeJson.Options, ct);
+                if (resp.IsSuccessStatusCode) return new SendOutcome(SendKind.Ok, null);
+
+                int http = (int)resp.StatusCode;
+                int? code = await TryReadCodeAsync(resp, ct);
+                string detail = $"HTTP {http}" + (code is int c ? $" / code {c}" : "");
+                // [§9.5] 400=형식 오류(재시도 금지) · 503=기동 중/미응답(백오프) · 500=내부 오류(제한적 재시도)
+                if (http == 400) return new SendOutcome(SendKind.Rejected, detail);
+                if (http == 503) return new SendOutcome(SendKind.Backoff, detail);
+                if (attempt < _opt.InternalErrorRetries) { await Task.Delay(300, ct); continue; }
+                return new SendOutcome(SendKind.Failed, detail);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                // 연결 불가·타임아웃 = SAIGE 미응답 → 50302와 동일하게 백오프
+                return new SendOutcome(SendKind.Backoff, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    private static async Task<int?> TryReadCodeAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.TryGetProperty("code", out var c) && c.TryGetInt32(out var v) ? v : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private async Task ApplyOutcomeAsync(AcsDbContext db, string robotId, SendOutcome o, CancellationToken ct)
+    {
+        switch (o.Kind)
+        {
+            case SendKind.Ok:
+                if (_consecutiveFailures > 0)
+                    _log.LogInformation("SAIGE 전송 복구 (연속 실패 {N}회 후).", _consecutiveFailures);
+                _consecutiveFailures = 0; _alarmRaised = false; _backoffUntil = DateTimeOffset.MinValue;
+                return;
+
+            case SendKind.Rejected:
+                // 형식 오류는 같은 값을 다시 보내도 같은 결과 — 폐기하고 로그·알람 [§9.5]
+                _log.LogError("SAIGE가 로봇 상태를 거부({Detail}) — robot={Robot}, 재시도하지 않고 폐기.", o.Detail, robotId);
+                await RaiseAlarmAsync(db, "SAIGE_BAD_REQUEST", robotId, "SAIGE 로봇 상태 형식 오류(40001)", o.Detail, ct);
+                return;
+
+            case SendKind.Backoff:
+            case SendKind.Failed:
+                _consecutiveFailures++;
+                if (o.Kind is SendKind.Backoff)
+                {
+                    // 5s → 10s → 20s … 상한 MaxBackoffSec
+                    double sec = Math.Min(_opt.MaxBackoffSec, _opt.IntervalSec * Math.Pow(2, Math.Min(_consecutiveFailures, 10)));
+                    _backoffUntil = DateTimeOffset.UtcNow.AddSeconds(sec);
+                }
+                _log.LogWarning("SAIGE 전송 실패 {N}회 연속 ({Detail}).", _consecutiveFailures, o.Detail);
+                if (!_alarmRaised && _consecutiveFailures >= _opt.AlarmAfterFailures)
+                {
+                    _alarmRaised = true;   // 복구 전까지 1회만
+                    await RaiseAlarmAsync(db, "SAIGE_UNREACHABLE", robotId, "SAIGE 로봇 상태 전송 불가", o.Detail, ct);
+                }
+                return;
+        }
+    }
+
+    private async Task RaiseAlarmAsync(AcsDbContext db, string code, string robotId, string title, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            db.Alarms.Add(new AlarmEntity
+            {
+                AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = robotId,
+                Detail = JsonSerializer.Serialize(new { severity = "WARNING", title, detail }),
+                RaisedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            _log.LogWarning(ex, "알람 {Code} 기록 실패 — alarm.spec 시드 확인 필요.", code);
+        }
+    }
+
+    private enum SendKind { Ok, Rejected, Backoff, Failed }
+    private sealed record SendOutcome(SendKind Kind, string? Detail);
+}
+
+/// <summary>robot-health-check 요청 본문 [§9.1]. JSON 키는 camelCase.</summary>
+public sealed record SaigeRobotHealth(
+    string RobotId, string Status, SaigeRobotPosition Position, int Battery, int Rssi, long Timestamp);
+
+/// <summary>도면 좌표 위치 — level 1-based, x·y mm 정수, yaw deg 소수 1자리.</summary>
+public sealed record SaigeRobotPosition(int Level, int X, int Y, double Yaw);
+
+internal static class SaigeJson
+{
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+}

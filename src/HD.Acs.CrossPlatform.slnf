@@ -3,6 +3,7 @@
     "path": "HD.Acs.sln",
     "projects": [
       "HD.Acs.App\\HD.Acs.App.csproj",
+      "HD.Acs.App.Tests\\HD.Acs.App.Tests.csproj",
       "HD.Acs.Core\\HD.Acs.Core.csproj",
       "HD.Acs.Core.Tests\\HD.Acs.Core.Tests.csproj",
       "HD.Acs.Data\\HD.Acs.Data.csproj",
