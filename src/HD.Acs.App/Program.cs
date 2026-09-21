@@ -203,6 +203,8 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     var (uMin, vMin, uMax, vMax) = HD.Acs.Core.Planning.AreaGeometry.Bbox(corners);
     if (uMax - uMin < 1e-6 || vMax - vMin < 1e-6)
         return Results.BadRequest(new { error = "영역이 퇴화(면적 0)했습니다 — 유효한 사각형 4점을 입력하세요." });
+    if (!HD.Acs.Core.Planning.AreaGeometry.WithinMaxSize(uMin, vMin, uMax, vMax))
+        return Results.BadRequest(new { error = "AREA 최대 크기는 벽면 로컬 u/v 각 1.44m(1440mm)입니다." });
 
     // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위(코너 v의 min/max)로 유도한다 ──
     var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
