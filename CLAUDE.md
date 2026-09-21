@@ -65,7 +65,7 @@ HD_ACS는 위 하드웨어를 직접 제어하는 로봇 컨트롤러가 아니�
 ## 기술 스택 (Tech Stack)
 
 - **관제 서버**: C# / ASP.NET Core — REST API + SignalR(실시간 푸시)
-- **주 운영 UI**: 데스크톱 앱 (화물창 3D 뷰 + 전개도) — **Avalonia 11 크로스플랫폼 헤드(HD.Acs.UI.Desktop, Win/macOS/Linux)로 이행 중**(ADR-005 개정, docs/UI_CROSS_PLATFORM_REVIEW.md). 공용 코어 HD.Acs.UI.Core를 WPF 헤드(HD.Acs.UI, 기존)와 공유. Avalonia 헤드는 3D(소프트웨어 투영)까지 이식 완료 — WPF 헤드 은퇴 여부는 사용자 결정(Phase 5)
+- **주 운영 UI**: 데스크톱 앱 (화물창 3D 뷰 + 전개도) — **Avalonia 11 크로스플랫폼 헤드(HD.Acs.UI.Desktop, Win/macOS/Linux) 단일 헤드**(ADR-005 개정 2, docs/UI_CROSS_PLATFORM_REVIEW.md). 프레임워크 중립 공용 코어 HD.Acs.UI.Core + 헤드 1종. **WPF 헤드(HD.Acs.UI)와 Telerik·HelixToolkit 의존은 2026-09-21 제거(이행 Phase 5 완료)** — 상용 NuGet 피드 없이 전 프로젝트가 net8.0으로 어디서나 빌드된다
 - **보조 UI**: Web 대시보드, 태블릿 (REST API + SignalR 공용)
 - **로봇 통신**: VDA 5050 over MQTT (로봇 측 통합 운영 S/W와 연동, 온보드 실행형)
 - **메시징**: MQTT 브로커 (서버 내 배치, 제품 선정 미결)
@@ -107,7 +107,7 @@ HD_ACS/
     ├── HD.Acs.Vda5050/        # VDA 5050 메시지·마스터 MQTT 클라이언트·OrderBuilder
     ├── HD.Acs.App/            # ASP.NET Core 호스트 — REST + SignalR + VDA 브릿지 [ADR-011]
     ├── HD.Acs.Simulator/      # VDA 5050 로봇(HD_AMR) 시뮬레이터
-    ├── HD.Acs.UI.Core/        # UI 공용 코어 (net8.0, 프레임워크 중립 — WPF/Avalonia 헤드가 공유, 도메인 Core 미참조)
+    ├── HD.Acs.UI.Core/        # UI 공용 코어 (net8.0, 프레임워크 중립 — 헤드가 공유, 도메인 Core 미참조)
     │   ├── Models/                # 백엔드 페이로드 미러 DTO · ProjectDoc(.hdacs)
     │   ├── Services/              # IAcsApiClient(REST) · IMonitoringClient(SignalR) · ProjectService · TankLayout
     │   ├── ViewModels/            # Shell + 로봇상태/미션/알람/수동층변경/계획/Tank (CommunityToolkit.Mvvm) · PlotShapes 렌더 레코드
@@ -115,12 +115,7 @@ HD_ACS/
     │   ├── Primitives/            # Pt2 · Pt3 · Rgba (System.Windows.Point/Color 대체)
     │   └── Rendering/             # Plot2D(전개도) · Camera3/Scene3/SceneRenderer(3D 소프트웨어 투영) · TankShape(형상 정본) · TankSceneBuilder
     ├── HD.Acs.UI.Core.Tests/  # UI.Core xUnit (상태색 골든·투영·SignalR 디스패처 마샬링)
-    ├── HD.Acs.UI/             # WPF 운영 앱 헤드 (Windows 전용 — Telerik UI for WPF·Fluent + HelixToolkit 3D, UI.Core 참조)
-    │   ├── Infrastructure/        # 컨버터(PointsConverter·WorkStatusToBrush) · RgbaExtensions
-    │   ├── Services/              # WPF 어댑터: ProjectDialogService(Win32) · WpfUiDispatcher · WpfDialogService
-    │   ├── Views/                 # UserControl (Telerik 컨트롤) · TankView(3D+전개도)
-    │   └── MainWindow.xaml        # 모드 탭 셸 (운영/계획/이력)
-    ├── HD.Acs.UI.Desktop/     # Avalonia 11 크로스플랫폼 운영 앱 헤드 (Win/macOS/Linux, Fluent Dark, UI.Core 참조)
+    ├── HD.Acs.UI.Desktop/     # Avalonia 11 크로스플랫폼 운영 앱 헤드 — 유일한 UI 헤드 (Win/macOS/Linux, Fluent Dark, UI.Core 참조)
     │   ├── AppHost.cs             # Generic Host DI (WPF와 동일 등록 + Avalonia 어댑터) — 테스트가 재사용
     │   ├── Services/              # AvaloniaUiDispatcher · AvaloniaDialogService(MessageDialog) · AvaloniaProjectDialogService(StorageProvider)
     │   ├── Infrastructure/        # 컨버터: EnumEquals·WorkStatusToBrush·Points·Point·KindToBrush·BoolToCursor
@@ -145,6 +140,7 @@ Claude가 이 저장소에서 작업할 때 지켜야 할 원칙:
 
 ## 변경 이력
 
+- 2026-09-21: **WPF 헤드·Telerik 의존 제거 (UI 이행 Phase 5 완료 — 사용자 결정)** — 자격증명 없는 환경에서 나던 **Telerik NuGet 경고**가 계기. Avalonia 헤드가 3D 포함 전 기능을 이미 이식 완료(Phase 3·4)해 이중 유지보수·상용 라이선스를 유지할 이유가 없었다. **삭제**: `src/HD.Acs.UI/` 전체(WPF 헤드 — Telerik UI for WPF·HelixToolkit.Wpf·WPF 어댑터·XAML 뷰 13종), `HD.Acs.sln`의 해당 프로젝트 등록, WPF 제외용 `src/HD.Acs.CrossPlatform.slnf`(전 프로젝트 net8.0이라 불필요), `nuget.config`의 **Telerik 상용 피드**(이제 nuget.org 하나 — packageSourceMapping 주의사항도 함께 소멸). **유지**: `HD.Acs.UI.Core`(프레임워크 중립 코어)와 `IUiDispatcher`/`IDialogService`/`IProjectDialogService` 추상화 — 헤드 교체 여지·헤드리스 테스트 경계가 계속 필요. UI.Core 주석 중 삭제된 WPF 구현을 가리키던 문구(RgbaExtensions·PointsConverter·Dispatcher 등)만 현행 기준으로 정정(로직 무변경). **문서 동기화**: ADR-005 **개정 2**(UI 헤드 단일화·되돌리는 법)·Q5/Q5″ 갱신, `UI_CROSS_PLATFORM_REVIEW.md` Phase 5 실적·상태 "이행 완료", `MANUAL.md`(§2 구성·§3 요구사항·§4.5 운영 UI 실행으로 통합·트러블슈팅), `INSTALL_MANUAL.md`(4단계 빌드 전면 교체·구성요소·부록 도식), `DEVELOPMENT_GUIDE.md`, `LAB_TEST_GUIDE.md` SW-31, `TANK_RENDERING.md`(§5=WPF 원본 기록으로 표기·코드 지도를 현행 경로로 교체·부록=현행 유일 구현), `src/README.md`, 위키 시스템 구조. **주의: .NET SDK 없어 빌드/테스트 미수행 — 로컬/CI에서 `dotnet build src/HD.Acs.sln` 확인 필요**
 - 2026-09-21: **VDA 5050 수신 경로 진단 로그 — "연결은 됐는데 로봇 상태가 안 보인다" 원인 규명용** — 종전 수신 경로는 실패를 **무음 폐기**해 현장에서 원인 구분이 불가능했다: ① `OnMessageAsync`가 미등록 identity 메시지를 `return`으로 버림 ② `catch (JsonException) { }`가 형식 위반 state를 전량 로그 없이 폐기(`agvPosition.theta`·`batteryCharge` 등 non-nullable 필드에 null이 오면 state가 통째로 사라짐) ③ 구독 토픽이 로그에 없어 `ref.robot`의 manufacturer/serial과 로봇 발행 토픽 대조 불가. **신규** `src/HD.Acs.Vda5050/Vda5050Diagnostic.cs`(`Vda5050DiagnosticKind` 4종: UnknownRobot·MalformedTopic·PayloadInvalid·FirstMessage + 레코드). `Vda5050MasterClient`에 `DiagnosticRaised` 이벤트(HD.Acs.Vda5050는 로깅 패키지 무의존 — 호스트가 ILogger로 연결), (사유,토픽)별 **60초 억제**(state 2Hz 범람 방지), 파싱 실패 시 **페이로드 앞 400자 + 예외** 보고, 채널·로봇별 **최초 수신 1회 INFO**(agvPosition/battery 유무를 한 줄 요약 — UI 위치 `-`의 원인 즉시 판별), 세션마다 진단 상태 초기화(재접속 후 수신 복구가 로그로 확인). **미구독 로봇 발견**: `Vda5050Topics.AnyConnection()`(`uagv/v2/+/+/connection`) 진단 구독 신설 — 개별 구독은 정확한 토픽이라 identity 불일치 시 아무것도 수신되지 않던 맹점 해소(connection만·QoS 0·retain이라 즉시 드러남, state는 중복 전달 위험으로 제외, ACS 자신의 생존 신호는 제외). `SubscribeUnknownRobotDiscoveryAsync`는 **로봇 등록 뒤** 호출(정상 로봇 retained connection 오인 방지). `VdaBridgeService`가 진단을 로그 레벨로 매핑(FirstMessage=INFO, 그 외 WARN)하고 **로봇별 구독 토픽 문자열**을 기동 시 출력, 활성 로봇 0대면 경고. 기존 수신·상태머신 동작 무변경(순수 관측성). **주의: .NET SDK 없어 빌드/테스트 미수행 — 로컬/CI 확인 필요**
 - 2026-09-15: **seamType enum 5값 확장(카탈로그 1:1) — LINE·CROSS3·CROSS4·CORNER2·CORNER3** — ACS가 HD_AMR로 전달하는 용접라인 형태를 종전 3값(`LINE`·`CROSS`·`CORNER`)에서 **검사 타입 카탈로그와 1:1인 5값**으로 세분(CROSS=갈래 수 3/4, CORNER=접합 면 수 2/3). `CROSS3`=3갈래 교차(T/Y), `CROSS4`=4갈래 十자 교차, `CORNER2`=2면 코너, `CORNER3`=3면 코너. **코드**: `param_schema` seamType enum을 3곳 동기 갱신(`db/schema.sql`·`src/HD.Acs.App/Services/ActionCatalogSeed.cs`·신규 `db/migrations/2026-09-15_seamtype_5values.sql`), 등록 게이트(`POST /api/areas/{id}/tasks`) 허용 집합 5값으로 확장(POLYLINE 거부 유지), 계획 UI VM `AreaPlanningViewModel.SeamTypes`=5값(WPF·Avalonia 두 헤드가 공유하는 ComboBox 자동 반영, XAML 무변경). **CROSS*/CORNER*는 HD_AMR 스텁이라 실행 미구현 — 계획 데이터로 저장·발행만**, 레시피 매핑·실행은 N13 확정 후 2차 연동. **문서**: `docs/INSPECTION_TYPES.md`(§3 형상=seamType 5종·§4 매트릭스·§5 레시피 카탈로그·§9), `docs/VDA5050_INTERFACE_SPEC.md`(개정 1.3c 신설·§8.1/§8.2·§8.5·§8.5.1·§10 N13), `docs/HD_AMR_INSPECTION_RECIPE_INTEGRATION.md`(매핑표·N13·수용기준), **LLM WIKI** `docs/obsidian/HD_ACS LLM WIKI/02 설계/HD_ACS - AMR 인터페이스.md`에 `params.seamType` 5값 카탈로그 절 신설(레시피 선택·구현 범위·seamType≠Surface). PDF 재생성은 후속(빌드 도구 필요). **주의: .NET SDK 없어 빌드/테스트 미수행 — 로컬/CI 확인 필요**
 - 2026-09-14: **action_catalog param_schema 기동 시드 — 현장 마이그레이션 누락 방지** — 앱은 자동 마이그레이션을 안 하므로 현장 이동식 서버(폐쇄망)에서 `db/migrations/2026-09-14_seamtype_cross_corner.sql`를 잊으면 CROSS/CORNER 작업이 발행 직전 검증에서 조용히 막히던 리스크 해소. 이번 변경은 순수 데이터(jsonb 값) 갱신이라 기존 `ref.map` 기동 시드 패턴(`Program.cs:55`)에 맞음. 신규 `src/HD.Acs.App/Services/ActionCatalogSeed.cs`: `startWeldInspection` canonical `param_schema`(seamType enum `LINE·CROSS·CORNER`)를 부팅 시 멱등 upsert(없으면 insert, 의미상 다르면 갱신 — jsonb 공백 재포맷 무시 위해 `JsonNode` 정규화 비교). `Program.cs` 기존 시드 scope에서 `ActionCatalogSeed.EnsureAsync` 호출(DB 미기동 내성 유지). → **현장은 앱 바이너리 배포만으로 계약 반영, 수동 SQL 불필요**. 마이그레이션 파일·schema.sql은 직접 접근 DB용으로 보존(3곳 동일 내용 유지 필요 — 시드 파일 주석에 명시). **한계**: 구조 DDL 마이그레이션(ADD COLUMN 등)은 여전히 수동(일반 러너=별도 결정). **.NET SDK 없어 빌드/테스트 미수행 — 로컬/CI 확인 필요**

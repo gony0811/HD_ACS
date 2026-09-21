@@ -250,7 +250,7 @@ CREATE TABLE ref.area_task (
 
 기존 `/api/seams*` · `generate-from-seams`는 dormant 주석 표기만 하고 유지.
 
-## 9. UI (HD.Acs.UI — SlicingView 대체)
+## 9. UI (운영 앱 계획 화면 — 구 SlicingView 대체)
 
 `SlicingView/SlicingViewModel` → `AreaPlanningView/AreaPlanningViewModel`
 (App.xaml.cs DI · ShellViewModel · MainWindow.xaml 탭 헤더 "영역/검사 작업" 갱신):

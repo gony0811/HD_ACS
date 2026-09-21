@@ -1,6 +1,8 @@
 # 선창 도면 렌더링 방법 (3D 뷰 · 전개도)
 
-> 작성 2026-08-27 · 기준 커밋의 `HD.Acs.UI` / `HD.Acs.Core` 코드에서 역으로 정리한 문서.
+> 작성 2026-08-27 · 기준 커밋의 UI/`HD.Acs.Core` 코드에서 역으로 정리한 문서.
+> **2026-09-21 갱신**: WPF 헤드(`HD.Acs.UI`)가 은퇴하여 현행 3D 구현은 **부록(Avalonia 헤드 + 코어 소프트웨어 투영 렌더러)** 이다.
+> §5는 그 원본인 WPF/Helix 구현의 기록이며, 레이어 오프셋·격벽 팔각·격리 모드 규칙은 이관본에도 그대로 적용된다.
 > **무엇을 그리는가**(기하 모델)는 `SPEC_AREA_TASK_MANUAL.md` §1~§3, **어떤 이름으로 부르는가**는
 > `TANK_WALL_LAYOUT.md` §2 와 `surface_id_enum.docx`(대외 정본)가 정본이다.
 > 이 문서는 **어떻게 화면에 그리는가**만 다룬다.
@@ -91,10 +93,14 @@ flowchart TD
 
 ---
 
-## 5. 3D 뷰 — `Views/TankView.xaml.cs`
+## 5. 3D 뷰 — 렌더링 규칙 (원본: WPF `Views/TankView.xaml.cs`, 현행: 부록 참조)
 
-HelixToolkit.Wpf. 메시는 XAML이 아니라 **코드비하인드에서 빌드**한다
-(`MeshBuilder`가 3.1.2에 없어 `MeshGeometry3D`를 직접 만든다).
+> 이 절의 코드 참조는 은퇴한 WPF 헤드의 것이다(2026-09-21 제거). 현행 구현은 `HD.Acs.UI.Core/Rendering`
+> (TankShape·TankSceneBuilder·Camera3·SceneRenderer)과 `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`이며,
+> 아래 규칙(셸 구성·격벽 팔각·층 밴드·레이어 오프셋)은 그대로 이관되었다. 대응은 부록 참조.
+
+원본은 HelixToolkit.Wpf였고, 메시는 XAML이 아니라 **코드비하인드에서 빌드**했다
+(`MeshBuilder`가 3.1.2에 없어 `MeshGeometry3D`를 직접 만들었다).
 
 진입점은 `Rebuild()` → `BuildShell()` + `BuildLevelHighlight()` + `BuildOverlays()`.
 `TankViewModel.ViewChanged` 이벤트 한 개가 이 셋을 모두 다시 트리거한다.
@@ -157,7 +163,7 @@ R(−yaw)이므로 방향 벡터도 −yaw 회전; 미보정 층은 원시 theta
 `TankSceneBuilder.AddRobotHeading`이 **마커 원 중심(로봇 z+0.4m)에서 heading 방향으로 수평하게 뻗는 3D 화살표**를 그린다:
 사각 프리즘 축(길이 0.9m·반두께 0.06m, 옆면 4) + 사각뿔 화살촉(끝 1.35m·밑면 반폭 0.2m, 밑면 1+옆면 4) — 9면 모두 플랫 셰이딩으로
 입체감을 준다(바닥 투영이 아니라 공중의 실체 형상, 사용자 요청). 마커 원은 오버레이(항상 위)라 축이 원 중심에서 나오는 것처럼 보인다. 같은 값이 로봇 상태 카드
-"방향(도면 x축 기준): n°"에도 표시된다. WPF 헤드(Helix)는 원 마커만 유지(Phase 5 처분 결정까지 미이식).
+"방향(도면 x축 기준): n°"에도 표시된다.
 
 ---
 
@@ -229,11 +235,14 @@ v = _projVlen − (py − Margin) / _projScale − VOff     // 층-로컬로 환
 | `Core/Planning/TankGeometry.cs` | 파라미터 → 10면 프레임 생성, 유도값·검증 |
 | `Core/Geometry/Vec3.cs` | `Vec3` 벡터 연산, `WallPose.LocalToDrawing` — (u,v)→도면 3D 정본 |
 | `Core/Planning/LevelBands.cs` | 층 도달 밴드 계산, `ReachableVBand` (UI가 소비만 함) |
-| `UI/Views/TankView.xaml.cs` | 3D 셸·격벽 팔각·층 강조·오버레이 메시 빌드 |
-| `UI/ViewModels/TankViewModel.cs` | 셸 데이터 로드, `BuildFacePlots()` 전개도 탭 |
-| `UI/ViewModels/AreaPlanningViewModel.cs` | 계획 캔버스 `Project()`, 층-로컬 v 변환, 역투영 |
-| `UI/Views/AreaLayoutView.xaml(.cs)` | 계획 캔버스 레이어 z-order, 줌·팬·픽 모드 |
-| `UI/Services/TankLayout.cs` | 벽면 코드·층 정적 목록 (전개도 좌표는 **미사용** — §8) |
+| `UI.Core/Rendering/TankShape.cs` | 면 (u,v)→3D, 격벽 팔각 반폭·`BulkheadPolygon`, 면 타입 색 — 3D 형상 정본 |
+| `UI.Core/Rendering/TankSceneBuilder.cs` | 3D 셸·층 밴드·오버레이·바닥 격자·로봇/이동 마커 씬 구성 |
+| `UI.Core/Rendering/Camera3.cs`·`Scene3.cs` | 오빗 카메라·투영·역투영, 페인터 깊이 정렬·플랫 셰이딩 |
+| `UI.Desktop/Views/Tank3DControl.cs` | 3D 렌더(DrawingContext) + 오빗/팬/줌·바닥 클릭 goto |
+| `UI.Core/ViewModels/TankViewModel.cs` | 셸 데이터 로드, `BuildFacePlots()` 전개도 탭 |
+| `UI.Core/ViewModels/AreaPlanningViewModel.cs` | 계획 캔버스 `Project()`, 층-로컬 v 변환, 역투영 |
+| `UI.Desktop/Views/AreaLayoutView.axaml(.cs)` | 계획 캔버스 레이어 z-order, 줌·팬·픽 모드 |
+| `UI.Core/Services/TankLayout.cs` | 벽면 코드·층 정적 목록 (전개도 좌표는 **미사용** — §8) |
 
 ---
 
@@ -294,12 +303,12 @@ u 값이 유효 범위 안이라 어떤 검증에도 걸리지 않는다.
 
 ---
 
-## 부록 — Avalonia 헤드(HD.Acs.UI.Desktop) 3D 렌더링 (2026-09-03)
+## 부록 — 현행 3D 렌더링: Avalonia 헤드(HD.Acs.UI.Desktop) (2026-09-03, 2026-09-21부터 유일 구현)
 
 크로스플랫폼 헤드는 HelixToolkit 대신 **코어의 소프트웨어 투영 렌더러**로 3D 뷰를 그린다(ADR-005 개정, `docs/UI_CROSS_PLATFORM_REVIEW.md` Phase 3).
 
-- 형상 정본: `HD.Acs.UI.Core/Rendering/TankShape.cs` — 면 프레임 (u,v)→3D(`TryPoint`/`Corners`), 마구리 팔각 반폭 `HalfWidth(g,z)`·`BulkheadPolygon`(z-밴드 클리핑), 면 타입 색 `FaceColor`. 본문 3중복 중 3D(WPF `TankView.HalfWidth`) 복사본의 이관본이며, 2D 전개도 복사본 2개는 잔존.
+- 형상 정본: `HD.Acs.UI.Core/Rendering/TankShape.cs` — 면 프레임 (u,v)→3D(`TryPoint`/`Corners`), 마구리 팔각 반폭 `HalfWidth(g,z)`·`BulkheadPolygon`(z-밴드 클리핑), 면 타입 색 `FaceColor`. 본문 3중복 중 3D 복사본의 이관본이며, 2D 전개도 복사본 2개는 잔존.
 - 씬: `TankSceneBuilder.Build(TankSceneInput)` — 셸(전체 모드만 반투명 채움, 격리 모드 와이어) → 층 밴드(외부향 0.02m) → 오버레이(외부향 0.03m, 상태색) → 바닥 히트 평면+1m 격자(격리 모드) → 로봇 heading 화살표(바닥면 z+0.05m, §5.6) → 로봇/이동 마커. 레이어 오프셋 규칙은 본문과 동일.
 - 투영: `Camera3`(오빗 카메라, z-up, 수직 FOV 45°) + `SceneRenderer.Render` → 화면 px 그리기 목록(면·선은 시선 깊이 내림차순 페인터 정렬, 마커·라벨은 오버레이). 면은 법선·광원 내적으로 플랫 셰이딩(0.65~1.0). 반투명은 2D 알파 블렌딩이라 WPF 3D의 반투명 깊이 컬링 문제가 없다.
 - 바닥 클릭: `Camera3.HitPlaneZ`(화면 점의 시선 광선과 z=층 주행면 교차) → `TankSceneBuilder.FloorPlane` 사각 범위 검사 → `TankViewModel.RequestMoveAsync`.
-- 헤드: `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`가 `DrawingContext`로 그리고 포인터(오빗/팬/줌)를 처리한다. VM `ViewChanged` 시 `ZoomExtents`(WPF와 동일 동작).
+- 헤드: `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`가 `DrawingContext`로 그리고 포인터(오빗/팬/줌)를 처리한다. VM `ViewChanged` 시 `ZoomExtents`.

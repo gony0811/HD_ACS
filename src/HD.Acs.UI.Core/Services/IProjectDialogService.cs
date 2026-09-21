@@ -2,7 +2,7 @@ namespace HD.Acs.UI.Services;
 
 /// <summary>
 /// 프로젝트 관련 View 상호작용(새 프로젝트 팝업 · 파일 열기/저장 대화상자)을 VM에서 분리하는 UI 서비스.
-/// 구현은 각 UI 헤드(WPF: Window·Microsoft.Win32 / Avalonia: StorageProvider)에 있고 ShellViewModel은 이 인터페이스만 사용한다.
+/// 구현은 UI 헤드(Avalonia: Window·StorageProvider)에 있고 ShellViewModel은 이 인터페이스만 사용한다.
 /// Avalonia 대화상자가 비동기 전용이라 계약도 Task 기반이다.
 /// </summary>
 public interface IProjectDialogService

@@ -11,8 +11,7 @@
 #   HDACS_SIGN_IDENTITY   macOS 코드서명 identity (예: "Developer ID Application: ..."). 미지정=ad-hoc("-") 서명.
 #   HDACS_VERSION         버전 문자열 오버라이드 (기본: csproj <Version>, 없으면 0.1.0)
 #   HDACS_OUT             산출 루트 (기본: artifacts/desktop)
-#   HDACS_NUGET_SOURCE    NuGet 복원 소스 오버라이드 (예: https://api.nuget.org/v3/index.json — Telerik 피드 접근 불가 환경용;
-#                         Desktop 헤드는 Telerik을 쓰지 않아 공개 피드만으로 복원된다)
+#   HDACS_NUGET_SOURCE    NuGet 복원 소스 오버라이드 (예: 폐쇄망 내부 미러. 기본은 nuget.config의 nuget.org)
 #
 # 산출물
 #   macOS : artifacts/desktop/<rid>/HD_ACS.app  (+ .zip)
