@@ -14,7 +14,8 @@ namespace HD.Acs.UI.Services;
 public sealed class ProjectService : IProjectService
 {
     public const string Extension = ".hdacs";
-    private const int FormatVersion = 2;   // v2: 영역 corners(임의 4점). v1(구파일)=bbox 사각형 폴백
+    // v3: 영역·작업 식별자(areaId·taskId) 보존. v2: 영역 corners(임의 4점). v1(구파일)=bbox 사각형 폴백
+    internal const int FormatVersion = 3;
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("HDACSPRJ"); // 8 bytes
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -41,10 +42,10 @@ public sealed class ProjectService : IProjectService
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
-                a.StationStandoffM));
+                a.StationStandoffM, a.AreaId));
         }
 
         var doc = new ProjectDoc(FormatVersion, tankId,
@@ -81,6 +82,10 @@ public sealed class ProjectService : IProjectService
                 ?? throw new InvalidDataException("프로젝트 파일을 읽을 수 없습니다 (내용 없음).");
         }
 
+        // 재적재 전에 파일 자체의 식별자 무결성 검증 — 중복 ID는 서버 409로 중간에 멈춰 DB가 반쯤 적재된 상태가 되므로
+        // DB를 건드리기 전에 걸러낸다.
+        ValidateIdentities(doc);
+
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
@@ -95,14 +100,37 @@ public sealed class ProjectService : IProjectService
             {
                 new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
             };
+            // v3: areaId·taskId를 그대로 복원한다 — taskId는 SAIGE productId·진행률·검사 이력을 잇는 영구 키이므로
+            // 파일을 다시 열었다고 바뀌면 같은 용접선의 이력이 끊긴다 [SAIGE v2.6 §2.5]. 구파일(null)은 서버가 새로 발급.
+            // seq·name도 저장값 그대로(종전엔 열 때 name이 사라지고 seq가 재부여됐다).
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, ct);
-            foreach (var t in a.Tasks)
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, a.AreaId, ct);
+            foreach (var t in a.Tasks.OrderBy(t => t.Seq))
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
-                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);
+                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, t.Seq, t.Name, t.TaskId, ct);
         }
 
         CurrentPath = path;
         return doc;
+    }
+
+    /// <summary>파일 내 식별자 무결성 — 빈 GUID·중복 areaId/taskId·영역 내 중복 seq는 손상/수기 편집 파일로 보고 거부.</summary>
+    internal static void ValidateIdentities(ProjectDoc doc)
+    {
+        var areaIds = new HashSet<Guid>();
+        var taskIds = new HashSet<Guid>();
+        foreach (var a in doc.Areas)
+        {
+            if (a.AreaId is Guid aid && (aid == Guid.Empty || !areaIds.Add(aid)))
+                throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}'의 areaId가 비었거나 중복됩니다 ({aid}).");
+            var seqs = new HashSet<int>();
+            foreach (var t in a.Tasks)
+            {
+                if (t.TaskId is Guid tid && (tid == Guid.Empty || !taskIds.Add(tid)))
+                    throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}' 작업 #{t.Seq}의 taskId가 비었거나 중복됩니다 ({tid}).");
+                if (!seqs.Add(t.Seq))
+                    throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}'에 seq {t.Seq}가 중복됩니다.");
+            }
+        }
     }
 }

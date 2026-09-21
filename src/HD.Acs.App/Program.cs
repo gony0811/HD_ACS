@@ -242,9 +242,14 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
         return Results.Conflict(new { error = $"면 {req.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+    // 식별자 보존(.hdacs 재적재) — 지정 시 그 값으로 등록. 이미 쓰이는 ID면 덮어쓰지 않고 거부한다.
+    if (req.AreaId == Guid.Empty)
+        return Results.BadRequest(new { error = "areaId 는 빈 GUID일 수 없습니다 (미지정이면 필드를 생략하세요)." });
+    if (req.AreaId is Guid wantedAreaId && await db.InspectionAreas.AsNoTracking().AnyAsync(a => a.AreaId == wantedAreaId))
+        return Results.Conflict(new { error = $"areaId '{wantedAreaId}' 가 이미 등록되어 있습니다 — 기존 영역을 덮어쓰지 않습니다." });
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
-        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
+        AreaId = req.AreaId ?? Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
         Corners = System.Text.Json.JsonSerializer.Serialize(corners),
         UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
@@ -300,10 +305,18 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
     if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
         return Results.BadRequest(new { error = "용접선 시작/끝점이 영역(사각형) 내부가 아닙니다." });
+    // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
+    // 프로젝트 파일(.hdacs) 재적재 때 같은 값으로 복원해야 한다. 지정 시 그 값으로 등록하되, 이미 존재하면 거부(덮어쓰기 금지).
+    if (req.TaskId == Guid.Empty)
+        return Results.BadRequest(new { error = "taskId 는 빈 GUID일 수 없습니다 (미지정이면 필드를 생략하세요)." });
+    if (req.TaskId is Guid wantedTaskId && await db.AreaTasks.AsNoTracking().AnyAsync(t => t.TaskId == wantedTaskId))
+        return Results.Conflict(new { error = $"taskId '{wantedTaskId}' 가 이미 등록되어 있습니다 — 영구 식별자는 다른 작업에 재사용할 수 없습니다." });
+    if (req.Seq is int wantedSeq && await db.AreaTasks.AsNoTracking().AnyAsync(t => t.AreaId == areaId && t.Seq == wantedSeq))
+        return Results.Conflict(new { error = $"영역 내 seq {wantedSeq} 가 이미 있습니다." });
     int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
-        TaskId = Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name, SeamType = req.SeamType ?? "LINE",
+        TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name, SeamType = req.SeamType ?? "LINE",
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
         SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
@@ -721,6 +734,8 @@ public sealed record CreateTankGeometryRequest(
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
-    double[][]? Corners = null, double? StationStandoffM = null);
+    double[][]? Corners = null, double? StationStandoffM = null,
+    Guid? AreaId = null);   // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
-    double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);
+    double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
+    Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급

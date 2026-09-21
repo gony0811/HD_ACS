@@ -24,10 +24,14 @@ public sealed record AreaDoc(
     double? StationX, double? StationY, double? StationTheta,
     TaskDoc[] Tasks,
     double[][]? Corners = null,          // 임의 4점 사각형. 구파일(null)=bbox 사각형 폴백
-    double? StationStandoffM = null);    // 정차 이격 [m]. 구파일(null)=서버 기본
+    double? StationStandoffM = null,     // 정차 이격 [m]. 구파일(null)=서버 기본
+    Guid? AreaId = null);                // v3: 영역 식별자 보존. 구파일(null)=열 때 서버가 새로 발급
 
 /// <summary>검사 작업 스냅샷 (벽면-로컬 u,v).</summary>
 public sealed record TaskDoc(
     int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
-    string SectionDxfId, string ProfileId);
+    string SectionDxfId, string ProfileId,
+    // v3: 용접선 1구간의 **영구 식별자** [SAIGE v2.6 §2.5] — 도면·진행률·촬영 이미지(productId)를 잇는 키라
+    // 파일을 다시 열어도 같은 값이어야 한다. 구파일(null)=열 때 서버가 새로 발급(이력 연결 끊김).
+    Guid? TaskId = null);

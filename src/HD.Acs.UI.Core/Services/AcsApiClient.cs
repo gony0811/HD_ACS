@@ -251,14 +251,15 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
-        double? stationStandoffM = null, CancellationToken ct = default)
+        double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
             TankId = tankId, WallCode = wallCode, Name = name,
             Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
-            StationStandoffM = stationStandoffM
+            StationStandoffM = stationStandoffM,
+            AreaId = areaId   // null=서버 발급. 지정=식별자 보존 등록(.hdacs 재적재)
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
@@ -280,12 +281,15 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
-        string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default)
+        string seamType, string sectionDxfId, string profileId, string userId,
+        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
-            SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
+            SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId,
+            Seq = seq, Name = name,
+            TaskId = taskId   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
