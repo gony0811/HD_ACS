@@ -117,3 +117,16 @@ public static class TaskOutcome
         return anyFailed ? Failed : Skipped;                   // 소진: 실패 이력 있으면 FAILED, 시도 기록조차 없으면 SKIPPED
     }
 }
+
+/// <summary>
+/// TASK 시도 번호(attempt) 발급 규칙 [VDA §8.1 / SAIGE §2.5 / 비전 v3.2 §3.3] — ACS 발급.
+/// taskId별 누적(1부터, run과 무관) → (taskId, attempt, captureSeq)가 재검사 run에서도 유일하다.
+/// 로봇↔비전 프레임에서 UInt8 이므로 255에서 포화(saturate)한다 — 0으로 되감기면 "최신 시도 = 최댓값" 판정이 깨진다.
+/// </summary>
+public static class TaskAttempt
+{
+    public const int Max = byte.MaxValue;
+
+    /// <param name="alreadyIssued">이 TASK에 지금까지 발행된 액션(시도) 수.</param>
+    public static int Next(int alreadyIssued) => Math.Min(Max, Math.Max(0, alreadyIssued) + 1);
+}

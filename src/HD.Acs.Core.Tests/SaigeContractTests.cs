@@ -102,4 +102,11 @@ public class SaigeContractTests
     [InlineData(new string[0], "SKIPPED", "SKIPPED")]
     public void TaskOutcome_UniqueTaskFinalResult(string[] actions, string workItem, string? expected) =>
         Assert.Equal(expected, TaskOutcome.Classify(actions, workItem));
+
+    /// <summary>attempt = taskId별 누적(1부터), UInt8 프레임 필드라 255에서 포화(되감김 금지).</summary>
+    [Theory]
+    [InlineData(0, 1)] [InlineData(1, 2)] [InlineData(253, 254)] [InlineData(254, 255)] [InlineData(255, 255)] [InlineData(9999, 255)]
+    [InlineData(-3, 1)]
+    public void TaskAttempt_AccumulatesAndSaturates(int alreadyIssued, int expected) =>
+        Assert.Equal(expected, TaskAttempt.Next(alreadyIssued));
 }

@@ -41,6 +41,7 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 
 builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD.Acs.Core.Planning.GreedyNearestPolicy>();
 builder.Services.AddScoped<InspectionDispatcher>();
+builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 TTL 캐시 [SAIGE §5.4]
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<RobotStateService>();
@@ -70,6 +71,10 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+
+        // EF 매핑 컬럼 선보장(추가형만, 멱등) — 아래 시드·이후 API가 새 컬럼을 읽기 전에.
+        await SchemaEnsure.EnsureAsync(db, app.Logger);
+
         const string seedTankId = "CT1";
         var existingMapIds = await db.Maps.AsNoTracking()
             .Where(m => m.TankId == seedTankId).Select(m => m.MapId).ToListAsync();
@@ -506,11 +511,10 @@ app.MapGet("/api/runs/{runId:guid}/task-actions", async (Guid runId, AcsDbContex
             a.Status, a.Result, a.CreatedAt,
         }).ToListAsync()));
 
-// TASK 단위 진행률 (완료/전체·%) — 운영 화면 초기 로드·새로고침용 pull. 실시간은 SignalR "RunProgress".
-app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress, AcsDbContext db) =>
-    await db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RunId == runId)
-        ? Results.Ok(await progress.ComputeRunProgressAsync(runId))
-        : Results.NotFound());
+// TASK 단위 진행률 [SAIGE §5.4/§6] — SAIGE 주기 조회(1~5초)·운영 화면 공용 pull, ~1초 TTL 캐시.
+// 분모는 run 시작 시 고정, 분자는 고유 TASK 종결 수(재시도 중복 없음). 실시간은 SignalR "RunProgress".
+app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress) =>
+    await progress.GetCachedAsync(runId) is { } p ? Results.Ok(p) : Results.NotFound(new { error = $"run '{runId}' 없음" }));
 
 // 작업자 수동 층(존) 변경 [Q9] — Operator 권한 필요 (TODO: 인증 미들웨어)
 app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeRequest req, MissionService missions) =>

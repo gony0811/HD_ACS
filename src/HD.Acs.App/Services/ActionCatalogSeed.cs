@@ -14,13 +14,15 @@ namespace HD.Acs.App.Services;
 /// param_schema 는 운영자 튜닝 대상이 아니라 ACS↔AMR **계약**이므로, 코드가 정본이며 부팅 때 맞춘다.
 ///
 /// ⚠️ 유지보수: 아래 canonical JSON 은 <c>db/schema.sql</c> 의 startWeldInspection param_schema 및
-/// <c>db/migrations/2026-09-15_seamtype_5values.sql</c>(최신) 와 **동일 내용**이어야 한다.
+/// <c>db/migrations/2026-09-21_param_schema_taskid_attempt.sql</c>(최신) 와 **동일 내용**이어야 한다.
 /// VDA5050_INTERFACE_SPEC §8.2 개정 시 세 곳을 함께 갱신할 것.
 /// </summary>
 public static class ActionCatalogSeed
 {
     // startWeldInspection param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8.2.
     // seamType enum = LINE·CROSS3·CROSS4·CORNER2·CORNER3 (§8.5.1, 2026-09-15 — 카탈로그 1:1 5종).
+    // params.taskId·attempt (개정 1.4, 2026-09-21) — 선택 필드(구버전 AMR 호환). attempt는 발행 시점 발급이라
+    // 큐 전개 시 검증 payload에는 없다 → required에 넣지 않는다.
     public const string StartWeldInspectionParamSchema = """
     {
       "type": "object",
@@ -56,7 +58,9 @@ public static class ActionCatalogSeed
             "standoffMm":          { "type": "number" },
             "workingDistanceMm":   { "type": "number" },
             "anchorGroupId":       { "type": "string" },
-            "seqInGroup":          { "type": "integer", "minimum": 1 }
+            "seqInGroup":          { "type": "integer", "minimum": 1 },
+            "taskId":              { "type": "string", "format": "uuid" },
+            "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 }
           }
         }
       }
@@ -92,7 +96,7 @@ public static class ActionCatalogSeed
         {
             row.ParamSchema = StartWeldInspectionParamSchema;
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (seamType LINE·CROSS3·CROSS4·CORNER2·CORNER3)", actionType);
+            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (VDA 사양서 개정 1.4 — taskId·attempt)", actionType);
         }
     }
 

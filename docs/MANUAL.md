@@ -325,6 +325,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지 |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
+| `GET /api/runs/{runId}/progress` | TASK 진행률 [SAIGE §5.4/§6] — 분모 `totalTasks`는 run 시작 시 고정, 분자는 **고유 taskId** 종결 수(재시도 중복 없음). `skippedTasks`⊂`failedTasks`, `excludedTasks`(미보정 층 등 제외분, 분모 미포함), `percent`·`fraction`. ~1초 TTL 캐시(1~5초 polling 대응) |
 | `GET /api/runs/{runId}/work-items` | 실행 큐(정차 단위) 상태 조회 |
 | `GET /api/runs/{runId}/task-actions` | 용접라인(액션) 단위 상태 조회 |
 | `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |
