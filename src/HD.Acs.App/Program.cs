@@ -2,6 +2,7 @@ using System.Text.Json;
 using HD.Acs.App.Hubs;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
+using HD.Acs.Core.Integration;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
@@ -220,6 +221,25 @@ app.MapGet("/api/areas", async (string? tankId, int? level, int? wallId, TankSha
 app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, TankShapeQueryService shape) =>
     await shape.GetAreaTasksAsync(areaId) is { } tasks
         ? Results.Ok(tasks) : Results.NotFound(new { error = $"area '{areaId}' 없음" }));
+
+// 면·층 단위 TASK 목록 [이노로보틱스 개선 요청 2026-09-22 — SAIGE §4.6.4 반영 요청분].
+// 위 영역 단건 조회는 호출 수가 영역 수에 비례해(선창 1개 ≈ 1만 회) 화면 1장에 수백 회가 필요했다 → 화면 단위 1회.
+// 기존 경로는 그대로 유지한다(요청 문서: 폐지 요청 아님). limit/offset 은 전 선창 일괄 적재용 안전판(기본=전량).
+app.MapGet("/api/tasks", async (string? tankId, int? wallId, int? level, int? limit, int? offset,
+    TankShapeQueryService shape) =>
+{
+    if (string.IsNullOrWhiteSpace(tankId))
+        return Results.BadRequest(new { error = "tankId 는 필수입니다." });
+    if (wallId is not null && WallIds.ToCode(wallId.Value) is null)
+        return Results.BadRequest(new { error = "wallId 는 1~10 이어야 합니다 (부록 A.1). 미지정 시 전 면." });
+    if (level is < 1)
+        return Results.BadRequest(new { error = "level 은 1 이상이어야 합니다 (1-based, 바닥 층 = 1). 미지정 시 전 층." });
+    if (limit is < 1) return Results.BadRequest(new { error = "limit 은 1 이상이어야 합니다." });
+    if (offset is < 0) return Results.BadRequest(new { error = "offset 은 0 이상이어야 합니다." });
+
+    return await shape.GetTasksAsync(tankId, wallId, level, limit, offset) is { } tasks
+        ? Results.Ok(tasks) : Results.NotFound(new { error = $"tank '{tankId}' 없음" });
+});
 
 app.MapGet("/api/internal/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
     await svc.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound());

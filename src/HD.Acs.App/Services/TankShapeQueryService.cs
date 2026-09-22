@@ -79,12 +79,19 @@ public sealed class TankShapeQueryService
         var q = _db.InspectionAreas.AsNoTracking().AsQueryable();
         if (tankId is not null) q = q.Where(a => a.TankId == tankId);
         if (level is not null) q = q.Where(a => a.Level == level);
+        if (wallId is not null)
+        {
+            // wallId → wall_code 로 바꿔 **DB 조건**으로 넘긴다. 코드→ID는 C# 함수라 SQL로 번역되지 않으므로,
+            // 이 변환 없이 메모리에서 거르면 선창의 전 영역(1만 건 규모)을 매 호출마다 적재하게 된다.
+            var code = WallIds.ToCode(wallId.Value);
+            if (code is null) return Array.Empty<TankShapeArea>();   // 1~10 밖 = 해당 면 없음
+            q = q.Where(a => a.WallCode == code);
+        }
         var areas = await q.Select(a => new { a.AreaId, a.TankId, a.Name, a.WallCode, a.Level, a.Corners, a.SortOrder, TaskCount = a.Tasks.Count })
             .ToListAsync(ct);
 
         return areas
             .Select(a => new { a, WallId = WallIds.FromCode(a.WallCode) })
-            .Where(x => wallId is null || x.WallId == wallId)
             .OrderBy(x => x.a.TankId).ThenBy(x => x.WallId).ThenBy(x => x.a.Level).ThenBy(x => x.a.SortOrder).ThenBy(x => x.a.Name)
             .Select(x => new TankShapeArea(x.a.AreaId, x.a.Name, x.a.TankId, x.WallId, x.a.WallCode, x.a.Level, x.a.TaskCount,
                 (JsonSerializer.Deserialize<double[][]>(x.a.Corners) ?? Array.Empty<double[]>())
@@ -102,11 +109,60 @@ public sealed class TankShapeQueryService
         return tasks.Select(ToTask).ToList();
     }
 
+    /// <summary>
+    /// 면·층 단위 TASK 목록 [이노로보틱스 개선 요청 2026-09-22 — SAIGE §4.6.4 반영 요청분].
+    /// 영역 단건 조회(<see cref="GetAreaTasksAsync"/>)만으로는 호출 수가 영역 수에 비례해(선창 1개 ≈ 1만 회)
+    /// SAIGE 화면 1장(면 1개 × 층 1개)을 그리는 데 수백 회가 필요했다 — 화면 단위로 열어 1회로 만든다.
+    /// 반환 항목은 영역 단건 응답과 동일하고 소속(areaId·areaName·wallId·wallCode·level)만 덧붙는다.
+    /// 정렬 = wallId → level → 영역 sortOrder → 영역명 → seq (DB에서 정렬·페이징하므로 limit/offset이 전량 적재를 피한다).
+    /// 선창이 없으면 null(404).
+    /// </summary>
+    public async Task<IReadOnlyList<TankShapeTaskFlat>?> GetTasksAsync(string tankId, int? wallId, int? level,
+        int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        if (!await _db.TankGeometries.AsNoTracking().AnyAsync(g => g.TankId == tankId, ct)) return null;
+
+        var q = from t in _db.AreaTasks.AsNoTracking()
+                join a in _db.InspectionAreas.AsNoTracking() on t.AreaId equals a.AreaId
+                where a.TankId == tankId
+                select new { t, a };
+        if (wallId is not null)
+        {
+            var code = WallIds.ToCode(wallId.Value);
+            if (code is null) return Array.Empty<TankShapeTaskFlat>();
+            q = q.Where(x => x.a.WallCode == code);
+        }
+        if (level is not null) q = q.Where(x => x.a.Level == level);
+
+        // wallId 순서는 DB에 없는 값이라 CASE 식으로 만든다(정렬을 메모리로 끌어오면 페이징이 무의미해진다).
+        // 매핑 정본은 Core WallIds — 이 식이 어긋나지 않는지는 TankShapeApiTests 가 10면 순서로 검증한다.
+        var ordered = q
+            .OrderBy(x => x.a.WallCode == "B" ? 1 : x.a.WallCode == "T" ? 2 : x.a.WallCode == "PM" ? 3
+                : x.a.WallCode == "SM" ? 4 : x.a.WallCode == "F" ? 5 : x.a.WallCode == "A" ? 6
+                : x.a.WallCode == "PL" ? 7 : x.a.WallCode == "SL" ? 8 : x.a.WallCode == "PU" ? 9
+                : x.a.WallCode == "SU" ? 10 : 0)
+            .ThenBy(x => x.a.Level).ThenBy(x => x.a.SortOrder).ThenBy(x => x.a.Name).ThenBy(x => x.t.Seq)
+            .AsQueryable();
+        if (offset is int skip and > 0) ordered = ordered.Skip(skip);
+        if (limit is int take) ordered = ordered.Take(take);
+
+        var rows = await ordered.Select(x => new
+        {
+            x.t, x.a.AreaId, AreaName = x.a.Name, x.a.WallCode, x.a.Level
+        }).ToListAsync(ct);
+
+        return rows.Select(r => new TankShapeTaskFlat(
+            r.t.TaskId, r.AreaId, r.AreaName, WallIds.FromCode(r.WallCode), r.WallCode, r.Level,
+            r.t.Seq, r.t.Name, Mm(r.t.StartU), Mm(r.t.StartV), Mm(r.t.EndU), Mm(r.t.EndV),
+            SeamLengthMm(r.t), r.t.SeamType)).ToList();
+    }
+
     private static TankShapeTask ToTask(AreaTaskEntity t) => new(
-        t.TaskId, t.Seq, t.Name, Mm(t.StartU), Mm(t.StartV), Mm(t.EndU), Mm(t.EndV),
-        // 면-로컬 (u,v)는 정규직교 프레임이라 평면 거리가 곧 3D 용접선 길이(챔퍼면 포함)
-        Mm(Math.Sqrt(Math.Pow(t.EndU - t.StartU, 2) + Math.Pow(t.EndV - t.StartV, 2))),
-        t.SeamType);
+        t.TaskId, t.Seq, t.Name, Mm(t.StartU), Mm(t.StartV), Mm(t.EndU), Mm(t.EndV), SeamLengthMm(t), t.SeamType);
+
+    /// <summary>면-로컬 (u,v)는 정규직교 프레임이라 평면 거리가 곧 3D 용접선 길이(챔퍼면 포함).</summary>
+    private static int SeamLengthMm(AreaTaskEntity t) =>
+        Mm(Math.Sqrt(Math.Pow(t.EndU - t.StartU, 2) + Math.Pow(t.EndV - t.StartV, 2)));
 
     private static int Mm(double meters) => SaigeUnits.ToMm(meters);
     private static double Deg(double rad) => Math.Round(rad * 180.0 / Math.PI, 3);
@@ -135,3 +191,10 @@ public sealed record TankShapeArea(Guid AreaId, string AreaName, string TankId, 
 
 public sealed record TankShapeTask(Guid TaskId, int Seq, string? Name, int StartU, int StartV, int EndU, int EndV,
     int SeamLength, string SeamType);
+
+/// <summary>
+/// 면·층 단위 TASK 응답 — <see cref="TankShapeTask"/>와 같은 항목 + 소속 5필드(areaId·areaName·wallId·wallCode·level).
+/// 소속 값은 모두 영역 조회(§4.6.3)가 이미 반환하는 것이라 새로 산출하는 데이터는 없다.
+/// </summary>
+public sealed record TankShapeTaskFlat(Guid TaskId, Guid AreaId, string AreaName, int WallId, string WallCode, int Level,
+    int Seq, string? Name, int StartU, int StartV, int EndU, int EndV, int SeamLength, string SeamType);

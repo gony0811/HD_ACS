@@ -16,6 +16,21 @@ public class SaigeContractTests
     public void WallId_MatchesAppendixA(string? code, int expected) =>
         Assert.Equal(expected, WallIds.FromCode(code));
 
+    /// <summary>wallId → wall_code 역매핑이 정매핑과 왕복 일치한다(대외 질의 필터를 DB 조건으로 바꿀 때 쓰는 경로).</summary>
+    [Fact]
+    public void WallId_ToCode_RoundTripsWithFromCode()
+    {
+        foreach (int id in Enumerable.Range(1, 10))
+        {
+            var code = WallIds.ToCode(id);
+            Assert.NotNull(code);
+            Assert.Equal(id, WallIds.FromCode(code));
+        }
+        Assert.Null(WallIds.ToCode(0));     // 0 = 예약(미지정)
+        Assert.Null(WallIds.ToCode(11));
+        Assert.Null(WallIds.ToCode(-1));
+    }
+
     /// <summary>TankGeometry가 생성하는 10면 코드가 전부 1~10에 1:1로 대응한다(누락·중복 없음).</summary>
     [Fact]
     public void WallId_CoversAllGeneratedWalls()

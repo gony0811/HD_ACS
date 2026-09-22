@@ -117,6 +117,82 @@ public class TankShapeApiTests
         Assert.Null(await svc.GetWallsAsync("NOPE", null));      // 없는 선창 = 404
     }
 
+    /// <summary>10면 × 2층에 영역 1개·TASK 1개씩 — 필터·정렬 검증용.</summary>
+    private static async Task<TankShapeQueryService> SeedAllWallsAsync()
+    {
+        var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        db.TankGeometries.Add(new TankGeometryEntity
+        {
+            TankId = "CT1", LengthL = 45, WFloor = 8.2, ThetaLow = Math.PI / 4, HLow = 1.9, HWall = 5.4, ThetaUp = Math.PI / 4, HUp = 1.9,
+            LevelZ = "[0,2.4,4.8,7.2]",
+        });
+        foreach (var code in new[] { "B", "T", "PM", "SM", "F", "A", "PL", "SL", "PU", "SU" })
+            foreach (var level in new[] { 1, 2 })
+                db.InspectionAreas.Add(new InspectionAreaEntity
+                {
+                    AreaId = Guid.NewGuid(), TankId = "CT1", WallCode = code, Level = level, Name = $"{code}-L{level}-01",
+                    Corners = "[[0,0],[1,0],[1,1],[0,1]]",
+                    Tasks = { new AreaTaskEntity { TaskId = Guid.NewGuid(), Seq = 1, StartU = 0.1, StartV = 0.1, EndU = 0.9, EndV = 0.1, SeamType = "LINE" } },
+                });
+        await db.SaveChangesAsync();
+        return new TankShapeQueryService(db);
+    }
+
+    /// <summary>
+    /// 면·층 단위 TASK 조회 [이노로보틱스 요청 2026-09-22] — 요청 문서의 응답 예시 그대로.
+    /// 현행 영역 단건 응답과 같은 항목 + 소속 5필드.
+    /// </summary>
+    [Fact]
+    public async Task Tasks_ByWallAndLevel_MatchesRequestedShape()
+    {
+        var svc = await SeedAsync();
+
+        var tasks = (await svc.GetTasksAsync("CT1", wallId: 3, level: 2))!;
+        Assert.Equal(2, tasks.Count);                       // 시드 영역(PM·L2)의 TASK 2건
+        var t = tasks[0];
+        Assert.Equal((TaskId, AreaId, "PM-L2-01", 3, "PM", 2), (t.TaskId, t.AreaId, t.AreaName, t.WallId, t.WallCode, t.Level));
+        Assert.Equal((1, 3200, 900, 5800, 900, 2600, "LINE"), (t.Seq, t.StartU, t.StartV, t.EndU, t.EndV, t.SeamLength, t.SeamType));
+
+        // 요청 문서 §3 응답 예시의 필드가 모두 있고, 이름·순서가 현행 영역 단건 응답과 어긋나지 않는다
+        var json = JsonSerializer.Serialize(t, Web);
+        foreach (var key in new[] { "taskId", "areaId", "areaName", "wallId", "wallCode", "level",
+                                    "seq", "startU", "startV", "endU", "endV", "seamLength", "seamType" })
+            Assert.Contains($"\"{key}\":", json);
+        Assert.Contains("\"startU\":3200,", json);          // mm 정수 직렬화
+    }
+
+    [Fact]
+    public async Task Tasks_Filters_And_NotFound()
+    {
+        var svc = await SeedAllWallsAsync();
+
+        Assert.Equal(20, (await svc.GetTasksAsync("CT1", null, null))!.Count);       // 무필터 = 전 면·전 층
+        Assert.Equal(10, (await svc.GetTasksAsync("CT1", null, 2))!.Count);          // 층만
+        Assert.Equal(2, (await svc.GetTasksAsync("CT1", 3, null))!.Count);           // 면만
+        var one = Assert.Single((await svc.GetTasksAsync("CT1", 3, 2))!);            // 화면 1장 = 면 1개 × 층 1개
+        Assert.Equal(("PM", 2), (one.WallCode, one.Level));
+
+        Assert.Empty((await svc.GetTasksAsync("CT1", null, 9))!);                    // 없는 층 = 빈 배열
+        Assert.Null(await svc.GetTasksAsync("NOPE", null, null));                    // 없는 선창 = 404
+    }
+
+    /// <summary>정렬 = wallId → level → … — 면 순서가 Core WallIds 매핑과 일치해야 한다(정렬 CASE 식 대조).</summary>
+    [Fact]
+    public async Task Tasks_OrderedByWallIdThenLevel_PagesAreStable()
+    {
+        var svc = await SeedAllWallsAsync();
+
+        var all = (await svc.GetTasksAsync("CT1", null, null))!;
+        Assert.Equal(Enumerable.Range(1, 10).SelectMany(id => new[] { id, id }), all.Select(t => t.WallId));
+        Assert.Equal(new[] { 1, 2 }, all.Where(t => t.WallId == 3).Select(t => t.Level));
+
+        // limit/offset = 같은 정렬의 연속 구간(전량 적재 없이 나눠 받기)
+        Assert.Equal(all.Take(5).Select(t => t.TaskId), (await svc.GetTasksAsync("CT1", null, null, limit: 5))!.Select(t => t.TaskId));
+        Assert.Equal(all.Skip(5).Take(5).Select(t => t.TaskId),
+            (await svc.GetTasksAsync("CT1", null, null, limit: 5, offset: 5))!.Select(t => t.TaskId));
+        Assert.Equal(all.Skip(18).Select(t => t.TaskId), (await svc.GetTasksAsync("CT1", null, null, offset: 18))!.Select(t => t.TaskId));
+    }
+
     [Fact]
     public async Task Areas_And_Tasks_MatchSpecExample()
     {

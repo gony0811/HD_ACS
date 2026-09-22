@@ -313,6 +313,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
 | `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
 | `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
+| `GET /api/tasks?tankId=&wallId=&level=&limit=&offset=` | **[이노로보틱스 요청 2026-09-22]** 면·층 단위 용접선 — 위 응답 + 소속 `areaId`·`areaName`·`wallId`·`wallCode`·`level`. `tankId` 필수, `wallId`(1~10)·`level` 미지정=전체. 화면 1장(면×층) = 조회 1회. 없는 선창 404 |
 | `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
