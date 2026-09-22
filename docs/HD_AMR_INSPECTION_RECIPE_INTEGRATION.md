@@ -37,6 +37,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 |---|---|---|
 | `jobRef` | (문자열) | 로깅·역추적. 해석 불요. **안정 키 아님**(영역 이름·순번 파생) |
 | `params` | **`taskId`** (uuid 문자열, 선택) | **계획 TASK 불변 키** — 검사 결과·이미지를 계획 작업에 대조할 때 이 값을 쓴다. 2026-09-22 ACS 선반영, 소비는 `[N14]` 확정 후 |
+| `params` | **`attempt`** (정수 ≥1, 선택) | **재시도 회차**. `1`=첫 검사, `2` 이상=같은 `taskId` 재검사(사양서 §9.5). 재촬영 이미지를 이전 회차와 구분해 저장할 때 쓴다 — 상한 판정·스킵은 ACS 책임이라 AMR 동작은 회차와 무관 |
 | `position` | `seamStartW`·`seamEndW` [x,y,z] m (맵 좌표) | **툴 회전(수직/수평) 자동 유도** = `seamStartW→seamEndW` 벡터 (§4.4·§8.1) |
 | `position` | `drawingPos.wall_code` | **면 자세 판정 키** (10면 코드) → 레시피 선택 |
 | `params` | **`seamType`** ∈ `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3` (5값, 카탈로그 1:1) | **형상 판정 키** → 레시피 선택 |
@@ -53,7 +54,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
     "seamEndW":   [13.310, 5.980, 1.420],
     "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "SM", "u": 3.12, "v": 1.42, "x": 3.12, "y": 0.0, "z": 1.42 } } },
 { "key": "params", "value": {
-    "taskId": "4b1e07c2-9f3a-4d51-8a77-2c6f0b9d1e44",
+    "taskId": "4b1e07c2-9f3a-4d51-8a77-2c6f0b9d1e44", "attempt": 1,
     "seamType": "LINE", "sectionDxfId": "DXF-CORR-T12", "inspectionProfileId": "INSPECT-STD-01",
     "standoffMm": 400, "workingDistanceMm": 400, "anchorGroupId": "CT1-L2-SM-ST04", "seqInGroup": 2 } }
 ```

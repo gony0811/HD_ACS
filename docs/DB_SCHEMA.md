@@ -28,7 +28,7 @@
 | | run.mission | 층 단위 미션 (order_id = **현재 정차의 orderId**로 정차마다 갱신, 상태머신) | ADR-010 |
 | | run.work_item | **실행 큐** — 정차 1곳(영역 1개)의 작업 항목: 정차 맵좌표·검사 액션 jsonb 사전 구성, 상태 PENDING/DISPATCHED/DONE/SKIPPED + attempts(재큐잉), order_id=배차된 orderId. order_action.work_item_id FK로 결과 집계. 상태 머신은 [INSPECTION_SCENARIO §3.1](INSPECTION_SCENARIO.md) | greedy 배차 |
 | | run.order_node / order_edge | Order 스냅샷 (sequenceId 짝/홀, released=Base) | ADR-002 |
-| | run.order_action | 액션 스냅샷 — actionId가 state 대조 키 | robot-is-truth |
+| | run.order_action | 액션 스냅샷 — actionId가 state 대조 키 | robot-is-truth · `attempts`=발행 회차(1-based, `params.attempt`와 동일 값 — 재시도 판별) |
 | | run.robot_context | 수동 지정 층 vs 로봇 보고 층 분리 보관 + 최신 상태 캐시 | Q9 검증 게이트 |
 | **hist 이력** | hist.transition_log | 상태머신 전이 이벤트 | ADR-010 |
 | | hist.inspection_result | 검사 수행 이력 — 위치+시각 대조 키 보존 | ADR-004, Q2 |

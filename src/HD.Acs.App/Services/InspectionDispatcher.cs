@@ -157,6 +157,7 @@ public sealed class InspectionDispatcher
                     ["workingDistanceMm"] = _workingDistanceMm,
                     ["anchorGroupId"] = anchorGroupId,
                     ["seqInGroup"] = t.Seq,
+                    ["attempt"] = 1,   // 1회차 기본값 — 실제 값은 발행 시점에 덮어쓴다(재시도 회차)
                 };
 
                 var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
@@ -264,6 +265,11 @@ public sealed class InspectionDispatcher
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(node);
 
+        // 재시도 회차(1부터) — work_item.attempts 는 "지금까지의 실패 횟수"라 +1 이 이번 실행의 회차다.
+        // 같은 taskId 를 다시 검사한다는 사실을 AMR·검사 S/W가 알아야 이미지·결과를 회차별로 구분할 수 있다
+        // [SPEC §8.1, N14]. actionId 는 회차마다 새로 발급되므로 회차 자체를 담지 못한다.
+        var attempt = wi.Attempts + 1;
+
         var actionsJson = wi.Actions is null ? new JsonArray() : JsonNode.Parse(wi.Actions)!.AsArray();
         foreach (var an in actionsJson)
         {
@@ -273,9 +279,13 @@ public sealed class InspectionDispatcher
             {
                 ActionType = o["actionType"]!.GetValue<string>(), ActionId = actionId.ToString(), BlockingType = "HARD",
             };
+            // params 는 큐 전개 시점에 만들어 두므로, 발행마다 달라지는 attempt 만 여기서 덮어쓴다.
+            var paramsNode = o["params"]?.DeepClone()?.AsObject() ?? new JsonObject();
+            paramsNode["attempt"] = attempt;
+
             vda.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = o["jobRef"]?.GetValue<string>() ?? "" });
             vda.ActionParameters.Add(new ActionParameter { Key = "position", Value = o["position"]?.DeepClone() });
-            vda.ActionParameters.Add(new ActionParameter { Key = "params", Value = o["params"]?.DeepClone() ?? new JsonObject() });
+            vda.ActionParameters.Add(new ActionParameter { Key = "params", Value = paramsNode });
             node.Actions.Add(vda);
 
             Guid? taskId = Guid.TryParse(o["taskId"]?.GetValue<string>(), out var tid) ? tid : null;
@@ -284,6 +294,7 @@ public sealed class InspectionDispatcher
                 ActionId = actionId, MissionId = mission.MissionId, WorkItemId = wi.WorkItemId,
                 TaskId = taskId, NodeSequenceId = 0, ActionType = vda.ActionType, BlockingType = "HARD",
                 Params = o["position"]?.ToJsonString(), Status = "WAITING",
+                Attempts = attempt,   // 발행한 회차 그대로(1-based) — hist.inspection_result 와 같은 의미
             });
         }
 

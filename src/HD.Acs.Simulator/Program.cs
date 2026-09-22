@@ -260,16 +260,19 @@ async Task ExecuteActionAsync(VdaAction action)
                      && currentAnchorGroup == anchorGroupId
                      && !movedSinceLastAction;
         var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
-        var taskId = WeldInspectionParams.TaskId(action);   // 선택 필드 — 없으면 "" [SPEC §8.1 N14]
+        var taskId = WeldInspectionParams.TaskId(action);     // 선택 필드 — 없으면 "" [SPEC §8.1 N14]
+        var attempt = WeldInspectionParams.Attempt(action);   // 선택 필드 — 없으면 0
         Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label}"
-                          + (taskId.Length > 0 ? $" · task={taskId}" : ""));
+                          + (taskId.Length > 0 ? $" · task={taskId}" : "")
+                          + (attempt > 0 ? $" · {attempt}회차" : ""));
         await Task.Delay(shared ? sharedMs : fullMs);
 
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
         actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef}"
-                                        + (taskId.Length > 0 ? $";taskId={taskId}" : "");
+                                        + (taskId.Length > 0 ? $";taskId={taskId}" : "")
+                                        + (attempt > 0 ? $";attempt={attempt}" : "");
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else
@@ -402,6 +405,15 @@ static class WeldInspectionParams
             && prms.TryGetProperty("taskId", out var t) && t.ValueKind == JsonValueKind.String)
             return t.GetString() ?? "";
         return "";
+    }
+
+    /// <summary>params.attempt(재시도 회차, 1부터 — 선택 필드) 읽기. 없으면 0(미표기).</summary>
+    public static int Attempt(VdaAction action)
+    {
+        if (GetObject(action, "params") is { } prms
+            && prms.TryGetProperty("attempt", out var a) && a.TryGetInt32(out var v) && v >= 1)
+            return v;
+        return 0;
     }
 
     static string? GetString(VdaAction a, string key)

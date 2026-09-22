@@ -60,7 +60,7 @@ stateDiagram-v2
 | →PENDING (전개) | `InspectionDispatcher.BuildQueueAsync` — 영역→정차 맵좌표(standoff)+액션 payload 사전 구성, 발행 전 param_schema 검증(위반 시 run 시작 거부) |
 | PENDING→DISPATCHED | `DispatchNextAsync` greedy 최근접 1건 → `PublishStopAsync`(저장 후 발행, work_item.order_id·mission.order_id 갱신) |
 | DISPATCHED→DONE/PENDING/SKIPPED | `RobotStateService` 정차 완료 판정(잔여 액션 0 + lastNodeSequenceId 도달) → `HandleStopOutcomeAsync` 실패 집계 |
-| 재큐잉 재발행 | **신규 orderId의 새 Order** (order update 아님 — VDA5050_INTERFACE_SPEC §4.5) |
+| 재큐잉 재발행 | **신규 orderId의 새 Order** (order update 아님 — VDA5050_INTERFACE_SPEC §4.5). 액션 payload의 `params.attempt`에 **이번 회차(=attempts+1)** 를 실어 AMR·검사 S/W가 재검사임을 알 수 있게 한다 [SPEC §8.1·§9.5, N14]. 같은 값이 `run.order_action.attempts`에도 기록되어 `hist.inspection_result.attempts`로 이어진다 |
 
 재시도 상한: `Acs:Dispatch:MaxRetries`(기본 2). 층의 PENDING 소진 시 → 그 층 미션 Completed →
 다른 층 남으면 run WAITING_FLOOR_TRANSFER, 전부 소진이면 run COMPLETED (SKIPPED 포함 완료).

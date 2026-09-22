@@ -146,7 +146,8 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "standoffMm":          { "type": "number" },
         "workingDistanceMm":   { "type": "number" },
         "anchorGroupId":       { "type": "string" },
-        "seqInGroup":          { "type": "integer", "minimum": 1 }
+        "seqInGroup":          { "type": "integer", "minimum": 1 },
+        "attempt":             { "type": "integer", "minimum": 1 }
       }
     }
   }
@@ -389,7 +390,7 @@ CREATE TABLE run.order_action (
   status           text NOT NULL DEFAULT 'WAITING',
     -- WAITING | INITIALIZING | RUNNING | FINISHED | FAILED  (VDA5050 actionStatus)
   result           jsonb,              -- 성공/실패 응답 [ADR-004]
-  attempts         int NOT NULL DEFAULT 0,
+  attempts         int NOT NULL DEFAULT 0,   -- 발행 회차(1-based, params.attempt 와 동일 값)
   created_at       timestamptz NOT NULL DEFAULT now()   -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
 );
 CREATE INDEX ix_orderaction_mission ON run.order_action (mission_id, node_sequence_id);

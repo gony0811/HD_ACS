@@ -2,18 +2,18 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.3d** |
+| 문서 버전 | **1.4** |
 | 작성일 | 2026-08-27 (최종 개정 2026-09-22) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
-| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호)는 2026-09-03 승인. N13(검사 타입 카탈로그)은 제안 진행 중 — `seamType` 5값(`LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`)은 2026-09-15 ACS 선반영(발행·UI), HD_AMR 레시피 실행은 미구현. **N14(`params.taskId`)는 2026-09-22 ACS 선반영 — 선택 필드라 기존 AMR 파서 무영향** |
+| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호)는 2026-09-03 승인. N13(검사 타입 카탈로그)은 제안 진행 중 — `seamType` 5값(`LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`)은 2026-09-15 ACS 선반영(발행·UI), HD_AMR 레시피 실행은 미구현. **N14(`params.taskId`·`params.attempt`)는 2026-09-22 ACS 선반영 — 둘 다 선택 필드라 기존 AMR 파서 무영향** |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
 | 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·승인 완료** `[N12]` |
 | 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)** |
 | 개정 1.3a | 2026-09-14 — **`seamType` enum 확장 ACS 선반영**: 계획 UI(③ 검사 작업 등록) seamType 드롭다운 추가에 맞춰 §8.1/§8.2·등록 게이트·`param_schema`가 `LINE`·`CROSS`·`CORNER`를 수용·발행(`POLYLINE` 거부). **`CROSS`/`CORNER`는 HD_AMR 실행 미구현(스텁) — 계획 데이터 전달만**, 레시피 실행은 N13 확정 후 2차 연동 |
 | 개정 1.3b | 2026-09-15 — **`drawingPos.wall_code` 발행 값 도메인 명시**: §8.1/§8.2에 `wall_code`가 항상 `TankGeometry` 10개 면 코드(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`) 중 하나이며 `ref.inspection_area.wall_code`(FK→`ref.wall`)에서 온다는 계약 명문화. §8.4 골든 예시의 임의 표기 `W03`→실제 면 코드 `PM`으로 정정(계약·발행 로직 무변경, 문서 정합만) |
 | 개정 1.3c | 2026-09-15 — **`seamType` enum 5값 확장(카탈로그 1:1)**: 종전 3값 `LINE`·`CROSS`·`CORNER`를 `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`로 세분(CROSS=갈래 수 3/4, CORNER=접합 면 수 2/3). §8.1/§8.2 `param_schema`·등록 게이트·계획 UI 드롭다운·§8.5 카탈로그·§8.5.1 매핑·§10 N13 반영. **ACS 수용·발행·UI 지정만 구현**(`POLYLINE` 거부 유지) — HD_AMR 레시피 실행은 여전히 미구현(스텁), 계획 데이터 전달만 |
-| 개정 1.3d | 2026-09-22 — **`params.taskId`(계획 TASK 불변 키) 추가 — ACS 선반영** `[N14]`: 종전 계약의 식별자는 `actionId`(배차마다 재발급 = 실행 인스턴스)와 `jobRef`(영역 이름·순번 파생이라 계획 수정 시 값이 바뀜)뿐이라, 계획 TASK를 시간이 지나도 동일하게 가리킬 키가 AMR·검사 S/W 쪽에 없었다. `params.taskId`(uuid 문자열, `ref.area_task.task_id`)를 **선택 필드**로 추가 — ACS는 항상 채워 발행하고, **소비(검사 결과 대조 키 채택)는 N14 확정 후 2차 연동**. §8.1/§8.2/§8.4·§10 N14 반영, 기존 필드·required 무변경 |
+| **개정 1.4** | 2026-09-22 — **작업 식별 계약 보강: `params.taskId`(계획 TASK 불변 키) + `params.attempt`(재시도 회차) 추가 — ACS 선반영** `[N14]`. 종전 식별자는 `actionId`(배차·재시도마다 재발급 = *실행 인스턴스* 키)와 `jobRef`(영역 이름·순번 파생이라 계획 수정 시 값이 바뀜)뿐이라 ① 계획 TASK를 시간이 지나도 동일하게 가리킬 키가 없고 ② **같은 작업의 재검사인지 첫 검사인지 구분할 수단이 없었다**. `taskId`(uuid, `ref.area_task.task_id`)와 `attempt`(1부터, 재배차마다 증가)를 **선택 필드**로 추가 — ACS는 항상 채워 발행하고, **소비(결과 대조 키 채택·회차별 이미지 구분)는 N14 확정 후 2차 연동**. §8.1/§8.2/§8.4·§9.5·§10 N14 반영, 기존 필드·`required` 무변경 |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
 > 다른 문서(ARCHITECTURE.md, GRAPH_DATA_MODEL.md, SPEC_PHASE2_ACS.md 등)와 기술이 다를 경우 본 사양서가 우선한다.
@@ -500,6 +500,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | 필드 | 의미 |
 |---|---|
 | `params.taskId` | **계획 TASK 불변 키** (uuid 문자열 — ACS `ref.area_task.task_id`). 2026-09-22 ACS 선반영, **선택 필드**(`required` 아님) `[협의 N14]`. `actionId`는 재시도·재배차마다 새로 발급되는 *실행 인스턴스* 키이고 `jobRef`는 영역 이름·순번에서 파생되어 계획 수정 시 값이 바뀌므로, **같은 검사 작업을 시간이 지나도 동일하게 가리키는 키는 이 값 하나**다. AMR은 현재 해석 불요(로깅·결과 전달 시 echo 권장) — 검사 S/W 결과 대조 키로 채택할지는 N14에서 확정 |
+| `params.attempt` | **재시도 회차** (정수, 1부터). 2026-09-22 ACS 선반영, **선택 필드** `[협의 N14]`. `1`=첫 검사, `2` 이상=같은 `taskId`의 **재검사**(직전 시도가 액션 FAILED로 끝나 ACS가 재배차한 것 — §9.5). 재시도는 항상 **신규 `orderId`·신규 `actionId`** 로 발행되므로 메시지만으로는 재검사임을 알 수 없다. 상한은 ACS 설정(`Acs:Dispatch:MaxRetries`, 기본 2)이며 초과 시 ACS가 스킵 처리하므로 **AMR이 회차를 보고 재시도를 중단할 필요는 없다** — 용도는 로깅·결과 전달 시 회차 구분(같은 용접선의 재촬영 이미지를 덮어쓰지 않기 위함) |
 | `jobRef` | 작업 역추적 키 (사람이 읽는 ID — AMR은 로깅 외 해석 불요). **안정 키가 아니다** — `JOB-{anchorGroupId}-{seqInGroup}` 조합이라 영역 이름·순번이 바뀌면 값도 바뀐다. 불변 키가 필요하면 `params.taskId` 사용 |
 | `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, z는 통과 |
 | `position.drawingPos` | 도면 좌표 echo — tank/level/wall_code + **u,v(벽면-로컬)** + x,y,z(도면). `wall_code`가 **티칭 자세 선택 키** — 값은 **`TankGeometry`가 자동 생성한 10개 면 코드 중 하나**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`, §8.5.1(2) 표). 자유 문자열이 아니라 검사 영역의 소속 면 코드(`ref.inspection_area.wall_code`, FK→`ref.wall`)를 그대로 echo하며, DB FK로 이 집합에 강제된다. `WALL 01`·`W03` 같은 임의 표기는 발행되지 않는다 |
@@ -551,7 +552,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
         "standoffMm": { "type": "number" },
         "workingDistanceMm": { "type": "number" },
         "anchorGroupId": { "type": "string" },
-        "seqInGroup": { "type": "integer", "minimum": 1 }
+        "seqInGroup": { "type": "integer", "minimum": 1 },
+        "attempt": { "type": "integer", "minimum": 1 }
       }
     }
   }
@@ -560,7 +562,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 
 > ※`wall_code`는 스키마상 `{ "type": "string" }`(enum 미강제)이지만, 발행 값은 **항상 10개 면 코드**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`) 중 하나다 — 값 자체는 `ref.inspection_area.wall_code`(FK→`ref.wall`)에서 오므로 DB 제약이 도메인을 보장한다. AMR은 이 10종만 티칭 키로 대응하면 되며, 그 밖의 값이 오면 계약 위반(액션 FAILED + `orderValidationError`)으로 처리해도 무방하다.
 >
-> ※구현(2026-08-28 반영 완료 / 2026-09-22 `taskId` 추가): `drawingPos`의 `u`, `v`와 완전한 `params`(**taskId**·seamType·sectionDxfId·inspectionProfileId·standoffMm·workingDistanceMm·anchorGroupId·seqInGroup)를 ACS가 본 스키마대로 발행하며, **발행 전 자체 스키마 검증**(위반 시 run 시작 거부)도 동작한다. DB 포함 풀 E2E(시뮬레이터)로 검증 완료. AMR 파서는 방어적으로 u,v 부재도 수용 가능하게 구현해도 무방하다.
+> ※구현(2026-08-28 반영 완료 / 2026-09-22 `taskId`·`attempt` 추가): `drawingPos`의 `u`, `v`와 완전한 `params`(**taskId**·**attempt**·seamType·sectionDxfId·inspectionProfileId·standoffMm·workingDistanceMm·anchorGroupId·seqInGroup)를 ACS가 본 스키마대로 발행하며, **발행 전 자체 스키마 검증**(위반 시 run 시작 거부)도 동작한다. DB 포함 풀 E2E(시뮬레이터)로 검증 완료. AMR 파서는 방어적으로 u,v 부재도 수용 가능하게 구현해도 무방하다.
 
 ### 8.3 직렬화 규칙
 
@@ -590,7 +592,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
         "standoffMm": 400,
         "workingDistanceMm": 400,
         "anchorGroupId": "CT1-L2-PM-ST04",
-        "seqInGroup": 2 } }
+        "seqInGroup": 2,
+        "attempt": 1 } }
   ]
 }
 ```
@@ -755,6 +758,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 ### 9.5 실패 처리
 
 - 액션 `FAILED` 보고 → ACS: 검사 실패 기록 → **재시도 N회(신규 orderId 재발행) → 스킵 → 알람** 정책.
+- 재발행된 Order의 액션에는 **`params.attempt`가 증가한 값**으로 실린다(첫 검사 `1`, 첫 재시도 `2`…; `taskId`는 그대로 — §8.1 `[N14]`). `orderId`·`actionId`가 매번 새로 발급되므로 **재검사 여부는 `taskId`·`attempt` 두 필드로만 판별된다**. 재시도 상한 판정·스킵은 ACS 책임이라 AMR은 회차에 따라 동작을 바꿀 필요가 없다.
 - AMR 요건: 실패 시 `actionStatus: "FAILED"` + `resultDescription`, 가능하면 `errors[]`에 유형 코드 병기. 같은 정차의 잔여 액션 계속 여부는 AMR 판단이되 각 액션 상태를 개별 보고할 것.
 
 ---
@@ -778,7 +782,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N11 | Order 거부 보고 방식 | 폐기 + `orderValidationError` | ✅ 동의 (§4.5.2 그대로 구현) |
 | N12 | ACS 생존 신호 | ACS 전용 `connection` 토픽 + ONLINE/OFFLINE/Last Will, QoS 1·retain (§7.2) | ✅ **승인** (2026-09-03) |
 | N13 | 검사 타입 카탈로그·레시피 계약 | 검사 형상 카탈로그 5종(§8.5, `seamType` 1:1) + **`seamType`(LINE/CROSS3/CROSS4/CORNER2/CORNER3) × `wall_code` → 레시피 매핑(§8.5.1)** + HD_AMR 타입별 레시피 라이브러리 운용 | ⏳ **대기** — `seamType` enum 5값 확장은 **ACS 선반영(2026-09-15, §8.1/§8.2)**: ACS가 5종 수용·발행·UI 지정(POLYLINE 거부). HD_AMR **레시피 매핑·실행은 미구현**(스텁) — `CROSS*`/`CORNER*`는 계획 데이터 전달만, 2차 연동 대기 |
-| N14 | 계획 TASK 불변 키 `params.taskId` | `ref.area_task.task_id`(uuid)를 `params.taskId` **선택 필드**로 전달 (§8.1/§8.2). 검사 결과·이미지를 계획 작업에 대조할 안정 키 — `actionId`(실행 인스턴스)·`jobRef`(이름 파생) 로는 불가 | ⏳ **대기** — 발행은 **ACS 선반영(2026-09-22)**. 회신 요청: ① 결과 보고·검사 S/W 전달 시 이 값을 echo/보존할 수 있는지 ② `jobRef` 대신 이 값을 1차 대조 키로 쓸지 ③ 이미지 메타데이터 키 규약(ADR-004/Q2)과의 정합 |
+| N14 | 작업 식별 키 `params.taskId`·`params.attempt` | `ref.area_task.task_id`(uuid)를 `taskId`로, 재시도 회차(1부터)를 `attempt`로 **선택 필드** 전달 (§8.1/§8.2/§9.5). 검사 결과·이미지를 계획 작업 **및 회차**에 대조할 키 — `actionId`(실행 인스턴스)·`jobRef`(이름 파생) 로는 불가 | ⏳ **대기** — 발행은 **ACS 선반영(2026-09-22)**. 회신 요청: ① 결과 보고·검사 S/W 전달 시 두 값을 echo/보존할 수 있는지 ② `jobRef` 대신 `taskId`를 1차 대조 키로 쓸지 ③ 재촬영 이미지를 `attempt`로 구분 저장할지(덮어쓰기 방지) ④ 이미지 메타데이터 키 규약(ADR-004/Q2)과의 정합 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 

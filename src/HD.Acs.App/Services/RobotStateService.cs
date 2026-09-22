@@ -258,7 +258,9 @@ public sealed class RobotStateService
             ActionType = oa.ActionType,
             Position = oa.Params ?? "{}",       // 위치+시각 대조 키 [ADR-004, Q2]
             Status = a.ActionStatus == "FINISHED" ? "SUCCESS" : "FAILED",
-            Attempts = oa.Attempts + 1,
+            // order_action.attempts = 발행 회차(1-based, InspectionDispatcher). 구버전 빌드가 발행해
+            // 0으로 남은 진행 중 액션은 1회차로 본다.
+            Attempts = oa.Attempts > 0 ? oa.Attempts : 1,
             OccurredAt = DateTimeOffset.UtcNow
         });
         return Task.CompletedTask;
