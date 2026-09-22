@@ -5,7 +5,7 @@
 | 문서 버전 | 1.0 (2026-09-02) |
 | 대상 | HD_ACS를 PC(개발/실험실/현장 서버)에 설치·기동하려는 담당자 |
 | 소요 시간 | 인프라 포함 약 30~60분 (다운로드 제외) |
-| 구성 요소 | HD.Acs.App(서버 :5199) · HD.Acs.UI(WPF 운영 앱) · PostgreSQL(:5432) · MQTT 브로커(:1883) · HD.Acs.Simulator(검증용 가상 로봇) |
+| 구성 요소 | HD.Acs.App(서버 :5199) · HD.Acs.UI.Desktop(Avalonia 운영 앱, Win/macOS/Linux) · PostgreSQL(:5432) · MQTT 브로커(:1883) · HD.Acs.Simulator(검증용 가상 로봇) |
 
 > 이 PC(개발 PC)에는 3~4단계 인프라가 **이미 docker로 구동 중**(dev-postgres/dev-rabbitmq)이고 DB도 구성돼 있다.
 > 이 PC 기준으로는 **5단계(빌드)부터** 진행하면 된다. 신규 PC는 0단계부터 순서대로.
@@ -16,11 +16,10 @@
 
 | 항목 | 요구 | 확인 방법 |
 |---|---|---|
-| OS | Windows 10/11 (UI 필수 — WPF), 서버·시뮬레이터만이면 macOS/Linux 가능 | — |
+| OS | Windows 10/11 · macOS · Linux (UI 포함 전 구성요소가 크로스플랫폼) | — |
 | .NET SDK | **8.0 이상** (9.x로 8.0 타깃 빌드 가능) | `dotnet --version` |
 | Docker Desktop | 인프라를 docker로 쓸 경우 (권장) | `docker --version` |
 | Git | 소스 확보용 | `git --version` |
-| Telerik 계정 | **UI 빌드 시에만** — nuget.telerik.com 자격증명 | 4단계 참고 |
 
 ⚠ **포트 확인**: 이 프로젝트의 서버 포트는 **5199**다(5100은 이 개발 PC에 상주하는 NAMUGA 계열 제품
 `CS01_P.exe`와 충돌하여 회피). 설치 대상 PC에서 5199·5432·1883이 비어 있는지 확인:
@@ -99,35 +98,35 @@ docker exec dev-postgres psql -U postgres -d hdacs -c "SELECT robot_id, manufact
 
 ## 4단계. 빌드
 
-### 4.1 서버·시뮬레이터 (Telerik 불필요 — 어디서나 빌드 가능)
+### 4.1 솔루션 전체 (어느 OS에서나 동일)
 
-```powershell
-cd D:\Github\HD_ACS\src
-dotnet build HD.Acs.App\HD.Acs.App.csproj
-dotnet build HD.Acs.Simulator\HD.Acs.Simulator.csproj
-# 단위 테스트 통과 확인
-dotnet test  HD.Acs.Core.Tests\HD.Acs.Core.Tests.csproj
-```
-
-**macOS/Linux(또는 Telerik 없는 PC)** 는 WPF 헤드(`HD.Acs.UI`, `net8.0-windows`)가 복원 단계에서 실패해
-`HD.Acs.sln` 전체 빌드가 중단된다. WPF만 제외한 **솔루션 필터**로 빌드·테스트한다:
+전 프로젝트가 `net8.0`이라 솔루션 하나로 빌드·테스트한다. 상용 피드 자격증명은 필요 없다
+(Telerik UI for WPF에 의존하던 WPF 헤드는 은퇴 — 2026-09-21).
 
 ```bash
 cd src
-dotnet build HD.Acs.CrossPlatform.slnf     # App·Simulator·Avalonia 헤드·테스트 3종 (WPF 제외 10개)
-dotnet test  HD.Acs.CrossPlatform.slnf
+dotnet build HD.Acs.sln
+dotnet test  HD.Acs.sln
 ```
 
-### 4.2 UI (Windows 전용, Telerik 자격증명 필요)
+개별 프로젝트만 빌드하려면:
 
-```powershell
-dotnet nuget update source Telerik --username <계정메일> --password <비밀번호> --store-password-in-clear-text
-dotnet build HD.Acs.UI\HD.Acs.UI.csproj
+```bash
+dotnet build HD.Acs.App/HD.Acs.App.csproj
+dotnet build HD.Acs.Simulator/HD.Acs.Simulator.csproj
+dotnet test  HD.Acs.Core.Tests/HD.Acs.Core.Tests.csproj
 ```
 
-⚠ 루트 `nuget.config`는 nuget.org + Telerik 두 소스만 등록돼 있다 — **packageSourceMapping을 추가하지 말 것**
-(Telerik.Licensing=nuget.org / MediaFoundation=Telerik 피드로 나뉘어 매핑이 복원을 깨뜨린 이력 있음).
-폐쇄망이면 개발 PC의 전역 패키지 캐시(`%USERPROFILE%\.nuget\packages`)를 복사해 오프라인 복원.
+### 4.2 운영 UI (Windows·macOS·Linux 공통)
+
+```bash
+dotnet build HD.Acs.UI.Desktop/HD.Acs.UI.Desktop.csproj
+dotnet run   --project HD.Acs.UI.Desktop
+```
+
+배포 산출물(.app 번들 등)은 `tools/publish_desktop.sh <rid>` — 자세한 절차는 `MANUAL.md` §4.5.
+루트 `nuget.config`는 nuget.org 하나만 등록한다. 폐쇄망이면 개발 PC의 전역 패키지 캐시
+(`%USERPROFILE%\.nuget\packages` / `~/.nuget/packages`)를 복사해 오프라인 복원.
 
 ---
 
@@ -143,7 +142,8 @@ dotnet build HD.Acs.UI\HD.Acs.UI.csproj
 | `Acs:Dispatch:MaxRetries` | 2 | 실패 재시도 상한 |
 | `Acs:Dispatch:AllowedDevXy` / `Theta` | 0.08 / 0.07 | 도착 판정 허용 오차 |
 
-UI 쪽: `src/HD.Acs.UI/appsettings.json`의 `Acs:BaseUrl`이 `http://localhost:5199`인지 확인.
+UI 쪽: `src/HD.Acs.UI.Desktop/appsettings.json`의 `Acs:BaseUrl`이 `http://localhost:5199`인지 확인
+(환경변수 `Acs__BaseUrl`로도 덮어쓸 수 있다).
 **서버가 다른 PC**(예: Mac에서 App 실행)면 ① 서버 측 `ListenHost`를 `0.0.0.0`으로 ② UI 측 `BaseUrl`을
 `http://<서버IP>:5199`로 바꾼다(REST·SignalR 공용 — 이 값 하나면 됨). 수정 후 UI 재빌드(또는
 `bin\Debug\net8.0\appsettings.json` 직접 수정) 필요.
@@ -222,7 +222,7 @@ sc.exe start HDACS-App
 | 기동 시 `address already in use` | 이전 App 인스턴스 잔존 — `Get-Process HD.Acs.App \| Stop-Process` 후 재기동 |
 | 시뮬레이터/로봇이 ONLINE 안 됨 | **serial 3자 불일치** — `ref.robot.serial_number` = 로봇(시뮬레이터) serial = MQTT 토픽 요소가 모두 일치해야 함. 기본 AMR-01 |
 | 등록/조회가 500 | **DB 스키마 구버전** — 3단계 최신 schema.sql(또는 migrations 순서 적용) 재확인 |
-| UI 복원(NuGet) 실패 | Telerik 자격증명 미설정 또는 packageSourceMapping 추가됨 — 4.2 참고 |
+| UI 복원(NuGet) 실패 | 공개 피드(nuget.org) 접근 불가 — 폐쇄망이면 패키지 캐시 복사(4.2 참고). Telerik 피드 의존은 제거되었다 |
 | UI가 구버전 동작(포트 5100 호출 등) | UI **재빌드 없이** 구 exe 실행 — `dotnet build` 후 재실행 |
 | run 시작이 409 | 같은 로봇의 진행 중 run 존재 — 운영 화면 "이어하기" 또는 "중단" 후 시작 |
 
@@ -232,8 +232,8 @@ sc.exe start HDACS-App
 
 ```
 ┌─────────────┐  REST+SignalR   ┌──────────────┐  VDA5050/MQTT  ┌────────────┐
-│  HD.Acs.UI  │ ──── :5199 ───▶ │  HD.Acs.App  │ ─── :1883 ───▶ │ 브로커      │◀── 로봇/시뮬레이터
-│  (WPF)      │                 │  (서버)       │                │ (RabbitMQ/  │
+│ UI.Desktop  │ ──── :5199 ───▶ │  HD.Acs.App  │ ─── :1883 ───▶ │ 브로커      │◀── 로봇/시뮬레이터
+│ (Avalonia)  │                 │  (서버)       │                │ (RabbitMQ/  │
 └─────────────┘                 └──────┬───────┘                │  Mosquitto) │
                                        │ :5432                  └────────────┘
                                 ┌──────▼───────┐

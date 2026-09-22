@@ -2,7 +2,7 @@
 
 > **대상 독자**: HD_ACS를 설치·실행·운영하려는 개발자/운영자.
 > **문서 성격**: "어떻게 사용하는가" 중심. 코드 구조·향후 개발 방향은 `DEVELOPMENT_GUIDE.md` 참고.
-> 최종 갱신: 2026-08-03 (커밋 `773441e` — seam 슬라이싱 API + WPF 시각화 기준)
+> 최종 갱신: 2026-09-21 (WPF 헤드·Telerik 의존 제거 — UI 헤드는 Avalonia 하나)
 
 ---
 
@@ -13,7 +13,7 @@ HD_ACS는 **HD현대중공업 LNG 화물창 용접검사로봇의 관제 시스�
 인터페이스는 **VDA 5050 over MQTT** 하나뿐이다.
 
 ```
-운영자(WPF UI / Web) ──REST+SignalR──▶ HD_ACS 서버 (:5199)
+운영자(Avalonia 데스크톱 UI / Web) ──REST+SignalR──▶ HD_ACS 서버 (:5199)
                                           │ VDA 5050 over MQTT (:1883)
                                           ▼
                        HD_AMR (로봇 온보드) — AMR 주행·코봇 검사·장비 제어 전담
@@ -49,7 +49,8 @@ HD_ACS는 **HD현대중공업 LNG 화물창 용접검사로봇의 관제 시스�
 | `HD.Acs.App` | **서버 본체** — ASP.NET Core, REST(:5199) + SignalR + VDA 브릿지, 단일 프로세스 [ADR-011] |
 | `HD.Acs.Simulator` | 가상 HD_AMR — Order 수신→노드 순회→액션 실행/보고. 실장비 없이 E2E 검증용 |
 | `HD.Acs.SimTest` | 시뮬레이터 검증 드라이버 (ACS·DB 없이 마스터 역할 수행, 시나리오 S1~S3) |
-| `HD.Acs.UI` | WPF 운영 앱 (**Windows 전용**, net8.0-windows) — Telerik Fluent + HelixToolkit 3D |
+| `HD.Acs.UI.Core` | UI 공용 코어(net8.0, 프레임워크 중립) — DTO·REST/SignalR 서비스·ViewModel·2D/3D 렌더 프리미티브 |
+| `HD.Acs.UI.Desktop` | **운영 앱** — Avalonia 11(Windows·macOS·Linux), 3D는 코어의 소프트웨어 투영 렌더러 |
 
 MQTT 토픽 규약: `uagv/v2/{manufacturer}/{serialNumber}/{channel}` (channel = order / instantActions / state / connection / factsheet).
 
@@ -60,11 +61,9 @@ MQTT 토픽 규약: `uagv/v2/{manufacturer}/{serialNumber}/{channel}` (channel =
 - **.NET 8 SDK**
 - **PostgreSQL 16** — 스키마는 `db/schema.sql` (ref/run/hist/alarm/sys, snake_case)
 - **MQTT 브로커** — 로컬 개발은 Mosquitto가 간단. `docker/docker-compose.yml`은 RabbitMQ(MQTT 플러그인, 1883 포트)도 제공
-- **(UI 빌드 시) Windows + Telerik NuGet 피드 자격증명** — Telerik UI for WPF 2025.3.813은 `nuget.telerik.com` 로그인 필요.
-  루트 `nuget.config`는 nuget.org + Telerik 두 소스만 등록하며 **packageSourceMapping을 추가하지 말 것**
-  (Telerik.Licensing은 nuget.org, MediaFoundation은 Telerik 피드로 나뉘어 있어 매핑이 복원을 깨뜨린 이력 있음)
-- Mac/Linux에서는 UI 프로젝트를 제외하고 빌드한다:
-  `dotnet build src/HD.Acs.App` 처럼 프로젝트 단위로 빌드하거나 sln에서 UI 제외
+- 상용 NuGet 피드·자격증명은 필요 없다 — 루트 `nuget.config`는 nuget.org 하나만 등록한다
+  (Telerik UI for WPF에 의존하던 WPF 헤드 `HD.Acs.UI`는 2026-09-21 은퇴)
+- 전 프로젝트가 `net8.0`이라 Windows·macOS·Linux 어디서나 `dotnet build src/HD.Acs.sln` 으로 전체 빌드된다
 
 ---
 
@@ -148,20 +147,11 @@ cd src
 시나리오: S1 앵커 공유(FULL/FULL/SHARED 순서 검증) · S2 파라미터 위반 검출 · S3 실패 주입.
 exit code 0 = 전체 통과. 실장비 HD_AMR 구현 시 이 시나리오를 그대로 대조 기준으로 재사용할 수 있다.
 
-### 4.5 WPF UI 실행 (Windows)
+### 4.5 운영 UI(HD.Acs.UI.Desktop, Avalonia) 실행 — Windows / macOS / Linux
 
-```bash
-cd src
-dotnet run --project HD.Acs.UI
-```
-
-셸 구성(RadDocking): 좌측 **화물창 뷰**(3D + 전개도, TankView), 우측 운영 패널 탭 —
-로봇 상태 / 미션 / 알람 / 수동 층 변경 / **캘리브레이션(기준점 캡처)** / **슬라이싱(seam→스테이션 시각화)**.
-상단 툴바에 비상정지 버튼. UI는 REST+SignalR만 사용한다(API-First — 서버에 직접 접근하는 로직 없음).
-
-### 4.6 크로스플랫폼 UI(HD.Acs.UI.Desktop, Avalonia) 실행 — Windows / macOS / Linux
-
-WPF UI와 같은 화면(운영/계획/이력, 3D·전개도)을 Win/mac/Linux에서 제공하는 헤드. 서버(App)는 그대로 Windows 현장 서버에 두고 UI만 원격 PC/Mac에서 띄운다.
+운영/계획/이력 모드와 3D·전개도를 제공하는 **유일한 UI 헤드**다(WPF 헤드 `HD.Acs.UI`는 2026-09-21 은퇴).
+셸은 상단 모드 탭(운영·계획·이력) + 상시 비상정지 버튼이며, UI는 REST+SignalR만 사용한다
+(API-First — 서버 내부에 직접 접근하는 로직 없음). 서버(App)는 현장 서버에 두고 UI만 원격 PC/Mac에서 띄울 수 있다.
 
 **개발 실행** (.NET 8 SDK만 필요, 어느 OS든 동일)
 ```bash
@@ -182,7 +172,7 @@ tools/publish_desktop.sh osx-x64     # Intel Mac
 tools/publish_desktop.sh win-x64     # Windows 폴더 (또는 tools\publish_desktop.ps1)
 tools/publish_desktop.sh linux-x64
 ```
-- Telerik 피드에 접근할 수 없는 PC(자격증명 없음)에서는 `HDACS_NUGET_SOURCE=https://api.nuget.org/v3/index.json` 을 붙인다 — Desktop 헤드는 공개 패키지만 쓴다.
+- 폐쇄망 등 nuget.org에 직접 못 붙는 PC에서는 `HDACS_NUGET_SOURCE=<내부 미러 URL>` 로 복원 소스를 바꾼다(의존성은 전부 공개 패키지).
 - macOS 번들은 `Contents/MacOS/` 에 실행 파일·어셈블리·`appsettings.json` 을 두므로 **번들 안의 appsettings.json 을 편집해 서버 주소를 바꾼다**(또는 환경변수).
 - 서명: 기본 ad-hoc(`codesign -s -`) — **같은 Mac에서 만든 번들은 그대로 실행**된다. 다른 Mac으로 배포하면 Gatekeeper가 차단하므로 ① Finder에서 우클릭 ▸ 열기(1회) 또는 `xattr -dr com.apple.quarantine HD_ACS.app`, ② 정식 배포는 `HDACS_SIGN_IDENTITY="Developer ID Application: …"` 로 서명 후 notarization(`xcrun notarytool submit`). 폐쇄망 현장은 ①로 충분.
 - 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
@@ -342,8 +332,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET .../calibration`이 404 | T_W_D 미등록이거나 **맵버전 불일치**(맵 재생성됨) — 재캘리브레이션 |
 | generate-from-seams 실패 | 유효 T_W_D 없음(의도된 명시적 실패) — 단계 1 먼저 수행 |
 | Order가 릴리즈되지 않음 | 릴리즈 가드 — 로봇 보고 층과 미션 층 불일치. 시뮬레이터 4번째 인자(mapId)를 미션 층과 맞출 것 |
-| Mac/Linux 빌드 실패 | HD.Acs.UI는 net8.0-windows — 프로젝트 단위 빌드로 제외 |
-| Telerik 패키지 복원 실패 | nuget.telerik.com 자격증명 필요. `nuget.config`에 packageSourceMapping 넣지 말 것 |
+| NuGet 복원 실패 | 폐쇄망에서 nuget.org 접근 불가 — 패키지 캐시 복사 또는 `HDACS_NUGET_SOURCE` 로 내부 미러 지정 |
 | solve 결과 RMS 경고 | 기준점 오입력 의심 — 점 목록 확인, 점 간 거리를 벌려 재캡처 |
 
 ---

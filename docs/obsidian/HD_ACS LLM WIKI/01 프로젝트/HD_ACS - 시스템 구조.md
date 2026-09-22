@@ -14,7 +14,6 @@ tags:
 |---|---|
 | HD.Acs.UI.Desktop | Avalonia 데스크톱 UI, 뷰와 플랫폼 어댑터 |
 | HD.Acs.UI.Core | 공용 ViewModel, DTO, API 클라이언트, 렌더링 로직 |
-| HD.Acs.UI | 기존 WPF 헤드; 저장소에 존재하며 처분 결정은 별도 |
 | HD.Acs.App | ACS 서버 애플리케이션 |
 | HD.Acs.Core | 핵심 도메인·계획·기하 로직 |
 | HD.Acs.Data | 데이터 접근 계층 |

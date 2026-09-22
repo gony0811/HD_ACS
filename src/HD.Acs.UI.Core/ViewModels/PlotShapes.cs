@@ -16,7 +16,7 @@ public sealed record AreaPoly(IReadOnlyList<Pt2> Points, double LabelX, double L
 public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge,
     string? Status = null)
 {
-    // 점 형태 파생값 — Line.StartPoint/EndPoint(Avalonia)처럼 Point를 요구하는 헤드용. WPF는 X1..Y2를 직접 바인딩.
+    // 점 형태 파생값 — Line.StartPoint/EndPoint(Avalonia)처럼 Point를 요구하는 바인딩용(좌표 직접 바인딩도 가능).
     public Pt2 Start => new(X1, Y1);
     public Pt2 End => new(X2, Y2);
     public Pt2 EndMarker => new(EndX, EndY);

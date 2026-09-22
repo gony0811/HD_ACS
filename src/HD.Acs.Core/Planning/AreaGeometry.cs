@@ -5,6 +5,12 @@ namespace HD.Acs.Core.Planning;
 /// <summary>영역(Area) 순수 기하 [PHASE2 개정]. 디폴트 정차 pose·경계 판정. 도면 좌표(m).</summary>
 public static class AreaGeometry
 {
+    public const double MaxSpanM = 1.44;
+
+    /// <summary>벽면 로컬 좌표의 축별 AREA 최대 범위(각 1440 mm).</summary>
+    public static bool WithinMaxSize(double minU, double minV, double maxU, double maxV) =>
+        maxU - minU <= MaxSpanM + 1e-9 && maxV - minV <= MaxSpanM + 1e-9;
+
     /// <summary>
     /// standoff 정차점(도면 좌표) — 영역 중심 (uc,vc)의 3D 투영에서 벽 내부향 법선의 **수평 성분** 방향으로
     /// standoffM 만큼 이격. 법선 수평 성분이 없는 면(바닥 B/천장 T)은 이격 없이 중심 투영 폴백(오버라이드 권장).

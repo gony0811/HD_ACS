@@ -7,6 +7,15 @@ namespace HD.Acs.Core.Tests;
 /// <summary>영역(Area) 기하 단위 테스트 [PHASE2 개정].</summary>
 public class AreaGeometryTests
 {
+    [Fact]
+    public void WithinMaxSize_AcceptsBoundaryAndRejectsEitherOversizedAxis()
+    {
+        Assert.True(AreaGeometry.WithinMaxSize(0, 0, 1.44, 1.44));
+        Assert.True(AreaGeometry.WithinMaxSize(0, 0, 0.72, 1.20));
+        Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.441, 1.0));
+        Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.0, 1.441));
+    }
+
     /// <summary>standoff 정차점 — 수직벽: 중심 투영에서 내부향 법선 방향으로 standoff만큼 이격. [standoff 정차]</summary>
     [Fact]
     public void StationDrawing_OffsetsAlongHorizontalNormal()
