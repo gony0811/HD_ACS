@@ -147,6 +147,9 @@ public sealed class InspectionDispatcher
                 var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
                 var taskParams = new JsonObject
                 {
+                    // 계획 TASK 불변 키 [SPEC §8.1, N14] — jobRef(이름 파생·가변)·actionId(재시도마다 재발급)와 달리
+                    // ref.area_task.task_id 는 계획이 살아있는 한 바뀌지 않는다. 검사 S/W 결과 대조용(Q2).
+                    ["taskId"] = t.TaskId.ToString(),
                     ["seamType"] = t.SeamType,
                     ["sectionDxfId"] = t.SectionDxfId,
                     ["inspectionProfileId"] = t.ProfileId,
@@ -168,7 +171,7 @@ public sealed class InspectionDispatcher
                 actionsJson.Add(new JsonObject
                 {
                     ["actionType"] = "startWeldInspection",
-                    ["taskId"] = t.TaskId.ToString(),
+                    ["taskId"] = t.TaskId.ToString(),   // ACS 내부용(order_action.task_id 기록) — 발행분은 params.taskId
                     ["jobRef"] = jobRef,
                     ["position"] = worldPos,
                     ["params"] = taskParams.DeepClone(),

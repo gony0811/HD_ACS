@@ -2,7 +2,7 @@
 project: HD_ACS
 type: contract
 status: documented
-updated: 2026-09-15
+updated: 2026-09-22
 tags:
   - hd-acs
   - llm-wiki
@@ -48,6 +48,22 @@ Area와 Task 자동생성도 이 책임 경계를 유지해야 합니다. 도면
 - **거부값**: `POLYLINE`은 계속 거부됩니다(2점 계약으로 세그먼트 방향 불명 → AMR FAILED). 꺾인 직선은 ACS가 세그먼트별 `LINE`으로 분할합니다.
 - **적용 지점**: `param_schema` 3곳 동기화(`db/schema.sql` · `src/HD.Acs.App/Services/ActionCatalogSeed.cs` · `db/migrations/2026-09-15_seamtype_5values.sql`), 등록 게이트(`POST /api/areas/{id}/tasks`), 계획 UI VM(`AreaPlanningViewModel.SeamTypes`, WPF·Avalonia 두 헤드 공유 드롭다운).
 - 상세 카탈로그·레시피 매핑: `docs/INSPECTION_TYPES.md` §3·§5, `docs/VDA5050_INTERFACE_SPEC.md` §8.5·§8.5.1, `docs/HD_AMR_INSPECTION_RECIPE_INTEGRATION.md`.
+
+## startWeldInspection 의 params.taskId (계획 TASK 불변 키)
+
+2026-09-22 ACS 선반영(사양서 개정 1.3d, 협의 `[N14]`). `params.taskId`는 ACS `ref.area_task.task_id`(uuid)를 그대로 발행한 값이며 **선택 필드**입니다(`required` 아님 — 기존 AMR 파서는 무시해도 계약 위반이 아닙니다).
+
+왜 필요한가 — 종전 계약의 식별자만으로는 계획 작업을 안정적으로 가리킬 수 없었습니다.
+
+| 키 | 성질 | 한계 |
+|---|---|---|
+| `actionId` | ACS 발급 uuid, 상태 대조 정본 | **배차마다 새로 발급** — 재시도하면 같은 용접라인도 다른 값. 실행 인스턴스 ID |
+| `jobRef` | `JOB-{tank}-L{level}-{wall}-{영역명}-{seq}` | 영역 이름·순번 파생 → **계획을 수정하면 값이 바뀜**. 사양서상 "로깅 외 해석 불요" |
+| `params.taskId` | `ref.area_task.task_id` (uuid) | 계획이 살아있는 한 불변 — 검사 결과·이미지 대조 키로 쓸 수 있음 |
+
+ACS 내부는 `run.order_action.task_id`로 역추적이 되므로 ACS만 보면 종전에도 문제가 없었고, 이 필드는 **AMR·검사 S/W 쪽에 안정 키를 주기 위한 것**입니다(ADR-004·미결 Q2의 위치/시각 키 규약과 연결).
+
+구현 범위: ACS는 항상 채워 발행하고, 시뮬레이터는 결과(`resultDescription`)에 `taskId=`를 echo합니다. **HD_AMR의 소비(결과 보고·검사 S/W 전달 시 echo, 1차 대조 키 채택 여부)는 N14 확정 후 2차 연동**입니다.
 
 ## seamType 과 Surface 의 구분
 

@@ -14,13 +14,14 @@ namespace HD.Acs.App.Services;
 /// param_schema 는 운영자 튜닝 대상이 아니라 ACS↔AMR **계약**이므로, 코드가 정본이며 부팅 때 맞춘다.
 ///
 /// ⚠️ 유지보수: 아래 canonical JSON 은 <c>db/schema.sql</c> 의 startWeldInspection param_schema 및
-/// <c>db/migrations/2026-09-15_seamtype_5values.sql</c>(최신) 와 **동일 내용**이어야 한다.
+/// <c>db/migrations/2026-09-22_params_task_id.sql</c>(최신) 와 **동일 내용**이어야 한다.
 /// VDA5050_INTERFACE_SPEC §8.2 개정 시 세 곳을 함께 갱신할 것.
 /// </summary>
 public static class ActionCatalogSeed
 {
     // startWeldInspection param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8.2.
     // seamType enum = LINE·CROSS3·CROSS4·CORNER2·CORNER3 (§8.5.1, 2026-09-15 — 카탈로그 1:1 5종).
+    // params.taskId = 계획 TASK 불변 키(uuid 문자열, 2026-09-22 ACS 선반영 — required 아님, N14).
     public const string StartWeldInspectionParamSchema = """
     {
       "type": "object",
@@ -49,6 +50,7 @@ public static class ActionCatalogSeed
           "type": "object",
           "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
           "properties": {
+            "taskId":              { "type": "string" },
             "seamType":            { "enum": ["LINE", "CROSS3", "CROSS4", "CORNER2", "CORNER3"] },
             "points":              { "type": "array" },
             "sectionDxfId":        { "type": "string" },
@@ -92,7 +94,7 @@ public static class ActionCatalogSeed
         {
             row.ParamSchema = StartWeldInspectionParamSchema;
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (seamType LINE·CROSS3·CROSS4·CORNER2·CORNER3)", actionType);
+            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (seamType 5값 + params.taskId)", actionType);
         }
     }
 

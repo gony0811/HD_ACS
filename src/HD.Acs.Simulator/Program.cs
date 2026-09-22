@@ -260,13 +260,16 @@ async Task ExecuteActionAsync(VdaAction action)
                      && currentAnchorGroup == anchorGroupId
                      && !movedSinceLastAction;
         var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
-        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label}");
+        var taskId = WeldInspectionParams.TaskId(action);   // 선택 필드 — 없으면 "" [SPEC §8.1 N14]
+        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label}"
+                          + (taskId.Length > 0 ? $" · task={taskId}" : ""));
         await Task.Delay(shared ? sharedMs : fullMs);
 
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef}";
+        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef}"
+                                        + (taskId.Length > 0 ? $";taskId={taskId}" : "");
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else
@@ -387,6 +390,18 @@ static class WeldInspectionParams
             else violations.Add("params.seqInGroup");
         }
         return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);
+    }
+
+    /// <summary>
+    /// params.taskId(계획 TASK 불변 키, 선택 필드 — SPEC §8.1 [N14]) 읽기.
+    /// 실장비 HD_AMR이 결과에 이 키를 echo하는 동작을 모사해 E2E에서 키 왕복을 확인한다.
+    /// </summary>
+    public static string TaskId(VdaAction action)
+    {
+        if (GetObject(action, "params") is { } prms
+            && prms.TryGetProperty("taskId", out var t) && t.ValueKind == JsonValueKind.String)
+            return t.GetString() ?? "";
+        return "";
     }
 
     static string? GetString(VdaAction a, string key)
