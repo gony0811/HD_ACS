@@ -128,10 +128,17 @@ public sealed partial class ShellViewModel : ObservableObject
             AreaPlanning.TankId = doc.TankId;
             Tank.TankId = doc.TankId;
             Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
-            await AreaPlanning.LoadAsync();
-            await Tank.LoadAsync();   // 열린 지오메트리로 3D 셸 갱신
+            // 프로젝트 재적재 결과를 모두 다시 조회한다. 특히 Calibration을 갱신하지 않으면
+            // 앱 시작 때 로컬 DB에서 읽은 포인트가 파일에서 복원된 것처럼 화면에 남는다.
+            await Task.WhenAll(
+                AreaPlanning.LoadAsync(),
+                Tank.LoadAsync(),          // 열린 지오메트리로 3D 셸 갱신
+                Calibration.LoadAsync(),
+                Mission.LoadAsync());
             UpdateTitle();
-            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)}";
+            var calibrationCount = doc.Calibrations?.Length ?? 0;
+            var pointCount = doc.Calibrations?.Sum(c => c.Points.Length) ?? 0;
+            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)} · 캘리브레이션 {calibrationCount}개/{pointCount}점 복원";
         }
         catch (Exception ex)
         {

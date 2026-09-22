@@ -8,7 +8,23 @@ public sealed record ProjectDoc(
     int Version,
     string TankId,
     GeometryDoc Geometry,
-    AreaDoc[] Areas);
+    AreaDoc[] Areas,
+    CalibrationDoc[]? Calibrations = null,
+    ScenarioDoc[]? Scenarios = null);
+
+/// <summary>층별 캘리브레이션과 재계산 가능한 원본 대응점.</summary>
+public sealed record CalibrationDoc(
+    string MapId,
+    CalibrationPointDoc[] Points,
+    double Tx, double Ty, double YawRad, double RmsM);
+
+public sealed record CalibrationPointDoc(
+    double DrawingXM, double DrawingYM, double MapX, double MapY);
+
+/// <summary>시나리오와 영역 선택. AreaIds는 같은 파일의 AreaDoc.SourceId를 참조한다.</summary>
+public sealed record ScenarioDoc(
+    string Name,
+    Guid[] AreaIds);
 
 /// <summary>선창 3D 정의 파라미터 [SPEC v3 §2] — 면은 열기 시 재생성되므로 저장하지 않는다.</summary>
 public sealed record GeometryDoc(
@@ -24,7 +40,8 @@ public sealed record AreaDoc(
     double? StationX, double? StationY, double? StationTheta,
     TaskDoc[] Tasks,
     double[][]? Corners = null,          // 임의 4점 사각형. 구파일(null)=bbox 사각형 폴백
-    double? StationStandoffM = null);    // 정차 이격 [m]. 구파일(null)=서버 기본
+    double? StationStandoffM = null,     // 정차 이격 [m]. 구파일(null)=서버 기본
+    Guid? SourceId = null);              // v3: 시나리오-영역 연결 복원용 파일 내부 ID
 
 /// <summary>검사 작업 스냅샷 (벽면-로컬 u,v).</summary>
 public sealed record TaskDoc(
