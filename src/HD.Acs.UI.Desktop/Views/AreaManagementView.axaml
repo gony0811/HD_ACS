@@ -100,7 +100,11 @@
                             <TextBlock Text="용접라인 타입" Classes="lbl" />
                             <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}" />
                         </StackPanel>
-                        <Button Classes="form" Content="작업 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Classes="form" Content="작업 등록" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
+                            <Button Classes="form" Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
+                                    ToolTip.Tip="작업 목록에서 선택한 용접선의 좌표·타입을 고칩니다. 삭제 후 재등록과 달리 taskId(검사 이력 키)가 유지됩니다." />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" />
@@ -139,7 +143,7 @@
 
             <DockPanel Grid.Row="2" MinHeight="120">
                 <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록" FontWeight="Bold" Margin="0,0,0,4" />
-                <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
+                <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="seq" Binding="{Binding Seq}" Width="46" />
                         <DataGridTextColumn Header="시작 u" Binding="{Binding StartU, StringFormat='{}{0:N2}'}" Width="64" />

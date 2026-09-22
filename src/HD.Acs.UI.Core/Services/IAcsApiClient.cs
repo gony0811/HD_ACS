@@ -68,12 +68,16 @@ public interface IAcsApiClient
     Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
-        double? stationStandoffM = null, CancellationToken ct = default);
+        double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
-        string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default);
+        string seamType, string sectionDxfId, string profileId, string userId,
+        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
+    /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지.</summary>
+    Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
+        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
 
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────

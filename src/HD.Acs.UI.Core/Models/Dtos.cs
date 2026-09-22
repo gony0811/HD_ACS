@@ -219,7 +219,7 @@ public sealed record SlicedStationDto(
     PoseDto StationMap,
     List<SlicedTaskDto> Tasks);
 
-/// <summary>GET /api/tanks/{id}/geometry — 선창 파라미터 + 유도값 [SPEC v3 §2].</summary>
+/// <summary>GET /api/internal/tanks/{id}/geometry — 선창 파라미터 + 유도값 [SPEC v3 §2].</summary>
 public sealed record TankGeometryDto(
     string TankId,
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
@@ -229,7 +229,7 @@ public sealed record TankGeometryDto(
     double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
 public sealed record TankDerivedDto(double WLow, double B, double WUp, double WCeil, double H);
 
-/// <summary>GET /api/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>
+/// <summary>GET /api/internal/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>
 public sealed record WallDto(
     string TankId,
     string WallCode,
@@ -244,7 +244,7 @@ public sealed record WallDto(
     string? Description,
     double[]? ReachableVBand = null);   // v3.1 §8: level 필터 조회 시 [vLo,vHi] 도달 v구간
 
-/// <summary>GET /api/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
+/// <summary>GET /api/internal/areas 항목 — ref.inspection_area (벽면-로컬 u,v) [SPEC v3 §4].</summary>
 public sealed record AreaDto(
     Guid AreaId, string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
@@ -252,7 +252,7 @@ public sealed record AreaDto(
     double[][]? Corners = null,    // 임의 4점 사각형 [[u,v]…]. bbox(u/v min·max)와 함께 반환
     double? StationStandoffM = null);   // 정차 이격 [m] — null=서버 설정 기본
 
-/// <summary>GET /api/areas/{id}/tasks 항목 — ref.area_task (u,v) [SPEC v3 §4].</summary>
+/// <summary>GET /api/internal/areas/{id}/tasks 항목 — ref.area_task (u,v) [SPEC v3 §4].</summary>
 public sealed record AreaTaskDto(
     Guid TaskId, int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,

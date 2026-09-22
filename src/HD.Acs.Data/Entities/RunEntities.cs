@@ -11,6 +11,8 @@ public class ScenarioRunEntity
     public string State { get; set; } = "RUNNING";    // RUNNING | WAITING_FLOOR_TRANSFER | COMPLETED | ABORTED
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? EndedAt { get; set; }
+    public int? TotalTasks { get; set; }              // 진행률 분모 — 시작 시 큐 전개 시점 고정 [SAIGE §6.1]. null=구버전 run
+    public int ExcludedTasks { get; set; }            // 큐에서 제외된 TASK 수 (T_W_D 부재 등, 분모 미포함) [SAIGE §6.4]
     public List<MissionEntity> Missions { get; set; } = new();
 }
 

@@ -145,7 +145,9 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "standoffMm":          { "type": "number" },
         "workingDistanceMm":   { "type": "number" },
         "anchorGroupId":       { "type": "string" },
-        "seqInGroup":          { "type": "integer", "minimum": 1 }
+        "seqInGroup":          { "type": "integer", "minimum": 1 },
+        "taskId":              { "type": "string", "format": "uuid" },
+        "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 }
       }
     }
   }
@@ -334,7 +336,10 @@ CREATE TABLE run.scenario_run (
   robot_id     text NOT NULL REFERENCES ref.robot,
   state        text NOT NULL,   -- RUNNING | WAITING_FLOOR_TRANSFER | COMPLETED | ABORTED
   started_at   timestamptz,
-  ended_at     timestamptz
+  ended_at     timestamptz,
+  -- 진행률 분모 고정 [SAIGE 연동 사양서 v2.6 §6.1/§6.4] — run 시작 시 큐 전개 시점에 1회 기록, 이후 불변.
+  total_tasks    int,                     -- 전개된 TASK 총수 (NULL = 구버전 run → work_item 에서 폴백 산출)
+  excluded_tasks int NOT NULL DEFAULT 0   -- 유효 T_W_D 부재 등으로 큐에서 제외된 TASK 수 (분모 미포함)
 );
 
 -- 층 단위 미션 (한 미션의 모든 노드는 같은 map_id)
@@ -456,7 +461,9 @@ INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('LOCALIZATION_LOST',  'WARNING', '측위 상실', '맵 일치율 저하·재측위 실패 — 재시도 무의미, 재측위/수동 개입 필요 [§6.4]'),
   ('EQUIPMENT_ERROR',    'WARNING', '장비 이상', '코봇/카메라 등 온보드 장비 이상 보고 [§6.4]'),
   ('BATTERY_LOW',        'WARNING', '배터리 부족', 'AMR 배터리 부족 보고 [§6.4]'),
-  ('EMERGENCY_STOP',     'WARNING', '비상정지 중', 'AMR측 기능 정지(emergencyStopActive) 보고 — 활성 run 자동 중단됨 [§6.4]')
+  ('EMERGENCY_STOP',     'WARNING', '비상정지 중', 'AMR측 기능 정지(emergencyStopActive) 보고 — 활성 run 자동 중단됨 [§6.4]'),
+  ('SAIGE_UNREACHABLE',  'WARNING', 'SAIGE 전송 불가', '로봇 상태(robot-health-check) 전송이 임계 횟수 이상 연속 실패 — SAIGE 기동/네트워크 확인 [SAIGE §9.5]'),
+  ('SAIGE_BAD_REQUEST',  'WARNING', 'SAIGE 형식 오류', 'SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]')
 ON CONFLICT (alarm_code) DO UPDATE SET
   severity = EXCLUDED.severity, title = EXCLUDED.title, description = EXCLUDED.description;
 

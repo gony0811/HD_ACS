@@ -72,6 +72,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // ── 영역 등록 입력 (면 로컬 u,v, 임의 4점 사각형). level은 서버가 유도 → 입력 없음 ──
     [ObservableProperty] private WallDto? _selectedWall;
     [ObservableProperty] private AreaDto? _selectedArea;
+    /// <summary>작업 목록에서 선택한 작업 — 선택 시 입력 폼에 값이 채워지고 "선택 작업 수정"이 활성화된다(taskId 유지 수정).</summary>
+    [ObservableProperty] private AreaTaskDto? _selectedTask;
     [ObservableProperty] private string _areaName = "A01";
     // 코너 P1~P4 (면-로컬 u,v). 기본=작은 사각형. 캔버스 클릭으로도 순서대로 지정.
     [ObservableProperty] private double _c1U; [ObservableProperty] private double _c1V;
@@ -221,6 +223,36 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"작업 등록 실패: {ex.Message}"; }   // 경계 밖 400
     }
 
+    private bool CanUpdateTask() => SelectedTask is not null;
+
+    /// <summary>
+    /// 선택 작업 수정 — 삭제→재등록과 달리 **taskId가 유지**된다 [SAIGE v2.6 §2.5]: 좌표를 고쳐도 같은 용접선의
+    /// 검사 이력(SAIGE productId)·attempt 누적이 이어진다. seq·name은 건드리지 않는다(null=기존값 유지).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUpdateTask))]
+    private async Task UpdateTaskAsync()
+    {
+        if (SelectedTask is not { } task) return;
+        double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장
+        try
+        {
+            await _api.UpdateAreaTaskAsync(task.TaskId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, _operatorId);
+            StatusMessage = $"작업 수정: seq {task.Seq} [{SelectedSeamType}] ({StartU},{StartV})–({EndU},{EndV})(로컬) — taskId 유지";
+            await LoadTasksAndProjectAsync();
+            await RefreshAreasAsync();
+        }
+        catch (Exception ex) { StatusMessage = $"작업 수정 실패: {ex.Message}"; }   // 경계 밖 400·없음 404
+    }
+
+    partial void OnSelectedTaskChanged(AreaTaskDto? value)
+    {
+        UpdateTaskCommand.NotifyCanExecuteChanged();
+        if (value is null) return;
+        // 선택 작업의 값(층-로컬 v — AreaTasks가 이미 −VOff 적용분)을 폼에 채운다 → 전개도 점선 미리보기도 그 선분으로 이동
+        StartU = value.StartU; StartV = value.StartV; EndU = value.EndU; EndV = value.EndV;
+        if (SeamTypes.Contains(value.SeamType)) SelectedSeamType = value.SeamType;
+    }
+
     [RelayCommand]
     private async Task DeleteTaskAsync(AreaTaskDto? task)
     {
@@ -255,8 +287,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         var list = SelectedArea is { } a
             ? await _api.GetAreaTasksAsync(a.AreaId)
             : (IReadOnlyList<AreaTaskDto>)Array.Empty<AreaTaskDto>();
+        var keep = SelectedTask?.TaskId;   // 수정·새로고침 후에도 같은 작업을 계속 선택(연속 미세 조정)
         AreaTasks.Clear();
         foreach (var t in list) AreaTasks.Add(t with { StartV = t.StartV - off, EndV = t.EndV - off });
+        SelectedTask = keep is Guid id ? AreaTasks.FirstOrDefault(t => t.TaskId == id) : null;
         Project();
     }
 

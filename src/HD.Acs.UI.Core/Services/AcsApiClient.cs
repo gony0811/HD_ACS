@@ -9,6 +9,8 @@ namespace HD.Acs.UI.Services;
 /// typed HttpClient 기반 REST 클라이언트. BaseAddress는 DI(AddHttpClient)에서 AcsOptions로 주입한다.
 /// System.Net.Http.Json 은 JsonSerializerOptions.Web(대소문자 무시)을 사용하므로 PascalCase DTO가 그대로 매핑된다.
 /// </summary>
+// 선창 형상 **조회**(geometry·walls·areas·tasks GET)는 /api/internal/… 을 쓴다 — 같은 이름의 /api/… GET은
+// 대외(SAIGE) 계약 규격(mm 정수·wallId)이라 이 DTO들(m 실수)과 맞지 않는다. 등록·수정·삭제는 /api/… 그대로.
 public sealed class AcsApiClient : IAcsApiClient
 {
     private readonly HttpClient _http;
@@ -235,7 +237,7 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default)
     {
-        var resp = await _http.GetAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", ct);
+        var resp = await _http.GetAsync($"/api/internal/tanks/{Uri.EscapeDataString(tankId)}/geometry", ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<TankGeometryDto>(ct);
@@ -243,7 +245,7 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default)
     {
-        var url = $"/api/tanks/{Uri.EscapeDataString(tankId)}/walls" + (level is int l ? $"?level={l}" : "");
+        var url = $"/api/internal/tanks/{Uri.EscapeDataString(tankId)}/walls" + (level is int l ? $"?level={l}" : "");
         return await _http.GetFromJsonAsync<List<WallDto>>(url, ct) ?? new();
     }
 
@@ -251,14 +253,15 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
-        double? stationStandoffM = null, CancellationToken ct = default)
+        double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
             TankId = tankId, WallCode = wallCode, Name = name,
             Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
-            StationStandoffM = stationStandoffM
+            StationStandoffM = stationStandoffM,
+            AreaId = areaId   // null=서버 발급. 지정=식별자 보존 등록(.hdacs 재적재)
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
@@ -267,7 +270,7 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)
     {
-        var url = $"/api/areas?tankId={Uri.EscapeDataString(tankId)}"
+        var url = $"/api/internal/areas?tankId={Uri.EscapeDataString(tankId)}"
                   + (wallCode is not null ? $"&wallCode={Uri.EscapeDataString(wallCode)}" : "")
                   + (level is int l ? $"&level={l}" : "");
         return await _http.GetFromJsonAsync<List<AreaDto>>(url, ct) ?? new();
@@ -280,19 +283,33 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
-        string seamType, string sectionDxfId, string profileId, string userId, CancellationToken ct = default)
+        string seamType, string sectionDxfId, string profileId, string userId,
+        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
-            SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId
+            SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId,
+            Seq = seq, Name = name,
+            TaskId = taskId   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
     }
 
+    public async Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
+        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/area-tasks/{taskId}", new
+        {
+            StartU = startU, StartV = startV, EndU = endU, EndV = endV,
+            SeamType = seamType, Seq = seq, Name = name, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
+    }
+
     public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/areas/{areaId}/tasks", ct) ?? new();
+        await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/internal/areas/{areaId}/tasks", ct) ?? new();
 
     public async Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default)
     {

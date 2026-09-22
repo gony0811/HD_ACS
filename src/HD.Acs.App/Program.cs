@@ -41,13 +41,25 @@ builder.Services.AddSingleton(sp => new Vda5050MasterClient(
 
 builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD.Acs.Core.Planning.GreedyNearestPolicy>();
 builder.Services.AddScoped<InspectionDispatcher>();
+builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 TTL 캐시 [SAIGE §5.4]
 builder.Services.AddScoped<ProgressService>();
+builder.Services.AddScoped<RunQueryService>();
+builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
+
+// SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
+builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["Acs:Saige:BaseUrl"] ?? "http://localhost:8080");
+    c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Acs:Saige:TimeoutSec", 3));
+});
+builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
 builder.Services.AddSignalR();
 
 var app = builder.Build();
@@ -61,6 +73,10 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<AcsDbContext>();
+
+        // EF 매핑 컬럼 선보장(추가형만, 멱등) — 아래 시드·이후 API가 새 컬럼을 읽기 전에.
+        await SchemaEnsure.EnsureAsync(db, app.Logger);
+
         const string seedTankId = "CT1";
         var existingMapIds = await db.Maps.AsNoTracking()
             .Where(m => m.TankId == seedTankId).Select(m => m.MapId).ToListAsync();
@@ -79,6 +95,9 @@ using (var scope = app.Services.CreateScope())
         // ref.action_catalog param_schema (startWeldInspection) 기동 시드 — 현장 배포에서
         // db/migrations 수동 적용을 잊어도 앱 바이너리 배포만으로 계약(seamType enum 등)이 반영된다.
         await ActionCatalogSeed.EnsureAsync(db, app.Logger);
+
+        // alarm.spec 누락 코드 기동 시드 — 알람 FK 선행 조건 (SAIGE 전송 알람 등).
+        await AlarmSpecSeed.EnsureAsync(db, app.Logger);
     }
     catch (Exception ex)
     {
@@ -93,7 +112,8 @@ using (var scope = app.Services.CreateScope())
 app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 {
     var ex = ctx.Features.Get<IExceptionHandlerFeature>()?.Error;
-    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    // 요청 본문 자체가 잘못된 경우(깨진 JSON·형식 안 맞는 GUID 등)는 클라이언트 오류 — 서버 오류(500)로 뭉개지 않는다 [SAIGE §5.1: 400 = 요청 값 검증 실패].
+    ctx.Response.StatusCode = ex is BadHttpRequestException bad ? bad.StatusCode : StatusCodes.Status500InternalServerError;
     var msg = ex is DbUpdateException
         ? $"DB 저장 실패 — 스키마가 최신인지 확인하세요 (db/schema.sql · db/migrations). 원인: {ex.InnerException?.Message ?? ex.Message}"
         : (ex?.Message ?? "서버 내부 오류");
@@ -103,6 +123,9 @@ app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 app.MapHub<MonitoringHub>("/hubs/monitoring");
 
 // ── REST API (API-First: WPF/Web/태블릿 공용 [ADR-005]) ──────────────
+
+// SAIGE 연동 상태 [운영 확인] — 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다(lastOkAt·totalSent·robots[].lastSentAt).
+app.MapGet("/api/integrations/saige", (SaigeHealthReporter saige) => Results.Ok(saige.Status));
 
 app.MapGet("/api/robots", async (AcsDbContext db) =>
     Results.Ok(await db.Robots.AsNoTracking().ToListAsync()));
@@ -177,10 +200,31 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
     { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
 });
 
-app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
+// ── 선창 형상 조회 — 같은 데이터를 두 규약으로 제공한다 ──
+//  · /api/…           = **대외(SAIGE) 계약** [SAIGE 연동 사양서 v2.6 §4.6]: mm 정수·wallId·outline. 조회 전용, 필드는 사양서가 정본.
+//  · /api/internal/…  = 운영 UI 전용: m 실수 + 화면용 부가 필드(법선·facingYaw·정차 오버라이드 등). 계약 아님 — UI와 함께 자유롭게 바뀐다.
+// 등록·수정·삭제(POST/PUT/DELETE)는 사양 범위 밖이라 /api/… 그대로(m 단위 입력).
+app.MapGet("/api/tanks/{tankId}/geometry", async (string tankId, TankShapeQueryService shape) =>
+    await shape.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound(new { error = $"tank '{tankId}' 없음" }));
+
+app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankShapeQueryService shape) =>
+{
+    if (level is < 1) return Results.BadRequest(new { error = "level 은 1 이상이어야 합니다 (1-based, 바닥 층 = 1)." });
+    return await shape.GetWallsAsync(tankId, level) is { } walls
+        ? Results.Ok(walls) : Results.NotFound(new { error = $"tank '{tankId}' 없음" });
+});
+
+app.MapGet("/api/areas", async (string? tankId, int? level, int? wallId, TankShapeQueryService shape) =>
+    Results.Ok(await shape.GetAreasAsync(tankId, level, wallId)));
+
+app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, TankShapeQueryService shape) =>
+    await shape.GetAreaTasksAsync(areaId) is { } tasks
+        ? Results.Ok(tasks) : Results.NotFound(new { error = $"area '{areaId}' 없음" }));
+
+app.MapGet("/api/internal/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
     await svc.GetGeometryAsync(tankId) is { } g ? Results.Ok(g) : Results.NotFound());
 
-app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
+app.MapGet("/api/internal/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
     Results.Ok(await svc.GetWallsAsync(tankId, level)));
 
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
@@ -227,9 +271,14 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
         return Results.Conflict(new { error = $"면 {req.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+    // 식별자 보존(.hdacs 재적재) — 지정 시 그 값으로 등록. 이미 쓰이는 ID면 덮어쓰지 않고 거부한다.
+    if (req.AreaId == Guid.Empty)
+        return Results.BadRequest(new { error = "areaId 는 빈 GUID일 수 없습니다 (미지정이면 필드를 생략하세요)." });
+    if (req.AreaId is Guid wantedAreaId && await db.InspectionAreas.AsNoTracking().AnyAsync(a => a.AreaId == wantedAreaId))
+        return Results.Conflict(new { error = $"areaId '{wantedAreaId}' 가 이미 등록되어 있습니다 — 기존 영역을 덮어쓰지 않습니다." });
     var area = new HD.Acs.Data.Entities.InspectionAreaEntity
     {
-        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
+        AreaId = req.AreaId ?? Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
         Corners = System.Text.Json.JsonSerializer.Serialize(corners),
         UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
@@ -241,7 +290,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
 });
 
-app.MapGet("/api/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
+app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
 {
     var q = db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == (tankId ?? "CT1"));
     if (wallCode is not null) q = q.Where(a => a.WallCode == wallCode);
@@ -269,26 +318,22 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
     if (a is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
-    // seamType = 용접라인 형태 카탈로그(VDA §8.5.1, [협의 N13]) — 카탈로그와 1:1 5종 허용:
-    //   LINE(직선) · CROSS3(3갈래 교차) · CROSS4(4갈래 十자 교차) · CORNER2(2면 코너) · CORNER3(3면 코너).
-    // CROSS/CORNER 계열은 HD_AMR 레시피 미확정 — 계획 데이터로 저장·전달만(실행 미동작).
-    // POLYLINE 등 그 외 값은 계속 거부(꺾인 용접선은 세그먼트별 LINE으로 등록 — 같은 영역=정렬 공유).
-    if (req.SeamType is { } st &&
-        !(string.Equals(st, "LINE", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CROSS3", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CROSS4", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CORNER2", StringComparison.OrdinalIgnoreCase)
-          || string.Equals(st, "CORNER3", StringComparison.OrdinalIgnoreCase)))
-        return Results.BadRequest(new
-        { error = $"seamType '{st}'은 지원하지 않습니다 — 허용: LINE·CROSS3·CROSS4·CORNER2·CORNER3(VDA §8.5.1). 꺾인 용접선은 세그먼트별 LINE으로 나눠 등록하세요." });
-    var poly = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
-    bool In(double u, double v) => HD.Acs.Core.Planning.AreaGeometry.PointInPolygon(u, v, poly);
-    if (!In(req.StartU, req.StartV) || !In(req.EndU, req.EndV))
-        return Results.BadRequest(new { error = "용접선 시작/끝점이 영역(사각형) 내부가 아닙니다." });
+    // seamType 5종·영역 내부 판정 — PUT과 공통 규칙(AreaTaskRules). CROSS/CORNER 계열은 계획 데이터로 저장·전달만.
+    if (AreaTaskRules.Validate(req.SeamType, a.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
+        return Results.BadRequest(new { error = violation });
+    // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
+    // 프로젝트 파일(.hdacs) 재적재 때 같은 값으로 복원해야 한다. 지정 시 그 값으로 등록하되, 이미 존재하면 거부(덮어쓰기 금지).
+    if (req.TaskId == Guid.Empty)
+        return Results.BadRequest(new { error = "taskId 는 빈 GUID일 수 없습니다 (미지정이면 필드를 생략하세요)." });
+    if (req.TaskId is Guid wantedTaskId && await db.AreaTasks.AsNoTracking().AnyAsync(t => t.TaskId == wantedTaskId))
+        return Results.Conflict(new { error = $"taskId '{wantedTaskId}' 가 이미 등록되어 있습니다 — 영구 식별자는 다른 작업에 재사용할 수 없습니다." });
+    if (req.Seq is int wantedSeq && await db.AreaTasks.AsNoTracking().AnyAsync(t => t.AreaId == areaId && t.Seq == wantedSeq))
+        return Results.Conflict(new { error = $"영역 내 seq {wantedSeq} 가 이미 있습니다." });
     int seq = req.Seq ?? ((await db.AreaTasks.Where(t => t.AreaId == areaId).MaxAsync(t => (int?)t.Seq) ?? 0) + 1);
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
-        TaskId = Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name, SeamType = req.SeamType ?? "LINE",
+        TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name,
+        SeamType = (req.SeamType ?? "LINE").ToUpperInvariant(),   // param_schema enum이 대문자 — 소문자 저장 시 run 시작 때 스키마 위반
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
         SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
@@ -297,13 +342,47 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     return Results.Ok(new { taskId = task.TaskId, seq });
 });
 
-app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
+app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
 {
     var tasks = await db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId).OrderBy(t => t.Seq).ToListAsync();
     return Results.Ok(tasks.Select(t => new
     {
         t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId
     }));
+});
+
+// 검사 작업 수정 — **taskId를 유지한 채** 용접선 좌표·형태를 고친다 [SAIGE v2.6 §2.5/§10.2].
+// taskId는 도면·진행률·촬영 이미지(productId)를 잇는 영구 식별자라, 좌표를 고치려고 삭제→재생성하면 같은 용접선의 검사 이력이 끊긴다.
+// 좌표 4값은 필수(전체 교체), 나머지는 null=기존값 유지. 영역 이동(areaId 변경)은 지원하지 않는다 — 정차·anchorGroup이 바뀌는 별개 작업이다.
+// 진행 중 run에는 영향 없음: run은 시작 시점에 큐(work_item.actions)로 스냅샷되므로 수정분은 다음 run부터 반영된다.
+app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRequest req, AcsDbContext db) =>
+{
+    var t = await db.AreaTasks.FirstOrDefaultAsync(x => x.TaskId == taskId);
+    if (t is null) return Results.NotFound(new { error = $"area-task '{taskId}' 없음" });
+    var area = await db.InspectionAreas.AsNoTracking().FirstAsync(x => x.AreaId == t.AreaId);
+
+    if (AreaTaskRules.Validate(req.SeamType, area.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
+        return Results.BadRequest(new { error = violation });
+    if (req.Seq is < 1)
+        return Results.BadRequest(new { error = "seq 는 1 이상이어야 합니다 (seqInGroup 계약)." });
+    if (req.Seq is int newSeq && newSeq != t.Seq &&
+        await db.AreaTasks.AsNoTracking().AnyAsync(x => x.AreaId == t.AreaId && x.Seq == newSeq))
+        return Results.Conflict(new { error = $"영역 내 seq {newSeq} 가 이미 있습니다." });
+
+    t.StartU = req.StartU; t.StartV = req.StartV; t.EndU = req.EndU; t.EndV = req.EndV;
+    if (req.Seq is int s) t.Seq = s;
+    if (req.Name is not null) t.Name = req.Name.Length == 0 ? null : req.Name;   // "" = 이름 지움
+    if (req.SeamType is not null) t.SeamType = req.SeamType.ToUpperInvariant();
+    if (req.SectionDxfId is not null) t.SectionDxfId = req.SectionDxfId;
+    if (req.ProfileId is not null) t.ProfileId = req.ProfileId;
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_TASK_UPDATE", Target = taskId.ToString(),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new { t.AreaId, t.Seq, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new
+    { t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId });
 });
 
 app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext db) =>
@@ -438,10 +517,33 @@ app.MapPost("/api/runs/{runId:guid}/release-next", async (Guid runId, MissionSer
     { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapGet("/api/runs/{runId:guid}", async (Guid runId, AcsDbContext db) =>
-    await db.ScenarioRuns.AsNoTracking().Include(r => r.Missions.OrderBy(m => m.Seq))
-        .FirstOrDefaultAsync(r => r.RunId == runId)
-        is { } run ? Results.Ok(run) : Results.NotFound());
+// ── Run 조회(pull) [SAIGE 연동 사양서 v2.6 §5] — SAIGE·운영 UI 공용, 조회 전용 ──
+// Run 목록 — 검사 개시 주체는 현장 운영자이므로 SAIGE는 이 API로 진행 중 Run을 발견한다 [§5.3].
+app.MapGet("/api/runs", async (string? status, string? tankId, int? limit, RunQueryService runs) =>
+{
+    if (status is not null && !RunQueryService.RunStates.Contains(status))
+        return Results.BadRequest(new { error = $"status '{status}' 는 허용값이 아닙니다 — {string.Join(" | ", RunQueryService.RunStates)}" });
+    if (limit is < 1 or > 500)
+        return Results.BadRequest(new { error = "limit 은 1~500 이어야 합니다." });
+    return Results.Ok(await runs.ListRunsAsync(status, tankId, limit ?? 50));
+});
+
+// Run 상세 — 상태 + 층별 미션 [§5.5]
+app.MapGet("/api/runs/{runId:guid}", async (Guid runId, RunQueryService runs) =>
+    await runs.GetRunAsync(runId) is { } run ? Results.Ok(run) : Results.NotFound(new { error = $"run '{runId}' 없음" }));
+
+// TASK별 결과 상세 — 종결 TASK의 최종 결과, taskId당 1건 [§5.6]
+app.MapGet("/api/runs/{runId:guid}/results", async (Guid runId, string? status, int? limit, int? offset, RunQueryService runs) =>
+{
+    if (status is not null && !RunQueryService.TaskStatuses.Contains(status))
+        return Results.BadRequest(new { error = $"status '{status}' 는 허용값이 아닙니다 — {string.Join(" | ", RunQueryService.TaskStatuses)}" });
+    if (limit is < 1 or > 1000)
+        return Results.BadRequest(new { error = "limit 은 1~1000 이어야 합니다." });
+    if (offset is < 0)
+        return Results.BadRequest(new { error = "offset 은 0 이상이어야 합니다." });
+    return await runs.GetResultsAsync(runId, status, limit ?? 100, offset ?? 0) is { } r
+        ? Results.Ok(r) : Results.NotFound(new { error = $"run '{runId}' 없음" });
+});
 
 // 검사 작업 큐 조회 (greedy 배차 상태 — 운영 화면 층 진행/오버레이 소스)
 app.MapGet("/api/runs/{runId:guid}/work-items", async (Guid runId, AcsDbContext db) =>
@@ -473,11 +575,10 @@ app.MapGet("/api/runs/{runId:guid}/task-actions", async (Guid runId, AcsDbContex
             a.Status, a.Result, a.CreatedAt,
         }).ToListAsync()));
 
-// TASK 단위 진행률 (완료/전체·%) — 운영 화면 초기 로드·새로고침용 pull. 실시간은 SignalR "RunProgress".
-app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress, AcsDbContext db) =>
-    await db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RunId == runId)
-        ? Results.Ok(await progress.ComputeRunProgressAsync(runId))
-        : Results.NotFound());
+// TASK 단위 진행률 [SAIGE §5.4/§6] — SAIGE 주기 조회(1~5초)·운영 화면 공용 pull, ~1초 TTL 캐시.
+// 분모는 run 시작 시 고정, 분자는 고유 TASK 종결 수(재시도 중복 없음). 실시간은 SignalR "RunProgress".
+app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress) =>
+    await progress.GetCachedAsync(runId) is { } p ? Results.Ok(p) : Results.NotFound(new { error = $"run '{runId}' 없음" }));
 
 // 작업자 수동 층(존) 변경 [Q9] — Operator 권한 필요 (TODO: 인증 미들웨어)
 app.MapPost("/api/robots/{robotId}/zone", async (string robotId, ZoneChangeRequest req, MissionService missions) =>
@@ -684,6 +785,12 @@ public sealed record CreateTankGeometryRequest(
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
-    double[][]? Corners = null, double? StationStandoffM = null);
+    double[][]? Corners = null, double? StationStandoffM = null,
+    Guid? AreaId = null);   // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
-    double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId);
+    double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
+    Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+// 검사 작업 수정(PUT) — 좌표 4값 필수, 나머지 null=기존값 유지. taskId·areaId는 바뀌지 않는다.
+public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double EndU, double EndV,
+    int? Seq = null, string? Name = null, string? SeamType = null, string? SectionDxfId = null, string? ProfileId = null,
+    string? UserId = null);

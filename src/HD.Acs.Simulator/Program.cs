@@ -260,13 +260,14 @@ async Task ExecuteActionAsync(VdaAction action)
                      && currentAnchorGroup == anchorGroupId
                      && !movedSinceLastAction;
         var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
-        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label}");
+        var (simTaskId, simAttempt) = WeldInspectionParams.ReadTaskRef(action);
+        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label} · task={simTaskId} attempt={simAttempt}");
         await Task.Delay(shared ? sharedMs : fullMs);
 
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef}";
+        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}";
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else
@@ -385,8 +386,24 @@ static class WeldInspectionParams
             if (prms.Value.TryGetProperty("seqInGroup", out var sq) && sq.TryGetInt32(out var sqv) && sqv >= 1)
                 seqInGroup = sqv;
             else violations.Add("params.seqInGroup");
+            // taskId·attempt [사양서 개정 1.4] — 선택 필드지만 실려 왔다면 형식이 맞아야 한다(조용한 오귀속 방지)
+            if (prms.Value.TryGetProperty("taskId", out var tk) &&
+                !(tk.ValueKind == JsonValueKind.String && Guid.TryParse(tk.GetString(), out _)))
+                violations.Add("params.taskId");
+            if (prms.Value.TryGetProperty("attempt", out var at) &&
+                !(at.ValueKind == JsonValueKind.Number && at.TryGetInt32(out var atv) && atv is >= 1 and <= 255))
+                violations.Add("params.attempt");
         }
         return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);
+    }
+
+    /// <summary>params.taskId·attempt 추출(검증 통과 후 호출). 미탑재(구버전 ACS)면 "-" / 1 — 실제 AMR 폴백과 동일.</summary>
+    public static (string TaskId, int Attempt) ReadTaskRef(VdaAction action)
+    {
+        var prms = GetObject(action, "params");
+        string taskId = prms is { } p1 && p1.TryGetProperty("taskId", out var tk) ? tk.GetString() ?? "-" : "-";
+        int attempt = prms is { } p2 && p2.TryGetProperty("attempt", out var at) && at.TryGetInt32(out var v) ? v : 1;
+        return (taskId, attempt);
     }
 
     static string? GetString(VdaAction a, string key)

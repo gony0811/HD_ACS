@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using HD.Acs.Core.Domain;
 using HD.Acs.Core.Geometry;
+using HD.Acs.Core.Integration;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
@@ -115,10 +116,16 @@ public sealed class InspectionDispatcher
 
         var seq = 0;
         var missionMaps = new HashSet<string>();
+        int totalTasks = 0, excludedTasks = 0;   // 진행률 분모/제외 수 — 이 시점에 고정 [SAIGE §6.1/§6.4]
         foreach (var area in areas)
         {
-            if (!tWdByLevel.TryGetValue(area.Level, out var lv)) continue;   // 층 T_W_D 없음 → 배차 불가
-            if (!walls.TryGetValue(area.WallCode, out var wall)) continue;
+            // 층 T_W_D 없음(또는 면 미등록) → 로봇 좌표 산출 불가로 큐에서 제외. 분모에 넣지 않고 별도 보고한다.
+            if (!tWdByLevel.TryGetValue(area.Level, out var lv) || !walls.TryGetValue(area.WallCode, out var wall))
+            {
+                excludedTasks += area.Tasks.Count;
+                continue;
+            }
+            totalTasks += area.Tasks.Count;
 
             var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
             var corners = Json<double[][]>(area.Corners);
@@ -154,6 +161,9 @@ public sealed class InspectionDispatcher
                     ["workingDistanceMm"] = _workingDistanceMm,
                     ["anchorGroupId"] = anchorGroupId,
                     ["seqInGroup"] = t.Seq,
+                    // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
+                    // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
+                    ["taskId"] = t.TaskId.ToString(),
                 };
 
                 var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
@@ -183,6 +193,12 @@ public sealed class InspectionDispatcher
             });
             missionMaps.Add(lv.MapId);
         }
+
+        run.TotalTasks = totalTasks;
+        run.ExcludedTasks = excludedTasks;
+        if (excludedTasks > 0)
+            _log.LogWarning("Run {Run}: TASK {Excluded}건이 검사 큐에서 제외됨(층 T_W_D 부재 등) — 진행률 분모 {Total}건에 미포함.",
+                run.RunId, excludedTasks, totalTasks);
 
         // 층별 미션 1개 (수동 층 전환 게이트·상태 재사용). 층 번호 순.
         foreach (var mapId in missionMaps.OrderBy(m => m))
@@ -262,25 +278,42 @@ public sealed class InspectionDispatcher
         order.Nodes.Add(node);
 
         var actionsJson = wi.Actions is null ? new JsonArray() : JsonNode.Parse(wi.Actions)!.AsArray();
+
+        // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
+        // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
+        var stopTaskIds = actionsJson
+            .Select(a => Guid.TryParse(a!["taskId"]?.GetValue<string>(), out var g) ? g : (Guid?)null)
+            .Where(g => g is not null).Select(g => g!.Value).Distinct().ToList();
+        var issuedByTask = await _db.OrderActions.AsNoTracking()
+            .Where(a => a.TaskId != null && stopTaskIds.Contains(a.TaskId.Value))
+            .GroupBy(a => a.TaskId!.Value).Select(g => new { TaskId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
+
         foreach (var an in actionsJson)
         {
             var o = an!.AsObject();
             var actionId = Guid.NewGuid();
+            Guid? taskId = Guid.TryParse(o["taskId"]?.GetValue<string>(), out var tid) ? tid : null;
+            int attempt = TaskAttempt.Next(taskId is Guid t0 && issuedByTask.TryGetValue(t0, out var n) ? n : 0);
+            if (attempt == TaskAttempt.Max)
+                _log.LogWarning("Run {Run}: task {Task} attempt가 상한 {Max}에 도달 — 이후 시도는 같은 번호로 발행됩니다.",
+                    run.RunId, taskId, TaskAttempt.Max);
+            var prm = o["params"]?.DeepClone() as JsonObject ?? new JsonObject();
+            prm["attempt"] = attempt;
             var vda = new VdaAction
             {
                 ActionType = o["actionType"]!.GetValue<string>(), ActionId = actionId.ToString(), BlockingType = "HARD",
             };
             vda.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = o["jobRef"]?.GetValue<string>() ?? "" });
             vda.ActionParameters.Add(new ActionParameter { Key = "position", Value = o["position"]?.DeepClone() });
-            vda.ActionParameters.Add(new ActionParameter { Key = "params", Value = o["params"]?.DeepClone() ?? new JsonObject() });
+            vda.ActionParameters.Add(new ActionParameter { Key = "params", Value = prm });
             node.Actions.Add(vda);
 
-            Guid? taskId = Guid.TryParse(o["taskId"]?.GetValue<string>(), out var tid) ? tid : null;
             _db.OrderActions.Add(new OrderActionEntity
             {
                 ActionId = actionId, MissionId = mission.MissionId, WorkItemId = wi.WorkItemId,
                 TaskId = taskId, NodeSequenceId = 0, ActionType = vda.ActionType, BlockingType = "HARD",
-                Params = o["position"]?.ToJsonString(), Status = "WAITING",
+                Params = o["position"]?.ToJsonString(), Status = "WAITING", Attempts = attempt,
             });
         }
 
