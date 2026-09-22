@@ -62,7 +62,7 @@ HD_ACS 저장소 타임라인:
 | WP-2 슬라이싱 | `ref.weld_seam` 스키마, `SeamSlicer`(LINE/POLYLINE 분할, 스테이션 병합·anchorGroup·seqInGroup) + 테스트, `SeamPlanningService`(STATION 노드·TRAVEL 엣지·Point/Task 생성, T_W_D 필수 가드) |
 | WP-4 시뮬레이터 | 파라미터 검증, 앵커 공유(FULL/SHARED), 실패 주입, 관측 계약(resultDescription) + `HD.Acs.SimTest` 3시나리오 + `run_simtest.sh` — 전체 PASS 확인됨 |
 | WP-5 일부 | 캘리브레이션 패널(CalibrationView), 슬라이싱 시각화 패널(SlicingView), seam CRUD·스테이션 조회 API |
-| UI 셸 | Telerik Fluent RadDocking, 로봇상태/미션/알람/수동층변경 패널, REST/SignalR 계약 레이어 |
+| UI 셸 | Avalonia 11 Fluent Dark, 모드 탭(운영/계획/이력) 셸, 로봇상태/미션/알람/수동층변경 패널, REST/SignalR 계약 레이어 |
 
 ### 미완료 / 잔여 ⬜ (다음 작업 후보 — 우선순위순)
 
@@ -117,7 +117,7 @@ HD_ACS 저장소 타임라인:
 | 좌표 변환 | `HD.Acs.Core/Geometry/DrawingTransform.cs` |
 | DB 스키마/엔티티 | `db/schema.sql` ↔ `HD.Acs.Data/Entities/*` + `AcsDbContext` (snake_case 매핑) — **양쪽 동시 갱신** |
 | 시뮬레이터 동작 | `HD.Acs.Simulator/Program.cs` / 검증 드라이버 `HD.Acs.SimTest/` |
-| UI 패널 추가 | `HD.Acs.UI.Core/ViewModels`(프레임워크 중립 VM — System.Windows/Avalonia 금지) + 뷰는 **두 헤드 모두**(`HD.Acs.UI/Views` WPF, `HD.Acs.UI.Desktop/Views` Avalonia) + DI 등록(`App.xaml.cs` / `AppHost.cs`) + `IAcsApiClient` 계약. UI 스레드·대화상자는 `Abstractions/IUiDispatcher·IDialogService·IProjectDialogService` 경유. Avalonia 뷰는 `HD.Acs.UI.Desktop.Tests` 헤드리스 스모크에 x:Name 그리드/탭을 등록 |
+| UI 패널 추가 | `HD.Acs.UI.Core/ViewModels`(프레임워크 중립 VM — Avalonia 타입 직접 참조 금지) + 뷰 `HD.Acs.UI.Desktop/Views` + DI 등록(`AppHost.cs`) + `IAcsApiClient` 계약. UI 스레드·대화상자는 `Abstractions/IUiDispatcher·IDialogService·IProjectDialogService` 경유. Avalonia 뷰는 `HD.Acs.UI.Desktop.Tests` 헤드리스 스모크에 x:Name 그리드/탭을 등록 |
 
 ---
 
@@ -135,7 +135,7 @@ HD_ACS 저장소 타임라인:
    payload 변경 시 SPEC 부록 A와의 golden test를 깨뜨리지 않는지 확인.
 4. **완료 후 의무**: 결정이 새로 내려지면 ADR 갱신, 인터페이스가 바뀌면 해당 docs/ 문서와 CLAUDE.md 변경 이력에 한 줄 추가.
    이 관행 덕분에 대화 기억이 사라져도 문서로 복원된다 — 이 가이드 자체가 그 산물이다.
-5. **환경 주의**: Mac에서는 UI 프로젝트(net8.0-windows) 제외 빌드. Telerik 피드는 자격증명 필요.
+5. **환경 주의**: 전 프로젝트가 net8.0이라 Windows·macOS·Linux에서 솔루션 전체를 빌드·테스트한다(상용 NuGet 피드 없음 — WPF 헤드·Telerik은 2026-09-21 제거).
    폐쇄망 전제 — 외부 인터넷 의존 요소를 추가하지 말 것 [ADR-003].
 
 ---

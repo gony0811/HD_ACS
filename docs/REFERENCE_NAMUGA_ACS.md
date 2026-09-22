@@ -59,7 +59,7 @@ ACS.Host.Test       Host(MES) 연동 테스트
 
 ## 3. 주요 결정 포인트 (참조 분석으로 새로 발생)
 
-### (1) UI 프레임워크: WPF vs Avalonia — ⬜ 재검토 필요
+### (1) UI 프레임워크: WPF vs Avalonia — ✅ 해소 (2026-09-21: Avalonia 단일화, ADR-005 개정 2)
 - ADR-005는 WPF로 결정했으나, 팀의 기존 관제 UI 자산(Avalonia 11 + MVVM + MapCanvas + 로그인/권한)은 Avalonia에 있다.
 - 긴장점: Avalonia는 성숙한 3D 렌더링 생태계가 없다 (WPF는 HelixToolkit 등 존재). 반면 Avalonia를 버리면 MapCanvas/권한/서비스 계층 UI 자산 재사용률이 낮아진다.
 - 선택지:

@@ -2,9 +2,10 @@
 
 ## 0. 배경
 
-> 작성일 2026-09-03 · 상태 **A안(Avalonia) 채택 · Phase 0 완료(Windows 확인) · Phase 1 완료(전 뷰 이식) · Phase 3 완료(3D 소프트웨어 투영 렌더러) · Phase 4 완료(macOS 패키징)** — ADR-005 개정 반영(2026-09-03). 남은 것: Phase 5 WPF 헤드 처분 결정(사용자).
+> 작성일 2026-09-03 · 상태 **이행 완료 (Phase 0~5)** — Phase 0 코어 분리 · Phase 1 전 뷰 이식 · Phase 3 3D 소프트웨어 투영 렌더러 · Phase 4 macOS 패키징 · **Phase 5 WPF 헤드 은퇴(2026-09-21)**. ADR-005 개정·개정 2 반영.
+> 아래 1~3장의 진단·비교는 **이행 당시 기록**이며(WPF 헤드는 현재 저장소에 없음), 되돌릴 때의 근거 자료로 남긴다.
 
-HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행된다.
+(이행 착수 시점) HD.Acs.UI는 WPF(`net8.0-windows`) + Telerik UI for WPF(Fluent Dark) + HelixToolkit.Wpf로 구현돼 Windows에서만 실행됐다.
 요구사항: **동일한 프로그램 구조(MVVM·Generic Host DI·REST/SignalR 계약 계층·운영/계획/이력 모드 셸)를 유지하면서 macOS에서도 운영** 가능하게 할 방법을 검토한다.
 백엔드(HD.Acs.App, ASP.NET Core)는 현장 서버에 그대로 두고 UI 클라이언트만 mac에서 뜨면 되며, UI는 ADR-005의 API-First 원칙상 REST+SignalR만 사용하므로 서버 측 변경은 없다.
 
@@ -136,18 +137,18 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 3. 로봇 마커·상태색 material은 `StatusColors(Rgba)` 재사용.
 
 ### Phase 4 — macOS 패키징·운영 — ✅ 2026-09-03 구현
-실적: `tools/publish_desktop.sh`(osx-arm64/osx-x64 → `HD_ACS.app`+zip, win-x64/linux-x64 → 폴더; 자체 포함 publish, `Info.plist` 템플릿 `src/HD.Acs.UI.Desktop/macos/`에서 버전 치환, PkgInfo, iconutil 있을 때 .icns, codesign ad-hoc 기본·`HDACS_SIGN_IDENTITY`로 Developer ID) + `tools/publish_desktop.ps1`(Windows). csproj에 Version 0.1.0·Product·Company. macOS 시스템 메뉴바 `NativeMenu`(파일 ⌘N/⌘O/⌘S/⌘⇧S·운영 비상정지; 창 내 Menu는 전 플랫폼 상시 표시 — 처음엔 mac에서 숨겼으나 "파일 메뉴가 사라졌다" 피드백으로 되돌림). 한글 글리프 폴백 `FontManagerOptions.FontFallbacks`(Apple SD Gothic Neo·맑은 고딕·Noto CJK·나눔). 서버 주소는 번들 내 appsettings.json 또는 `Acs__BaseUrl` 환경변수. MANUAL §4.6 신설. 검증: Linux 샌드박스에서 osx-arm64 교차 publish → .app 구조(Contents/MacOS·Info.plist·PkgInfo) 생성 확인, linux-x64 폴더 publish 확인(codesign·iconutil은 mac 전용이라 생략됨). notarization은 범위 외(폐쇄망은 ad-hoc + quarantine 해제로 충분).
+실적: `tools/publish_desktop.sh`(osx-arm64/osx-x64 → `HD_ACS.app`+zip, win-x64/linux-x64 → 폴더; 자체 포함 publish, `Info.plist` 템플릿 `src/HD.Acs.UI.Desktop/macos/`에서 버전 치환, PkgInfo, iconutil 있을 때 .icns, codesign ad-hoc 기본·`HDACS_SIGN_IDENTITY`로 Developer ID) + `tools/publish_desktop.ps1`(Windows). csproj에 Version 0.1.0·Product·Company. macOS 시스템 메뉴바 `NativeMenu`(파일 ⌘N/⌘O/⌘S/⌘⇧S·운영 비상정지; 창 내 Menu는 전 플랫폼 상시 표시 — 처음엔 mac에서 숨겼으나 "파일 메뉴가 사라졌다" 피드백으로 되돌림). 한글 글리프 폴백 `FontManagerOptions.FontFallbacks`(Apple SD Gothic Neo·맑은 고딕·Noto CJK·나눔). 서버 주소는 번들 내 appsettings.json 또는 `Acs__BaseUrl` 환경변수. MANUAL에 크로스플랫폼 실행·배포 절 신설(현행 §4.5). 검증: Linux 샌드박스에서 osx-arm64 교차 publish → .app 구조(Contents/MacOS·Info.plist·PkgInfo) 생성 확인, linux-x64 폴더 publish 확인(codesign·iconutil은 mac 전용이라 생략됨). notarization은 범위 외(폐쇄망은 ad-hoc + quarantine 해제로 충분).
 원안:
 - `dotnet publish -c Release -r osx-arm64 --self-contained`(+ `osx-x64` 필요 시), `.app` 번들(Info.plist, 아이콘) + 코드서명(폐쇄망 배포는 ad-hoc 서명으로 시작, 외부 배포 시 notarization). `appsettings.json` BaseUrl=현장 서버 :5199. 한글 폰트는 시스템 폰트(Apple SD Gothic Neo) 자동.
 - `.hdacs` 프로젝트 파일은 GZip+JSON이라 Win↔mac 왕복 호환(경로 구분자 의존 없음 확인됨).
 
-### Phase 5 — WPF 헤드 처분 결정 (사용자 결정)
-- Avalonia 헤드 동등성 확인 후 WPF 헤드·Telerik 피드 은퇴 여부 결정. 은퇴 시 `nuget.config` Telerik 소스 제거, CLAUDE.md 저장소 구조 갱신.
+### Phase 5 — WPF 헤드 은퇴 ✅ (2026-09-21, 사용자 결정)
+실적: `src/HD.Acs.UI`(WPF 헤드) 전체와 솔루션 등록을 제거, 루트 `nuget.config`에서 **Telerik 상용 피드 삭제**(자격증명 없는 환경에서 나던 복원 경고 해소 — 이번 결정의 계기), WPF 제외용 `HD.Acs.CrossPlatform.slnf` 삭제(전 프로젝트 net8.0이라 불필요). `HD.Acs.UI.Core`의 프레임워크 중립 계약(`IUiDispatcher`/`IDialogService`/`IProjectDialogService`)은 그대로 유지 — 헤드 교체 여지와 헤드리스 테스트 경계가 계속 필요하다. 문서 동기화: ADR-005 개정 2 · CLAUDE.md 구조/이력 · MANUAL §2~4 · INSTALL_MANUAL 4단계 · src/README · TANK_RENDERING · DEVELOPMENT_GUIDE. 되돌리려면 `git log -- src/HD.Acs.UI` 에서 복원.
 
 ## 5. 문서 갱신
 - `docs/ARCHITECTURE_DECISIONS.md`: ADR-005 개정("WPF 확정" → "Avalonia 11 크로스플랫폼 UI, 3D=자체 소프트웨어 투영") + Q5/Q5′ 재개·해소 기록, macOS 운영 요구를 결정 근거로 명시.
 - `docs/TANK_RENDERING.md`: 3중복 단일화·투영 코드 위치 갱신.
-- `CLAUDE.md`: 기술 스택·저장소 구조(UI.Core/UI/UI.Avalonia)·변경 이력.
+- `CLAUDE.md`: 기술 스택·저장소 구조(UI.Core/UI.Desktop)·변경 이력.
 
 ## 6. 검증
 1. Phase 0: `dotnet build src/HD.Acs.UI.Core`(Linux/mac 가능) + Windows에서 WPF 전체 빌드 0 error, 운영 화면 회귀(연결·시나리오 시작·work item 색·전개도·3D·프로젝트 열기/저장).
@@ -156,7 +157,7 @@ Avalonia에는 HelixToolkit 등가물이 없다. 후보 3종:
 
 ## 7. 리스크·미결
 - **3D 시각 품질**: 소프트웨어 투영은 Helix 조명·안티앨리어싱 수준과 다를 수 있음 → Phase 3 초기에 스크린샷 비교로 수용 여부 판단, 불충분 시 ② OpenGL로 전환(카메라·씬 코드는 재사용).
-- **DataGrid 기능 격차**: Telerik 필터/그룹 등을 쓰는 화면이 생기면 내장 DataGrid로 부족할 수 있음(현행은 없음).
+- **DataGrid 기능 격차**: 필터/그룹 등 상용 그리드 기능이 필요한 화면이 생기면 Avalonia 내장 DataGrid로 부족할 수 있음(현행은 없음).
 - **Avalonia 버전 고정**: 11.x LTS 계열로 고정하고 `Avalonia.Controls.DataGrid` 동일 버전 정렬.
-- **폐쇄망 NuGet**: Avalonia 패키지는 nuget.org 공개라 Telerik 피드 문제는 없음. 오프라인 복원용 패키지 캐시 준비 필요.
-- **미결 결정(사용자)**: (a) WPF 헤드 유지 기간/은퇴 여부, (b) 3D ① vs ② 최종 선택은 Phase 3 프로토타입 후, (c) Web 대시보드(ADR-005 보조 UI)로 mac 요구를 대신 충족할지 여부 — 이 계획은 "동일 구조 유지" 요구에 따라 데스크톱 앱 이식을 전제한다.
+- **폐쇄망 NuGet**: Avalonia 패키지는 nuget.org 공개라 상용 피드 의존이 없다(Telerik 피드는 Phase 5에서 제거). 오프라인 복원용 패키지 캐시 준비 필요.
+- **결정 결과(사용자)**: (a) WPF 헤드 은퇴 — 2026-09-21 제거 완료, (b) 3D는 ①(소프트웨어 투영) 채택, (c) Web 대시보드는 보조 UI로 남김(ADR-005) — 데스크톱 앱 이식으로 mac 요구를 충족했다.

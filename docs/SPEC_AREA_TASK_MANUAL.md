@@ -157,6 +157,7 @@ CREATE TABLE ref.area_task (
 ```
 
 - 등록 검증: 영역 `max > min` + 면 범위`[0, u_len]×[0, v_len]` 내(400) ·
+  AREA 경계상자의 u/v 폭이 각각 최대 **1.44m(1440mm)**(초과 시 400) ·
   작업 시작/끝점 영역 경계 내(400) · `(tank, wall_code)` 존재(404) ·
   **층 유도 성공(§5-A — 실패 시 400 + 사유)**. 요청에 level 필드가 있어도 무시한다(응답에 유도된 level 반환).
 - **좌표 변환(공용 유틸, Core에 순수 함수로)**: `To3D(wall, u, v) = P0 + u·U + v·V`.
@@ -250,7 +251,7 @@ CREATE TABLE ref.area_task (
 
 기존 `/api/seams*` · `generate-from-seams`는 dormant 주석 표기만 하고 유지.
 
-## 9. UI (HD.Acs.UI — SlicingView 대체)
+## 9. UI (운영 앱 계획 화면 — 구 SlicingView 대체)
 
 `SlicingView/SlicingViewModel` → `AreaPlanningView/AreaPlanningViewModel`
 (App.xaml.cs DI · ShellViewModel · MainWindow.xaml 탭 헤더 "영역/검사 작업" 갱신):

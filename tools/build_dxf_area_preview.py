@@ -10,6 +10,8 @@ from analyze_dxf_regions import ROOT, entities, first, points
 
 OUT = ROOT / 'drawing' / 'area-preview'
 EPS = .03
+AREA_WIDTH = 1440
+AREA_HEIGHT = 1440
 
 def segment_records(es, layers):
     result=[]
@@ -85,23 +87,23 @@ def build_wall(path):
                 tasks.append({'id':f'{wall}-T{len(tasks)+1:05d}','direction':s['axis'],'start':pp[0],'middle':pp[1],'end':pp[2],
                               'seam_handles':s['handles'],'top_handles':sorted({h for t in cross if t['fixed'] in run[i:i+3] for h in t['handles']})})
     assert len({(t['direction'],tuple(t['start']),tuple(t['end'])) for t in tasks})==len(tasks)
-    # Candidate 800 x 1600 windows around task endpoints and on a 720 x 1440 grid.
+    # Candidate windows at the maximum AREA size, around task endpoints and on a 720 mm grid.
     boxes=[]
     for t in tasks:
         boxes.append((min(t['start'][0],t['end'][0]),min(t['start'][1],t['end'][1]),max(t['start'][0],t['end'][0]),max(t['start'][1],t['end'][1])))
     candidates=set()
     def clamp(v,dim,width): return round(max(0,min(v,dim-width)),3)
     for x0,y0,x1,y1 in boxes:
-        xs=[x0-40,x1-760,(x0//720)*720-40]
-        ys=[y0-80,y1-1520,(y0//1440)*1440-80]
+        xs=[x0-40,x1-(AREA_WIDTH-40),(x0//720)*720-40]
+        ys=[y0-80,y1-(AREA_HEIGHT-80),(y0//720)*720-80]
         for x in xs:
             for y in ys:
-                candidates.add((clamp(x,size[0],800),clamp(y,size[1],1600)))
+                candidates.add((clamp(x,size[0],AREA_WIDTH),clamp(y,size[1],AREA_HEIGHT)))
     candidates=sorted(candidates,key=lambda c:(c[1],c[0]))
     covers=[]
     inverse=[[] for _ in tasks]
     for ci,(x,y) in enumerate(candidates):
-        covered={i for i,(x0,y0,x1,y1) in enumerate(boxes) if x0>=x-EPS and y0>=y-EPS and x1<=x+800+EPS and y1<=y+1600+EPS}
+        covered={i for i,(x0,y0,x1,y1) in enumerate(boxes) if x0>=x-EPS and y0>=y-EPS and x1<=x+AREA_WIDTH+EPS and y1<=y+AREA_HEIGHT+EPS}
         covers.append(covered)
         for i in covered: inverse[i].append(ci)
     remaining=[set(c) for c in covers]
@@ -128,7 +130,7 @@ def build_wall(path):
         x,y=candidates[ci]
         aid=f'{wall}-A{k+1:04d}'
         included=sorted(covers[ci])
-        corners=[[x,y],[round(x+800,3),y],[round(x+800,3),round(y+1600,3)],[x,round(y+1600,3)]]
+        corners=[[x,y],[round(x+AREA_WIDTH,3),y],[round(x+AREA_WIDTH,3),round(y+AREA_HEIGHT,3)],[x,round(y+AREA_HEIGHT,3)]]
         areas.append({'id':aid,'corners':corners,'included_task_ids':[tasks[i]['id'] for i in included],
                       'assigned_task_ids':[tasks[i]['id'] for i in sorted(owned)],'included_count':len(included),'assigned_count':len(owned),
                       'assigned_H':sum(tasks[i]['direction']=='H' for i in owned),'assigned_V':sum(tasks[i]['direction']=='V' for i in owned)})
@@ -145,7 +147,7 @@ def main():
         w=build_wall(path)
         walls.append(w)
         print(w['wall'],w['status'],w.get('counts',{}),flush=True)
-    data={'units':'mm','pitch':360,'task_length':720,'area_width':800,'area_height':1600,
+    data={'units':'mm','pitch':360,'task_length':720,'area_width':AREA_WIDTH,'area_height':AREA_HEIGHT,
           'status':'review_only_not_registered','algorithm':'Greedy maximum uncovered-task coverage over task-aligned candidate windows; no global optimum claim.',
           'limitations':['Membrane Sheet straight segments are candidate weld seams; detailed lines may need filtering.',
                          'CENTER line intersections are treated as tops as agreed by the user.',
@@ -160,7 +162,7 @@ def main():
         '**검토용 산출물입니다. 실제 ACS 등록 좌표나 DB ID가 아닙니다.**', '',
         '- 단위: mm로 가정. 각 DXF의 멤브레인 도형 경계상자 좌하단이 (0, 0), +u=도면 x, +v=도면 y입니다.',
         '- 원시 DXF 좌표 = 이 목록의 좌표 + 해당 면의 원점. ACS 면 좌표로의 원점·방향 변환은 별도입니다.',
-        '- Area: 800 × 1600mm, 작업: 360mm 피치의 top–top–top 직선 720mm.',
+        f'- Area 최대 크기: {AREA_WIDTH} × {AREA_HEIGHT}mm. 이 검토용 배치는 최대 크기 창을 사용합니다. 작업: 360mm 피치의 top–top–top 직선 720mm.',
         '- 포함 수: 해당 Area에 완전히 들어오는 작업 수. 배정 수: 그 Area에만 연결된 고유 작업 수.',
         '- Area 간 겹침은 허용하고 작업 ID는 중복 배정하지 않았습니다.',
         '- 도면의 Membrane Sheet 직선을 용접선 후보로 사용했습니다. 상세 형상선 구분은 추가 확인이 필요합니다.',

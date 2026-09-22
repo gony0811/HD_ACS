@@ -1,91 +1,150 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="HD.Acs.UI.Desktop.Views.CalibrationView">
-    <!-- DataContext = CalibrationViewModel -->
-    <Grid Margin="10" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" TextBlock.Foreground="{DynamicResource AppTextBrush}">
-        <StackPanel Grid.Row="0" Margin="0,0,0,6">
-            <TextBlock Text="도면→맵 캘리브레이션 (T_W_D) · Operator" FontWeight="Bold" />
-            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}"
-                       Text="도면 좌표 입력 → 현재 위치 캡처 → AMR 맵 X/Y 확인·수정 → 기준점 저장. 맵 좌표는 항상 m 단위입니다. 2~3점 저장 후 계산하세요." />
+    <Grid Margin="10" RowDefinitions="Auto,Auto,*,Auto" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="도면→맵 캘리브레이션 마법사 (T_W_D)" FontWeight="Bold" FontSize="16" />
+            <TextBlock Text="도면에서 기준점 3~4개 선택 → 현장 마커 정렬 → 위치 안정화 자동 측정 → 자동 계산·잔차 분석"
+                       Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- 층 선택 + 로봇 보고 준비 상태 -->
-        <Grid Grid.Row="1" Margin="0,0,0,6" ColumnDefinitions="Auto,*">
+        <Grid Grid.Row="1" ColumnDefinitions="Auto,220,*" Margin="0,0,0,8">
             <TextBlock Text="층" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Floors}"
-                      DisplayMemberBinding="{Binding Level}"
-                      SelectedItem="{Binding SelectedFloor}" />
-        </Grid>
-        <Border Grid.Row="2" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6" Margin="0,0,0,8">
-            <TextBlock Text="{Binding ReadinessText}" TextWrapping="Wrap" />
-        </Border>
-
-        <!-- 도면 좌표 입력 + 캡처 -->
-        <StackPanel Grid.Row="3" Margin="0,0,0,8">
-        <Grid ColumnDefinitions="*,*,Auto,Auto">
-            <StackPanel Grid.Column="0" Margin="0,0,4,0">
-                <TextBlock Text="도면 X" />
-                <NumericUpDown Value="{Binding DrawingX}" FormatString="0.###" Increment="0.1" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Margin="2,0">
-                <TextBlock Text="도면 Y" />
-                <NumericUpDown Value="{Binding DrawingY}" FormatString="0.###" Increment="0.1" />
-            </StackPanel>
-            <StackPanel Grid.Column="2" Margin="4,0" VerticalAlignment="Bottom">
-                <TextBlock Text="단위" />
-                <ComboBox ItemsSource="{Binding Units}" SelectedItem="{Binding Unit}" Width="70" />
-            </StackPanel>
-            <Button Grid.Column="3" Content="현재 위치 캡처" VerticalAlignment="Bottom"
-                    Margin="6,0,0,0" Command="{Binding CaptureRobotPositionCommand}" />
-        </Grid>
-        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-            <StackPanel Width="130" Margin="0,0,8,0">
-                <TextBlock Text="AMR 맵 X (m)" />
-                <NumericUpDown Value="{Binding MapX, Mode=TwoWay}" />
-            </StackPanel>
-            <StackPanel Width="130" Margin="0,0,8,0">
-                <TextBlock Text="AMR 맵 Y (m)" />
-                <NumericUpDown Value="{Binding MapY, Mode=TwoWay}" />
-            </StackPanel>
-            <Button Content="기준점 저장" VerticalAlignment="Bottom" Command="{Binding CapturePointCommand}" />
-        </StackPanel>
-        </StackPanel>
-
-        <!-- 대응쌍 목록 -->
-        <DataGrid Grid.Row="4" x:Name="PointGrid" ItemsSource="{Binding Points}"
-                  AutoGenerateColumns="False" IsReadOnly="True">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="도면X" Binding="{Binding DrawingXM, StringFormat='{}{0:N3}'}" Width="70" />
-                <DataGridTextColumn Header="도면Y" Binding="{Binding DrawingYM, StringFormat='{}{0:N3}'}" Width="70" />
-                <DataGridTextColumn Header="맵X" Binding="{Binding MapX, StringFormat='{}{0:N3}'}" Width="70" />
-                <DataGridTextColumn Header="맵Y" Binding="{Binding MapY, StringFormat='{}{0:N3}'}" Width="70" />
-                <DataGridTemplateColumn Header="" Width="Auto">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <Button Content="삭제" Padding="6,1"
-                                    Command="{Binding $parent[DataGrid].DataContext.DeletePointCommand}"
-                                    CommandParameter="{Binding}" />
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-            </DataGrid.Columns>
-        </DataGrid>
-
-        <!-- 결과 + 경고 배지 -->
-        <StackPanel Grid.Row="5" Margin="0,6,0,0">
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                <Button Content="계산 (solve)" Command="{Binding SolveCommand}" Margin="0,0,6,0" />
-                <Button Content="새로고침" Command="{Binding RefreshCommand}" />
-            </StackPanel>
-            <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6">
-                <TextBlock Text="{Binding CalibrationSummary}" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Floors}" DisplayMemberBinding="{Binding Level}" SelectedItem="{Binding SelectedFloor}" />
+            <Border Grid.Column="2" Margin="8,0,0,0" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="8,5">
+                <TextBlock Text="{Binding ReadinessText}" TextWrapping="Wrap" />
             </Border>
-            <Border Background="{DynamicResource AppWarnBgBrush}" BorderBrush="{DynamicResource AppWarnBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="6"
-                    Margin="0,6,0,0" IsVisible="{Binding HasWarning}">
-                <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
-            </Border>
-        </StackPanel>
+        </Grid>
 
-        <TextBlock Grid.Row="6" Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,8,0,0" />
+        <Grid Grid.Row="2" ColumnDefinitions="540,*" ColumnSpacing="12">
+            <!-- 기준점 도면 선택 -->
+            <StackPanel Grid.Column="0">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,5">
+                    <StackPanel>
+                        <TextBlock Text="1. 기준점 배치" FontWeight="Bold" />
+                        <TextBlock Text="{Binding GeometryLabel}" Foreground="{DynamicResource AppMutedTextBrush}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="계획 초기화" Command="{Binding ClearCandidatesCommand}" />
+                </Grid>
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppCanvasBrush}">
+                    <Canvas x:Name="CalibrationCanvas" Width="520" Height="520" Background="Transparent"
+                            PointerPressed="CalibrationCanvas_PointerPressed">
+                        <Rectangle Canvas.Left="28" Canvas.Top="28" Width="464" Height="464"
+                                   Fill="#101A2028" Stroke="#708A9AA8" StrokeThickness="1.5" />
+                        <Line StartPoint="260,28" EndPoint="260,492" Stroke="#506E7B86" StrokeDashArray="4,4" />
+                        <Line StartPoint="28,260" EndPoint="492,260" Stroke="#506E7B86" StrokeDashArray="4,4" />
+                        <TextBlock Canvas.Left="448" Canvas.Top="239" Text="+X 선수" Foreground="#8DD9E8" />
+                        <TextBlock Canvas.Left="34" Canvas.Top="239" Text="선미 −X" Foreground="#8DD9E8" />
+                        <TextBlock Canvas.Left="267" Canvas.Top="32" Text="+Y 좌현" Foreground="#8DD9E8" />
+                        <TextBlock Canvas.Left="267" Canvas.Top="470" Text="우현 −Y" Foreground="#8DD9E8" />
+                        <TextBlock Canvas.Left="267" Canvas.Top="263" Text="(0,0)" FontSize="10" Foreground="#78909C" />
+                        <ItemsControl ItemsSource="{Binding Candidates}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="520" Height="520" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.Styles>
+                                <Style Selector="ContentPresenter">
+                                    <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                                    <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                                </Style>
+                            </ItemsControl.Styles>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Width="38" Height="38" Padding="0" CornerRadius="19"
+                                            Background="#315A7184" BorderBrush="#3AC4DF" BorderThickness="2"
+                                            Command="{Binding $parent[UserControl].DataContext.SelectCandidateCommand}" CommandParameter="{Binding}"
+                                            ToolTip.Tip="{Binding CoordinateText}">
+                                        <Grid>
+                                            <Ellipse Fill="#2980B9" IsVisible="{Binding !IsMeasured}" />
+                                            <Ellipse Fill="#229954" IsVisible="{Binding IsMeasured}" />
+                                            <Ellipse Stroke="White" StrokeThickness="3" Margin="-3" IsVisible="{Binding IsSelected}" />
+                                            <TextBlock Text="{Binding Name}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="White" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Canvas>
+                </Border>
+                <TextBlock Text="{Binding CandidateSummary}" Margin="0,6,0,0" />
+                <TextBlock Text="{Binding LayoutQualityText}" Foreground="{DynamicResource AppWarnFgBrush}" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- 측정 마법사 -->
+            <ScrollViewer Grid.Column="1">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="2. 현장 측정" FontWeight="Bold" />
+                    <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="8">
+                        <StackPanel>
+                            <TextBlock Text="선택 기준점" Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <TextBlock Text="{Binding SelectedCandidate.Name, TargetNullValue='도면에서 점을 선택하세요'}" FontSize="18" FontWeight="Bold" />
+                            <TextBlock Text="{Binding SelectedCandidate.CoordinateText}" />
+                            <TextBlock Text="{Binding SelectedCandidate.ResultText}" Foreground="{DynamicResource AppGoodBrush}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="정렬 완료 · 자동 측정" Command="{Binding StartMeasurementCommand}" Margin="0,0,6,0" />
+                                <Button Content="측정 취소" Command="{Binding CancelMeasurementCommand}" IsVisible="{Binding IsMeasuring}" />
+                                <Button Content="점 제거" Command="{Binding RemoveCandidateCommand}" CommandParameter="{Binding SelectedCandidate}" Margin="6,0,0,0" />
+                            </StackPanel>
+                            <ProgressBar Minimum="0" Maximum="15" Value="{Binding StableSamples}" Height="8" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding MeasurementProgress}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding Candidates}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="38,120,*,Auto" Margin="0,2">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                                    <TextBlock Grid.Column="1" Text="{Binding CoordinateText}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding ResultText}" />
+                                    <Button Grid.Column="3" Content="선택" Padding="8,2"
+                                            Command="{Binding $parent[UserControl].DataContext.SelectCandidateCommand}" CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="3. 계산 및 품질 확인" FontWeight="Bold" Margin="0,4,0,0" />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="다시 계산" Command="{Binding SolveCommand}" Margin="0,0,6,0" />
+                        <Button Content="새로고침" Command="{Binding RefreshCommand}" />
+                    </StackPanel>
+                    <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="7">
+                        <TextBlock Text="{Binding CalibrationSummary}" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" />
+                    </Border>
+                    <Border Background="{DynamicResource AppWarnBgBrush}" BorderBrush="{DynamicResource AppWarnBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="7"
+                            IsVisible="{Binding HasWarning}">
+                        <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
+                    </Border>
+
+                    <Expander Header="수동 입력 / 저장된 대응쌍" IsExpanded="True">
+                        <StackPanel Margin="0,6,0,0">
+                            <Grid ColumnDefinitions="*,*,80,Auto" ColumnSpacing="5">
+                                <NumericUpDown Value="{Binding DrawingX}" FormatString="0.###" Watermark="도면 X" />
+                                <NumericUpDown Grid.Column="1" Value="{Binding DrawingY}" FormatString="0.###" Watermark="도면 Y" />
+                                <ComboBox Grid.Column="2" ItemsSource="{Binding Units}" SelectedItem="{Binding Unit}" />
+                                <Button Grid.Column="3" Content="위치 캡처" Command="{Binding CaptureRobotPositionCommand}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="5" Margin="0,5,0,0">
+                                <NumericUpDown Value="{Binding MapX}" Watermark="맵 X (m)" />
+                                <NumericUpDown Grid.Column="1" Value="{Binding MapY}" Watermark="맵 Y (m)" />
+                                <Button Grid.Column="2" Content="기준점 저장" Command="{Binding CapturePointCommand}" />
+                            </Grid>
+                            <DataGrid x:Name="PointGrid" ItemsSource="{Binding Points}" AutoGenerateColumns="False" IsReadOnly="True" Height="180" Margin="0,6,0,0">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="도면X" Binding="{Binding DrawingXM, StringFormat='{}{0:N3}'}" Width="70" />
+                                    <DataGridTextColumn Header="도면Y" Binding="{Binding DrawingYM, StringFormat='{}{0:N3}'}" Width="70" />
+                                    <DataGridTextColumn Header="맵X" Binding="{Binding MapX, StringFormat='{}{0:N3}'}" Width="70" />
+                                    <DataGridTextColumn Header="맵Y" Binding="{Binding MapY, StringFormat='{}{0:N3}'}" Width="70" />
+                                    <DataGridTemplateColumn Width="Auto"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+                                        <Button Content="삭제" Padding="6,1" Command="{Binding $parent[DataGrid].DataContext.DeletePointCommand}" CommandParameter="{Binding}" />
+                                    </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <TextBlock Grid.Row="3" Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,8,0,0" />
     </Grid>
 </UserControl>

@@ -92,6 +92,12 @@
 - WPF 헤드는 Avalonia 헤드가 기능 동등성(3D 포함)에 도달할 때까지 유지하고, 이후 은퇴 여부를 결정한다(Telerik 라이선스·이중 유지보수 제거).
 - API-First·SignalR 푸시 원칙은 불변(두 헤드 모두 동일 계약만 사용).
 
+**개정 2** (2026-09-21, 이행 Phase 5 — WPF 헤드 은퇴 결정):
+- **UI 헤드는 `HD.Acs.UI.Desktop`(Avalonia) 하나로 단일화**한다. WPF 헤드 `HD.Acs.UI`와 Telerik UI for WPF·HelixToolkit.Wpf 의존을 저장소에서 제거했고, 루트 `nuget.config`의 Telerik 상용 피드도 함께 제거했다(자격증명 없는 환경의 복원 경고 해소).
+- 근거: Avalonia 헤드가 3D 포함 전 기능을 이식 완료(Phase 3·4), 이중 유지보수와 상용 라이선스 비용이 남을 이유가 없다. 전 프로젝트가 `net8.0`이 되어 솔루션 전체를 어느 OS에서나 빌드·테스트한다(WPF 제외용 `HD.Acs.CrossPlatform.slnf`도 불필요해져 삭제).
+- 공용 코어 `HD.Acs.UI.Core`와 `IUiDispatcher`/`IDialogService`/`IProjectDialogService` 추상화는 **유지**한다 — 헤드 교체 가능성(Web 대시보드·태블릿)과 헤드리스 테스트 경계가 그대로 필요하다.
+- 되돌릴 경우: WPF 헤드는 커밋 이력(`git log -- src/HD.Acs.UI`)에서 복원할 수 있다.
+
 ---
 
 ## ADR-006. 기술 스택 및 유지보수 ✅
@@ -241,9 +247,9 @@
 | Q2 | 검사 S/W와의 위치/시각 키 규약 | ADR-004 | ⬜ 좌표계, 타임스탬프 기준 |
 | Q3 | DB 선정 | ADR-006, 009 | ✅ 해소 — PostgreSQL + EF Core (NAMUGA_ACS 자산 일치) |
 | Q4 | 배포 방식 (Windows 서비스 vs Docker Compose) | ADR-006 | ⬜ NAMUGA_ACS는 ps1 publish/deploy 스크립트 사용 — 승계 검토 |
-| Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ✅ 해소 — **HelixToolkit.Wpf** 확정 (HD.Acs.UI에 도입). UI 컨트롤 스위트는 Telerik UI for WPF(Fluent 테마), 전개도는 Canvas 기반 2D. UI DI는 백엔드와 일관되게 MS.DI(Generic Host) 사용 |
+| Q5 | 3D 렌더링 라이브러리 선정 (HelixToolkit 등) | ADR-005 | ✅ 해소 — 최초 HelixToolkit.Wpf + Telerik UI for WPF로 확정했으나, **2026-09-21 WPF 헤드 은퇴로 둘 다 제거**. 현행은 코어의 소프트웨어 투영 렌더러 + Avalonia 내장 컨트롤. UI DI는 백엔드와 일관되게 MS.DI(Generic Host) |
 | Q5′ | UI 프레임워크 재검토 | ADR-005, 009 | ✅ 해소 — 3D 요구 우선, WPF 확정 (2026-09-03 ADR-005 개정으로 대체) |
-| Q5″ | macOS 운영 대응 UI 프레임워크 | ADR-005 | ✅ 해소 — **Avalonia 11 + 공용 코어(HD.Acs.UI.Core)** 채택, 3D=소프트웨어 투영 렌더러(Phase 3). Phase 0(코어 분리)·Phase 1(Avalonia 헤드, 3D 제외 전 뷰) 완료 — `docs/UI_CROSS_PLATFORM_REVIEW.md` |
+| Q5″ | macOS 운영 대응 UI 프레임워크 | ADR-005 | ✅ 해소 — **Avalonia 11 + 공용 코어(HD.Acs.UI.Core)** 채택, 3D=소프트웨어 투영 렌더러. Phase 0~4 완료 후 **Phase 5(2026-09-21) WPF 헤드 은퇴**로 UI 헤드 단일화 — `docs/UI_CROSS_PLATFORM_REVIEW.md` |
 | Q6 | 화물창 맵 데이터 소스 | ADR-008 | ⬜ CAD/도면 기반 vs SLAM 맵 기반 |
 | Q7 | 안전 요구사항 명세 (관제 정지의 위상) | ADR-007 | ⬜ 하드웨어 E-Stop 체계와의 관계 문서화 |
 | Q8 | 미션 오케스트레이터 구현 방식 | ADR-010 | ✅ 해소 — Stateless 상태머신 확정 |

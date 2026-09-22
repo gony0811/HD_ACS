@@ -2,7 +2,7 @@ namespace HD.Acs.UI.Primitives;
 
 /// <summary>
 /// 프레임워크 중립 색(ARGB 8비트). 상태색 매핑(TankViewModel.StatusColors)의 반환 타입.
-/// 각 UI 헤드가 Brush/Color로 변환한다(WPF: RgbaExtensions.ToMediaColor).
+/// 각 UI 헤드가 Brush/Color로 변환한다(Avalonia 헤드: Infrastructure/Converters.cs의 RgbaExtensions).
 /// </summary>
 public readonly record struct Rgba(byte A, byte R, byte G, byte B)
 {
