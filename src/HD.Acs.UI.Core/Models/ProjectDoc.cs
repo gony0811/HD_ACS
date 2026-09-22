@@ -47,4 +47,5 @@ public sealed record AreaDoc(
 public sealed record TaskDoc(
     int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
-    string SectionDxfId, string ProfileId);
+    string SectionDxfId, string ProfileId,
+    Guid? SourceId = null);

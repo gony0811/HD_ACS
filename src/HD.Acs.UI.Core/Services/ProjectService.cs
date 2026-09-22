@@ -41,7 +41,7 @@ public sealed class ProjectService : IProjectService
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
                 a.StationStandoffM, a.AreaId));
@@ -100,6 +100,8 @@ public sealed class ProjectService : IProjectService
                 ?? throw new InvalidDataException("프로젝트 파일을 읽을 수 없습니다 (내용 없음).");
         }
 
+        ValidateIdentities(doc);
+
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
@@ -116,11 +118,13 @@ public sealed class ProjectService : IProjectService
                 new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
             };
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, ct);
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId,
+                stationStandoffM: a.StationStandoffM, areaId: a.SourceId, ct: ct);
             if (a.SourceId is Guid sourceId) restoredAreaIds[sourceId] = areaId;
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
-                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);
+                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId,
+                    seq: t.Seq, name: t.Name, taskId: t.SourceId, ct: ct);
         }
 
         // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.
@@ -157,5 +161,30 @@ public sealed class ProjectService : IProjectService
 
         CurrentPath = path;
         return doc;
+    }
+
+    private static void ValidateIdentities(ProjectDoc doc)
+    {
+        var areaIds = new HashSet<Guid>();
+        var taskIds = new HashSet<Guid>();
+
+        foreach (var area in doc.Areas)
+        {
+            if (area.SourceId == Guid.Empty)
+                throw new InvalidDataException("프로젝트 파일의 영역 식별자가 비어 있습니다.");
+            if (area.SourceId is Guid areaId && !areaIds.Add(areaId))
+                throw new InvalidDataException($"프로젝트 파일에 중복 영역 식별자가 있습니다: {areaId}");
+
+            var seqs = new HashSet<int>();
+            foreach (var task in area.Tasks)
+            {
+                if (!seqs.Add(task.Seq))
+                    throw new InvalidDataException($"영역 '{area.Name}'에 중복 작업 순번이 있습니다: {task.Seq}");
+                if (task.SourceId == Guid.Empty)
+                    throw new InvalidDataException("프로젝트 파일의 작업 식별자가 비어 있습니다.");
+                if (task.SourceId is Guid taskId && !taskIds.Add(taskId))
+                    throw new InvalidDataException($"프로젝트 파일에 중복 작업 식별자가 있습니다: {taskId}");
+            }
+        }
     }
 }

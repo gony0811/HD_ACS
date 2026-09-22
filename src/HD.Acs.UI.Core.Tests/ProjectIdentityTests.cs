@@ -150,6 +150,8 @@ public class ProjectIdentityTests : IDisposable
                     new { taskId = Task1, seq = 1, name = "W1", seamType = "LINE", startU = 3.2, startV = 0.9, endU = 5.8, endV = 0.9, sectionDxfId = "DXF-1", profileId = "PROF-1" },
                     new { taskId = Task2, seq = 5, name = "W5-cross", seamType = "CROSS4", startU = 4.0, startV = 1.2, endU = 4.4, endV = 1.2, sectionDxfId = "DXF-1", profileId = "PROF-1" },
                 });
+            if (path == "/api/scenarios")
+                return Json(Array.Empty<object>());
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 
