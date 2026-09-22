@@ -58,7 +58,8 @@ builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
     c.BaseAddress = new Uri(builder.Configuration["Acs:Saige:BaseUrl"] ?? "http://localhost:8080");
     c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Acs:Saige:TimeoutSec", 3));
 });
-builder.Services.AddHostedService<SaigeHealthReporter>();
+builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
 builder.Services.AddSignalR();
 
 var app = builder.Build();
@@ -122,6 +123,9 @@ app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 app.MapHub<MonitoringHub>("/hubs/monitoring");
 
 // ── REST API (API-First: WPF/Web/태블릿 공용 [ADR-005]) ──────────────
+
+// SAIGE 연동 상태 [운영 확인] — 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다(lastOkAt·totalSent·robots[].lastSentAt).
+app.MapGet("/api/integrations/saige", (SaigeHealthReporter saige) => Results.Ok(saige.Status));
 
 app.MapGet("/api/robots", async (AcsDbContext db) =>
     Results.Ok(await db.Robots.AsNoTracking().ToListAsync()));

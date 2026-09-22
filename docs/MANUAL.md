@@ -315,6 +315,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
 | `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
+| `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |

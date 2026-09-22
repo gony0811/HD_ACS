@@ -265,6 +265,87 @@ public class SaigeInterfaceTests
         Assert.False(reporter.InBackoff);
     }
 
+    // ── 연동 상태 스냅샷 (GET /api/integrations/saige) ─────────────────
+
+    /// <summary>정상 전송은 로그가 없으므로 상태 스냅샷이 "보내고 있다"의 유일한 근거 — 성공 시 lastOkAt·totalSent·로봇별 마지막 전송이 채워진다.</summary>
+    [Fact]
+    public async Task Status_ReflectsSuccessfulSend()
+    {
+        using var sp = BuildServices(new FakeSaige(HttpStatusCode.OK));
+        await SeedRobotAsync(sp.GetRequiredService<AcsDbContext>());
+        var reporter = Reporter(sp);
+        Assert.False(reporter.Status.Healthy);                       // 아직 한 번도 안 보냄
+        Assert.Null(reporter.Status.LastOkAt);
+
+        await reporter.TickAsync(default);
+        await reporter.TickAsync(default);
+
+        var st = reporter.Status;
+        Assert.True(st.Enabled && st.Healthy);
+        Assert.Equal(2, st.TotalSent);
+        Assert.NotNull(st.LastOkAt);
+        Assert.Equal((0L, 0L, 0, false), (st.TotalFailed, st.TotalRejected, st.ConsecutiveFailures, st.AlarmRaised));
+        var r = Assert.Single(st.Robots);
+        Assert.Equal(("AMR01", "IDLE", 2, 12480, 5120, 82, "OK"), (r.RobotId, r.LastStatus, r.Level, r.X, r.Y, r.Battery, r.LastResult));
+        Assert.Null(r.HoldReason);
+        Assert.Contains("/agent/v3/external/robot-health-check", st.Endpoint);
+    }
+
+    [Fact]
+    public async Task Status_ShowsHoldReason_WhenCalibrationInvalid()
+    {
+        using var sp = BuildServices(new FakeSaige(HttpStatusCode.OK));
+        await SeedRobotAsync(sp.GetRequiredService<AcsDbContext>(), calibrated: false);
+        var reporter = Reporter(sp);
+
+        await reporter.TickAsync(default);
+
+        var r = Assert.Single(reporter.Status.Robots);
+        Assert.Contains("T_W_D", r.HoldReason);
+        Assert.Null(r.LastSentAt);
+        Assert.Equal(0, reporter.Status.TotalSent);
+        Assert.False(reporter.Status.Healthy);
+    }
+
+    [Fact]
+    public async Task Status_TracksFailuresBackoffAndAlarm_ThenClearsOnRecovery()
+    {
+        var saige = new FakeSaige(HttpStatusCode.ServiceUnavailable, "{\"code\":50302}");
+        using var sp = BuildServices(saige);
+        await SeedRobotAsync(sp.GetRequiredService<AcsDbContext>());
+        var reporter = Reporter(sp);   // AlarmAfterFailures=2
+
+        await reporter.TickAsync(default);
+        await reporter.TickAsync(default);
+        var st = reporter.Status;
+        Assert.Equal((2L, 2, true), (st.TotalFailed, st.ConsecutiveFailures, st.AlarmRaised));
+        Assert.NotNull(st.BackoffUntil);
+        Assert.Contains("503", st.LastError);
+        Assert.Equal("HTTP 503 / code 50302", Assert.Single(st.Robots).LastResult);
+        Assert.False(st.Healthy);
+
+        saige.Status = HttpStatusCode.OK;
+        await reporter.TickAsync(default);
+        st = reporter.Status;
+        Assert.True(st.Healthy);
+        Assert.Equal((1L, 2L, 0), (st.TotalSent, st.TotalFailed, st.ConsecutiveFailures));   // 누적 실패 수는 이력으로 남고 연속은 0
+        Assert.Null(st.BackoffUntil);
+        Assert.Null(st.LastError);
+    }
+
+    [Fact]
+    public async Task Status_SerializesForOperators()
+    {
+        using var sp = BuildServices(new FakeSaige(HttpStatusCode.OK));
+        await SeedRobotAsync(sp.GetRequiredService<AcsDbContext>());
+        var reporter = Reporter(sp);
+        await reporter.TickAsync(default);
+
+        var json = JsonSerializer.Serialize(reporter.Status, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        foreach (var key in new[] { "enabled", "endpoint", "intervalSec", "healthy", "lastOkAt", "secondsSinceLastOk", "totalSent", "consecutiveFailures", "backoffUntil", "lastError", "robots", "holdReason" })
+            Assert.Contains($"\"{key}\":", json);
+    }
+
     private sealed class FakeSaige(HttpStatusCode status, string body = "{\"status\":200,\"message\":\"success\"}") : HttpMessageHandler
     {
         public HttpStatusCode Status { get; set; } = status;

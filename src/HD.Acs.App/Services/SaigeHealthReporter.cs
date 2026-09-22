@@ -41,7 +41,14 @@ public sealed class SaigeHealthReporter : BackgroundService
     private DateTimeOffset _backoffUntil = DateTimeOffset.MinValue;
     private readonly HashSet<string> _positionWarned = new();   // 위치 산출 불가 경고 edge (로봇별 1회)
 
+    // 운영 확인용 상태 스냅샷 — 매 전송/보류/실패마다 통째로 교체(불변 레코드, volatile 참조 스왑 = 락 없이 읽기 안전).
+    private volatile SaigeLinkStatus _status;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SaigeRobotLink> _robots = new();
+
     public const string HttpClientName = "saige";
+
+    /// <summary>현재 연동 상태 — <c>GET /api/integrations/saige</c>. 정상 전송은 로그를 남기지 않으므로 이것이 "보내고 있다"의 근거다.</summary>
+    public SaigeLinkStatus Status => _status;
 
     internal bool InBackoff => DateTimeOffset.UtcNow < _backoffUntil;
     internal int ConsecutiveFailures => _consecutiveFailures;
@@ -51,7 +58,11 @@ public sealed class SaigeHealthReporter : BackgroundService
     {
         _scopes = scopes; _http = http; _errors = errors; _log = log;
         _opt = config.GetSection("Acs:Saige").Get<SaigeOptions>() ?? new SaigeOptions();
+        _status = SaigeLinkStatus.Initial(_opt);
     }
+
+    private void Publish(Func<SaigeLinkStatus, SaigeLinkStatus> change) =>
+        _status = change(_status) with { Robots = _robots.Values.OrderBy(r => r.RobotId).ToArray() };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -83,6 +94,9 @@ public sealed class SaigeHealthReporter : BackgroundService
             var payload = await BuildSnapshotAsync(db, robotId, ct);
             if (payload is null) continue;
             var outcome = await SendAsync(payload, ct);
+            _robots[robotId] = new SaigeRobotLink(robotId, DateTimeOffset.UtcNow, payload.Status,
+                payload.Position.Level, payload.Position.X, payload.Position.Y, payload.Battery,
+                outcome.Kind == SendKind.Ok ? "OK" : outcome.Detail ?? outcome.Kind.ToString(), HoldReason: null);
             await ApplyOutcomeAsync(db, robotId, outcome, ct);
             if (outcome.Kind is SendKind.Backoff) break;   // SAIGE 자체가 불능 — 나머지 로봇도 이번 주기 생략
         }
@@ -132,6 +146,10 @@ public sealed class SaigeHealthReporter : BackgroundService
     {
         if (_positionWarned.Add(robotId))
             _log.LogWarning("SAIGE 전송 보류 — robot={Robot}: {Reason} (해소되면 자동 재개)", robotId, reason);
+        var prev = _robots.TryGetValue(robotId, out var p) ? p : null;
+        _robots[robotId] = new SaigeRobotLink(robotId, prev?.LastSentAt, prev?.LastStatus, prev?.Level, prev?.X, prev?.Y, prev?.Battery,
+            prev?.LastResult, HoldReason: reason);
+        Publish(s => s);
         return null;
     }
 
@@ -185,12 +203,18 @@ public sealed class SaigeHealthReporter : BackgroundService
                 if (_consecutiveFailures > 0)
                     _log.LogInformation("SAIGE 전송 복구 (연속 실패 {N}회 후).", _consecutiveFailures);
                 _consecutiveFailures = 0; _alarmRaised = false; _backoffUntil = DateTimeOffset.MinValue;
+                // 정상 전송은 Debug — 평소엔 조용, 추적 시 Serilog MinimumLevel 을 Debug 로 내리면 매 건 보인다.
+                if (_robots.TryGetValue(robotId, out var r))
+                    _log.LogDebug("SAIGE 전송 OK — robot={Robot} status={Status} L{Level} ({X},{Y})mm battery={Battery}%",
+                        robotId, r.LastStatus, r.Level, r.X, r.Y, r.Battery);
+                Publish(s => s with { LastOkAt = DateTimeOffset.UtcNow, TotalSent = s.TotalSent + 1, ConsecutiveFailures = 0, BackoffUntil = null, LastError = null });
                 return;
 
             case SendKind.Rejected:
                 // 형식 오류는 같은 값을 다시 보내도 같은 결과 — 폐기하고 로그·알람 [§9.5]
                 _log.LogError("SAIGE가 로봇 상태를 거부({Detail}) — robot={Robot}, 재시도하지 않고 폐기.", o.Detail, robotId);
                 await RaiseAlarmAsync(db, "SAIGE_BAD_REQUEST", robotId, "SAIGE 로봇 상태 형식 오류(40001)", o.Detail, ct);
+                Publish(s => s with { TotalRejected = s.TotalRejected + 1, LastError = o.Detail, LastErrorAt = DateTimeOffset.UtcNow });
                 return;
 
             case SendKind.Backoff:
@@ -208,6 +232,9 @@ public sealed class SaigeHealthReporter : BackgroundService
                     _alarmRaised = true;   // 복구 전까지 1회만
                     await RaiseAlarmAsync(db, "SAIGE_UNREACHABLE", robotId, "SAIGE 로봇 상태 전송 불가", o.Detail, ct);
                 }
+                var until = _backoffUntil == DateTimeOffset.MinValue ? (DateTimeOffset?)null : _backoffUntil;
+                Publish(s => s with { TotalFailed = s.TotalFailed + 1, ConsecutiveFailures = _consecutiveFailures, BackoffUntil = until,
+                    LastError = o.Detail, LastErrorAt = DateTimeOffset.UtcNow, AlarmRaised = _alarmRaised });
                 return;
         }
     }
@@ -233,6 +260,31 @@ public sealed class SaigeHealthReporter : BackgroundService
     private enum SendKind { Ok, Rejected, Backoff, Failed }
     private sealed record SendOutcome(SendKind Kind, string? Detail);
 }
+
+/// <summary>
+/// SAIGE 연동 상태 스냅샷 [운영 확인용 — GET /api/integrations/saige]. 정상 전송은 로그에 남지 않으므로
+/// "지금 보내고 있는가"는 <see cref="LastOkAt"/>·<see cref="TotalSent"/>가 근거다. Healthy = 활성 + 마지막 결과 OK + 백오프 아님.
+/// </summary>
+public sealed record SaigeLinkStatus(
+    bool Enabled, string Endpoint, int IntervalSec,
+    DateTimeOffset? LastOkAt, long TotalSent, long TotalFailed, long TotalRejected,
+    int ConsecutiveFailures, DateTimeOffset? BackoffUntil, bool AlarmRaised,
+    string? LastError, DateTimeOffset? LastErrorAt,
+    IReadOnlyList<SaigeRobotLink> Robots)
+{
+    public bool Healthy => Enabled && LastOkAt is not null && ConsecutiveFailures == 0 && LastError is null;
+
+    /// <summary>마지막 성공 이후 경과 초 — 주기(IntervalSec)의 몇 배인지로 "멈춤"을 판단할 수 있다.</summary>
+    public double? SecondsSinceLastOk => LastOkAt is { } t ? Math.Round((DateTimeOffset.UtcNow - t).TotalSeconds, 1) : null;
+
+    public static SaigeLinkStatus Initial(SaigeOptions o) => new(
+        o.Enabled, o.BaseUrl.TrimEnd('/') + o.HealthPath, o.IntervalSec,
+        null, 0, 0, 0, 0, null, false, null, null, Array.Empty<SaigeRobotLink>());
+}
+
+/// <summary>로봇별 마지막 전송 내용. HoldReason 이 있으면 지금은 전송 보류 중(도면 좌표 산출 불가 등).</summary>
+public sealed record SaigeRobotLink(string RobotId, DateTimeOffset? LastSentAt, string? LastStatus,
+    int? Level, int? X, int? Y, int? Battery, string? LastResult, string? HoldReason);
 
 /// <summary>robot-health-check 요청 본문 [§9.1]. JSON 키는 camelCase.</summary>
 public sealed record SaigeRobotHealth(
