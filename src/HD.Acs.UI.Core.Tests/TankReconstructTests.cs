@@ -46,4 +46,24 @@ public class TankReconstructTests
         Assert.Equal(30630, e!.Value.W, 1);
         Assert.Equal(5095, e.Value.H, 1);
     }
+
+    // 바닥 면(WALL B) 자체 bbox = 길이 30630 × 폭 9618 → 폭(짧은 변)을 정확히 취한다.
+    // 마구리 챔퍼 외곽 역산(9620/8590)이 아닌 이 값이 바닥폭 정본(CAD 측정 9618과 일치).
+    [Fact]
+    public void FaceWidth_PicksTransverse_NotLength()
+    {
+        var floor = new[] { new Pt2(0, 0), new Pt2(30630, 0), new Pt2(30630, 9618), new Pt2(0, 9618) };
+        Assert.Equal(9618, TankReconstruct.FaceWidth(floor, 30630)!.Value, 1);   // L에 가까운 변=길이, 나머지=폭
+    }
+
+    // 도면 방향이 뒤집혀(길이 축이 Y) 있어도 L에 가까운 변을 길이로 판정 → 폭은 여전히 짧은 변.
+    [Fact]
+    public void FaceWidth_OrientationIndependent()
+    {
+        var rotated = new[] { new Pt2(0, 0), new Pt2(11778, 0), new Pt2(11778, 30630), new Pt2(0, 30630) };
+        Assert.Equal(11778, TankReconstruct.FaceWidth(rotated, 30630)!.Value, 1);
+    }
+
+    [Fact]
+    public void FaceWidth_Empty_ReturnsNull() => Assert.Null(TankReconstruct.FaceWidth(Array.Empty<Pt2>(), 30630));
 }

@@ -52,4 +52,34 @@ public class DxfFaceImportTests
         Assert.Equal(0, r.WeldCount);
         Assert.Equal(0, r.CorrCount);
     }
+
+    // 마구리 챔퍼 각 45° 견고화: OutlineFit은 corrugation 포함 외곽으로 역산 → 바닥 코너가 채워져
+    // 용접선만 기반 fit보다 바닥폭이 정확(넓게) 나온다. 저장/표시 Segments는 여전히 용접선만.
+    [Fact]
+    public void Classify_OutlineFit_IncludesCorrugationCorners()
+    {
+        var raw = new List<(Pt2 A, Pt2 B)>
+        {
+            // 용접선 팔각 외곽(바닥 변 4000..8000 = 폭 4000)
+            (new Pt2(4000, 0),     new Pt2(8000, 0)),        // 바닥
+            (new Pt2(8000, 0),     new Pt2(12000, 3000)),    // 하부챔퍼 우
+            (new Pt2(12000, 3000), new Pt2(12000, 9000)),    // 우벽
+            (new Pt2(12000, 9000), new Pt2(8000, 12000)),    // 상부챔퍼 우
+            (new Pt2(8000, 12000), new Pt2(4000, 12000)),    // 천장
+            (new Pt2(4000, 12000), new Pt2(0, 9000)),        // 상부챔퍼 좌
+            (new Pt2(0, 9000),     new Pt2(0, 3000)),        // 좌벽
+            (new Pt2(0, 3000),     new Pt2(4000, 0)),        // 하부챔퍼 좌
+            // corrugation(단선<500): 바닥 코너를 바깥으로 200mm씩 넓힘(용접선엔 없는 코너 채움)
+            (new Pt2(3800, 0), new Pt2(4000, 0)),
+            (new Pt2(8000, 0), new Pt2(8200, 0)),
+        };
+        var r = DxfFaceImport.Classify("A", "a.dxf", raw);
+
+        Assert.NotNull(r.OutlineFit);
+        Assert.Equal(4400, r.OutlineFit!.WFloor, 1);   // corrugation 포함 = 3800..8200
+
+        var weldFit = TankReconstruct.FitOctagon(
+            r.Segments.SelectMany(s => new[] { new Pt2(s.Ax, s.Ay), new Pt2(s.Bx, s.By) }).ToList());
+        Assert.Equal(4000, weldFit!.WFloor, 1);        // 용접선만 = 4000 (코너 미채움)
+    }
 }

@@ -41,6 +41,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>새 프로젝트 팝업의 면별 CAD 등록 행(파일·분류 집계 표시).</summary>
     public ObservableCollection<FaceCadRow> CadFaces { get; } = new();
 
+    /// <summary>면별 <b>corrugation 포함</b> 외곽 팔각 fit(마구리 역산용 세션 임시값). 저장소/DB엔 안 남김 —
+    /// 새 프로젝트 등록 흐름에서만 산출·소비. 마구리 챔퍼 각을 45°로 견고하게 얻기 위해 코너를 채우는 외곽이 필요.</summary>
+    private readonly Dictionary<string, TankReconstruct.OctagonFit> _outlineFits = new(StringComparer.OrdinalIgnoreCase);
+
     private void EnsureCadRows()
     {
         if (CadFaces.Count == 0)
@@ -51,6 +55,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public void ResetFaceCad()
     {
         _faceCad.Clear();
+        _outlineFits.Clear();
         EnsureCadRows();
         foreach (var r in CadFaces) r.SetUnregistered();
     }
@@ -71,6 +76,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 return;
             }
             _faceCad.Set(new FaceCadDoc(wallCode, imp.SourceFile, imp.Segments.ToArray()));
+            // 마구리(A/F)면 corrugation 포함 외곽 팔각 fit을 임시 보관 — 역산에서 챔퍼 각 45° 견고화에 사용.
+            if (BulkheadCodes.Contains(wallCode) && imp.OutlineFit is { } of) _outlineFits[wallCode] = of;
+            else _outlineFits.Remove(wallCode);
             row?.SetRegistered(imp.SourceFile, imp.WeldCount, imp.CorrCount);
             StatusMessage = $"[{wallCode}] CAD 등록: {imp.SourceFile} — 용접라인 {imp.WeldCount} (Corrugation {imp.CorrCount} 제외)"
                           + $" · 약 {imp.WidthMm:0}×{imp.HeightMm:0}mm";
@@ -87,6 +95,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public async void ClearFaceCad(string wallCode)
     {
         _faceCad.Remove(wallCode);
+        _outlineFits.Remove(wallCode);
         CadFaces.FirstOrDefault(r => r.WallCode == wallCode)?.SetUnregistered();
         StatusMessage = $"[{wallCode}] CAD 등록 해제.";
         try { await _api.DeleteFaceCadAsync(TankId, wallCode); }
@@ -224,7 +233,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             StatusMessage = "마구리(A 또는 F) 면 DXF를 먼저 등록하세요 — 팔각 단면을 도면에서 추출합니다.";
             return false;
         }
-        var fit = TankReconstruct.FitOctagon(ToPoints(bulk));
+        // 챔퍼 각(θ)은 좌변 y-구간에 민감 → corrugation 포함 외곽 fit을 우선 사용(코너까지 채워 45° 견고).
+        // 세션 임시값이 없을 때만(예: 프로젝트 재열기) 용접선만 외곽으로 폴백(각도 근사 가능).
+        var fit = _outlineFits.TryGetValue(bulk.WallCode, out var of) ? of : TankReconstruct.FitOctagon(ToPoints(bulk));
         if (fit is null)
         {
             StatusMessage = $"[{bulk.WallCode}] 도면에서 팔각 단면을 추출하지 못했습니다(외곽 경계 부족).";
@@ -244,16 +255,40 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             return false;
         }
 
+        // 바닥/천장 폭은 마구리 챔퍼 외곽이 아니라 바닥(B)·천장(T) 면 도면의 자체 폭에서 직접 얻는다.
+        //  · 마구리 외곽의 바닥/천장 변은 코너에 corrugation이 섞여 ±수 mm 불안정(용접선만 추출 시 더 심함)
+        //  · 각 면 bbox의 짧은 변(=길이 L이 아닌 폭)은 외곽 용접선이라 견고 → CAD 측정값과 일치
+        //  · 해당 면 미등록 시 마구리 역산값으로 폴백(기존 동작)
+        double wFloorMm = FaceTransverse("B", lenMm) ?? fit.WFloor;
+        double wCeilMm = FaceTransverse("T", lenMm) ?? fit.WCeil;
+
+        // 폭 정본이 바뀌었으므로 챔퍼 각을 재계산(전폭 B·챔퍼 높이는 마구리 유지 → 폭만 정확 반영).
+        double thLowDeg = Math.Atan2(fit.HLow, Math.Max(1e-6, (fit.BeamB - wFloorMm) / 2)) * 180 / Math.PI;
+        double thUpDeg = Math.Atan2(fit.HUp, Math.Max(1e-6, (fit.BeamB - wCeilMm) / 2)) * 180 / Math.PI;
+
         const double s = 0.001;   // mm → m
         LengthL = lenMm * s;
-        WFloor = fit.WFloor * s;
-        ThetaLowDeg = fit.ThetaLowDeg; HLow = fit.HLow * s;
+        WFloor = wFloorMm * s;
+        ThetaLowDeg = thLowDeg; HLow = fit.HLow * s;
         HWall = fit.HWall * s;
-        ThetaUpDeg = fit.ThetaUpDeg; HUp = fit.HUp * s;
-        DerivedText = $"도면 추출: L {LengthL:0.##}m · 전폭 {fit.BeamB * s:0.##}m · 바닥폭 {WFloor:0.##} · 천장폭 {fit.WCeil * s:0.##}"
-                    + $" · 높이 {fit.HTotal * s:0.##}m (θ_low {ThetaLowDeg:0.#}° · θ_up {ThetaUpDeg:0.#}°)";
+        ThetaUpDeg = thUpDeg; HUp = fit.HUp * s;
+
+        // 마구리 챔퍼 외곽 폭과 면 도면 폭의 차이를 알림(도면 간 불일치 가시화 — 봉합하지 않고 노출).
+        double dFloor = Math.Abs(fit.WFloor - wFloorMm), dCeil = Math.Abs(fit.WCeil - wCeilMm);
+        string note = (dFloor > 3 || dCeil > 3)
+            ? $" · ⚠ 마구리 외곽 폭(바닥 {fit.WFloor:0}·천장 {fit.WCeil:0}mm)과 면 도면 폭이 최대 {Math.Max(dFloor, dCeil):0}mm 차이 — 면 도면값 사용"
+            : "";
+        DerivedText = $"도면 추출: L {LengthL:0.##}m · 전폭 {fit.BeamB * s:0.##}m · 바닥폭 {WFloor:0.###} · 천장폭 {wCeilMm * s:0.###}"
+                    + $" · 높이 {fit.HTotal * s:0.##}m (θ_low {ThetaLowDeg:0.#}° · θ_up {ThetaUpDeg:0.#}°)" + note;
 
         return await TryRegisterGeometryAsync();   // 기존 등록(면 생성)+CAD flush 재사용
+    }
+
+    /// <summary>면(wallCode)의 자체 도면 bbox에서 폭(=길이 L이 아닌 짧은 변)을 mm로 얻는다. 미등록/미추출 시 null.</summary>
+    private double? FaceTransverse(string wallCode, double lenMm)
+    {
+        var doc = _faceCad.Get(wallCode);
+        return doc is { Segments.Length: > 0 } ? TankReconstruct.FaceWidth(ToPoints(doc), lenMm) : null;
     }
 
     private static IReadOnlyList<Pt2> ToPoints(FaceCadDoc doc) =>

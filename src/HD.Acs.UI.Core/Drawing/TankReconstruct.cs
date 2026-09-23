@@ -47,4 +47,16 @@ public static class TankReconstruct
     /// <summary>점 집합의 bbox 크기(mm). 비면 null.</summary>
     public static (double W, double H)? Extent(IReadOnlyList<Pt2> pts) =>
         pts.Count == 0 ? null : (pts.Max(p => p.X) - pts.Min(p => p.X), pts.Max(p => p.Y) - pts.Min(p => p.Y));
+
+    /// <summary>
+    /// 면 자체 bbox에서 <b>폭</b>(=선창 길이 L이 아닌 짧은 변)을 mm로 얻는다.
+    /// 바닥/천장 폭을 마구리 챔퍼 외곽(코너 corrugation 혼재로 불안정)이 아니라
+    /// 그 면 도면에서 직접 취할 때 사용 — 도면 방향(길이 축이 X든 Y든)에 무관하게
+    /// L에 가까운 변을 길이로, 나머지를 폭으로 판정한다. 점 없음 시 null.
+    /// </summary>
+    public static double? FaceWidth(IReadOnlyList<Pt2> pts, double lengthMm)
+    {
+        if (Extent(pts) is not { } e) return null;
+        return Math.Abs(e.W - lengthMm) <= Math.Abs(e.H - lengthMm) ? e.H : e.W;
+    }
 }

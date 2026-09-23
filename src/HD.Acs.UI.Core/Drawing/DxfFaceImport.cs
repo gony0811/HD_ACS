@@ -22,9 +22,13 @@ public static class DxfFaceImport
     public const double DefaultWeldMinLenMm = 500;
 
     /// <summary>가져오기 결과 — 면-로컬 선분 + 분류 집계 + 원본 bbox 크기(mm).</summary>
+    /// <remarks><see cref="OutlineFit"/>: <b>corrugation 포함</b> 외곽으로 역산한 팔각 단면(마구리 역산용).
+    /// 저장·표시 선분은 용접선만이지만, 마구리 챔퍼 각(θ)을 45°로 견고하게 얻으려면 코너까지 채우는
+    /// corrugation 외곽이 필요하다 — 이 값만 그 목적에 쓴다(비면/퇴화 시 null).</remarks>
     public sealed record FaceImport(
         string WallCode, string SourceFile, IReadOnlyList<FaceCadSeg> Segments,
-        int WeldCount, int CorrCount, double WidthMm, double HeightMm);
+        int WeldCount, int CorrCount, double WidthMm, double HeightMm,
+        TankReconstruct.OctagonFit? OutlineFit = null);
 
     /// <summary>DXF 한 장을 읽어 멤브레인 레이어 선분을 면-로컬 mm로 추출·분류한다.</summary>
     public static FaceImport Load(string wallCode, string path, double weldMinLenMm = DefaultWeldMinLenMm)
@@ -90,8 +94,20 @@ public static class DxfFaceImport
             weld++;
             segs.Add(new FaceCadSeg(a.X - minX, a.Y - minY, b.X - minX, b.Y - minY, nameof(DrawType.WeldLine)));
         }
+
+        // corrugation 포함 외곽으로 팔각 단면 역산(마구리 챔퍼 각 45° 견고화용) — 저장/표시엔 미사용.
+        //  용접선만으로는 챔퍼가 만나는 바닥/천장 코너가 비어 좌변 y-구간이 어긋나 θ가 47°로 근사되던 문제를
+        //  코너를 채우는 corrugation 끝점까지 포함해 해소한다. 좌표계는 위 segs와 동일(면-로컬, minX/minY 원점).
+        var fullPts = new List<Pt2>(uniq.Count * 2);
+        foreach (var (a, b) in uniq)
+        {
+            fullPts.Add(new Pt2(a.X - minX, a.Y - minY));
+            fullPts.Add(new Pt2(b.X - minX, b.Y - minY));
+        }
+        var outlineFit = TankReconstruct.FitOctagon(fullPts);
+
         // CorrCount = 제외된 Corrugation 선 수(참고 표시용).
-        return new FaceImport(wallCode, sourceFile, segs, weld, dropped, maxX - minX, maxY - minY);
+        return new FaceImport(wallCode, sourceFile, segs, weld, dropped, maxX - minX, maxY - minY, outlineFit);
     }
 
     private static bool IsMembrane(string? layer) =>
