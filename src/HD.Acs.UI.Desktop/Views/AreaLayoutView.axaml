@@ -14,9 +14,11 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <TextBlock Text="{Binding SelectedWallInfo, StringFormat='벽면-로컬 (u,v): {0}'}" FontWeight="Bold" VerticalAlignment="Center" />
                     <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"
-                               Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 입력 중=파란 점선 박스·주황 점선. 휠=확대/축소." />
+                               Text="용접선=청록 선(등록 CAD) · 영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 입력 중=파란 점선 박스·주황 점선. 휠=확대/축소." />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Content="용접선" IsChecked="{Binding ShowWeldLines}" VerticalAlignment="Center" Margin="0,0,12,0"
+                              ToolTip.Tip="등록된 CAD 용접선을 참조 레이어로 표시" />
                     <TextBlock x:Name="ZoomLabel" Text="100%" VerticalAlignment="Center" Margin="0,0,8,0" MinWidth="42" TextAlignment="Right" />
                     <Button Content="－" Click="ZoomOut_Click" MinWidth="30" Margin="0,0,4,0" ToolTip.Tip="축소" />
                     <Button Content="＋" Click="ZoomIn_Click" MinWidth="30" Margin="0,0,4,0" ToolTip.Tip="확대" />
@@ -36,6 +38,16 @@
                         <Polygon Points="{Binding FaceOutline, Converter={StaticResource Pts}}" Fill="#33AAB0B7" Stroke="#95A5A6" StrokeThickness="1.2" />
                         <!-- 선택 층 활성 밴드(밝게) -->
                         <Polygon Points="{Binding ActiveBand, Converter={StaticResource Pts}}" Fill="#1A2ECC71" Stroke="#27AE60" StrokeThickness="1.4" />
+                        <!-- 등록된 CAD 용접선(참조 레이어 — 영역/작업 뒤, 청록 얇은 선) -->
+                        <ItemsControl ItemsSource="{Binding WeldLines}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
+                                          Stroke="#3FB8CC" StrokeThickness="1" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <!-- 타 층 영역(회색·비활성) -->
                         <ItemsControl ItemsSource="{Binding InactiveAreaBoxes}">
                             <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>

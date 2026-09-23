@@ -98,18 +98,22 @@ public sealed partial class TankViewModel : ObservableObject
         var labels = BuildEdgeLabels(w, uv, sc);
         var vm = new FaceDrawingViewModel(wallCode, w.ULen * sc, w.VLen * sc, outline, labels);
 
-        // 등록된 CAD(DXF)가 있으면 그 면의 용접선·Corrugation 선분을 시드하고, 수동 보정→캐시+DB 반영 콜백을 연결
-        if (_faceCad.Get(wallCode) is { } cad)
+        // 등록된 CAD(DXF)가 있으면 그 면의 용접선·Corrugation 선분을 시드(수기 생성 선창은 CAD가 없어 빈 캔버스).
+        var cad = _faceCad.Get(wallCode);
+        if (cad is not null)
         {
             vm.CadSourceFile = cad.SourceFile;
             vm.SeedCad(cad.Segments);
-            vm.PersistCad = async segs =>
-            {
-                var arr = segs.ToArray();
-                _faceCad.Set(new FaceCadDoc(wallCode, cad.SourceFile, arr));   // 캐시 즉시 반영(오프라인에도 보존)
-                await _api.SaveFaceCadAsync(TankId, wallCode, cad.SourceFile, arr);   // DB 반영(실패 시 예외)
-            };
         }
+        // 저장 콜백은 CAD 유무와 무관하게 항상 연결 — 수기 생성 선창에서 새로 그린 용접선도 캐시+DB에 저장 가능.
+        // 출처 파일은 기존 CAD가 있으면 유지, 없으면 null(직접 드로잉). 선창 지오메트리는 이미 등록돼 있어 DB FK 충족.
+        vm.PersistCad = async segs =>
+        {
+            var arr = segs.ToArray();
+            var src = cad?.SourceFile;
+            _faceCad.Set(new FaceCadDoc(wallCode, src, arr));         // 캐시 즉시 반영(오프라인에도 보존)
+            await _api.SaveFaceCadAsync(TankId, wallCode, src, arr);   // DB 반영(실패 시 예외 → SaveCad가 안내)
+        };
         return vm;
     }
 

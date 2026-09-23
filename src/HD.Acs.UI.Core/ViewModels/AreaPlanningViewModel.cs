@@ -125,6 +125,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public ObservableCollection<TaskSeg> TaskSegments { get; } = new();
     public ObservableCollection<TaskSeg> DraftSegments { get; } = new();       // 입력 중 용접선 미리보기
     public ObservableCollection<StationMarker> StationMarkers { get; } = new(); // 정차점 = 영역 중심
+    public ObservableCollection<WeldLineSeg> WeldLines { get; } = new();        // 등록된 CAD 용접선(선택 면, 참조 레이어)
 
     [ObservableProperty] private string _tankId = "CT1";
     [ObservableProperty] private string? _statusMessage;
@@ -143,6 +144,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _originOx;
     [ObservableProperty] private double _originOy;
     [ObservableProperty] private string _derivedText = "-";
+    [ObservableProperty] private bool _showWeldLines = true;   // 계획 전개도에 등록 CAD 용접선 표시
 
     // 선택 면 경계 폴리곤(캔버스 px) — 면 전체(회색 음영). 마구리(F/A)는 팔각, 그 외 직사각형.
     [ObservableProperty] private IReadOnlyList<Pt2> _faceOutline = Array.Empty<Pt2>();
@@ -200,9 +202,21 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var g = await _api.GetTankGeometryAsync(TankId);
             if (g is not null) ApplyGeometry(g);
             await LoadWallsAsync();
+            await RefreshFaceCadAsync();   // 등록된 면 CAD(용접선) → 저장소 동기화 → 전개도 참조 레이어
             await RefreshAreasAsync();
         }
         catch (Exception ex) { StatusMessage = $"조회 실패: {ex.Message}"; }
+    }
+
+    /// <summary>DB(ref.face_cad)의 면 CAD를 저장소로 동기화 — 저장소를 비우지 않고 면별 갱신(미저장 캐시 보존).</summary>
+    private async Task RefreshFaceCadAsync()
+    {
+        try
+        {
+            var cads = await _api.GetFaceCadAsync(TankId);
+            foreach (var f in cads) _faceCad.Set(new FaceCadDoc(f.WallCode, f.SourceFile, f.Segments));
+        }
+        catch { /* 서버 미연결 — 기존 캐시 유지 */ }
     }
 
     /// <summary>선택 층 필터로 면 목록 재적재 [v3.1 §8/§9]. 층 미선택 시 전체 면.</summary>
@@ -445,7 +459,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private void Project()
     {
         AreaBoxes.Clear(); InactiveAreaBoxes.Clear(); DraftAreas.Clear();
-        TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
+        TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear(); WeldLines.Clear();
         if (SelectedWall is not { } w || w.ULen <= 0 || w.VLen <= 0) return;
 
         double off = VOff;                     // 층-로컬 → 면-전체 v
@@ -453,6 +467,15 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         double scale = Math.Min((CanvasSize - 2 * Margin) / w.ULen, (CanvasSize - 2 * Margin) / vlen);
         _projScale = scale; _projVlen = vlen;
         (double x, double y) Proj(double u, double v) => (Margin + u * scale, Margin + (vlen - v) * scale);
+
+        // 등록된 CAD 용접선(선택 면) — 참조 레이어. 좌표=면-로컬 mm(÷1000=면-전체 v 미터), off 불요.
+        if (ShowWeldLines && _faceCad.Get(w.WallCode) is { Segments.Length: > 0 } cad)
+            foreach (var s in cad.Segments)
+            {
+                var (x1, y1) = Proj(s.Ax / 1000.0, s.Ay / 1000.0);
+                var (x2, y2) = Proj(s.Bx / 1000.0, s.By / 1000.0);
+                WeldLines.Add(new WeldLineSeg(x1, y1, x2, y2));
+            }
 
         // 코너 배열(면-전체 v) → 캔버스 폴리곤 + 라벨 앵커(centroid).
         AreaPoly Poly(double[][] corners, string label)
@@ -582,6 +605,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     partial void OnC4UChanged(double value) => Project();
     partial void OnC4VChanged(double value) => Project();
     partial void OnAreaNameChanged(string value) => Project();
+    partial void OnShowWeldLinesChanged(bool value) => Project();
     partial void OnStartUChanged(double value) => Project();
     partial void OnStartVChanged(double value) => Project();
     partial void OnEndUChanged(double value) => Project();

@@ -23,6 +23,13 @@ public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double 
     public Pt2 Mid => new(MidX, MidY);
 }
 
+/// <summary>등록된 CAD 용접선 선분(캔버스 px) — 계획 전개도의 참조 레이어(영역/작업 배치 기준).</summary>
+public sealed record WeldLineSeg(double X1, double Y1, double X2, double Y2)
+{
+    public Pt2 Start => new(X1, Y1);
+    public Pt2 End => new(X2, Y2);
+}
+
 /// <summary>정차점 마커(영역 centroid, 캔버스 px).</summary>
 public sealed record StationMarker(double Left, double Top, string Label);
 
