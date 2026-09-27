@@ -180,6 +180,10 @@ R(−yaw)이므로 방향 벡터도 −yaw 회전; 미보정 층은 원시 theta
   실제 치수는 다르다. 헤더에 `"uLen × vLen m"` 을 함께 표시하는 이유가 이것이다.
 - 윤곽은 `FaceOutlineUv()` — 격벽은 팔각 8정점, 나머지는 사각형 4정점.
 - 층 필터와 무관하게 **전 면·전 층을 항상 표시**한다 (3D 뷰의 층 선택과 연동되지 않는다).
+- 그리기: 면 1개 = `FacePlotCanvas` 컨트롤 1개가 `DrawingContext`로 윤곽·영역·용접선·끝점·글자를 한 번에 그린다
+  (2026-09-27 — 종전 항목마다 Polygon/Line/Ellipse/TextBlock 컨트롤을 만들던 방식은 작업 수천 개에서 컨트롤 수만 개).
+- 표시 항목: 전개도 탭 **우클릭 메뉴** = `TankViewModel.FlatLayers`(영역 채움·윤곽 / 영역 이름 / 용접선 / 용접 시작·끝점 / 작업 순번).
+  꺼진 항목은 `FacePlot` 목록에 넣지 않는다. 3D 뷰 설정과 독립.
 
 ### 6.2 계획 화면 (u,v) 캔버스 — `AreaPlanningViewModel.Project()`
 
@@ -312,3 +316,13 @@ u 값이 유효 범위 안이라 어떤 검증에도 걸리지 않는다.
 - 투영: `Camera3`(오빗 카메라, z-up, 수직 FOV 45°) + `SceneRenderer.Render` → 화면 px 그리기 목록(면·선은 시선 깊이 내림차순 페인터 정렬, 마커·라벨은 오버레이). 면은 법선·광원 내적으로 플랫 셰이딩(0.65~1.0). 반투명은 2D 알파 블렌딩이라 WPF 3D의 반투명 깊이 컬링 문제가 없다.
 - 바닥 클릭: `Camera3.HitPlaneZ`(화면 점의 시선 광선과 z=층 주행면 교차) → `TankSceneBuilder.FloorPlane` 사각 범위 검사 → `TankViewModel.RequestMoveAsync`.
 - 헤드: `HD.Acs.UI.Desktop/Views/Tank3DControl.cs`가 `DrawingContext`로 그리고 포인터(오빗/팬/줌)를 처리한다. VM `ViewChanged` 시 `ZoomExtents`.
+- **표시 항목·성능 (2026-09-27)**: 3D 탭 **우클릭(드래그 없이)** 메뉴 = `TankViewModel.View3DLayers`(`OverlayLayers` —
+  영역 채움·윤곽 / 영역 이름 / 용접선 / 용접 시작·끝점 / 작업 순번 / 바닥 1m 격자 / 지면 격자, "모두 표시"·"빠른 보기").
+  스냅샷 `SceneLayers`가 `TankSceneInput.Layers`로 들어가 **꺼진 항목의 도형을 만들지 않는다**(바닥 히트 평면은 격자와 무관하게 유지).
+  기본값은 시작·끝점과 작업 순번 끔(작업 수에 비례해 도형이 가장 많은 항목).
+  씬은 `BuildStatic`(셸·밴드·오버레이·격자 — 데이터·뷰 모드·표시 항목 변경 때만) / `BuildDynamic`(로봇·목적지 — 로봇 state마다)로
+  나눠 캐시하고 `SceneRenderer.Render(scenes[])`가 한 번에 깊이 정렬한다. 라벨 `FormattedText`는 (글자·색·크기) 키로 캐시.
+  색만 바뀌는 갱신(work_item/액션 상태 푸시, 표시 항목 변경)은 `SceneInvalidated`로 알려 **카메라 맞춤을 다시 하지 않는다**
+  (종전엔 상태 푸시마다 `ViewChanged`→ZoomExtents로 사용자가 돌려 둔 시점이 초기화됐다).
+  실측(영역 1,276·작업 7,513, 전체 뷰): 로봇 갱신 1회 재구성 약 33ms→0.04ms, 프레임당 그리기 목록 37,741→15,202(기본)/13,908(빠른 보기),
+  투영·정렬 55.6→26.5ms.

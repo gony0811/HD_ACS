@@ -43,10 +43,23 @@ public static class SceneRenderer
     private static readonly Pt3 LightDir = new Pt3(-0.4, -0.3, 1.0).Normalized();
 
     public static List<Draw2> Render(Scene3 scene, Camera3 camera, double viewWidth, double viewHeight)
-    {
-        var body = new List<Draw2>(scene.Faces.Count + scene.Segments.Count);
-        var overlay = new List<Draw2>(scene.Markers.Count + scene.Labels.Count);
+        => Render(new[] { scene }, camera, viewWidth, viewHeight);
 
+    /// <summary>여러 씬(예: 캐시한 정적 씬 + 매번 새로 만드는 동적 씬)을 하나의 깊이 정렬로 합쳐 그린다.</summary>
+    public static List<Draw2> Render(IReadOnlyList<Scene3> scenes, Camera3 camera, double viewWidth, double viewHeight)
+    {
+        var body = new List<Draw2>(scenes.Sum(s => s.Faces.Count + s.Segments.Count));
+        var overlay = new List<Draw2>(scenes.Sum(s => s.Markers.Count + s.Labels.Count));
+        foreach (var scene in scenes) Project(scene, camera, viewWidth, viewHeight, body, overlay);
+
+        // 먼 것 먼저(깊이 내림차순). 안정 정렬로 같은 깊이는 삽입 순서 유지(셸 → 강조 → 오버레이 순서 보존).
+        var ordered = body.OrderByDescending(x => x.Depth).ToList();
+        ordered.AddRange(overlay.OrderByDescending(x => x.Depth));
+        return ordered;
+    }
+
+    private static void Project(Scene3 scene, Camera3 camera, double viewWidth, double viewHeight, List<Draw2> body, List<Draw2> overlay)
+    {
         foreach (var f in scene.Faces)
         {
             if (f.Points.Count < 3) continue;
@@ -88,11 +101,6 @@ public static class SceneRenderer
             if (!vis) continue;
             overlay.Add(new Label2(p, l.Text, l.Color, l.FontSize, d));
         }
-
-        // 먼 것 먼저(깊이 내림차순). 안정 정렬로 같은 깊이는 삽입 순서 유지(셸 → 강조 → 오버레이 순서 보존).
-        var ordered = body.OrderByDescending(x => x.Depth).ToList();
-        ordered.AddRange(overlay.OrderByDescending(x => x.Depth));
-        return ordered;
     }
 
     /// <summary>다각형 법선(처음 세 점, 정규화). 퇴화면 z-up.</summary>

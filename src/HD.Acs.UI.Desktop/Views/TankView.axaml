@@ -1,14 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
              xmlns:views="using:HD.Acs.UI.Desktop.Views"
              x:Class="HD.Acs.UI.Desktop.Views.TankView">
     <!-- DataContext = TankViewModel. 3D 뷰=소프트웨어 투영 렌더러(Tank3DControl), 전개도 탭=면별 2D 캔버스. -->
-    <UserControl.Resources>
-        <conv:WorkStatusToBrushConverter x:Key="WorkStatusBrush" />
-        <conv:PointsConverter x:Key="Pts" />
-        <conv:PointConverter x:Key="Pt" />
-    </UserControl.Resources>
     <DockPanel TextBlock.Foreground="{DynamicResource AppTextBrush}">
         <!-- 뷰 모드(전체/L1~L4) + 오버레이·수동 이동 토글 + 로봇 위치 -->
         <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
@@ -49,18 +43,50 @@
             <TabItem Header="3D 뷰">
                 <!-- 소프트웨어 투영 렌더러 — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 위치→방향 드래그=goto -->
                 <Grid>
-                    <views:Tank3DControl x:Name="Tank3D" />
+                    <views:Tank3DControl x:Name="Tank3D">
+                        <views:Tank3DControl.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="3D 뷰 표시 항목" IsEnabled="False" />
+                                <Separator />
+                                <MenuItem Header="영역 (채움·윤곽)" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.AreaFills, Mode=TwoWay}" />
+                                <MenuItem Header="영역 이름" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.AreaLabels, Mode=TwoWay}" />
+                                <MenuItem Header="용접선" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.WeldLines, Mode=TwoWay}" />
+                                <MenuItem Header="용접 시작·끝점" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.WeldEndpoints, Mode=TwoWay}" />
+                                <MenuItem Header="작업 순번" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.TaskSeq, Mode=TwoWay}" />
+                                <Separator />
+                                <MenuItem Header="바닥 격자 (1m, 층 뷰)" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.FloorGrid, Mode=TwoWay}" />
+                                <MenuItem Header="지면 참조 격자" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding View3DLayers.GroundGrid, Mode=TwoWay}" />
+                                <Separator />
+                                <MenuItem Header="모두 표시" Command="{Binding View3DLayers.ShowAllCommand}" />
+                                <MenuItem Header="빠른 보기 (윤곽·용접선만)" Command="{Binding View3DLayers.ShowMinimalCommand}" />
+                            </ContextMenu>
+                        </views:Tank3DControl.ContextMenu>
+                    </views:Tank3DControl>
                     <Button Content="맞춤" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Padding="8,2" FontSize="11"
                             Opacity="0.85" Click="ZoomExtents_Click" ToolTip.Tip="전체 형상에 맞춤" />
                     <TextBlock HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,4" FontSize="10.5"
                                Foreground="{DynamicResource AppMutedTextBrush}"
-                               Text="좌드래그 회전 · 우드래그 이동 · 휠 확대/축소" />
+                               Text="좌드래그 회전 · 우드래그 이동 · 휠 확대/축소 · 우클릭 표시 항목" />
                 </Grid>
             </TabItem>
 
             <TabItem Header="전개도">
-                <!-- 면별 2D 도면 그리드 — 각 면 실제 비율 형상(마구리 F/A=팔각) + 영역·작업 오버레이 -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource AppWindowBrush}">
+                <!-- 면별 2D 도면 그리드 — 각 면 실제 비율 형상(마구리 F/A=팔각) + 영역·작업 오버레이. 우클릭=표시 항목 -->
+                <ScrollViewer x:Name="FlatScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource AppWindowBrush}">
+                    <ScrollViewer.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="전개도 표시 항목" IsEnabled="False" />
+                            <Separator />
+                            <MenuItem Header="영역 (채움·윤곽)" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding FlatLayers.AreaFills, Mode=TwoWay}" />
+                            <MenuItem Header="영역 이름" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding FlatLayers.AreaLabels, Mode=TwoWay}" />
+                            <MenuItem Header="용접선" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding FlatLayers.WeldLines, Mode=TwoWay}" />
+                            <MenuItem Header="용접 시작·끝점" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding FlatLayers.WeldEndpoints, Mode=TwoWay}" />
+                            <MenuItem Header="작업 순번" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding FlatLayers.TaskSeq, Mode=TwoWay}" />
+                            <Separator />
+                            <MenuItem Header="모두 표시" Command="{Binding FlatLayers.ShowAllCommand}" />
+                            <MenuItem Header="빠른 보기 (윤곽·용접선만)" Command="{Binding FlatLayers.ShowMinimalCommand}" />
+                        </ContextMenu>
+                    </ScrollViewer.ContextMenu>
                     <ItemsControl x:Name="FacePlotList" ItemsSource="{Binding FacePlots}" Margin="8">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -71,39 +97,8 @@
                                             <TextBlock Text="{Binding Code}" FontWeight="Bold" FontSize="13" />
                                             <TextBlock Text="{Binding Dim}" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" Margin="8,2,0,0" />
                                         </StackPanel>
-                                        <Canvas Width="240" Height="150" Background="{DynamicResource AppCanvasBrush}">
-                                            <Polygon Points="{Binding Outline, Converter={StaticResource Pts}}" Fill="#0F2E86C1" Stroke="#5D6D7E" StrokeThickness="1.2" />
-                                            <!-- 영역(4점 폴리곤) — work_item 상태색 -->
-                                            <ItemsControl ItemsSource="{Binding Areas}">
-                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Canvas>
-                                                            <Polygon Points="{Binding Points, Converter={StaticResource Pts}}"
-                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}"
-                                                                     Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}"
-                                                                     StrokeThickness="1" />
-                                                            <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" Text="{Binding Label}" FontSize="9" FontWeight="Bold"
-                                                                       Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
-                                                        </Canvas>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                            <!-- 작업 용접선 — 액션 상태색(계획=주황) -->
-                                            <ItemsControl ItemsSource="{Binding Tasks}">
-                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Canvas>
-                                                            <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}" StrokeThickness="2"
-                                                                  Stroke="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
-                                                            <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="6" Height="6"
-                                                                     Fill="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=weldStroke}" />
-                                                        </Canvas>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </Canvas>
+                                        <!-- 면 형상 + 영역·용접선을 컨트롤 1개가 직접 그림(항목마다 컨트롤을 만들지 않음) — 표시 항목은 우클릭 메뉴 -->
+                                        <views:FacePlotCanvas Width="240" Height="150" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
