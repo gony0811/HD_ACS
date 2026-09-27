@@ -86,4 +86,12 @@
         <Setter Property="CanUserReorderColumns" Value="False" />
         <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
     </Style>
+    <!-- 열 머리글: Fluent 기본(흐린 회색 글씨)은 다크 배경에서 잘 안 보여 본문 글씨색·굵게로 -->
+    <Style Selector="DataGridColumnHeader">
+        <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AppHeaderBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="10,6" />
+    </Style>
 </Styles>
