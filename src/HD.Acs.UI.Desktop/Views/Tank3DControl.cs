@@ -15,7 +15,10 @@ namespace HD.Acs.UI.Desktop.Views;
 /// <summary>
 /// 화물창 3D 뷰 — 소프트웨어 투영 렌더러(코어 Camera3·SceneRenderer)를 DrawingContext로 그리는 컨트롤. HelixViewport3D 대체.
 /// DataContext=TankViewModel. VM의 ViewChanged/속성 변화에 씬을 재구성(TankSceneBuilder)하고 카메라는 ZoomExtents.
-/// 조작: 좌드래그=오빗 · 우/중드래그=팬 · 휠=줌 · (수동 이동 모드) 바닥에서 좌드래그=위치+정차 방향 goto.
+/// 조작: 좌드래그=오빗 · 우/중드래그=팬 · 휠=줌 · (수동 이동 모드) 바닥에서 좌드래그=위치+정차 방향 goto
+/// · 우클릭(드래그 없이)=표시 항목 메뉴(ContextMenu, VM.View3DLayers).
+/// 성능: 셸·오버레이(정적 씬)는 데이터·뷰 모드·표시 항목이 바뀔 때만 만들고, 로봇 state 수신 때는 로봇·목적지(동적 씬)만
+/// 다시 만든다. 라벨 텍스트 레이아웃(FormattedText)은 캐시해 프레임마다 새로 만들지 않는다.
 /// </summary>
 public sealed class Tank3DControl : Control
 {
@@ -25,10 +28,12 @@ public sealed class Tank3DControl : Control
     private readonly Camera3 _camera = new();
     private readonly Dictionary<Rgba, IImmutableBrush> _brushes = new();
     private readonly Dictionary<(Rgba, double), IPen> _pens = new();
+    private readonly Dictionary<(string, Rgba, double), FormattedText> _texts = new();
     private readonly Typeface _typeface = new("Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Noto Sans CJK KR, sans-serif");
 
     private TankViewModel? _vm;
-    private Scene3 _scene = new();
+    private Scene3 _staticScene = new();
+    private Scene3 _dynamicScene = new();
     private TankSceneInput? _input;
     private Pt3? _manualMoveStart;
     private double? _previewHeading;
@@ -52,12 +57,14 @@ public sealed class Tank3DControl : Control
         {
             _vm.PropertyChanged -= OnVmPropertyChanged;
             _vm.ViewChanged -= OnViewChanged;
+            _vm.SceneInvalidated -= OnSceneInvalidated;
         }
         _vm = vm;
         if (_vm is not null)
         {
             _vm.PropertyChanged += OnVmPropertyChanged;
             _vm.ViewChanged += OnViewChanged;
+            _vm.SceneInvalidated += OnSceneInvalidated;
         }
         _needsZoomExtents = true;
         Rebuild();
@@ -71,47 +78,75 @@ public sealed class Tank3DControl : Control
         Rebuild();
     }
 
+    private void OnSceneInvalidated(object? sender, EventArgs e) => Rebuild();   // 색·표시 항목 변경 — 카메라 유지
+
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // 로봇·목적지만 바뀜 → 동적 씬만(셸·오버레이 수천 개 도형은 재사용)
         if (e.PropertyName is nameof(TankViewModel.RobotDrawingX) or nameof(TankViewModel.RobotDrawingY)
             or nameof(TankViewModel.RobotDrawingZ) or nameof(TankViewModel.RobotDrawingTheta) or nameof(TankViewModel.RobotMarkerVisible)
-            or nameof(TankViewModel.ShowOverlays) or nameof(TankViewModel.ManualMoveMode)
             or nameof(TankViewModel.MoveMarker) or nameof(TankViewModel.MoveHeading))
-            Rebuild();
+            RebuildDynamic();
+        else if (e.PropertyName is nameof(TankViewModel.ManualMoveMode))
+            RebuildDynamic();
+        // ShowOverlays는 VM이 ViewChanged로 알린다(여기서 또 만들지 않음)
     }
 
-    /// <summary>VM 스냅샷으로 씬 재구성 후 다시 그리기.</summary>
+    /// <summary>VM 스냅샷으로 정적·동적 씬을 모두 재구성 후 다시 그리기.</summary>
     public void Rebuild()
     {
         if (_vm is null)
         {
-            _scene = new Scene3(); _input = null;
+            _staticScene = new Scene3(); _dynamicScene = new Scene3(); _input = null;
             InvalidateVisual();
             return;
         }
-
-        Pt3? moveMarker = _manualMoveStart is { } s ? new Pt3(s.X, s.Y, s.Z + 0.25) : _vm.MoveMarker;
-        double? moveHeading = _manualMoveStart is not null ? _previewHeading : _vm.MoveHeading;
-
-        _input = new TankSceneInput(
-            _vm.ShellWalls.ToArray(), _vm.LevelWalls.ToArray(), _vm.Geometry,
-            _vm.Overlays.ToArray(), _vm.ShowOverlays, _vm.SelectedLevel,
-            _vm.WorkItemStatusOf, _vm.TaskStatusOf,
-            _vm.RobotMarkerVisible, new Pt3(_vm.RobotDrawingX, _vm.RobotDrawingY, _vm.RobotDrawingZ),
-            moveMarker, _vm.RobotDrawingTheta, moveHeading);
-        _scene = TankSceneBuilder.Build(_input);
+        _input = SnapshotInput(_vm);
+        _staticScene = TankSceneBuilder.BuildStatic(_input);
+        _dynamicScene = TankSceneBuilder.BuildDynamic(_input);
         InvalidateVisual();
+    }
+
+    /// <summary>로봇 위치·수동 이동 목적지만 갱신 — 정적 씬은 그대로 둔다.</summary>
+    private void RebuildDynamic()
+    {
+        if (_vm is null || _input is null) { Rebuild(); return; }
+        var (moveMarker, moveHeading) = MoveTarget(_vm);
+        _input = _input with
+        {
+            HasRobotPosition = _vm.RobotMarkerVisible,
+            RobotPosition = new Pt3(_vm.RobotDrawingX, _vm.RobotDrawingY, _vm.RobotDrawingZ),
+            RobotHeading = _vm.RobotDrawingTheta,
+            MoveMarker = moveMarker,
+            MoveHeading = moveHeading,
+        };
+        _dynamicScene = TankSceneBuilder.BuildDynamic(_input);
+        InvalidateVisual();
+    }
+
+    private (Pt3? Marker, double? Heading) MoveTarget(TankViewModel vm) =>
+        _manualMoveStart is { } s ? (new Pt3(s.X, s.Y, s.Z + 0.25), _previewHeading) : (vm.MoveMarker, vm.MoveHeading);
+
+    private TankSceneInput SnapshotInput(TankViewModel vm)
+    {
+        var (moveMarker, moveHeading) = MoveTarget(vm);
+        return new TankSceneInput(
+            vm.ShellWalls.ToArray(), vm.LevelWalls.ToArray(), vm.Geometry,
+            vm.Overlays.ToArray(), vm.ShowOverlays, vm.SelectedLevel,
+            vm.WorkItemStatusOf, vm.TaskStatusOf,
+            vm.RobotMarkerVisible, new Pt3(vm.RobotDrawingX, vm.RobotDrawingY, vm.RobotDrawingZ),
+            moveMarker, vm.RobotDrawingTheta, moveHeading, vm.View3DLayers.Snapshot());
     }
 
     /// <summary>현재 카메라·크기로 그리기 목록 생성(테스트·진단용).</summary>
     public IReadOnlyList<Draw2> BuildDrawList(double width, double height)
     {
-        if (_needsZoomExtents && _scene.ExtentPoints.Count > 0 && width > 0 && height > 0)
+        if (_needsZoomExtents && _staticScene.ExtentPoints.Count > 0 && width > 0 && height > 0)
         {
-            _camera.ZoomExtents(_scene.ExtentPoints, width, height);
+            _camera.ZoomExtents(_staticScene.ExtentPoints, width, height);
             _needsZoomExtents = false;
         }
-        return SceneRenderer.Render(_scene, _camera, width, height);
+        return SceneRenderer.Render(new[] { _staticScene, _dynamicScene }, _camera, width, height);
     }
 
     public override void Render(DrawingContext ctx)
@@ -134,7 +169,7 @@ public sealed class Tank3DControl : Control
                     ctx.DrawEllipse(Brush(m.Fill), m.Stroke is { } st ? Pen(st, 1.2) : null, new Point(m.Center.X, m.Center.Y), m.Radius, m.Radius);
                     break;
                 case Label2 l:
-                    var text = new FormattedText(l.Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, _typeface, l.FontSize, Brush(l.Color));
+                    var text = Text(l.Text, l.Color, l.FontSize);
                     ctx.DrawText(text, new Point(l.Position.X - text.Width / 2, l.Position.Y - text.Height / 2));
                     break;
             }
@@ -206,6 +241,18 @@ public sealed class Tank3DControl : Control
         return b;
     }
 
+    /// <summary>라벨 텍스트 레이아웃 캐시 — 같은 글자·색·크기는 프레임마다 다시 측정하지 않는다.</summary>
+    private FormattedText Text(string text, Rgba color, double size)
+    {
+        var key = (text, color, size);
+        if (!_texts.TryGetValue(key, out var ft))
+        {
+            if (_texts.Count > 20_000) _texts.Clear();
+            _texts[key] = ft = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, _typeface, size, Brush(color));
+        }
+        return ft;
+    }
+
     private IPen Pen(Rgba c, double thickness)
     {
         var key = (c, thickness);
@@ -226,7 +273,7 @@ public sealed class Tank3DControl : Control
         {
             _manualMoveStart = hit;
             _previewHeading = null;
-            Rebuild();
+            RebuildDynamic();
         }
         e.Pointer.Capture(this);
         Focus();
@@ -248,7 +295,7 @@ public sealed class Tank3DControl : Control
             {
                 double hx = current.X - start.X, hy = current.Y - start.Y;
                 _previewHeading = hx * hx + hy * hy >= 0.0025 ? Math.Atan2(hy, hx) : null;
-                Rebuild();
+                RebuildDynamic();
             }
             return;
         }
@@ -265,6 +312,8 @@ public sealed class Tank3DControl : Control
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
+        // 우드래그(팬)·수동 이동 뒤에는 메뉴를 띄우지 않는다 — base(Control)는 처리되지 않은 우버튼 떼기에서만 ContextRequested를 올린다
+        if (_dragging || _manualMoveStart is not null) e.Handled = true;
         base.OnPointerReleased(e);
         if (ReferenceEquals(e.Pointer.Captured, this)) e.Pointer.Capture(null);
         if (_manualMoveStart is { } start)
@@ -278,7 +327,7 @@ public sealed class Tank3DControl : Control
             _manualMoveStart = null;
             _previewHeading = null;
             if (_vm is not null) _ = _vm.RequestMoveAsync(start.X, start.Y, theta, start.Z);
-            Rebuild();
+            RebuildDynamic();
             return;
         }
         if (_dragging || _dragButton != PointerUpdateKind.LeftButtonPressed) return;

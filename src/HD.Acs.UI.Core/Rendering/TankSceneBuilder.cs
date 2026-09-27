@@ -4,6 +4,14 @@ using HD.Acs.UI.ViewModels;
 
 namespace HD.Acs.UI.Rendering;
 
+/// <summary>세부 표시 항목 스냅샷(<see cref="OverlayLayers"/>) — 꺼진 항목은 씬에서 생략한다. 기본 생성=전부 표시.</summary>
+public sealed record SceneLayers(
+    bool AreaFills = true, bool AreaLabels = true, bool WeldLines = true,
+    bool WeldEndpoints = true, bool TaskSeq = true, bool FloorGrid = true, bool GroundGrid = true)
+{
+    public static readonly SceneLayers All = new();
+}
+
 /// <summary>씬 빌드 입력 — TankViewModel 상태의 스냅샷(VM 의존 없이 테스트 가능).</summary>
 public sealed record TankSceneInput(
     IReadOnlyList<WallDto> ShellWalls,
@@ -18,9 +26,11 @@ public sealed record TankSceneInput(
     Pt3 RobotPosition,
     Pt3? MoveMarker = null,
     double? RobotHeading = null,   // 도면 프레임 heading(rad). null=화살표 생략
-    double? MoveHeading = null)
+    double? MoveHeading = null,
+    SceneLayers? Layers = null)    // null=전부 표시
 {
     public bool IsolateLevel => SelectedLevel is not null;
+    public SceneLayers EffectiveLayers => Layers ?? SceneLayers.All;
 }
 
 /// <summary>
@@ -53,14 +63,39 @@ public static class TankSceneBuilder
     private static readonly Rgba LabelWhite = Rgba.FromRgb(0xFF, 0xFF, 0xFF);
     private static readonly Rgba LabelWheat = Rgba.FromRgb(0xF5, 0xDE, 0xB3);
 
+    /// <summary>전체 씬(정적+동적) — 테스트·단발 렌더용. 뷰는 <see cref="BuildStatic"/>/<see cref="BuildDynamic"/>을 나눠 캐시한다.</summary>
     public static Scene3 Build(TankSceneInput input)
     {
+        var scene = BuildStatic(input);
+        AddDynamic(scene, input);
+        return scene;
+    }
+
+    /// <summary>
+    /// 정적 씬 — 셸·층 밴드·영역/용접선 오버레이·격자. 데이터·뷰 모드·표시 항목이 바뀔 때만 다시 만든다
+    /// (로봇 위치 갱신마다 수천 개 도형을 재생성하지 않도록 동적 부분과 분리).
+    /// </summary>
+    public static Scene3 BuildStatic(TankSceneInput input)
+    {
         var scene = new Scene3();
-        AddGroundGrid(scene);
+        if (input.EffectiveLayers.GroundGrid) AddGroundGrid(scene);
         AddShell(scene, input);
         AddLevelHighlight(scene, input);
         AddOverlays(scene, input);
         AddFloorGrid(scene, input);
+        return scene;
+    }
+
+    /// <summary>동적 씬 — 로봇 마커·heading, 수동 이동 목적지. 로봇 state 수신마다 이것만 다시 만든다.</summary>
+    public static Scene3 BuildDynamic(TankSceneInput input)
+    {
+        var scene = new Scene3();
+        AddDynamic(scene, input);
+        return scene;
+    }
+
+    private static void AddDynamic(Scene3 scene, TankSceneInput input)
+    {
         if (input.HasRobotPosition)
         {
             if (input.RobotHeading is double heading) AddRobotHeading(scene, input.RobotPosition, heading);
@@ -71,7 +106,6 @@ public static class TankSceneBuilder
             if (input.MoveHeading is double moveHeading) AddHeading(scene, mm, moveHeading, MoveMarkerColor);
             scene.Markers.Add(new Marker3(mm, MoveMarkerColor, RadiusWorld: 0.25, Stroke: Rgba.FromRgb(0xFF, 0xFF, 0xFF)));
         }
-        return scene;
     }
 
     /// <summary>
@@ -171,6 +205,8 @@ public static class TankSceneBuilder
     private static void AddOverlays(Scene3 scene, TankSceneInput input)
     {
         if (!input.ShowOverlays || input.Overlays.Count == 0 || input.ShellWalls.Count == 0) return;
+        var layers = input.EffectiveLayers;
+        bool anyTask = layers.WeldLines || layers.WeldEndpoints || layers.TaskSeq;
 
         int? lvl = input.SelectedLevel;   // 전체=null → 모든 영역, L{n}=그 층만
         var wallByCode = input.ShellWalls.GroupBy(w => w.WallCode).ToDictionary(g => g.Key, g => g.First());
@@ -192,22 +228,28 @@ public static class TankSceneBuilder
                 if (p is { Length: >= 2 } && TankShape.TryPoint(wall, p[0], p[1], out var cp)) pts3d.Add(cp + off);
             if (pts3d.Count >= 3)
             {
-                var (fillC, lineC) = TankViewModel.StatusColors(input.WorkItemStatusOf(a.AreaId));
-                scene.Faces.Add(new Face3(pts3d, fillC, null, Shade: false));
-                AddClosedOutline(scene, pts3d, lineC, 2.0);
-                var c = Centroid(pts3d);
-                scene.Labels.Add(new Label3(c, a.Name, LabelWhite, 12));
+                if (layers.AreaFills)
+                {
+                    var (fillC, lineC) = TankViewModel.StatusColors(input.WorkItemStatusOf(a.AreaId));
+                    scene.Faces.Add(new Face3(pts3d, fillC, null, Shade: false));
+                    AddClosedOutline(scene, pts3d, lineC, 2.0);
+                }
+                if (layers.AreaLabels) scene.Labels.Add(new Label3(Centroid(pts3d), a.Name, LabelWhite, 12));
             }
 
+            if (!anyTask) continue;
             foreach (var t in ov.Tasks)
             {
                 if (!TankShape.TryPoint(wall, t.StartU, t.StartV, out var s) || !TankShape.TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
                 s += off; e += off;
-                var weldC = TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId));
-                scene.Segments.Add(new Segment3(s, e, weldC, 3.0));
-                scene.Markers.Add(new Marker3(s, WeldStart, RadiusPx: 5.5));
-                scene.Markers.Add(new Marker3(e, WeldEnd, RadiusPx: 5.5));
-                scene.Labels.Add(new Label3((s + e) * 0.5, t.Seq.ToString(), LabelWheat, 11));
+                if (layers.WeldLines)
+                    scene.Segments.Add(new Segment3(s, e, TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId)), 3.0));
+                if (layers.WeldEndpoints)
+                {
+                    scene.Markers.Add(new Marker3(s, WeldStart, RadiusPx: 5.5));
+                    scene.Markers.Add(new Marker3(e, WeldEnd, RadiusPx: 5.5));
+                }
+                if (layers.TaskSeq) scene.Labels.Add(new Label3((s + e) * 0.5, t.Seq.ToString(), LabelWheat, 11));
             }
         }
     }
@@ -218,8 +260,10 @@ public static class TankSceneBuilder
         if (FloorPlane(input) is not var (gridZ, x0, y0, x1, y1)) return;
         double z = gridZ + 0.015;   // 셸과의 겹침 회피
 
+        // 히트 평면(수동 이동 클릭 대상)은 격자 표시와 무관하게 유지 — 격자선만 옵션으로 생략
         scene.Faces.Add(new Face3(new[] { new Pt3(x0, y0, z), new Pt3(x1, y0, z), new Pt3(x1, y1, z), new Pt3(x0, y1, z) },
             FloorHitFill, null, Shade: false));
+        if (!input.EffectiveLayers.FloorGrid) return;
         for (double x = Math.Ceiling(x0); x <= x1 + 1e-9; x += 1.0)
             scene.Segments.Add(new Segment3(new Pt3(x, y0, z), new Pt3(x, y1, z), FloorGridLine, 1.0));
         for (double y = Math.Ceiling(y0); y <= y1 + 1e-9; y += 1.0)
