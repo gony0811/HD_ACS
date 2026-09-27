@@ -35,12 +35,12 @@
             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding HUp}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-            <TextBlock Text="level_z" Classes="lbl" ToolTip.Tip="쉼표 구분 z 목록 (예: 0, 3.2, 6.4, 9.6)" />
+            <TextBlock Text="level_z" Classes="lbl" ToolTip.Tip="각 층 발판(바닥) 높이 z, 쉼표 구분 (예: 0, 3.2, 6.4, 9.6). 최상층은 천장(H)까지 포함." />
             <TextBox Width="150" Classes="field" Text="{Binding LevelZText}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="reach_z min,max" Classes="lbl"
-                       ToolTip.Tip="(선택) 플랫폼 기준 코봇 도달 밴드 상대높이. 비우면 밴드=층 경계 그대로." />
+                       ToolTip.Tip="(선택) 발판 기준 코봇 도달 밴드 상대높이. 비우면 밴드=층 경계 그대로. 최상층 상한은 max와 무관하게 천장(H)." />
             <TextBox Width="97" Classes="field" Text="{Binding ReachZMinText}" Margin="0,0,6,0" />
             <TextBox Width="97" Classes="field" Text="{Binding ReachZMaxText}" />
         </StackPanel>
