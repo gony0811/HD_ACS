@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Logging;
 using Avalonia.Threading;
@@ -113,11 +115,11 @@ public class ShellSmokeTests
             Assert.NotNull(work.RowDetailsTemplate);
             Assert.Equal(5, Find<DataGrid>(window, "AlarmGrid").Columns.Count);
 
-            // 계획 ▸ 영역·작업(기본 탭) → AreaGrid 8열 / TaskGrid 6열, 시나리오 탭 → ScenarioGrid 5열, 캘리브레이션 → PointGrid 5열
+            // 계획 ▸ 영역·작업(기본 탭) → AreaGrid 8열 / TaskGrid 7열(유형 포함), 시나리오 탭 → ScenarioGrid 5열, 캘리브레이션 → PointGrid 5열
             shell.CurrentMode = AppMode.Planning;
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(8, Find<DataGrid>(window, "AreaGrid").Columns.Count);
-            Assert.Equal(6, Find<DataGrid>(window, "TaskGrid").Columns.Count);
+            Assert.Equal(7, Find<DataGrid>(window, "TaskGrid").Columns.Count);
 
             var tabs = Find<TabControl>(window, "Tabs");
             tabs.SelectedIndex = 1; Dispatcher.UIThread.RunJobs();
@@ -166,6 +168,82 @@ public class ShellSmokeTests
             Assert.All(draws, d => Assert.IsType<Segment2>(d));
             tank3d.InvalidateVisual();
             Dispatcher.UIThread.RunJobs();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Tank3D_RightClick_OpensDisplayMenu_ButRightDragPansOnly()
+    {
+        using var log = new BindingLogCollector();
+        var (host, window, shell) = CreateShell();
+        using (host)
+        {
+            var tank3d = window.GetVisualDescendants().OfType<Tank3DControl>().First();
+            var menu = tank3d.ContextMenu!;
+            var center = tank3d.TranslatePoint(new Point(tank3d.Bounds.Width / 2, tank3d.Bounds.Height / 2), window)!.Value;
+
+            // 우드래그(팬) — 메뉴가 열리면 안 된다
+            window.MouseDown(center, MouseButton.Right);
+            window.MouseMove(center + new Point(40, 10), RawInputModifiers.RightMouseButton);
+            window.MouseUp(center + new Point(40, 10), MouseButton.Right);
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(menu.IsOpen);
+
+            // 제자리 우클릭 — 표시 항목 메뉴
+            window.MouseDown(center, MouseButton.Right);
+            window.MouseUp(center, MouseButton.Right);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(menu.IsOpen);
+
+            // 체크 항목 ↔ VM 양방향: VM을 바꾸면 체크가, 체크를 바꾸면(메뉴 클릭과 같은 SetCurrentValue) VM이 바뀐다
+            var layers = shell.Tank.View3DLayers;
+            var weld = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == "용접선");
+            var seq = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == "작업 순번");
+            Assert.Equal(MenuItemToggleType.CheckBox, weld.ToggleType);
+            Assert.True(weld.IsChecked);
+            Assert.False(seq.IsChecked);   // 기본: 작업 순번 끔
+            layers.WeldLines = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(weld.IsChecked);
+            seq.SetCurrentValue(MenuItem.IsCheckedProperty, true);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(layers.TaskSeq);
+            Assert.DoesNotContain(log.Messages, m => m.Contains("Could not find", StringComparison.OrdinalIgnoreCase));
+            menu.Close();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void FlatView_HasDisplayMenu_BoundToFlatLayers()
+    {
+        using var log = new BindingLogCollector();
+        var (host, window, shell) = CreateShell();
+        using (host)
+        {
+            var scroll = window.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault(s => s.Name == "FlatScroll");
+            if (scroll is null)
+            {
+                var tabs = window.GetVisualDescendants().OfType<TabControl>().First(t => t.Name == "TankTabs");
+                tabs.SelectedIndex = 1;
+                Dispatcher.UIThread.RunJobs();
+                scroll = window.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "FlatScroll");
+            }
+            var menu = scroll.ContextMenu!;
+            menu.Open(scroll);
+            Dispatcher.UIThread.RunJobs();
+            var names = menu.Items.OfType<MenuItem>().Where(i => i.ToggleType == MenuItemToggleType.CheckBox)
+                .Select(i => (string?)i.Header).ToList();
+            Assert.Equal(new[] { "영역 (채움·윤곽)", "영역 이름", "용접선", "용접 시작·끝점", "작업 순번" }, names);   // 3D 격자 항목 없음
+
+            var fills = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == "영역 (채움·윤곽)");
+            fills.SetCurrentValue(MenuItem.IsCheckedProperty, false);
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(shell.Tank.FlatLayers.AreaFills);
+            Assert.True(shell.Tank.View3DLayers.AreaFills);   // 두 뷰의 설정은 서로 독립
+            Assert.DoesNotContain(log.Messages, m => m.Contains("Could not find", StringComparison.OrdinalIgnoreCase));
+            menu.Close();
             window.Close();
         }
     }

@@ -178,6 +178,7 @@ tools/publish_desktop.sh linux-x64
 - 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
 - 파일 메뉴(새 프로젝트·열기·저장·다른 이름으로 저장)는 전 플랫폼에서 창 상단 앱바에 표시된다. macOS에서는 추가로 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장·⌘⇧S 다른 이름으로 저장)에도 같은 명령이 뜬다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
 - 3D 뷰 조작: 좌드래그 회전 · 우드래그(또는 휠 클릭 드래그) 이동 · 휠 확대/축소 · 우상단 "맞춤". 트랙패드는 두 손가락 스크롤=줌.
+- 표시 항목(3D 뷰·전개도 각각): 탭 안에서 **마우스 오른쪽 버튼을 드래그 없이 클릭**하면 메뉴가 뜬다 — 영역(채움·윤곽)·영역 이름·용접선·용접 시작·끝점·작업 순번(3D는 바닥 격자·지면 격자 추가)을 켜고 끌 수 있다. 여러 항목을 연달아 바꿔도 메뉴가 닫히지 않는다. 영역·작업이 많아 화면이 느리면 **"빠른 보기"**(윤곽·용접선만)를 쓴다. 기본값은 시작·끝점과 작업 순번이 꺼진 상태이며, 설정은 앱을 다시 켜면 기본값으로 돌아간다.
 - 3D 뷰의 로봇 마커(빨간 원) 중심에서 **3D 방향 화살표**(축+화살촉, 입체)가 뻗어 나온다 — AMR이 보고한 heading(VDA `agvPosition.theta`)을 층 캘리브레이션(T_W_D) yaw로 보정한 도면 방향. theta를 보고하지 않는 동안(부팅 직후 등)은 원만 보인다. 같은 값은 로봇 상태 카드 "방향(도면 x축 기준)"에 도 단위로 표시된다.
 
 ---
@@ -309,10 +310,20 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
 | `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
 | `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
-| `GET /api/runs/{runId}` | Run/미션 상태 조회 |
+| `GET /api/tanks/{tankId}/geometry` | **[SAIGE §4.6.1 대외 계약]** 선창 파라미터+유도값 — **mm 정수**·각도 deg, `derived{beam,wCeil,height}`. 없는 선창 404 |
+| `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
+| `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
+| `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
+| `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
+| `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
+| `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
+| `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
+| `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
+| `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |
 | `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지 |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
+| `GET /api/runs/{runId}/progress` | TASK 진행률 [SAIGE §5.4/§6] — 분모 `totalTasks`는 run 시작 시 고정, 분자는 **고유 taskId** 종결 수(재시도 중복 없음). `skippedTasks`⊂`failedTasks`, `excludedTasks`(미보정 층 등 제외분, 분모 미포함), `percent`·`fraction`. ~1초 TTL 캐시(1~5초 polling 대응) |
 | `GET /api/runs/{runId}/work-items` | 실행 큐(정차 단위) 상태 조회 |
 | `GET /api/runs/{runId}/task-actions` | 용접라인(액션) 단위 상태 조회 |
 | `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |

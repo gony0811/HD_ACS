@@ -33,12 +33,26 @@ public class LevelBandsTests
     [Fact]
     public void Compute_ReachZ_NarrowsBands()
     {
-        // reachMin=0.5, reachMax=2.0 → 각 층 밴드 = [z+0.5, min(next, z+2.0)]
+        // reachMin=0.5, reachMax=2.0 → 각 층 밴드 = [z+0.5, min(next, z+2.0)], 단 최상층 상한은 H 고정
         var bands = LevelBands.Compute(new[] { 0.0, 3.2, 6.4, 9.6 }, 0.5, 2.0, 13.0);
         Assert.Equal(0.5, bands[0].ZMin, 6);
         Assert.Equal(2.0, bands[0].ZMax, 6);           // min(3.2, 0+2.0)=2.0 → 축소(3.2 아님)
         Assert.Equal(9.6 + 0.5, bands[3].ZMin, 6);
-        Assert.Equal(Math.Min(13.0, 9.6 + 2.0), bands[3].ZMax, 6);   // min(13, 11.6)=11.6
+        Assert.Equal(13.0, bands[3].ZMax, 6);   // 최상층은 reachMax 무시 → H(천장 포함)
+    }
+
+    [Fact]
+    public void Ceiling_StaysOnTopLevel_EvenWithReachZMax()
+    {
+        // reach_z_max로 중간 층이 좁아져도 천장(z=H)·상부 챔퍼는 최상층(L4)으로 유도돼야 한다.
+        var g = Sample() with { ReachZMax = 2.0 };
+        var bands = g.LevelBandList();
+        var w = g.GenerateWalls().ToDictionary(x => x.WallCode);
+        var (zLo, zHi) = AreaZ(w["T"], 2, 8);
+        Assert.Equal(4, LevelBands.Derive(zLo, zHi, bands, out _));
+        var su = w["SU"];
+        (zLo, zHi) = AreaZ(su, 0, su.VLen);
+        Assert.Equal(4, LevelBands.Derive(zLo, zHi, bands, out _));
     }
 
     // ── 면별 층 유도 ──────────────────────────────────────

@@ -11,6 +11,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="HD.Acs.App.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\HD.Acs.Core\HD.Acs.Core.csproj" />
     <ProjectReference Include="..\HD.Acs.Data\HD.Acs.Data.csproj" />
     <ProjectReference Include="..\HD.Acs.Vda5050\HD.Acs.Vda5050.csproj" />

@@ -24,7 +24,7 @@
 | | ref.scenario_area | 시나리오 검사 대상 영역 연결 [부분 검사 계획] — 연결 0건=선창 전체(하위호환), sort_order는 표시용(배차는 greedy) | 부분 검사 |
 | | ref.weld_seam | 도면 seam 자동 슬라이싱 원천 (WP-2, **dormant** — 운영 워크플로우 제외) | PHASE2 |
 | **ref 로봇** | ref.robot | 로봇 마스터 (manufacturer/serialNumber = MQTT 토픽 요소) | ADR-003 |
-| **run 런타임** | run.scenario_run | 시나리오 실행 = 층 미션 시퀀스 (WAITING_FLOOR_TRANSFER) | 8.4절 |
+| **run 런타임** | run.scenario_run | 시나리오 실행 = 층 미션 시퀀스 (WAITING_FLOOR_TRANSFER). `total_tasks`(진행률 분모 — run 시작 시 고정, NULL=구버전 run)·`excluded_tasks`(T_W_D 부재 등으로 큐에서 제외된 TASK 수, 분모 미포함) [SAIGE §6.1/§6.4, 2026-09-21] | 8.4절 |
 | | run.mission | 층 단위 미션 (order_id = **현재 정차의 orderId**로 정차마다 갱신, 상태머신) | ADR-010 |
 | | run.work_item | **실행 큐** — 정차 1곳(영역 1개)의 작업 항목: 정차 맵좌표·검사 액션 jsonb 사전 구성, 상태 PENDING/DISPATCHED/DONE/SKIPPED + attempts(재큐잉), order_id=배차된 orderId. order_action.work_item_id FK로 결과 집계. 상태 머신은 [INSPECTION_SCENARIO §3.1](INSPECTION_SCENARIO.md) | greedy 배차 |
 | | run.order_node / order_edge | Order 스냅샷 (sequenceId 짝/홀, released=Base) | ADR-002 |

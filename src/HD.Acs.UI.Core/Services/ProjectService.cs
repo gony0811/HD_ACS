@@ -14,7 +14,7 @@ namespace HD.Acs.UI.Services;
 public sealed class ProjectService : IProjectService
 {
     public const string Extension = ".hdacs";
-    private const int FormatVersion = 3;   // v3: 면별 CAD(DXF). v2: 영역 corners. v1(구파일)=bbox 폴백
+    private const int FormatVersion = 3;   // v3: 면별 CAD(DXF) + 캘리브레이션 + 시나리오/영역 연결. v2: 영역 corners. v1(구파일)=bbox 폴백
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("HDACSPRJ"); // 8 bytes
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -43,10 +43,29 @@ public sealed class ProjectService : IProjectService
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
-                a.StationStandoffM));
+                a.StationStandoffM, a.AreaId));
+        }
+
+        var calibrations = new List<CalibrationDoc>();
+        for (var level = 1; level <= (geom.LevelZ?.Length ?? 0); level++)
+        {
+            var mapId = $"{tankId}-L{level}";
+            var cal = await _api.GetCalibrationAsync(mapId, ct);
+            if (cal is null) continue;
+            var points = await _api.GetCalibrationPointsAsync(mapId, ct);
+            calibrations.Add(new CalibrationDoc(mapId,
+                points.Select(p => new CalibrationPointDoc(p.DrawingXM, p.DrawingYM, p.MapX, p.MapY)).ToArray(),
+                cal.Tx, cal.Ty, cal.YawRad, cal.RmsM));
+        }
+
+        var scenarios = new List<ScenarioDoc>();
+        foreach (var scenario in (await _api.GetScenariosAsync(ct)).Where(s => s.TankId == tankId))
+        {
+            var links = await _api.GetScenarioAreasAsync(scenario.ScenarioId, ct);
+            scenarios.Add(new ScenarioDoc(scenario.Name, links.OrderBy(x => x.SortOrder).Select(x => x.AreaId).ToArray()));
         }
 
         // 면별 CAD(DXF)는 DB(ref.face_cad)가 정본 — 저장 시 서버에서 조회해 파일에 담고 로컬 캐시도 동기화
@@ -59,7 +78,7 @@ public sealed class ProjectService : IProjectService
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
                 geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
             areaDocs.ToArray(),
-            faceDocs);
+            faceDocs, calibrations.ToArray(), scenarios.ToArray());
 
         await using (var fs = File.Create(path))
         {
@@ -89,12 +108,15 @@ public sealed class ProjectService : IProjectService
                 ?? throw new InvalidDataException("프로젝트 파일을 읽을 수 없습니다 (내용 없음).");
         }
 
+        ValidateIdentities(doc);
+
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
             g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
             g.ReachZMin, g.ReachZMax, ct);
 
+        var restoredAreaIds = new Dictionary<Guid, Guid>();
         foreach (var a in doc.Areas)
         {
             // v3.1: level은 서버가 영역 z범위로 유도(저장된 a.Level은 무시). AreaId만 사용.
@@ -104,10 +126,45 @@ public sealed class ProjectService : IProjectService
                 new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
             };
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, ct);
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId,
+                stationStandoffM: a.StationStandoffM, areaId: a.SourceId, ct: ct);
+            if (a.SourceId is Guid sourceId) restoredAreaIds[sourceId] = areaId;
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
-                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, ct);
+                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId,
+                    seq: t.Seq, name: t.Name, taskId: t.SourceId, ct: ct);
+        }
+
+        // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.
+        foreach (var cal in doc.Calibrations ?? Array.Empty<CalibrationDoc>())
+        {
+            foreach (var old in await _api.GetCalibrationPointsAsync(cal.MapId, ct))
+                await _api.DeleteCalibrationPointAsync(cal.MapId, old.Id, ct);
+            foreach (var p in cal.Points)
+                await _api.CaptureCalibrationPointAsync(cal.MapId, p.DrawingXM, p.DrawingYM, "m", _operatorId,
+                    ct, p.MapX, p.MapY);
+            if (cal.Points.Length >= 2)
+                await _api.SolveCalibrationAsync(cal.MapId, ct);
+
+            // 가져오기 API가 다른 서버를 향하거나 구버전 서버에서 일부 요청이 누락돼도
+            // 성공으로 가장하지 않는다. 실제 서버 상태를 다시 읽어 파일 내용과 대조한다.
+            var restoredPoints = await _api.GetCalibrationPointsAsync(cal.MapId, ct);
+            var restoredCalibration = await _api.GetCalibrationAsync(cal.MapId, ct);
+            if (restoredPoints.Count != cal.Points.Length || (cal.Points.Length >= 2 && restoredCalibration is null))
+                throw new InvalidDataException(
+                    $"캘리브레이션 복원 검증 실패: {cal.MapId} — 파일 {cal.Points.Length}점, " +
+                    $"서버 {restoredPoints.Count}점, T_W_D {(restoredCalibration is null ? "없음" : "있음")}. " +
+                    "다른 PC의 HD.Acs.App 주소와 실행 버전을 확인하세요.");
+        }
+
+        // 같은 선창/이름의 시나리오는 재사용하여 중복 생성을 피하고, 없으면 새로 만든다.
+        var existingScenarios = (await _api.GetScenariosAsync(ct)).Where(s => s.TankId == doc.TankId).ToList();
+        foreach (var scenario in doc.Scenarios ?? Array.Empty<ScenarioDoc>())
+        {
+            var existing = existingScenarios.FirstOrDefault(s => s.Name == scenario.Name);
+            var scenarioId = existing?.ScenarioId ?? await _api.CreateScenarioAsync(scenario.Name, doc.TankId, ct);
+            var areaIds = scenario.AreaIds.Where(restoredAreaIds.ContainsKey).Select(id => restoredAreaIds[id]).ToArray();
+            await _api.SetScenarioAreasAsync(scenarioId, areaIds, ct);
         }
 
         // 면별 CAD(DXF) 복원 — DB(ref.face_cad)에 재적재(선창 등록 후 tank_id 존재) 후 로컬 캐시 동기화
@@ -117,5 +174,30 @@ public sealed class ProjectService : IProjectService
 
         CurrentPath = path;
         return doc;
+    }
+
+    private static void ValidateIdentities(ProjectDoc doc)
+    {
+        var areaIds = new HashSet<Guid>();
+        var taskIds = new HashSet<Guid>();
+
+        foreach (var area in doc.Areas)
+        {
+            if (area.SourceId == Guid.Empty)
+                throw new InvalidDataException("프로젝트 파일의 영역 식별자가 비어 있습니다.");
+            if (area.SourceId is Guid areaId && !areaIds.Add(areaId))
+                throw new InvalidDataException($"프로젝트 파일에 중복 영역 식별자가 있습니다: {areaId}");
+
+            var seqs = new HashSet<int>();
+            foreach (var task in area.Tasks)
+            {
+                if (!seqs.Add(task.Seq))
+                    throw new InvalidDataException($"영역 '{area.Name}'에 중복 작업 순번이 있습니다: {task.Seq}");
+                if (task.SourceId == Guid.Empty)
+                    throw new InvalidDataException("프로젝트 파일의 작업 식별자가 비어 있습니다.");
+                if (task.SourceId is Guid taskId && !taskIds.Add(taskId))
+                    throw new InvalidDataException($"프로젝트 파일에 중복 작업 식별자가 있습니다: {taskId}");
+            }
+        }
     }
 }

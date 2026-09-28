@@ -132,7 +132,8 @@ public sealed class RobotStateService
             await _hub.Clients.All.SendAsync("RunProgress", new
             {
                 prog.RunId, prog.TotalTasks, prog.ReleasedTasks, prog.CompletedTasks,
-                prog.SucceededTasks, prog.FailedTasks, prog.PendingTasks, prog.Percent
+                prog.SucceededTasks, prog.FailedTasks, prog.SkippedTasks, prog.ExcludedTasks,
+                prog.PendingTasks, prog.Percent, prog.Fraction
             }, ct);
         }
     }

@@ -74,6 +74,38 @@ public sealed record TankGeometry(
         return e;
     }
 
+    /// <summary>격벽(F·A) 면 코드 — 윤곽이 직사각형이 아니라 선창 단면(팔각) 그대로인 두 면.</summary>
+    public static bool IsBulkhead(string wallCode) => wallCode is "F" or "A";
+
+    /// <summary>
+    /// 격벽 반폭 halfWidth(v) [SAIGE 연동 사양서 v2.6 §4.3] — 면-로컬 높이 v에서 단면 중심선으로부터의 폭(m).
+    /// 하부 챔퍼: w_floor/2 → B/2 선형, 수직벽: B/2, 상부 챔퍼: B/2 → W_ceil/2 선형. v는 [0,H]로 클램프.
+    /// </summary>
+    public double BulkheadHalfWidth(double v)
+    {
+        var d = Derived();
+        double b2 = d.B / 2;
+        v = Math.Clamp(v, 0, d.H);
+        if (v <= HLow) return WFloor / 2 + v / HLow * (b2 - WFloor / 2);
+        if (v <= HLow + HWall) return b2;
+        return b2 - (v - HLow - HWall) / HUp * (b2 - d.WCeil / 2);
+    }
+
+    /// <summary>
+    /// 격벽 윤곽 8정점 (면-로컬 u,v, m) [§4.3] — v = 0, h_low, h_low+h_wall, H 에서의 좌/우 경계
+    /// (uLeft = B/2 − halfWidth, uRight = B/2 + halfWidth). 좌하단에서 시작해 좌측을 올라가 상단을 건너 우측을 내려온다.
+    /// 단면이 좌우 대칭이라 U축 방향이 반대인 F(좌현→우현)·A(우현→좌현)에 같은 윤곽이 적용된다.
+    /// </summary>
+    public IReadOnlyList<(double U, double V)> BulkheadOutline()
+    {
+        var d = Derived();
+        double b2 = d.B / 2;
+        double[] vs = { 0, HLow, HLow + HWall, d.H };
+        var left = vs.Select(v => (U: b2 - BulkheadHalfWidth(v), V: v));
+        var right = vs.Reverse().Select(v => (U: b2 + BulkheadHalfWidth(v), V: v));
+        return left.Concat(right).ToList();
+    }
+
     /// <summary>10면 자동 생성 [§3]. 코드=TANK_WALL_LAYOUT 매핑(B/SL/PL/SM/PM/SU/PU/T/F/A). 내부향 법선.</summary>
     public IReadOnlyList<GeneratedWall> GenerateWalls()
     {

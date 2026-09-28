@@ -3,7 +3,7 @@ namespace HD.Acs.Core.Planning;
 /// <summary>층 도달 밴드 [SPEC v3.1 §5-A]. 층 ℓ(1-based)이 코봇으로 도달 가능한 전역 z구간 [ZMin, ZMax].</summary>
 /// <param name="Level">층 번호(1-based, 1=바닥층)</param>
 /// <param name="ZMin">밴드 하한(전역 z, m)</param>
-/// <param name="ZMax">밴드 상한(전역 z, m). 최상층은 전체높이 H(폐구간, 천장 포함)</param>
+/// <param name="ZMax">밴드 상한(전역 z, m). 최상층은 항상 전체높이 H(폐구간, 천장 포함 — reach_z_max 무관)</param>
 public sealed record LevelBand(int Level, double ZMin, double ZMax);
 
 /// <summary>
@@ -15,9 +15,11 @@ public static class LevelBands
 {
     /// <summary>
     /// 층 도달 밴드 목록 생성. 층 ℓ 밴드 B(ℓ) = [z_ℓ + reachMin, min(z_{ℓ+1}, z_ℓ + reachMax)).
-    /// reach_z_* 미지정 시 B(ℓ) = [z_ℓ, z_{ℓ+1}). 최상층 상한 = 전체높이 H(폐구간, 천장 포함).
+    /// reach_z_* 미지정 시 B(ℓ) = [z_ℓ, z_{ℓ+1}).
+    /// 최상층 상한 = 전체높이 H(폐구간) — reach_z_max를 적용하지 않는다. 상부 챔퍼(SU/PU)·천장(T)은
+    /// 최상층에서만 검사하므로, 상한을 잘라 어느 층에도 속하지 않는 면이 생기지 않게 한다.
     /// </summary>
-    /// <param name="levelZ">층 경계 z 오름차순 목록 (각 층 바닥의 전역 z)</param>
+    /// <param name="levelZ">각 층 발판(바닥) 높이 z 오름차순 목록 — 층 ℓ 로봇이 서는 전역 z</param>
     /// <param name="reachMin">(선택) 플랫폼 기준 코봇 도달 하한 상대높이</param>
     /// <param name="reachMax">(선택) 플랫폼 기준 코봇 도달 상한 상대높이</param>
     /// <param name="h">선창 전체높이 H (최상층 밴드 상한)</param>
@@ -30,7 +32,8 @@ public static class LevelBands
             double baseLo = levelZ[i];
             double nextZ = i < levelZ.Length - 1 ? levelZ[i + 1] : h;   // 최상층 상한 = H
             double zMin = baseLo + (reachMin ?? 0);
-            double zMax = reachMax is double rmax ? Math.Min(nextZ, baseLo + rmax) : nextZ;
+            bool top = i == levelZ.Length - 1;
+            double zMax = !top && reachMax is double rmax ? Math.Min(nextZ, baseLo + rmax) : nextZ;   // 최상층=H 고정(천장 포함)
             bands.Add(new LevelBand(i + 1, zMin, zMax));
         }
         return bands;

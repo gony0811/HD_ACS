@@ -25,4 +25,11 @@ public sealed class RobotErrorTracker
         }
         return appeared;
     }
+
+    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용.</summary>
+    public bool HasActiveErrors(string robotId)
+    {
+        if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
+        lock (active) return active.Count > 0;
+    }
 }

@@ -26,6 +26,9 @@ public sealed record DrawingTransform(double Tx, double Ty, double YawRad)
     /// <summary>도면 좌표계 방향(yaw) → 맵 좌표계 방향. yaw 합성 후 (−π, π]로 정규화.</summary>
     public double DrawingYawToMap(double drawingYaw) => NormalizeAngle(drawingYaw + YawRad);
 
+    /// <summary>맵 좌표계 방향(yaw) → 도면 좌표계 방향. DrawingYawToMap의 역 — (−π, π]로 정규화 [SAIGE §9.2].</summary>
+    public double MapYawToDrawing(double mapYaw) => NormalizeAngle(mapYaw - YawRad);
+
     /// <summary>방향(법선) 벡터 회전 — 평행이동 없이 R(yaw)만 적용. R·v [PHASE2 §4.2 wallNormalW].</summary>
     public (double X, double Y) RotateDirection(double x, double y)
     {
