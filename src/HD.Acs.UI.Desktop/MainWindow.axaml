@@ -49,6 +49,10 @@
                         <MenuItem Header="저장(_S)" Command="{Binding SaveProjectCommand}" />
                         <MenuItem Header="다른 이름으로 저장(_A)…" Command="{Binding SaveProjectAsCommand}" />
                     </MenuItem>
+                    <!-- 설정: 드롭다운 항목 클릭 시 별도의 창(로봇 정보 설정)으로 이동. -->
+                    <MenuItem Header="설정(_E)">
+                        <MenuItem Header="로봇 정보…" Click="RobotSettings_Click" />
+                    </MenuItem>
                 </Menu>
 
                 <!-- 우측 클러스터: 연결 상태칩 + 비상정지 -->

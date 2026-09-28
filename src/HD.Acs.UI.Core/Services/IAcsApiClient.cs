@@ -11,6 +11,8 @@ public interface IAcsApiClient
     // ── 조회 ──────────────────────────────────────────────
     Task<IReadOnlyList<RobotDto>> GetRobotsAsync(CancellationToken ct = default);
     Task<RobotContextDto?> GetRobotContextAsync(string robotId, CancellationToken ct = default);
+    /// <summary>로봇 타입 기본 정보 등록/수정(upsert). 설정 화면에서 운영자가 기입.</summary>
+    Task SaveRobotAsync(RobotDto robot, CancellationToken ct = default);
     Task<IReadOnlyList<ScenarioSummaryDto>> GetScenariosAsync(CancellationToken ct = default);
     Task<ScenarioRunDto?> GetRunAsync(Guid runId, CancellationToken ct = default);
     Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default);

@@ -107,6 +107,26 @@ app.MapHub<MonitoringHub>("/hubs/monitoring");
 app.MapGet("/api/robots", async (AcsDbContext db) =>
     Results.Ok(await db.Robots.AsNoTracking().ToListAsync()));
 
+// 로봇 타입 기본 정보 등록/수정(upsert) — 설정 화면에서 운영자가 기입. manufacturer/serial은 VDA5050 토픽 요소라 변경 시 재구독 필요.
+app.MapPut("/api/robots/{robotId}", async (string robotId, RobotUpsertRequest req, AcsDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(robotId))
+        return Results.BadRequest(new { error = "robotId가 비었습니다." });
+    var robot = await db.Robots.FirstOrDefaultAsync(r => r.RobotId == robotId);
+    if (robot is null)
+    {
+        robot = new HD.Acs.Data.Entities.RobotEntity { RobotId = robotId };
+        db.Robots.Add(robot);
+    }
+    robot.Name = req.Name ?? "";
+    robot.Manufacturer = req.Manufacturer ?? "";
+    robot.SerialNumber = req.SerialNumber ?? "";
+    robot.VdaVersion = string.IsNullOrWhiteSpace(req.VdaVersion) ? "2.0" : req.VdaVersion;
+    robot.IsActive = req.IsActive;
+    await db.SaveChangesAsync();
+    return Results.Ok(robot);
+});
+
 app.MapGet("/api/robots/{robotId}/context", async (string robotId, AcsDbContext db) =>
     await db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId)
         is { } ctx ? Results.Ok(ctx) : Results.NotFound());
@@ -702,6 +722,7 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
 
 app.Run();
 
+public sealed record RobotUpsertRequest(string? Name, string? Manufacturer, string? SerialNumber, string? VdaVersion, bool IsActive);
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);

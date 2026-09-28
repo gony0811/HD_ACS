@@ -50,6 +50,7 @@ public class ManualMoveTests
 
         public Task<IReadOnlyList<RobotDto>> GetRobotsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RobotContextDto?> GetRobotContextAsync(string robotId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SaveRobotAsync(RobotDto robot, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<ScenarioSummaryDto>> GetScenariosAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<ScenarioRunDto?> GetRunAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();

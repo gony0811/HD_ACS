@@ -26,6 +26,15 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<RobotContextDto>(ct);
     }
 
+    public async Task SaveRobotAsync(RobotDto robot, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/robots/{robot.RobotId}", new
+        {
+            robot.Name, robot.Manufacturer, robot.SerialNumber, robot.VdaVersion, robot.IsActive
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+    }
+
     public async Task<IReadOnlyList<ScenarioSummaryDto>> GetScenariosAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<ScenarioSummaryDto>>("/api/scenarios", ct) ?? new();
 
