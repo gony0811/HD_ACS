@@ -469,9 +469,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         (double x, double y) Proj(double u, double v) => (Margin + u * scale, Margin + (vlen - v) * scale);
 
         // 등록된 CAD 용접선(선택 면) — 참조 레이어. 좌표=면-로컬 mm(÷1000=면-전체 v 미터), off 불요.
+        // Corrugation은 제외하고 용접선(Kind=WeldLine)만 표시.
         if (ShowWeldLines && _faceCad.Get(w.WallCode) is { Segments.Length: > 0 } cad)
             foreach (var s in cad.Segments)
             {
+                if (!string.Equals(s.Kind, "WeldLine", StringComparison.OrdinalIgnoreCase)) continue;
                 var (x1, y1) = Proj(s.Ax / 1000.0, s.Ay / 1000.0);
                 var (x2, y2) = Proj(s.Bx / 1000.0, s.By / 1000.0);
                 WeldLines.Add(new WeldLineSeg(x1, y1, x2, y2));
