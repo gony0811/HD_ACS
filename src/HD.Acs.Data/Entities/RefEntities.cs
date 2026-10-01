@@ -187,7 +187,7 @@ public class InspectionAreaEntity
     public double VMin { get; set; }
     public double UMax { get; set; }
     public double VMax { get; set; }
-    public double? StationX { get; set; }               // 정차 수동 오버라이드 (전역 x,y + theta). FL/CL 필수(§5)
+    public double? StationX { get; set; }               // 정차 수동 오버라이드 (도면 프레임 x,y + theta; 발행 시 T_W_D 적용). FL/CL 필수(§5)
     public double? StationY { get; set; }
     public double? StationTheta { get; set; }
     public double? StationStandoffM { get; set; }       // 정차 이격 [m] — NULL=설정 기본(Acs:Area:StationStandoffM)

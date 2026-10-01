@@ -169,22 +169,54 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private async Task RegisterAreaAsync()
     {
         if (SelectedWall is not { } w) return;
-        var local = InputCorners();
-        var (miu, miv, mau, mav) = AreaBboxLocal(local);
-        if (mau - miu < 1e-6 || mav - miv < 1e-6) { StatusMessage = "영역이 퇴화했습니다 — 유효한 사각형 4점을 입력하세요."; return; }
-        if (mau - miu > 1.44 + 1e-9 || mav - miv > 1.44 + 1e-9) { StatusMessage = "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다."; return; }
-        if (mav > SliceH + 1e-6 || miv < -1e-6) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return; }
-        double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장(각 코너 v)
-        var corners = local.Select(p => new[] { p[0], p[1] + off }).ToArray();
+        if (InputCornersFaceGlobal() is not { } corners) return;
         try
         {
-            var (_, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
+            var (areaId, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
                 _operatorId, StationStandoffM);
             StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 L{level}";
-            await RefreshAreasAsync();
+            await RefreshAreasAsync(select: areaId);   // 새 영역을 선택 → 바로 작업 등록·수정 가능
         }
         catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }   // 면범위·층유도 400·중복 409
+    }
+
+    /// <summary>
+    /// 입력 코너(층-로컬 v) 사전 검증 후 면-전체 v로 환산해 반환. 위반 시 StatusMessage를 채우고 null.
+    /// 서버가 최종 판정하지만, 흔한 실수는 왕복 전에 알린다(등록·수정 공통).
+    /// </summary>
+    private double[][]? InputCornersFaceGlobal()
+    {
+        var local = InputCorners();
+        var (miu, miv, mau, mav) = AreaBboxLocal(local);
+        if (mau - miu < 1e-6 || mav - miv < 1e-6) { StatusMessage = "영역이 퇴화했습니다 — 유효한 사각형 4점을 입력하세요."; return null; }
+        if (mau - miu > 1.44 + 1e-9 || mav - miv > 1.44 + 1e-9) { StatusMessage = "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다."; return null; }
+        if (mav > SliceH + 1e-6 || miv < -1e-6) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
+        double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장(각 코너 v)
+        return local.Select(p => new[] { p[0], p[1] + off }).ToArray();
+    }
+
+    private bool CanUpdateArea() => SelectedArea is not null;
+
+    /// <summary>
+    /// 선택 영역 수정 — 삭제→재등록과 달리 **areaId와 소속 작업(taskId)이 유지**된다 [SAIGE v2.6 §2.5].
+    /// 이름·4점 코너·정차 설정을 폼 값으로 교체한다. 면은 바꿀 수 없고, 층은 서버가 새 코너로 다시 유도한다.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUpdateArea))]
+    private async Task UpdateAreaAsync()
+    {
+        if (SelectedArea is not { } area) return;
+        if (InputCornersFaceGlobal() is not { } corners) return;
+        try
+        {
+            int level = await _api.UpdateAreaAsync(area.AreaId, AreaName, corners,
+                StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
+                StationStandoffM, _operatorId);
+            StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 L{level} — areaId·작업 유지"
+                + (SelectedLevel is { } l && l.Level != level ? $" (층이 L{level}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
+            await RefreshAreasAsync(select: area.AreaId);
+        }
+        catch (Exception ex) { StatusMessage = $"영역 수정 실패: {ex.Message}"; }   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404
     }
 
     private static (double MinU, double MinV, double MaxU, double MaxV) AreaBboxLocal(double[][] pts)
@@ -264,7 +296,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>영역·작업이 등록/삭제되어 3D 오버레이 갱신이 필요함(등록/삭제가 모두 RefreshAreasAsync 경유).</summary>
     public event EventHandler? PlanningChanged;
 
-    private async Task RefreshAreasAsync()
+    private async Task RefreshAreasAsync(Guid? select = null)
     {
         // 그 면의 **모든 층** 영역을 로드(_allAreas, 면-전체 v — 전개도가 타 층을 회색으로 표시).
         // 그리드 Areas = 선택 층만 + 층-로컬 v(−VOff) — 입력 규약과 일치.
@@ -274,9 +306,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             : (IReadOnlyList<AreaDto>)Array.Empty<AreaDto>();
         _allAreas.Clear();
         _allAreas.AddRange(list);
+        var keep = select ?? SelectedArea?.AreaId;   // 새로고침 후에도 같은 영역을 계속 선택(수정·작업 등록 연속)
         Areas.Clear();
         foreach (var a in list.Where(a => sel is null || a.Level == sel))
             Areas.Add(a with { VMin = a.VMin - off, VMax = a.VMax - off, Corners = OffsetCornersV(a.Corners, -off) });
+        SelectedArea = keep is Guid id ? Areas.FirstOrDefault(a => a.AreaId == id) : null;
         await LoadTasksAndProjectAsync();
         PlanningChanged?.Invoke(this, EventArgs.Empty);   // 3D 오버레이 동기화
     }
@@ -301,10 +335,26 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         _ = RefreshAreasAsync();
     }
 
+    private Guid? _formAreaId;   // 폼에 값이 채워진 영역 — 같은 영역 재선택(새로고침)은 편집 중인 폼을 덮지 않는다
+
     partial void OnSelectedAreaChanged(AreaDto? value)
     {
         RegisterTaskCommand.NotifyCanExecuteChanged();
+        UpdateAreaCommand.NotifyCanExecuteChanged();
+        if (value is not null && value.AreaId != _formAreaId) FillAreaForm(value);
+        _formAreaId = value?.AreaId;
         _ = LoadTasksAndProjectAsync();
+    }
+
+    /// <summary>선택 영역 값을 입력 폼에 채운다(Areas는 이미 층-로컬 v) → 전개도 점선 미리보기도 그 영역으로 이동.</summary>
+    private void FillAreaForm(AreaDto a)
+    {
+        var c = a.Corners is { Length: 4 } ? a.Corners : RectCorners(a.UMin, a.VMin, a.UMax, a.VMax);   // 구데이터 폴백
+        AreaName = a.Name;
+        for (int i = 0; i < 4; i++) SetCorner(i, c[i][0], c[i][1]);
+        StationOverride = a.StationX is not null && a.StationY is not null;
+        StationX = a.StationX ?? 0; StationY = a.StationY ?? 0; StationTheta = a.StationTheta ?? 0;
+        StationStandoffM = a.StationStandoffM;
     }
 
     /// <summary>

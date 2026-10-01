@@ -134,12 +134,14 @@ public sealed class InspectionDispatcher
             var standoffM = area.StationStandoffM ?? _stationStandoffM;
             var stationDrawing = AreaGeometry.StationDrawing(pose, uc, vc, Json<double[]>(wall.Normal), standoffM);
 
-            // 정차 맵좌표: 오버라이드(맵 프레임 가정) 우선, 없으면 centroid→도면→T_W_D
-            double mx, my;
-            if (area.StationX is double sx && area.StationY is double sy) { mx = sx; my = sy; }
-            else (mx, my) = lv.T.DrawingToMap(stationDrawing[0], stationDrawing[1]);
-            double? mTheta = area.StationTheta
-                ?? (wall.FacingYaw is double fy ? lv.T.DrawingYawToMap(fy) : (double?)null);
+            // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
+            // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
+            var stationDx = area.StationX ?? stationDrawing[0];
+            var stationDy = area.StationY ?? stationDrawing[1];
+            var (mx, my) = lv.T.DrawingToMap(stationDx, stationDy);
+            double? mTheta = area.StationTheta is double st
+                ? lv.T.DrawingYawToMap(st)
+                : wall.FacingYaw is double fy ? lv.T.DrawingYawToMap(fy) : null;
 
             // 액션 payload(정차의 용접선들) 사전 구성 — 발행 시 actionId만 새로 발급.
             // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
@@ -147,6 +149,9 @@ public sealed class InspectionDispatcher
             var actionsJson = new JsonArray();
             foreach (var t in area.Tasks)
             {
+                if (string.IsNullOrWhiteSpace(t.SectionDxfId) || string.IsNullOrWhiteSpace(t.ProfileId))
+                    throw new InvalidOperationException(
+                        $"TASK {t.TaskId} 검사 참조 누락: sectionDxfId/profileId를 등록한 뒤 RUN을 시작하세요.");
                 var startD = pose.LocalToDrawing(t.StartU, t.StartV);
                 var endD = pose.LocalToDrawing(t.EndU, t.EndV);
                 var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
@@ -364,16 +369,22 @@ public sealed class InspectionDispatcher
             }
             else
             {
+                var failureReasons = acts.Where(a => a.Status == "FAILED")
+                    .Select(a => ResultDescription(a.Result))
+                    .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToArray();
+                var failureSummary = failureReasons.Length == 0 ? "AMR 실패 사유 미제공" : string.Join(" | ", failureReasons);
                 wi.Attempts++;
                 if (wi.Attempts < _maxRetries)
                 {
                     wi.Status = "PENDING";   // 재큐잉 — 다음 라운드 재배차
-                    _log.LogWarning("Run {Run}: wi={Wi} 실패 — 재시도 {N}/{Max}", mission.RunId, wi.WorkItemId, wi.Attempts, _maxRetries);
+                    _log.LogWarning("Run {Run}: wi={Wi} 실패 — 재시도 {N}/{Max}. 원인={Reason}",
+                        mission.RunId, wi.WorkItemId, wi.Attempts, _maxRetries, failureSummary);
                 }
                 else
                 {
                     wi.Status = "SKIPPED";
-                    _log.LogWarning("Run {Run}: wi={Wi} 재시도 초과 — 스킵.", mission.RunId, wi.WorkItemId);
+                    _log.LogWarning("Run {Run}: wi={Wi} 재시도 초과 — 스킵. 원인={Reason}",
+                        mission.RunId, wi.WorkItemId, failureSummary);
                     _db.Alarms.Add(new AlarmEntity
                     {
                         AlarmId = Guid.NewGuid(), AlarmCode = "INSPECTION_SKIPPED", RobotId = mission.RobotId,
@@ -381,7 +392,8 @@ public sealed class InspectionDispatcher
                         Detail = JsonSerializer.Serialize(new
                         {
                             severity = "WARNING", title = "검사 작업 스킵(재시도 초과)",
-                            workItemId = wi.WorkItemId, wi.Attempts
+                            workItemId = wi.WorkItemId, wi.Attempts,
+                            reason = failureSummary, failureReasons
                         }),
                         RaisedAt = DateTimeOffset.UtcNow,
                     });
@@ -442,4 +454,16 @@ public sealed class InspectionDispatcher
     }
 
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
+
+    private static string? ResultDescription(string? resultJson)
+    {
+        if (string.IsNullOrWhiteSpace(resultJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            return doc.RootElement.TryGetProperty("ResultDescription", out var d) && d.ValueKind == JsonValueKind.String
+                ? d.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
 }

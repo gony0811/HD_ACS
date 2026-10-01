@@ -259,7 +259,7 @@ CREATE TABLE ref.inspection_area (
   v_min         double precision NOT NULL,
   u_max         double precision NOT NULL,
   v_max         double precision NOT NULL,
-  station_x     double precision,          -- 정차 수동 오버라이드 (전역 x,y + theta). FL/CL은 필수(§5)
+  station_x     double precision,          -- 정차 수동 오버라이드 (도면 프레임 x,y + theta; 발행 시 T_W_D 적용). FL/CL은 필수(§5)
   station_y     double precision,
   station_theta double precision,
   station_standoff_m double precision,     -- 정차 이격 [m] — 영역 중심에서 내부향 법선 수평성분 방향. NULL=설정 기본

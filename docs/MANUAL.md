@@ -268,7 +268,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
   TankView의 **용접선 선분**도 같은 상태색으로 칠해진다(run 없으면 계획 기본 주황).
 - 상태의 진실은 항상 로봇(robot-is-truth): ACS는 state 보고의 lastNodeId/actionStates를 actionId로 대조해 DB를 갱신.
 - 통신 두절 시 connection Last Will로 OFFLINE 표시 — 로봇은 릴리즈된 Order를 계속 실행, 복귀 시 state 기준 재동기화.
-- **비상정지**: UI 툴바 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
+- **비상정지**: UI 툴바(■비상정지 — **확인 팝업 없이 누르는 즉시 전송**, 대상=로봇 상태 패널 선택 로봇) 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
   ⚠️ 이는 기능적 정지이며 안전 규격 정지가 아니다 — 인명 안전은 로봇 측 하드웨어 E-Stop 체계가 담당 [ADR-007].
 
 ---
@@ -315,6 +315,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
 | `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
 | `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
+| `PUT /api/areas/{areaId}` | 영역 수정 — **areaId·소속 작업(taskId) 유지**. `{ name, corners, stationX/Y/Theta, stationStandoffM }` 전체 교체(정차 null=수동 지정 해제), 면은 변경 불가·층은 재유도. 면 범위/1.44m/층 유도 실패·**기존 작업이 새 영역 밖**이면 400, 이름 중복 409, 없음 404. 화면: 계획 ▸ 영역·작업에서 영역 행 선택 → 폼에 값 채워짐 → [선택 영역 수정] |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |

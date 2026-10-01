@@ -55,6 +55,8 @@ public class ManualMoveTests
         public Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<WorkItemDto>> GetWorkItemsAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<RunSummaryDto>> GetRunsAsync(int limit = 50, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RunResultsDto?> GetRunResultsAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AbortRunAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ResumeRunAsync(Guid runId, CancellationToken ct = default) => throw new NotImplementedException();
@@ -82,6 +84,7 @@ public class ManualMoveTests
         public Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name, double[][] corners, double? stationX, double? stationY, double? stationTheta, string userId, double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AreaDto>>(Array.Empty<AreaDto>());
         public Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners, double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV, string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV, string seamType, string sectionDxfId, string profileId, string userId, int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AreaTaskDto>>(Array.Empty<AreaTaskDto>());

@@ -23,7 +23,8 @@
                 <!-- ② 영역 등록 (면 로컬 u,v) -->
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
-                        <TextBlock Text="② 영역 등록 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock Text="② 영역 등록·수정 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="영역 목록에서 행을 선택하면 값이 폼에 채워집니다 → 고친 뒤 [선택 영역 수정]." Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="층 필터" Classes="lbl" />
                             <ComboBox Classes="field" Width="100" ItemsSource="{Binding Levels}" DisplayMemberBinding="{Binding Label}"
@@ -77,7 +78,11 @@
                             <TextBlock Text="θ" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationTheta}" />
                         </StackPanel>
-                        <Button Classes="form" Content="영역 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Classes="form" Content="영역 등록" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
+                            <Button Classes="form" Content="선택 영역 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateAreaCommand}"
+                                    ToolTip.Tip="영역 목록에서 고른 영역의 이름·4점·정차를 고칩니다. 삭제 후 재등록과 달리 areaId와 작업(taskId)이 유지됩니다. 면은 바꿀 수 없고, 층은 새 코너로 다시 유도됩니다." />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -85,7 +90,8 @@
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel>
                         <TextBlock Text="{Binding SelectedArea.Name, StringFormat='③ 검사 작업 등록 — 영역 {0}', FallbackValue='③ 검사 작업 등록 (영역 선택)'}"
-                                   FontWeight="SemiBold" Margin="0,0,0,6" />
+                                   FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="작업 목록에서 행을 선택하면 값이 폼에 채워집니다 → 고친 뒤 [선택 작업 수정]." Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="시작 u,v" Classes="lbl" />
                             <NumericUpDown Classes="field" Value="{Binding StartU}" Margin="0,0,6,0" />
@@ -117,8 +123,8 @@
             <views:AreaLayoutView Grid.Row="0" Margin="0,0,0,8" />
 
             <DockPanel Grid.Row="1" MinHeight="130" Margin="0,0,0,8">
-                <TextBlock DockPanel.Dock="Top" Text="선택 면 영역 목록 (선택 시 작업 등록)" FontWeight="Bold" Margin="0,0,0,4" />
-                <DataGrid x:Name="AreaGrid" ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea}"
+                <TextBlock DockPanel.Dock="Top" Text="선택 면 영역 목록 (선택 시 수정·작업 등록)" FontWeight="Bold" Margin="0,0,0,4" />
+                <DataGrid x:Name="AreaGrid" ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea, Mode=TwoWay}"
                           AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="영역 이름" Binding="{Binding Name}" Width="Auto" MinWidth="100" />
@@ -142,7 +148,7 @@
             </DockPanel>
 
             <DockPanel Grid.Row="2" MinHeight="120">
-                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록" FontWeight="Bold" Margin="0,0,0,4" />
+                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록 (선택 시 수정)" FontWeight="Bold" Margin="0,0,0,4" />
                 <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="순번" Binding="{Binding Seq}" Width="Auto" MinWidth="52" />

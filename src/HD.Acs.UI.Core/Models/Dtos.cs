@@ -87,6 +87,21 @@ public sealed record TaskActionProgressDto(
     string Status,
     string? ResultDescription);
 
+/// <summary>GET /api/runs — 이력 목록.</summary>
+public sealed record RunSummaryDto(
+    Guid RunId, Guid ScenarioId, string? ScenarioName, string? TankId,
+    string RobotId, string State, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+
+/// <summary>GET /api/runs/{id}/results — TASK별 최종 성공/실패 이력.</summary>
+public sealed record RunResultsDto(Guid RunId, int Total, IReadOnlyList<RunTaskResultDto> Items);
+public sealed record RunTaskResultDto(
+    Guid TaskId, Guid AreaId, string? AreaName, int WallId, string? WallCode, int? Level,
+    string Status, int Attempts, DateTimeOffset OccurredAt, string? Description,
+    TaskSeamPositionDto? Position);
+public sealed record TaskSeamPositionDto(
+    int WallId, UvMmDto SeamStart, UvMmDto SeamEnd, int SeamLength, string SeamType);
+public sealed record UvMmDto(int U, int V);
+
 /// <summary>SignalR "WorkItemProgress" 푸시 — work_item 상태 변화 단건(배차/완료/재큐잉/스킵).</summary>
 public sealed record WorkItemProgressDto(
     Guid RunId,

@@ -29,6 +29,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public CalibrationViewModel Calibration { get; }
     public AreaPlanningViewModel AreaPlanning { get; }
     public TankViewModel Tank { get; }
+    public HistoryViewModel History { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
@@ -49,7 +50,8 @@ public sealed partial class ShellViewModel : ObservableObject
         ManualZoneChangeViewModel manualZoneChange,
         CalibrationViewModel calibration,
         AreaPlanningViewModel areaPlanning,
-        TankViewModel tank)
+        TankViewModel tank,
+        HistoryViewModel history)
     {
         _monitoring = monitoring;
         _api = api;
@@ -64,6 +66,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Calibration = calibration;
         AreaPlanning = areaPlanning;
         Tank = tank;
+        History = history;
 
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
@@ -85,6 +88,11 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>모드 탭 전환. 탭 버튼이 CommandParameter로 AppMode를 전달한다(토글 해제 방지).</summary>
     [RelayCommand]
     private void SetMode(AppMode mode) => CurrentMode = mode;
+
+    partial void OnCurrentModeChanged(AppMode value)
+    {
+        if (value == AppMode.History) _ = History.LoadAsync();
+    }
 
     /// <summary>앱 시작 시 호출 — 실시간 연결 개시 + 각 패널 초기 로드. 서버 미기동이어도 UI는 유지된다.</summary>
     public async Task InitializeAsync()
@@ -205,12 +213,8 @@ public sealed partial class ShellViewModel : ObservableObject
         var robot = RobotStatus.SelectedRobot;
         if (robot is null) return;
 
-        var confirm = await _dialog.ConfirmAsync(
-            $"로봇 '{robot.RobotId}' 비상정지를 실행합니다.\n" +
-            "※ 기능적 정지(VDA 5050)이며 안전규격 정지는 로봇측 하드웨어입니다. [ADR-007]\n계속하시겠습니까?",
-            "비상정지 확인");
-        if (!confirm) return;
-
+        // 확인 팝업 없음 — 비상정지는 누르는 즉시 전송되어야 한다(확인 단계가 정지를 지연시킨다).
+        // 기능적 정지(VDA 5050 instantActions)이며 안전규격 정지는 로봇측 하드웨어 [ADR-007].
         try
         {
             await _api.EmergencyStopAsync(robot.RobotId, _operatorId);

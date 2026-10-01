@@ -200,7 +200,10 @@ public class ProgressTests
             AreaId = Guid.NewGuid(), TankId = "CT1", WallCode = "PM", Level = level, Name = name,
             Corners = "[[3,0.2],[6,0.2],[6,1.5],[3,1.5]]",
             Tasks = Enumerable.Range(1, tasks).Select(i => new AreaTaskEntity
-            { TaskId = Guid.NewGuid(), Seq = i, StartU = 3.2, StartV = 0.5, EndU = 5.8, EndV = 0.5 }).ToList(),
+            {
+                TaskId = Guid.NewGuid(), Seq = i, StartU = 3.2, StartV = 0.5, EndU = 5.8, EndV = 0.5,
+                SectionDxfId = "DXF-1", ProfileId = "PROF-1"
+            }).ToList(),
         };
         var l1 = Area("PM-L1-01", 1, 3);
         db.InspectionAreas.AddRange(l1, Area("PM-L2-01", 2, 4));

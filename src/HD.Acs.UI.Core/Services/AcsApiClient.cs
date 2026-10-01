@@ -45,6 +45,17 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<TaskActionDto>>($"/api/runs/{runId}/task-actions", ct) ?? new();
 
+    public async Task<IReadOnlyList<RunSummaryDto>> GetRunsAsync(int limit = 50, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<RunSummaryDto>>($"/api/runs?limit={limit}", ct) ?? new();
+
+    public async Task<RunResultsDto?> GetRunResultsAsync(Guid runId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/runs/{runId}/results?limit=1000", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<RunResultsDto>(ct);
+    }
+
     public async Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/runs/{runId}/progress", ct);
@@ -266,6 +277,21 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
         return (r?.AreaId ?? Guid.Empty, r?.Level ?? 0);
+    }
+
+    public async Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
+        double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/areas/{areaId}", new
+        {
+            Name = name, Corners = corners,
+            StationX = stationX, StationY = stationY, StationTheta = stationTheta,
+            StationStandoffM = stationStandoffM, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404 메시지 노출
+        var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
+        return r?.Level ?? 0;
     }
 
     public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)

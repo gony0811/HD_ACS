@@ -16,6 +16,8 @@ public interface IAcsApiClient
     Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default);
     Task<IReadOnlyList<WorkItemDto>> GetWorkItemsAsync(Guid runId, CancellationToken ct = default);
     Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default);
+    Task<IReadOnlyList<RunSummaryDto>> GetRunsAsync(int limit = 50, CancellationToken ct = default);
+    Task<RunResultsDto?> GetRunResultsAsync(Guid runId, CancellationToken ct = default);
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);
@@ -69,6 +71,10 @@ public interface IAcsApiClient
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
         double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default);
+    /// <summary>영역 수정(PUT) — areaId·면 유지, 이름·코너(면-전체 v)·정차 전체 교체. 반환=재유도된 층.</summary>
+    Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
+        double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
+        CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,

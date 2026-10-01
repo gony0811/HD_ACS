@@ -235,33 +235,18 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         ? req.Corners
         : new[] { new[] { req.UMin, req.VMin }, new[] { req.UMax, req.VMin }, new[] { req.UMax, req.VMax }, new[] { req.UMin, req.VMax } })
         .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
-    if (corners.Count < 3)
-        return Results.BadRequest(new { error = "영역 코너가 3점 미만입니다." });
-
     var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
     if (wall is null)
         return Results.NotFound(new { error = $"면이 없습니다: {req.TankId}/{req.WallCode} (선창 파라미터를 먼저 등록하세요)." });
-    // 전 코너가 면 범위 내인지 검사(대각 2점만 검사하면 회전 사각형이 면 밖으로 나가도 통과됨).
-    if (corners.Any(p => !HD.Acs.Core.Planning.AreaGeometry.InBounds(p[0], p[1], 0, 0, wall.ULen, wall.VLen)))
-        return Results.BadRequest(new { error = $"영역 코너가 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
-    var (uMin, vMin, uMax, vMax) = HD.Acs.Core.Planning.AreaGeometry.Bbox(corners);
-    if (uMax - uMin < 1e-6 || vMax - vMin < 1e-6)
-        return Results.BadRequest(new { error = "영역이 퇴화(면적 0)했습니다 — 유효한 사각형 4점을 입력하세요." });
-    if (!HD.Acs.Core.Planning.AreaGeometry.WithinMaxSize(uMin, vMin, uMax, vMax))
-        return Results.BadRequest(new { error = "AREA 최대 크기는 벽면 로컬 u/v 각 1.44m(1440mm)입니다." });
+    if (AreaRules.ValidateCorners(corners, req.WallCode, wall.ULen, wall.VLen, out var bb) is { } cornerViolation)
+        return Results.BadRequest(new { error = cornerViolation });
+    var (uMin, vMin, uMax, vMax) = bb;
 
     // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위(코너 v의 min/max)로 유도한다 ──
     var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
     if (g is null)
         return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {req.TankId} (파라미터를 먼저 등록하세요)." });
-    var geom = new HD.Acs.Core.Planning.TankGeometry(
-        g.LengthL, g.WFloor, g.ThetaLow, g.HLow, g.HWall, g.ThetaUp, g.HUp,
-        System.Text.Json.JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(),
-        g.OriginOx, g.OriginOy, g.ReachZMin, g.ReachZMax);
-    var vAxis = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
-    var origin = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.Origin)!;
-    var (zLo, zHi) = HD.Acs.Core.Planning.LevelBands.AreaZRange(origin[2], vAxis[2], vMin, vMax);
-    int? derivedLevel = HD.Acs.Core.Planning.LevelBands.Derive(zLo, zHi, geom.LevelBandList(), out var reason);
+    int? derivedLevel = AreaRules.DeriveLevel(g, wall, vMin, vMax, out var reason);
     if (derivedLevel is null)
         return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
 
@@ -288,6 +273,55 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     db.InspectionAreas.Add(area);
     await db.SaveChangesAsync();
     return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
+});
+
+// 영역 수정 — **areaId를 유지한 채** 이름·4점 코너·정차 설정을 고친다. 삭제→재등록은 area_task까지 CASCADE로 지워
+// taskId(SAIGE productId·attempt 누적의 영구 키)가 끊기므로 수정 경로를 따로 둔다 [SAIGE v2.6 §2.5].
+// 면(wallCode)은 바꿀 수 없다 — 작업 (u,v)가 면 기준이다. 층은 새 코너로 다시 유도한다.
+// 기존 작업이 새 폴리곤 밖으로 나가면 거부(작업 등록 규칙 = 영역 내부). 진행 중 run 무영향(work_item 스냅샷).
+app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req, AcsDbContext db) =>
+{
+    var area = await db.InspectionAreas.Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId);
+    if (area is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    if (string.IsNullOrWhiteSpace(req.Name))
+        return Results.BadRequest(new { error = "영역 이름은 빈 값일 수 없습니다." });
+    var corners = (req.Corners ?? Array.Empty<double[]>())
+        .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
+
+    var wall = await db.Walls.AsNoTracking().FirstAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode);
+    if (AreaRules.ValidateCorners(corners, area.WallCode, wall.ULen, wall.VLen, out var bb) is { } cornerViolation)
+        return Results.BadRequest(new { error = cornerViolation });
+    var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == area.TankId);
+    if (g is null)
+        return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {area.TankId}." });
+    int? derivedLevel = AreaRules.DeriveLevel(g, wall, bb.MinV, bb.MaxV, out var reason);
+    if (derivedLevel is null)
+        return Results.BadRequest(new { error = $"층 유도 실패 (면 {area.WallCode}): {reason}", reason });
+    if (req.StationStandoffM is < 0)
+        return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
+    var outside = AreaRules.TasksOutside(corners, area.Tasks);
+    if (outside.Count > 0)
+        return Results.BadRequest(new { error = $"기존 작업이 새 영역 밖으로 나갑니다 (seq {string.Join(", ", outside)}) — 작업을 먼저 옮기거나 영역을 넓히세요." });
+    if (await db.InspectionAreas.AsNoTracking().AnyAsync(a =>
+            a.AreaId != areaId && a.TankId == area.TankId && a.WallCode == area.WallCode && a.Name == req.Name))
+        return Results.Conflict(new { error = $"면 {area.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+
+    int oldLevel = area.Level;
+    area.Name = req.Name;
+    area.Corners = System.Text.Json.JsonSerializer.Serialize(corners);
+    (area.UMin, area.VMin, area.UMax, area.VMax) = bb;
+    area.Level = derivedLevel.Value;
+    area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
+    area.StationStandoffM = req.StationStandoffM;
+    if (req.SortOrder is int so) area.SortOrder = so;
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_UPDATE", Target = areaId.ToString(),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new
+        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { areaId, level = area.Level });
 });
 
 app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
@@ -321,6 +355,8 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     // seamType 5종·영역 내부 판정 — PUT과 공통 규칙(AreaTaskRules). CROSS/CORNER 계열은 계획 데이터로 저장·전달만.
     if (AreaTaskRules.Validate(req.SeamType, a.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    if (string.IsNullOrWhiteSpace(req.SectionDxfId) || string.IsNullOrWhiteSpace(req.ProfileId))
+        return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
     // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
     // 프로젝트 파일(.hdacs) 재적재 때 같은 값으로 복원해야 한다. 지정 시 그 값으로 등록하되, 이미 존재하면 거부(덮어쓰기 금지).
     if (req.TaskId == Guid.Empty)
@@ -363,6 +399,9 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 
     if (AreaTaskRules.Validate(req.SeamType, area.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    if (req.SectionDxfId is not null && string.IsNullOrWhiteSpace(req.SectionDxfId) ||
+        req.ProfileId is not null && string.IsNullOrWhiteSpace(req.ProfileId))
+        return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
     if (req.Seq is < 1)
         return Results.BadRequest(new { error = "seq 는 1 이상이어야 합니다 (seqInGroup 계약)." });
     if (req.Seq is int newSeq && newSeq != t.Seq &&
@@ -787,6 +826,10 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
     double[][]? Corners = null, double? StationStandoffM = null,
     Guid? AreaId = null);   // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
+// 영역 수정(PUT) — 이름·코너·정차 전체 교체(정차 null=수동 지정 해제, 이격 null=서버 기본). SortOrder null=유지. 면·areaId 불변.
+public sealed record UpdateAreaRequest(string Name, double[][] Corners,
+    double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
+    int? SortOrder = null, string? UserId = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
     Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
