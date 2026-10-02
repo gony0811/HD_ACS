@@ -38,7 +38,10 @@ public sealed record RobotStateDto(
     string? LastNodeId,
     bool Driving,
     int Errors,
-    double? ReportedTheta = null);   // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
+    double? ReportedTheta = null,    // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
+    string? OperatingMode = null,    // AUTOMATIC | SEMIAUTOMATIC | MANUAL | SERVICE | TEACHIN. 구서버 → null
+    string? EStop = null,            // safetyState.eStop: NONE | AUTOACK | MANUAL | REMOTE
+    string[]? ErrorDescriptions = null);   // 활성 errors "errorType: description" 목록
 
 /// <summary>SignalR "RobotConnection" 푸시. ConnectionState: ONLINE | OFFLINE | CONNECTIONBROKEN</summary>
 public sealed record RobotConnectionDto(
@@ -109,7 +112,11 @@ public sealed record WorkItemProgressDto(
     Guid AreaId,
     string MapId,
     string Status,
-    int Attempts);
+    int Attempts,
+    string? Reason = null);   // 실패(재큐잉 PENDING/SKIPPED) 시 AMR 보고 사유 요약
+
+/// <summary>SignalR "RunState" 푸시 — run 상태 변화(RUNNING | WAITING_FLOOR_TRANSFER | COMPLETED | ABORTED).</summary>
+public sealed record RunStateDto(Guid RunId, string State);
 
 /// <summary>SignalR "RunProgress" 푸시 / GET /api/runs/{id}/progress — Run 단위 TASK 진행률.
 /// Percent = CompletedTasks / TotalTasks × 100 (종결 기준). Completed = Succeeded + Failed.</summary>
@@ -286,3 +293,11 @@ public sealed record AlarmDto(
     DateTimeOffset RaisedAt,
     DateTimeOffset? ClearedAt,
     string? ClearedBy);
+
+/// <summary>GET /api/scenarios/{id}/area-stations — 시나리오 계획 정차점(도면 프레임) + 도착 허용 오차(m, rad).</summary>
+public sealed record PlannedStationsDto(Guid ScenarioId, string TankId, double AllowedDevXy, double AllowedDevTheta,
+    List<PlannedStationDto> Stations);
+
+/// <summary>영역 1개의 계획 정차점. Yaw=도면 yaw[rad](없으면 null), WallU/WallNormal=면 u축·내부향 법선 수평 단위벡터.</summary>
+public sealed record PlannedStationDto(Guid AreaId, string AreaName, string WallCode, int Level, string MapId,
+    double X, double Y, double? Yaw, double StandoffM, bool Manual, double[]? WallU, double[]? WallNormal);

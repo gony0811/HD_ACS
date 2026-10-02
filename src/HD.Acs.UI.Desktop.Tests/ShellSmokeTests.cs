@@ -113,7 +113,10 @@ public class ShellSmokeTests
             Assert.Equal(5, work.Columns.Count);
             Assert.Equal(DataGridRowDetailsVisibilityMode.VisibleWhenSelected, work.RowDetailsVisibilityMode);
             Assert.NotNull(work.RowDetailsTemplate);
-            Assert.Equal(5, Find<DataGrid>(window, "AlarmGrid").Columns.Count);
+            // 알람·이벤트 패널 → 현재 상태 카드 + 이벤트 로그
+            Assert.NotNull(Find<Border>(window, "StatusCard"));
+            Assert.NotNull(Find<Border>(window, "StationPanel"));   // 로봇 카드 ▸ 계획 정차점까지 거리
+            Assert.False(string.IsNullOrEmpty(Find<TextBlock>(window, "StatusHeadline").Text));   // 바인딩 연결 확인
 
             // 계획 ▸ 영역·작업(기본 탭) → AreaGrid 8열 / TaskGrid 7열(유형 포함), 시나리오 탭 → ScenarioGrid 5열, 캘리브레이션 → PointGrid 5열
             shell.CurrentMode = AppMode.Planning;

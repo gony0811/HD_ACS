@@ -55,6 +55,7 @@ public sealed partial class MissionViewModel : ObservableObject
         monitoring.RunProgressReceived += OnRunProgress;
         monitoring.WorkItemProgressReceived += OnWorkItemProgress;
         monitoring.TaskActionProgressReceived += OnTaskActionProgress;
+        monitoring.RunStateReceived += OnRunState;
     }
 
     [RelayCommand]
@@ -75,6 +76,18 @@ public sealed partial class MissionViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = $"시나리오/로봇 조회 실패: {ex.Message}";
+        }
+
+        // 앱 재시작·다른 단말에서 시작한 진행 중 run을 이어서 모니터링한다(운영 화면 현재 상태 표시의 기준).
+        if (CurrentRun is null)
+        {
+            try
+            {
+                var active = (await _api.GetRunsAsync(10))
+                    .FirstOrDefault(r => r.State is "RUNNING" or "WAITING_FLOOR_TRANSFER");
+                if (active is not null) await RefreshRunAsync(active.RunId);
+            }
+            catch { /* 진행 중 run 조회 실패는 화면 흐름을 막지 않음 */ }
         }
     }
 
@@ -357,6 +370,24 @@ public sealed partial class MissionViewModel : ObservableObject
             RebuildFloorProgress();
             return;
         }
+    }
+
+    /// <summary>RunState 푸시 — 현재 run이면 상태 갱신, 다른 run이 시작/재개되면 그 run으로 전환해 모니터링.</summary>
+    private void OnRunState(object? sender, RunStateDto p)
+    {
+        if (CurrentRun is not null && CurrentRun.RunId == p.RunId)
+        {
+            CurrentRun = CurrentRun with { State = p.State };
+            return;
+        }
+        if (p.State is "RUNNING" or "WAITING_FLOOR_TRANSFER")
+            _ = AdoptRunAsync(p.RunId);
+    }
+
+    private async Task AdoptRunAsync(Guid runId)
+    {
+        try { await RefreshRunAsync(runId); }
+        catch { /* 조회 실패 — 다음 푸시/새로고침에서 재시도 */ }
     }
 
     /// <summary>RunProgress 푸시 — 현재 보고 있는 Run의 것만 반영(다른 Run 노이즈 무시).</summary>

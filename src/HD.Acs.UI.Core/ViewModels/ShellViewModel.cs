@@ -70,6 +70,8 @@ public sealed partial class ShellViewModel : ObservableObject
 
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
+        // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산
+        AreaPlanning.PlanningChanged += (_, _) => RobotStatus.InvalidatePlannedStations();
 
         // 실행 큐(work_item)·용접라인(액션) 상태 변화 → TankView 영역/용접선 상태색 갱신 (운영 진행 지도)
         Mission.WorkItemsChanged += (_, _) =>

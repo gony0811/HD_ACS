@@ -81,6 +81,7 @@ public sealed class MissionService
             m.EndedAt = DateTimeOffset.UtcNow;
         }
         await _db.SaveChangesAsync(ct);
+        await _dispatcher.PushRunStateAsync(runId, run.State, ct);
         _log.LogInformation("Run {Run} 중단(ABORTED) — 완료 이력은 보존, resume으로 이어하기 가능.", runId);
     }
 

@@ -178,6 +178,14 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(참조 run 존재)의 {error} 메시지 노출
     }
 
+    public async Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/area-stations", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<PlannedStationsDto>(ct);
+    }
+
     public async Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/areas", ct);

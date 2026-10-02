@@ -48,6 +48,9 @@ public interface IAcsApiClient
     // 부분 검사 계획 — 시나리오 검사 대상 영역 (빈 목록 = 전체 검사)
     Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default);
     Task SetScenarioAreasAsync(Guid scenarioId, IReadOnlyList<Guid> areaIds, CancellationToken ct = default);
+    // 계획 정차점(도면 프레임) — 로봇 상태 카드의 "계획 정차점까지 거리". 시나리오 없음(404)=null
+    Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
+        Task.FromResult<PlannedStationsDto?>(null);
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);

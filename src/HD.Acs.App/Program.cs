@@ -156,6 +156,14 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, Acs
         select new { sa.AreaId, a.WallCode, a.Level, a.Name, sa.SortOrder }).ToListAsync());
 });
 
+// 계획 정차점(도면 프레임) — 운영 화면 로봇 상태 카드가 현재 위치와 비교해 정차점을 사전 평가한다.
+// 배차와 같은 산출식(InspectionDispatcher.StationDrawingOf)·같은 영역 선택(연결 0건=선창 전체).
+app.MapGet("/api/scenarios/{scenarioId:guid}/area-stations",
+    async (Guid scenarioId, InspectionDispatcher dispatcher, CancellationToken ct) =>
+        await dispatcher.GetPlannedStationsAsync(scenarioId, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"시나리오 '{scenarioId}' 없음" }));
+
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
 app.MapPut("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, SetScenarioAreasRequest req, AcsDbContext db) =>
 {

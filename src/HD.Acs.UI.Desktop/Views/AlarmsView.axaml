@@ -1,22 +1,64 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
              x:Class="HD.Acs.UI.Desktop.Views.AlarmsView">
-    <!-- DataContext = AlarmsViewModel -->
-    <Grid Margin="10" TextBlock.Foreground="{DynamicResource AppTextBrush}">
-        <DataGrid x:Name="AlarmGrid" ItemsSource="{Binding Alarms}" IsVisible="{Binding HasAlarms}"
-                  AutoGenerateColumns="False" IsReadOnly="True">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="심각도" Binding="{Binding Severity}" Width="80" />
-                <DataGridTextColumn Header="코드" Binding="{Binding AlarmCode}" Width="110" />
-                <DataGridTextColumn Header="로봇" Binding="{Binding RobotId}" Width="90" />
-                <DataGridTextColumn Header="내용" Binding="{Binding Title}" Width="*" />
-                <DataGridTextColumn Header="발생시각" Binding="{Binding RaisedAt}" Width="150" />
-            </DataGrid.Columns>
-        </DataGrid>
+    <!-- DataContext = AlarmsViewModel — ① 현재 상태 카드 ② 시간순 이벤트 로그(최신이 위) -->
+    <UserControl.Resources>
+        <conv:KindToBrushConverter x:Key="KindBrush" />
+    </UserControl.Resources>
 
-        <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Foreground="{DynamicResource AppMutedTextBrush}" MaxWidth="280" TextAlignment="Center"
-                   IsVisible="{Binding !HasAlarms}" />
+    <Grid RowDefinitions="Auto,Auto,*" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <!-- ① 현재 상태 -->
+        <Border Grid.Row="0" x:Name="StatusCard" Margin="10,10,10,6" Padding="10,8"
+                CornerRadius="6" Background="{DynamicResource AppHeaderBrush}"
+                BorderThickness="4,0,0,0"
+                BorderBrush="{Binding StatusKind, Converter={StaticResource KindBrush}, ConverterParameter=bar}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="현재 상태" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                <TextBlock x:Name="StatusHeadline" Text="{Binding StatusHeadline}" FontSize="16" FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Foreground="{Binding StatusKind, Converter={StaticResource KindBrush}, ConverterParameter=text}" />
+                <TextBlock Text="{Binding StatusDetail}" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="1"
+                             Value="{Binding Mission.TaskProgressFraction}"
+                             Foreground="{Binding StatusKind, Converter={StaticResource KindBrush}, ConverterParameter=bar}" />
+                <TextBlock Text="{Binding Mission.TaskProgressSummary}" FontSize="12" />
+                <TextBlock Text="{Binding Mission.WorkSummary}" FontSize="12"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <TextBlock Text="{Binding RobotSummary}" FontSize="12" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding LastFailure, StringFormat='최근 실패: {0}'}" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AppErrorBrush}"
+                           IsVisible="{Binding LastFailure, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="1" Text="이벤트 기록" Margin="12,4,10,4" FontSize="11"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+
+        <!-- ② 이벤트 로그 -->
+        <Grid Grid.Row="2">
+            <ScrollViewer Margin="10,0,6,10" IsVisible="{Binding HasEvents}">
+                <ItemsControl x:Name="EventList" ItemsSource="{Binding Events}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="58,12,*" Margin="0,2">
+                                <TextBlock Grid.Column="0" Text="{Binding TimeText}" FontSize="11"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                                <Ellipse Grid.Column="1" Width="7" Height="7" Margin="0,4,0,0" VerticalAlignment="Top"
+                                         Fill="{Binding Kind, Converter={StaticResource KindBrush}, ConverterParameter=bar}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Text}" FontSize="12" TextWrapping="Wrap"
+                                           Margin="4,0,0,0"
+                                           Foreground="{Binding Kind, Converter={StaticResource KindBrush}, ConverterParameter=text}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock Text="아직 이벤트가 없습니다. 작업을 시작하면 진행 내용이 여기에 기록됩니다."
+                       TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" MaxWidth="260" TextAlignment="Center"
+                       IsVisible="{Binding !HasEvents}" />
+        </Grid>
     </Grid>
 </UserControl>

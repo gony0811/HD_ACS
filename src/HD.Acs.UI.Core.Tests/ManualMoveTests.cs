@@ -17,6 +17,7 @@ public class ManualMoveTests
         public event EventHandler<RobotConnectionDto>? RobotConnectionReceived;
         public event EventHandler<MissionProgressDto>? MissionProgressReceived;
         public event EventHandler<RunProgressDto>? RunProgressReceived;
+        public event EventHandler<RunStateDto>? RunStateReceived;
         public event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;
         public event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;
         public event EventHandler<AlarmDto>? AlarmRaised;
