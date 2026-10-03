@@ -59,8 +59,10 @@ public sealed record PlanOp
     public string? Suffix { get; init; }
 
     // ── copyArea ────────────────────────────────────
-    /// <summary>복사 위치(전개도 화면 기준): left(u 감소)·right(u 증가)·above(v 증가)·below(v 감소). du/dv 를 주면 그 값 우선.</summary>
+    /// <summary>방향(전개도 화면 기준): left(u 감소)·right(u 증가)·above(v 증가)·below(v 감소). copyArea 위치·moveAreas/shiftTasks 이동 방향.</summary>
     public string? Placement { get; init; }
+    /// <summary>moveAreas·shiftTasks 이동 거리[m] — placement 와 함께 쓰면 부호는 방향이 정한다(아래=v 감소).</summary>
+    public double? Distance { get; init; }
     /// <summary>원본 영역의 작업(용접선)도 같은 상대 위치로 복사(기본 true).</summary>
     public bool? CopyTasks { get; init; }
 

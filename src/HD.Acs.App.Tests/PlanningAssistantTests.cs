@@ -259,6 +259,28 @@ public class PlanningAssistantTests
         Assert.Contains("PM-L2-01 u 3~4.4 v 0.1~1.5 작업 2", ctx);   // 면-전체 v 0.6~2.0 − VOff 0.5
     }
 
+    [Theory]
+    [InlineData("below", 0.3, null, 0.0, -0.3)]
+    [InlineData("below", null, 0.3, 0.0, -0.3)]    // LLM이 "아래로 0.3"을 dv=+0.3으로 낸 경우 — 방향이 부호를 정한다
+    [InlineData("above", 0.2, -0.2, 0.0, 0.2)]
+    [InlineData("left", 0.5, null, -0.5, 0.0)]
+    [InlineData(null, null, 0.3, 0.0, 0.3)]        // 방향 없으면 du/dv 그대로
+    public void MoveOffset_DirectionDecidesSign(string? placement, double? distance, double? dv, double expDu, double expDv)
+    {
+        var (du, v) = PlanChangeSetEngine.MoveOffset(new PlanOp { Op = "moveAreas", Placement = placement, Distance = distance, Dv = dv })!.Value;
+        Assert.Equal((expDu, expDv), (du, v));
+    }
+
+    [Fact]
+    public async Task MoveAreas_Below_LowersArea()
+    {
+        using var sp = Build();
+        var (_, ok) = await PreviewApply(sp, new PlanOp { Op = "moveAreas", AreaName = "PM-L2-01", Placement = "below", Distance = 0.1, Dv = 0.1 });
+        Assert.True(ok);
+        var a = await Db(sp).InspectionAreas.AsNoTracking().SingleAsync(x => x.Name == "PM-L2-01");
+        Assert.Equal(0.5, a.VMin, 9);   // 0.6 → 0.5 (위가 아니라 아래)
+    }
+
     [Fact]
     public async Task MoveAreas_MovesTasksToo_AndRejectsLeavingFace()
     {

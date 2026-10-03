@@ -249,8 +249,8 @@ public sealed class PlanChangeSetEngine
                         list.Add(new AtomicOp { Kind = "deleteArea", Source = src, AreaId = a.AreaId });
                     else if (op.Op == "moveAreas")
                     {
-                        double du = op.Du ?? 0, dv = op.Dv ?? 0;
-                        if (du == 0 && dv == 0) return [Invalid("moveAreas 에는 du 또는 dv 가 필요합니다.")];
+                        if (MoveOffset(op) is not var (du, dv)) return [Invalid($"방향 '{op.Placement}' — left·right·above·below 중 하나여야 합니다.")];
+                        if (du == 0 && dv == 0) return [Invalid("moveAreas 에는 placement+distance(또는 du/dv)가 필요합니다.")];
                         var corners = JsonSerializer.Deserialize<double[][]>(a.Corners)!.Select(p => new[] { p[0] + du, p[1] + dv }).ToArray();
                         list.Add(new AtomicOp { Kind = "updateArea", Source = src, AreaId = a.AreaId, Corners = corners, MoveTasksDu = du, MoveTasksDv = dv });
                     }
@@ -277,7 +277,9 @@ public sealed class PlanChangeSetEngine
             {
                 if (!HasFilter(op)) return [Invalid($"{op.Op} 에는 대상 필터(wallCode·level·areaName·namePattern 중 하나 이상)가 필요합니다 — 전체 대상이면 namePattern \"*\".")];
                 if (op.Op == "setSeamType" && op.SeamType is null) return [Invalid("setSeamType 에는 seamType 이 필요합니다.")];
-                if (op.Op == "shiftTasks" && (op.Du ?? 0) == 0 && (op.Dv ?? 0) == 0) return [Invalid("shiftTasks 에는 du 또는 dv 가 필요합니다.")];
+                var (sdu, sdv) = op.Op == "shiftTasks" ? MoveOffset(op) ?? (double.NaN, double.NaN) : (0, 0);
+                if (double.IsNaN(sdu)) return [Invalid($"방향 '{op.Placement}' — left·right·above·below 중 하나여야 합니다.")];
+                if (op.Op == "shiftTasks" && sdu == 0 && sdv == 0) return [Invalid("shiftTasks 에는 placement+distance(또는 du/dv)가 필요합니다.")];
                 foreach (var a in SelectAreas(ws, op))
                     foreach (var t in a.Tasks.OrderBy(t => t.Seq))
                     {
@@ -290,8 +292,8 @@ public sealed class PlanChangeSetEngine
                             _ => new AtomicOp
                             {
                                 Kind = "updateTask", Source = src, AreaId = a.AreaId, TaskId = t.TaskId,
-                                StartU = t.StartU + (op.Du ?? 0), StartV = t.StartV + (op.Dv ?? 0),
-                                EndU = t.EndU + (op.Du ?? 0), EndV = t.EndV + (op.Dv ?? 0),
+                                StartU = t.StartU + sdu, StartV = t.StartV + sdv,
+                                EndU = t.EndU + sdu, EndV = t.EndV + sdv,
                             },
                         });
                     }
@@ -379,6 +381,25 @@ public sealed class PlanChangeSetEngine
             (overlap > 0 ? $" · 기존 영역과 겹쳐 {overlap}칸 제외" : "") +
             (outside > 0 ? $" · 격벽 윤곽 밖 {outside}칸 제외" : ""));
         return list;
+    }
+
+    /// <summary>
+    /// 이동량(du,dv). placement 가 있으면 **부호는 방향이 정한다**(LLM이 "아래로 0.3"을 dv=+0.3으로 내는 부호 실수 방지),
+    /// 크기는 distance → |du| → |dv| 순. placement 가 없으면 du/dv 그대로. 알 수 없는 방향이면 null.
+    /// 방향은 전개도 화면 기준: 위=v 증가, 아래=v 감소, 오른쪽=u 증가, 왼쪽=u 감소.
+    /// </summary>
+    internal static (double Du, double Dv)? MoveOffset(PlanOp op)
+    {
+        if (string.IsNullOrWhiteSpace(op.Placement)) return (op.Du ?? 0, op.Dv ?? 0);
+        double mag = op.Distance ?? (op.Du is double d && d != 0 ? Math.Abs(d) : Math.Abs(op.Dv ?? 0));
+        return op.Placement.ToLowerInvariant() switch
+        {
+            "left" => (-mag, 0),
+            "right" => (mag, 0),
+            "above" => (0, mag),
+            "below" => (0, -mag),
+            _ => null,
+        };
     }
 
     private static bool HasFilter(PlanOp op) =>
