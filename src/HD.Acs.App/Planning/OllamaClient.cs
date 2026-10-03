@@ -27,7 +27,14 @@ public sealed record ChatMessage(string Role, string Content);
 public sealed record LlmStatus(
     bool Enabled, string BaseUrl, string Model,
     DateTimeOffset? LastOkAt, string? LastError, DateTimeOffset? LastErrorAt, long TotalRequests,
-    bool? Reachable = null, bool? ModelAvailable = null, string[]? InstalledModels = null);
+    bool? Reachable = null, bool? ModelAvailable = null, string[]? InstalledModels = null)
+{
+    /// <summary>
+    /// 계획 어시스턴트 서버 기능 개정 번호 — UI가 "서버가 구빌드"인지 판별한다(UI.Core PlanningAssistantViewModel.RequiredServerRevision 과 맞출 것).
+    /// 1=초판, 2=renameAreas name 지원, 3=빈 ops 재요청·opsSummary.
+    /// </summary>
+    public int AssistantRevision => 3;
+}
 
 /// <summary>
 /// Ollama /api/chat 최소 클라이언트 — stream=false, format=JSON Schema(structured output), temperature 0.

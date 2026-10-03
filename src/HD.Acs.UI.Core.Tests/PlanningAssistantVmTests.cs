@@ -130,6 +130,27 @@ public class PlanningAssistantVmTests
     }
 
     [Fact]
+    public async Task OldServer_NoOpsSummary_StillExplains_AndStatusWarnsRebuild()
+    {
+        var server = new FakeAcs
+        {
+            Propose = new
+            {
+                changeSetId = (Guid?)null, tankId = "CT1", reply = "F-SM-A0001 영역의 이름을 F-A0001로 변경합니다.", messages = Array.Empty<string>(),
+                results = Array.Empty<object>(), creates = 0, updates = 0, deletes = 0, failed = 0, allOk = true, hasChanges = false,
+            },   // opsSummary 없음 = 구서버
+            LlmStatus = new { enabled = true, baseUrl = "http://127.0.0.1:11434", model = "qwen", reachable = true, modelAvailable = true },
+        };
+        var (vm, _) = await BuildAsync(server);
+        vm.Assistant.Input = "F-SM-A0001을 F-A0001로 변경해줘";
+        await vm.Assistant.SendCommand.ExecuteAsync(null);
+        Assert.Contains("실행할 변경을 만들지 못했습니다", vm.Assistant.Lines.Last().Text);
+
+        await vm.Assistant.CheckStatusAsync();
+        Assert.Contains("구빌드", vm.Assistant.StatusText);
+    }
+
+    [Fact]
     public async Task ServerDisabled_ShowsReasonInChat()
     {
         var server = new FakeAcs { ProposeStatus = HttpStatusCode.ServiceUnavailable };
@@ -145,6 +166,7 @@ public class PlanningAssistantVmTests
     private sealed class FakeAcs : HttpMessageHandler
     {
         public object? Propose { get; set; }
+        public object? LlmStatus { get; set; }
         public HttpStatusCode ProposeStatus { get; set; } = HttpStatusCode.OK;
         public List<(string Method, string Path, JsonElement Body)> Writes { get; } = new();
         public int Gets;
@@ -155,6 +177,7 @@ public class PlanningAssistantVmTests
             if (req.Method == HttpMethod.Get)
             {
                 Interlocked.Increment(ref Gets);
+                if (path == "/api/integrations/llm" && LlmStatus is not null) return Json(LlmStatus);
                 return path.StartsWith("/api/internal/") && !path.Contains("geometry") ? Json(Array.Empty<object>()) : new HttpResponseMessage(HttpStatusCode.NotFound);
             }
             Writes.Add((req.Method.Method, path, JsonDocument.Parse(await req.Content!.ReadAsStringAsync(ct)).RootElement.Clone()));

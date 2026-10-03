@@ -325,4 +325,4 @@ public sealed record PlanApplyResultDto(Guid ChangeSetId, int Applied, int Creat
 
 /// <summary>GET /api/integrations/llm — Ollama 연결 상태(Reachable·ModelAvailable 은 조회 시 점검).</summary>
 public sealed record LlmStatusDto(bool Enabled, string BaseUrl, string Model, DateTimeOffset? LastOkAt, string? LastError,
-    bool? Reachable, bool? ModelAvailable);
+    bool? Reachable, bool? ModelAvailable, int? AssistantRevision = null);   // null = 개정 번호 도입 전 구빌드 서버

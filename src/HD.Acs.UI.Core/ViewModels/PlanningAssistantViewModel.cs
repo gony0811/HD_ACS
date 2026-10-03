@@ -46,6 +46,9 @@ public sealed partial class PlanningAssistantViewModel : ObservableObject
 
     public bool HasProposal => Proposal is { HasChanges: true };
 
+    /// <summary>이 UI가 기대하는 서버 어시스턴트 개정(App OllamaClient LlmStatus.AssistantRevision 과 맞출 것).</summary>
+    public const int RequiredServerRevision = 3;
+
     /// <summary>패널 표시 시 서버 LLM 설정 상태를 확인해 안내한다(비활성·모델 미설치 등).</summary>
     [RelayCommand]
     public async Task CheckStatusAsync()
@@ -59,6 +62,8 @@ public sealed partial class PlanningAssistantViewModel : ObservableObject
                 { Enabled: false } => "계획 어시스턴트 비활성 — 서버 appsettings.json 의 Acs:Llm:Enabled=true, BaseUrl(Ollama 주소)·Model 을 설정하세요.",
                 { Reachable: false } => $"Ollama 연결 불가({s.BaseUrl}) — 주소·방화벽·OLLAMA_HOST 를 확인하세요.",
                 { ModelAvailable: false } => $"Ollama 에 모델 '{s.Model}'이(가) 없습니다 — ollama pull {s.Model}",
+                _ when (s.AssistantRevision ?? 0) < RequiredServerRevision =>
+                    $"⚠ 관제 서버(HD.Acs.App)가 구빌드입니다(개정 {s.AssistantRevision?.ToString() ?? "없음"} < {RequiredServerRevision}) — 최신 브랜치로 서버를 다시 빌드·재시작하세요. 이름 변경 등 일부 명령이 동작하지 않습니다.",
                 _ => $"연결됨 — {s.Model} @ {s.BaseUrl}",
             };
         }
@@ -86,7 +91,8 @@ public sealed partial class PlanningAssistantViewModel : ObservableObject
                 parts.Add("해석: " + string.Join("; ", ops.Take(5)) + (ops.Length > 5 ? $" … 외 {ops.Length - 5}건" : ""));
             parts.AddRange(cs.Messages);
             // 답장은 "변경합니다"인데 연산이 0건이면 아무 일도 안 일어난다 — 조용히 넘기지 않고 알린다.
-            if (!cs.HasChanges && cs.OpsSummary is { Length: 0 })
+            // 구서버는 OpsSummary 를 안 보내므로(null) — 변경도 안내 메시지도 없으면 같은 안내를 띄운다(조회 응답은 messages 가 있어 제외).
+            if (!cs.HasChanges && cs.OpsSummary is not { Length: > 0 } && cs.Messages.Length == 0)
                 parts.Add("※ 실행할 변경을 만들지 못했습니다 — 표현을 바꿔 다시 요청하세요 (예: 'F-SM-A0001 영역 이름을 F-A0001로 바꿔').");
             var text = string.Join("\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
             Lines.Add(new PlanChatLine(false, text.Length > 0 ? text : "(응답 없음)"));
