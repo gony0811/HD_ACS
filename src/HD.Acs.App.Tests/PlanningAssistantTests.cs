@@ -281,6 +281,57 @@ public class PlanningAssistantTests
         Assert.Equal(0.5, a.VMin, 9);   // 0.6 → 0.5 (위가 아니라 아래)
     }
 
+    [Theory]
+    [InlineData("F-A0002영역의 위치를 아래로 0.3만큼 이동", "below")]   // "위치"의 '위'에 오인되지 않음
+    [InlineData("위로 0.2 올려", "above")]
+    [InlineData("왼쪽으로 옮겨", "left")]
+    [InlineData("오른쪽 0.1", "right")]
+    [InlineData("F-A0002 v를 -1.2 이동", null)]
+    [InlineData("왼쪽 위로 옮겨", null)]                       // 두 방향 — 서버가 정하지 않음
+    [InlineData("좌현 쪽 영역 이름 바꿔", null)]                // 선박 방향은 화면 방향어 아님
+    public void DirectionFromPrompt_DetectsSingleScreenDirection(string prompt, string? expected) =>
+        Assert.Equal(expected, PlanningAssistantService.DirectionFromPrompt(prompt)?.Placement);
+
+    [Theory]
+    [InlineData(null)]          // LLM이 placement 없이 dv=+0.3
+    [InlineData("above")]       // LLM이 방향을 반대로
+    public async Task Propose_DownWordInPrompt_MovesDown_RegardlessOfLlmSign(string? llmPlacement)
+    {
+        var fake = new FakeOllama(JsonSerializer.Serialize(new
+        {
+            reply = "PM-L2-01을 아래로 0.1m 옮깁니다.",
+            ops = new[] { new { op = "moveAreas", areaName = "PM-L2-01", placement = llmPlacement, dv = 0.1 } },
+        }));
+        using var sp = Build(fake);
+        var svc = sp.GetRequiredService<PlanningAssistantService>();
+        var cs = await svc.ProposeAsync(new ProposeRequest("CT1", "PM-L2-01 영역의 위치를 아래로 0.1 이동시켜", null, null, null), default);
+
+        Assert.NotNull(cs.ChangeSetId);
+        Assert.Contains("placement=below", cs.OpsSummary!.Single());
+        Assert.Contains("'아래'", cs.Messages.First());
+        await svc.ApplyAsync(cs.ChangeSetId!.Value, new ApplyChangeSetRequest("op1"), default);
+        var a = await Db(sp).InspectionAreas.AsNoTracking().SingleAsync(x => x.Name == "PM-L2-01");
+        Assert.Equal(0.5, a.VMin, 9);   // 0.6 → 0.5
+    }
+
+    [Fact]
+    public async Task Propose_SignedNumberWithoutDirectionWord_KeepsLlmSign()
+    {
+        var fake = new FakeOllama(JsonSerializer.Serialize(new
+        {
+            reply = "v를 -0.1 이동합니다.",
+            ops = new[] { new { op = "moveAreas", areaName = "PM-L2-01", dv = -0.1 } },
+        }));
+        using var sp = Build(fake);
+        var svc = sp.GetRequiredService<PlanningAssistantService>();
+        var cs = await svc.ProposeAsync(new ProposeRequest("CT1", "PM-L2-01 v를 -0.1 이동", null, null, null), default);
+
+        Assert.DoesNotContain(cs.Messages, m => m.StartsWith("방향:"));
+        await svc.ApplyAsync(cs.ChangeSetId!.Value, new ApplyChangeSetRequest("op1"), default);
+        var a = await Db(sp).InspectionAreas.AsNoTracking().SingleAsync(x => x.Name == "PM-L2-01");
+        Assert.Equal(0.5, a.VMin, 9);
+    }
+
     [Fact]
     public async Task MoveAreas_MovesTasksToo_AndRejectsLeavingFace()
     {

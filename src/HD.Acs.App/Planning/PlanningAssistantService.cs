@@ -84,11 +84,63 @@ public sealed class PlanningAssistantService
             var (second, raw2) = await AskAsync(messages, schema, ct);
             if (second.Ops is { Length: > 0 }) { reply = second; raw = raw2; }
         }
-        var opsSummary = (reply.Ops ?? []).Select(Summarize).ToArray();
+        // 방향(위·아래·왼쪽·오른쪽)은 LLM 부호가 아니라 운영자 명령문의 방향어로 서버가 정한다 — 소형 모델이 "아래로 0.3"을 dv=+0.3 으로 내는 일이 잦다.
+        var (ops, dirNote) = ApplyPromptDirection(reply.Ops ?? [], req.Prompt);
+        reply = reply with { Ops = ops };
+        var opsSummary = ops.Select(Summarize).ToArray();
         _log.LogInformation("계획 어시스턴트 제안: \"{Prompt}\" → 연산 {N}건 [{Ops}] 원문 {Raw}",
             req.Prompt, opsSummary.Length, string.Join("; ", opsSummary), raw.Length > 2048 ? raw[..2048] + "…" : raw);
-        var dto = await PreviewAndStoreAsync(tankId, reply.Ops ?? [], reply.Reply ?? "", req.Prompt, ct);
-        return dto with { OpsSummary = opsSummary };
+        var dto = await PreviewAndStoreAsync(tankId, ops, reply.Reply ?? "", req.Prompt, ct);
+        return dto with { OpsSummary = opsSummary, Messages = dirNote is null ? dto.Messages : [dirNote, .. dto.Messages] };
+    }
+
+    /// <summary>
+    /// 명령문 방향어 → placement. 한 방향만 걸릴 때만 값, 없거나 둘 이상(예 "왼쪽 위로")이면 null.
+    /// "위"는 단독 매칭하지 않는다 — "위치"에 오인된다. 좌현·우현·선수·선미는 선박 방향이라 화면 방향어가 아니다.
+    /// </summary>
+    internal static (string Placement, string Word)? DirectionFromPrompt(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return null;
+        var found = new List<(string, string)>();
+        foreach (var (placement, rx) in DirectionWords)
+            if (rx.Match(prompt) is { Success: true } m) found.Add((placement, m.Value));
+        return found.Count == 1 ? found[0] : null;
+    }
+
+    private static readonly (string Placement, System.Text.RegularExpressions.Regex Rx)[] DirectionWords =
+    [
+        ("below", new("아래|밑|하단|하향|내려|내리")),
+        ("above", new("위로|위쪽|윗쪽|윗편|위편|위에|상단|상향|올려|올리")),
+        ("left", new("왼쪽|좌측|왼편")),
+        ("right", new("오른쪽|우측|오른편")),
+    ];
+
+    /// <summary>
+    /// 명령문에 방향어가 하나 있으면 moveAreas·shiftTasks 의 방향을 그것으로 고정(크기는 distance → |du| → |dv|),
+    /// copyArea 는 placement 가 없을 때만 채운다(du/dv 직접 지정 시 제외). 고친 게 있으면 안내 문구를 돌려준다.
+    /// </summary>
+    internal static (PlanOp[] Ops, string? Note) ApplyPromptDirection(PlanOp[] ops, string? prompt)
+    {
+        if (DirectionFromPrompt(prompt) is not var (dir, word)) return (ops, null);
+        bool changed = false;
+        var result = ops.Select(op =>
+        {
+            if (op.Op is "moveAreas" or "shiftTasks")
+            {
+                double? mag = op.Distance is double dd && dd != 0 ? Math.Abs(dd)
+                            : op.Du is double du && du != 0 ? Math.Abs(du)
+                            : op.Dv is double dv && dv != 0 ? Math.Abs(dv) : null;
+                if (mag is null) return op;
+                var fixedOp = op with { Placement = dir, Distance = mag, Du = null, Dv = null };
+                if (fixedOp != op) changed = true;
+                return fixedOp;
+            }
+            if (op.Op == "copyArea" && op.Du is null && op.Dv is null && op.Placement != dir)
+            { changed = true; return op with { Placement = dir }; }
+            return op;
+        }).ToArray();
+        string label = dir switch { "below" => "아래(v−)", "above" => "위(v+)", "left" => "왼쪽(u−)", _ => "오른쪽(u+)" };
+        return (result, changed ? $"방향: 명령문의 '{word}'에 따라 {label}로 해석했습니다." : null);
     }
 
     /// <summary>LLM 1회 질의 + JSON 해석(깨진 JSON 이면 1회 재요청).</summary>
@@ -190,7 +242,7 @@ public sealed class PlanningAssistantService
         - gridAreas: 면·층을 격자로 영역 생성. wallCode, level, cellU, cellV(기본 1.4), gap, (uFrom,uTo,vFrom,vTo), namePrefix. 기존 영역과 겹치는 칸은 서버가 건너뛴다.
         - renameAreas: 필터 + name(새 이름 — 대상 영역 1개일 때) 또는 find/replace(일부 글자 바꾸기·지우기, 여러 개 가능) 또는 prefix/suffix
         - copyArea: 기존 영역을 같은 크기로 복사. areaName(+wallCode)=원본, name=새 이름, placement("left"|"right"|"above"|"below", 전개도 화면 기준 — left=u 감소·above=v 증가) 또는 du,dv, (gap 간격 m, copyTasks 기본 true=작업도 같은 상대 위치로 복사)
-        - moveAreas: 필터 + placement("left"|"right"|"above"|"below")+distance(m) (영역과 그 작업을 함께 이동). 위/아래/왼쪽/오른쪽 같은 방향 이동은 반드시 placement+distance 로 쓰고 du,dv 부호를 직접 계산하지 않는다(위=above, 아래=below).
+        - moveAreas: 필터 + placement("left"|"right"|"above"|"below")+distance(m, 양수) (영역과 그 작업을 함께 이동). 위/아래/왼쪽/오른쪽 같은 방향 이동은 반드시 placement+distance 로 쓰고 du,dv 부호를 직접 계산하지 않는다(위=above, 아래=below). du,dv 는 방향어 없이 부호 있는 숫자로 명령했을 때만(예 "v 를 -1.2") 쓴다.
         - deleteAreas: 필터 (작업도 함께 삭제)
         - createTask: areaName(+wallCode), startU,startV,endU,endV, seamType, (seq, taskName)
         - updateTask / deleteTask: areaName(+wallCode), seq 또는 seqs, 바꿀 필드
@@ -213,6 +265,7 @@ public sealed class PlanningAssistantService
         명령: "영역 F-SM-A0001 이름을 F-A0001로 바꿔" → {"reply":"영역 F-SM-A0001의 이름을 F-A0001로 바꿉니다.","ops":[{"op":"renameAreas","areaName":"F-SM-A0001","name":"F-A0001"}]}
         명령: "F-SM-로 시작하는 영역 이름에서 SM- 빼" → {"reply":"F-SM-* 영역 이름에서 'SM-'을 지웁니다.","ops":[{"op":"renameAreas","namePattern":"F-SM-*","find":"SM-","replace":""}]}
         명령: "F-A0001과 같은 크기로 F-A0002를 바로 왼쪽에 만들고 작업도 똑같이 넣어" → {"reply":"F-A0001을 왼쪽에 F-A0002로 복사합니다(작업 포함).","ops":[{"op":"copyArea","wallCode":"F","areaName":"F-A0001","name":"F-A0002","placement":"left"}]}
+        명령: "F-A0002영역의 위치를 아래로 0.3만큼 이동시켜" → {"reply":"F-A0002를 아래로 0.3m 옮깁니다.","ops":[{"op":"moveAreas","areaName":"F-A0002","placement":"below","distance":0.3}]}
         명령: "F-A0002 영역을 아래로 0.3 옮겨" → {"reply":"F-A0002를 아래로 0.3m 옮깁니다.","ops":[{"op":"moveAreas","wallCode":"F","areaName":"F-A0002","placement":"below","distance":0.3}]}
         명령: "바닥 1층을 1.4m 격자로 채워" → {"reply":"B L1에 1.4m 격자 영역을 만듭니다.","ops":[{"op":"gridAreas","wallCode":"B","level":1,"cellU":1.4,"cellV":1.4}]}
         명령: "SL 1층 작업 전부 CROSS4로" → {"reply":"SL L1 작업의 seamType을 CROSS4로 바꿉니다.","ops":[{"op":"setSeamType","wallCode":"SL","level":1,"seamType":"CROSS4"}]}

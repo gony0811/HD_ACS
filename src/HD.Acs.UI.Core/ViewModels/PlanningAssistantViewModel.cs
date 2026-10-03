@@ -47,7 +47,7 @@ public sealed partial class PlanningAssistantViewModel : ObservableObject
     public bool HasProposal => Proposal is { HasChanges: true };
 
     /// <summary>이 UI가 기대하는 서버 어시스턴트 개정(App OllamaClient LlmStatus.AssistantRevision 과 맞출 것).</summary>
-    public const int RequiredServerRevision = 5;
+    public const int RequiredServerRevision = 6;
 
     /// <summary>패널 표시 시 서버 LLM 설정 상태를 확인해 안내한다(비활성·모델 미설치 등).</summary>
     [RelayCommand]
