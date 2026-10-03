@@ -201,6 +201,9 @@ public sealed class PlanChangeSetEngine
                 if (!HasFilter(op)) return [Invalid($"{op.Op} 에는 대상 필터(wallCode·level·areaName·namePattern 중 하나 이상)가 필요합니다 — 전체 대상이면 namePattern \"*\".")];
                 var areas = SelectAreas(ws, op);
                 if (areas.Count == 0) { messages.Add($"#{src + 1} {op.Op}: 조건에 맞는 영역이 없습니다."); break; }
+                // 새 이름 지정(name) — "A 를 B 로 이름 변경"의 자연스러운 표현. 같은 이름 여러 개가 생기지 않게 대상 1개만 허용.
+                if (op.Op == "renameAreas" && !string.IsNullOrWhiteSpace(op.Name) && areas.Count > 1)
+                    return [Invalid($"새 이름(name) 지정은 영역 1개에만 쓸 수 있습니다 — 대상 {areas.Count}개. areaName(+wallCode)로 하나만 고르거나 find/replace 를 쓰세요.")];
                 foreach (var a in areas)
                 {
                     if (op.Op == "deleteAreas")
@@ -215,11 +218,18 @@ public sealed class PlanChangeSetEngine
                     else
                     {
                         var n = a.Name;
-                        if (!string.IsNullOrEmpty(op.Find)) n = n.Replace(op.Find, op.Replace ?? "");
-                        n = (op.Prefix ?? "") + n + (op.Suffix ?? "");
+                        if (!string.IsNullOrWhiteSpace(op.Name)) n = op.Name.Trim();   // name 우선
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(op.Find)) n = n.Replace(op.Find, op.Replace ?? "");
+                            n = (op.Prefix ?? "") + n + (op.Suffix ?? "");
+                        }
                         if (n != a.Name) list.Add(new AtomicOp { Kind = "updateArea", Source = src, AreaId = a.AreaId, Name = n });
                     }
                 }
+                // 대상은 찾았는데 바뀌는 이름이 없으면 조용히 끝내지 않고 이유를 알린다(LLM이 지원하지 않는 필드로 답한 경우 등).
+                if (op.Op == "renameAreas" && list.Count == 0)
+                    messages.Add($"#{src + 1} renameAreas: 대상 영역 {areas.Count}개를 찾았지만 바뀌는 이름이 없습니다 (name=새 이름, find/replace, prefix/suffix 중 하나를 지정).");
                 break;
             }
             case "setSeamType":

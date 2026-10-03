@@ -158,7 +158,7 @@ public sealed class PlanningAssistantService
         - query: 조회. 필터(wallCode·level·areaName·namePattern·matchSeamType) + aggregate("count"|"list"). 숫자는 서버가 계산하니 reply 에 숫자를 지어내지 말 것.
         - createArea: wallCode, level, name, corners [[u,v]×4], (standoffM)
         - gridAreas: 면·층을 격자로 영역 생성. wallCode, level, cellU, cellV(기본 1.4), gap, (uFrom,uTo,vFrom,vTo), namePrefix. 기존 영역과 겹치는 칸은 서버가 건너뛴다.
-        - renameAreas: 필터 + find/replace 또는 prefix/suffix
+        - renameAreas: 필터 + name(새 이름 — 대상 영역 1개일 때) 또는 find/replace(일부 글자 바꾸기·지우기, 여러 개 가능) 또는 prefix/suffix
         - moveAreas: 필터 + du,dv (영역과 그 작업을 함께 이동)
         - deleteAreas: 필터 (작업도 함께 삭제)
         - createTask: areaName(+wallCode), startU,startV,endU,endV, seamType, (seq, taskName)
@@ -177,6 +177,8 @@ public sealed class PlanningAssistantService
         ## 예
         명령: "좌현 수직벽 2층 영역 몇 개야?" → {"reply":"PM L2 영역 수를 조회합니다.","ops":[{"op":"query","wallCode":"PM","level":2}]}
         명령: "PM 2층 영역 이름 앞에 P2- 붙여" → {"reply":"PM L2 영역 이름에 접두어 P2-를 붙입니다.","ops":[{"op":"renameAreas","wallCode":"PM","level":2,"prefix":"P2-"}]}
+        명령: "영역 F-SM-A0001 이름을 F-A0001로 바꿔" → {"reply":"영역 F-SM-A0001의 이름을 F-A0001로 바꿉니다.","ops":[{"op":"renameAreas","areaName":"F-SM-A0001","name":"F-A0001"}]}
+        명령: "F-SM-로 시작하는 영역 이름에서 SM- 빼" → {"reply":"F-SM-* 영역 이름에서 'SM-'을 지웁니다.","ops":[{"op":"renameAreas","namePattern":"F-SM-*","find":"SM-","replace":""}]}
         명령: "바닥 1층을 1.4m 격자로 채워" → {"reply":"B L1에 1.4m 격자 영역을 만듭니다.","ops":[{"op":"gridAreas","wallCode":"B","level":1,"cellU":1.4,"cellV":1.4}]}
         명령: "SL 1층 작업 전부 CROSS4로" → {"reply":"SL L1 작업의 seamType을 CROSS4로 바꿉니다.","ops":[{"op":"setSeamType","wallCode":"SL","level":1,"seamType":"CROSS4"}]}
         """;

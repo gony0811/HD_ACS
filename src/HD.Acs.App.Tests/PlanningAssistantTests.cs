@@ -177,6 +177,49 @@ public class PlanningAssistantTests
     }
 
     [Fact]
+    public async Task RenameAreas_ExactNewName_KeepsAreaId()
+    {
+        using var sp = Build();
+        var id = (await Db(sp).InspectionAreas.AsNoTracking().SingleAsync(a => a.Name == "PM-L2-01")).AreaId;
+        var (p, ok) = await PreviewApply(sp, new PlanOp { Op = "renameAreas", AreaName = "PM-L2-01", Name = "PM-NEW" });
+
+        Assert.True(ok, string.Join(" / ", p.Ops.Select(o => o.Error)));
+        var a = await Db(sp).InspectionAreas.AsNoTracking().SingleAsync(x => x.AreaId == id);
+        Assert.Equal("PM-NEW", a.Name);   // 같은 areaId — 작업(taskId)·이력 유지
+    }
+
+    [Fact]
+    public async Task RenameAreas_ExactNewName_ToManyTargets_IsRejected()
+    {
+        using var sp = Build();
+        var p = await Engine(sp).PreviewAsync("CT1", [new PlanOp { Op = "renameAreas", WallCode = "PM", Name = "X" }], 5000);
+        Assert.False(p.AllOk);
+        Assert.Contains("영역 1개에만", p.Ops.Single().Error);
+    }
+
+    [Fact]
+    public async Task RenameAreas_NothingChanges_ExplainsWhy()
+    {
+        using var sp = Build();
+        var p = await Engine(sp).PreviewAsync("CT1", [new PlanOp { Op = "renameAreas", AreaName = "PM-L2-01" }], 5000);
+        Assert.Empty(p.Ops);
+        Assert.Contains(p.Messages, m => m.Contains("바뀌는 이름이 없습니다"));
+    }
+
+    [Fact]
+    public async Task RenameAreas_FindReplace_RemovesPart_AndDuplicateFails()
+    {
+        using var sp = Build();
+        var (_, ok) = await PreviewApply(sp, new PlanOp { Op = "renameAreas", NamePattern = "PM-L2-*", Find = "L2-", Replace = "" });
+        Assert.True(ok);
+        Assert.Equal(["PM-01", "PM-02"], await Db(sp).InspectionAreas.AsNoTracking().OrderBy(a => a.Name).Select(a => a.Name).ToListAsync());
+
+        var dup = await Engine(sp).PreviewAsync("CT1", [new PlanOp { Op = "renameAreas", AreaName = "PM-01", Name = "PM-02" }], 5000);
+        Assert.False(dup.AllOk);
+        Assert.Contains("이미 있습니다", dup.Ops.Single().Error);
+    }
+
+    [Fact]
     public async Task MoveAreas_MovesTasksToo_AndRejectsLeavingFace()
     {
         using var sp = Build();
@@ -284,6 +327,26 @@ public class PlanningAssistantTests
         Assert.True(await Db(sp).AuditLogs.AnyAsync(l => l.Action == "PLANNING_ASSISTANT_APPLY" && l.UserId == "op1"));
         await Assert.ThrowsAsync<PlanningAssistantService.ChangeSetNotFoundException>(() =>
             svc.ApplyAsync(cs.ChangeSetId!.Value, new ApplyChangeSetRequest("op1"), default));   // 1회용
+    }
+
+    [Fact]
+    public async Task Propose_RenameWithNewName_FromLlm()
+    {
+        var fake = new FakeOllama(JsonSerializer.Serialize(new
+        {
+            reply = "이름을 바꿉니다.",
+            ops = new[] { new { op = "renameAreas", areaName = "PM-L2-01", name = "PM-A0001" } },
+        }));
+        using var sp = Build(fake);
+        var cs = await sp.GetRequiredService<PlanningAssistantService>()
+            .ProposeAsync(new ProposeRequest("CT1", "PM-L2-01 이름을 PM-A0001로 바꿔", null, null, null), default);
+
+        Assert.NotNull(cs.ChangeSetId);
+        Assert.Equal(1, cs.Updates);
+        Assert.Contains("PM-L2-01", cs.Results.Single().Summary);
+        Assert.Contains("PM-A0001", cs.Results.Single().Summary);
+        var system = JsonNode.Parse(fake.Requests.Single())!["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains("\"name\":\"F-A0001\"", system);   // 프롬프트에 단일 이름 변경 예시
     }
 
     [Fact]
