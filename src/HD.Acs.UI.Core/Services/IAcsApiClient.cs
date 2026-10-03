@@ -89,6 +89,15 @@ public interface IAcsApiClient
         string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
 
+    // ── 계획 자연어 어시스턴트 [ADR-013] — 기본 구현은 미지원(기존 테스트 대역 무수정) ──
+    /// <summary>자연어 명령 → 변경안 미리보기(DB 무변경). 서버 비활성 503·LLM 실패 502는 {error} 메시지 예외.</summary>
+    Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default) =>
+        throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
+    /// <summary>미리보기한 변경안 적용(전부 또는 전무). 만료 404·동시 변경 409.</summary>
+    Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default) =>
+        throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
+    Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

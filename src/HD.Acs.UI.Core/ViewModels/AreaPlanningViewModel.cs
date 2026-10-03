@@ -28,6 +28,23 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         _api = api;
         _operatorId = options.Value.OperatorId;
+        Assistant = new PlanningAssistantViewModel(api, _operatorId, this);
+    }
+
+    /// <summary>계획 자연어 어시스턴트 패널 [ADR-013] — 이 화면의 면·층 선택을 공유하고 변경안을 전개도에 미리 그린다.</summary>
+    public PlanningAssistantViewModel Assistant { get; }
+
+    // 어시스턴트 변경안 미리보기(면-전체 v) — 선택 면에 해당하는 것만 그린다.
+    private IReadOnlyList<PlanChangeOpDto>? _proposal;
+    public ObservableCollection<AreaPoly> ProposalAreas { get; } = new();     // 생성·수정 후 모습(청록 점선)
+    public ObservableCollection<AreaPoly> ProposalRemovals { get; } = new();  // 삭제 대상(빨강 점선)
+    public ObservableCollection<TaskSeg> ProposalSegments { get; } = new();   // 생성·수정 용접선
+
+    /// <summary>변경안 미리보기 지정(null=지움) → 전개도 재투영.</summary>
+    public void SetProposal(IReadOnlyList<PlanChangeOpDto>? ops)
+    {
+        _proposal = ops;
+        Project();
     }
 
     public ObservableCollection<WallDto> Walls { get; } = new();
@@ -367,6 +384,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         AreaBoxes.Clear(); InactiveAreaBoxes.Clear(); DraftAreas.Clear();
         TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
+        ProposalAreas.Clear(); ProposalRemovals.Clear(); ProposalSegments.Clear();
         if (SelectedWall is not { } w || w.ULen <= 0 || w.VLen <= 0) return;
 
         double off = VOff;                     // 층-로컬 → 면-전체 v
@@ -412,6 +430,21 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         var (dmiu, dmiv, dmau, dmav) = AreaBboxLocal(draft);
         if (dmau - dmiu > 1e-6 && dmav - dmiv > 1e-6)
             DraftAreas.Add(Poly(draft.Select(p => new[] { p[0], p[1] + off }).ToArray(), AreaName));
+        // 어시스턴트 변경안(면-전체 v) — 이 면의 통과 연산만
+        foreach (var op in _proposal?.Where(o => o.Ok && o.WallCode == w.WallCode) ?? [])
+        {
+            if (op.Corners is { Length: >= 3 } c)
+            {
+                var poly = Poly(c, op.AreaName ?? "");
+                if (op.Kind == "deleteArea") ProposalRemovals.Add(poly); else if (op.Kind.EndsWith("Area")) ProposalAreas.Add(poly);
+            }
+            if (op.Segment is { Length: 4 } sg && op.Kind != "deleteTask")
+            {
+                var (sx1, sy1) = Proj(sg[0], sg[1]);
+                var (sx2, sy2) = Proj(sg[2], sg[3]);
+                ProposalSegments.Add(new TaskSeg(sx1, sy1, sx2, sy2, sx2 - 4, sy2 - 4, (sx1 + sx2) / 2, (sy1 + sy2) / 2, ""));
+            }
+        }
         if (SelectedArea is not null)
         {
             var (px1, py1) = Proj(StartU, StartV + off);

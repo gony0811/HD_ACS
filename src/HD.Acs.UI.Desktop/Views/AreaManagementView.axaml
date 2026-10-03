@@ -1,13 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="using:HD.Acs.UI.Desktop.Views"
+             xmlns:infra="using:HD.Acs.UI.Desktop.Infrastructure"
              x:Class="HD.Acs.UI.Desktop.Views.AreaManagementView">
     <!-- DataContext = AreaPlanningViewModel. ESC: 도면 4점 선택(픽) 모드 해제 (폼·전개도 캔버스 공통 서브트리) -->
+    <UserControl.Resources>
+        <infra:BoolToBrushConverter x:Key="ChatBg" TrueBrush="#33305A7A" FalseBrush="#1A1ABC9C" />
+    </UserControl.Resources>
     <UserControl.KeyBindings>
         <KeyBinding Gesture="Escape" Command="{Binding CancelPickCommand}" />
     </UserControl.KeyBindings>
 
-    <Grid Margin="14" ColumnDefinitions="Auto,*" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <Grid Margin="14" ColumnDefinitions="Auto,*,360" TextBlock.Foreground="{DynamicResource AppTextBrush}">
         <!-- ── 좌: 등록 폼 (영역 → 작업) ── -->
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
             <StackPanel Width="450">
@@ -170,5 +174,56 @@
                 </DataGrid>
             </DockPanel>
         </Grid>
+
+        <!-- ── 우측: 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기) → [적용] ── -->
+        <Border x:Name="AssistantPanel" Grid.Column="2" Margin="12,0,0,0" DataContext="{Binding Assistant}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+                <TextBlock Grid.Row="0" Text="계획 어시스턴트 (자연어)" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1" Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="11" Margin="0,2,0,6"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <ScrollViewer Grid.Row="2" x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" Background="{DynamicResource AppCanvasBrush}">
+                    <ItemsControl ItemsSource="{Binding Lines}" Margin="6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,6" Padding="8,5" CornerRadius="4"
+                                        Background="{Binding IsUser, Converter={StaticResource ChatBg}}">
+                                    <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <StackPanel Grid.Row="3" Margin="0,6,0,0" IsVisible="{Binding HasProposal}">
+                    <TextBlock Text="{Binding ProposalSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,4" />
+                    <ListBox ItemsSource="{Binding ProposalOps}" MaxHeight="160" FontSize="11">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Error}" IsVisible="{Binding !Ok}" TextWrapping="Wrap" Foreground="{DynamicResource AppErrorBrush}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Classes="form" Content="적용" MinWidth="80" Command="{Binding ApplyCommand}"
+                                ToolTip.Tip="변경안 전체를 한 번에 반영합니다(하나라도 실패하면 아무것도 반영하지 않음)." />
+                        <Button Classes="form" Content="버리기" MinWidth="80" Margin="6,0,0,0" Command="{Binding DiscardCommand}" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBox Grid.Row="4" Margin="0,6,0,0" Text="{Binding Input}" AcceptsReturn="False" TextWrapping="Wrap" MinHeight="54"
+                         Watermark="예: PM 2층 작업 전부 CROSS4로 바꿔">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding SendCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Classes="form" Content="보내기" MinWidth="80" Command="{Binding SendCommand}" />
+                    <Button Classes="form" Content="연결 확인" MinWidth="80" Margin="6,0,0,0" Command="{Binding CheckStatusCommand}" />
+                    <TextBlock Text="처리 중…" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

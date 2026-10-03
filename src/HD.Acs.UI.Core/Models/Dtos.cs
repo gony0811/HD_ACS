@@ -301,3 +301,27 @@ public sealed record PlannedStationsDto(Guid ScenarioId, string TankId, double A
 /// <summary>영역 1개의 계획 정차점. Yaw=도면 yaw[rad](없으면 null), WallU/WallNormal=면 u축·내부향 법선 수평 단위벡터.</summary>
 public sealed record PlannedStationDto(Guid AreaId, string AreaName, string WallCode, int Level, string MapId,
     double X, double Y, double? Yaw, double StandoffM, bool Manual, double[]? WallU, double[]? WallNormal);
+
+// ── 계획 자연어 어시스턴트 [ADR-013] — 서버 PlanningAssistantService 페이로드 미러 ──
+
+/// <summary>대화 1줄(role = user | assistant) — LLM에 직전 대화로 전달.</summary>
+public sealed record PlanChatMessageDto(string Role, string Content);
+
+/// <summary>POST /api/planning/assistant/propose 요청. WallCode/Level = 현재 화면 선택(명령에 면·층이 없을 때의 힌트).</summary>
+public sealed record PlanProposeRequestDto(string TankId, string Prompt, string? WallCode, int? Level, PlanChatMessageDto[]? History);
+
+/// <summary>원자 연산 1건의 검증 결과. Corners/Segment 는 **면-전체 v**(미리보기 그리기용).</summary>
+public sealed record PlanChangeOpDto(
+    int Index, int Source, string Kind, bool Ok, string? Error,
+    string? WallCode, int? Level, string? AreaName, double[][]? Corners, double[]? Segment, string Summary);
+
+/// <summary>변경안 미리보기. ChangeSetId = 적용 가능할 때만(변경 있음 + 전 연산 통과).</summary>
+public sealed record PlanChangeSetDto(
+    Guid? ChangeSetId, string TankId, string Reply, string[] Messages, List<PlanChangeOpDto> Results,
+    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges);
+
+public sealed record PlanApplyResultDto(Guid ChangeSetId, int Applied, int Creates, int Updates, int Deletes);
+
+/// <summary>GET /api/integrations/llm — Ollama 연결 상태(Reachable·ModelAvailable 은 조회 시 점검).</summary>
+public sealed record LlmStatusDto(bool Enabled, string BaseUrl, string Model, DateTimeOffset? LastOkAt, string? LastError,
+    bool? Reachable, bool? ModelAvailable);

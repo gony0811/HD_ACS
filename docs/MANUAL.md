@@ -343,6 +343,17 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs/{runId}/task-actions` | 용접라인(액션) 단위 상태 조회 |
 | `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |
 
+### 계획 자연어 어시스턴트 [ADR-013]
+| 메서드/경로 | 설명 |
+|---|---|
+| `GET /api/integrations/llm` | Ollama 연결 상태 — `enabled`·`baseUrl`·`model`·`reachable`·`modelAvailable`·`installedModels`·`lastError` |
+| `POST /api/planning/assistant/propose` | 자연어 → 변경안 미리보기(DB 무변경) — `{ tankId, prompt, wallCode?, level?, history? }` → `{ changeSetId?, reply, messages[], results[], creates, updates, deletes, failed, allOk, hasChanges }`. 비활성 503·Ollama 실패 502 |
+| `POST /api/planning/changesets/preview` | LLM 없이 연산 JSON 직접 미리보기 — `{ tankId, ops: [ { op: "gridAreas", wallCode: "B", level: 1, cellU: 1.4 }, … ] }` |
+| `POST /api/planning/changesets/{id}/apply` | 변경안 적용(전부 또는 전무) — `{ userId }`. 만료/재사용 404·미리보기 이후 데이터 변경 409·검증 실패 400 |
+
+**설정** (`appsettings.json` `Acs:Llm`): `Enabled`(기본 false) · `BaseUrl`(같은 서버 `http://127.0.0.1:11434` / 별도 GPU PC `http://{IP}:11434` — 그 PC에서 `OLLAMA_HOST=0.0.0.0:11434`로 외부 수신 허용·방화벽은 ACS 서버만) · `Model`(기본 `qwen2.5:14b-instruct`, 폐쇄망은 인터넷 PC에서 `ollama pull` 후 모델 폴더 복사) · `TimeoutSec` 120 · `MaxOps` 5000 · `ChangeSetTtlMin` 10.
+**화면**: 계획 ▸ 영역·작업 우측 "계획 어시스턴트" — 명령 입력 → 응답·변경 요약·실패 사유 → 전개도 점선(청록=생성·수정, 빨강=삭제, 선택 면만 표시) 확인 → [적용]/[버리기]. 좌표 v는 계획 폼과 같이 **층-로컬**. 명령 예: "PM 2층 영역 이름 앞에 P2- 붙여", "바닥 1층을 1.4m 격자로 채워", "SL 1층 작업 전부 CROSS4로", "좌현 수직벽 2층 영역을 시나리오 '좌현 정기'에 추가", "PM 3층 작업 몇 개야?".
+
 ### 실시간
 | 경로 | 설명 |
 |---|---|
@@ -360,6 +371,9 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | Order가 릴리즈되지 않음 | 릴리즈 가드 — 로봇 보고 층과 미션 층 불일치. 시뮬레이터 4번째 인자(mapId)를 미션 층과 맞출 것 |
 | NuGet 복원 실패 | 폐쇄망에서 nuget.org 접근 불가 — 패키지 캐시 복사 또는 `HDACS_NUGET_SOURCE` 로 내부 미러 지정 |
 | 작업 시작 후 아무 반응이 없음 | 알람·이벤트 패널의 현재 상태·최근 실패 사유 확인. `로봇 이동 오류 … STO`(구동 토크 차단)·`경로 막힘`·`모터 … 제한됨`이면 로봇 측 비상정지/안전 회로/구동 전원 해제, 운전 모드가 수동이면 자동으로 전환 후 다시 시작 (재시도 2회 실패한 영역은 건너뛰고 run이 종료됨) |
+| 계획 어시스턴트가 503 | `Acs:Llm:Enabled=false` — 서버 설정에서 켜고 재시작 |
+| 계획 어시스턴트가 502·시간 초과 | Ollama 주소/방화벽(`GET /api/integrations/llm`의 `reachable`), 모델 미설치(`modelAvailable=false` → `ollama pull`), GPU 없는 PC에서 큰 모델 — 작은 모델로 바꾸거나 `TimeoutSec` 상향 |
+| 어시스턴트 [적용]이 409 | 미리보기 후 다른 사람이 계획을 고침 — 같은 명령으로 다시 제안받기 |
 | solve 결과 RMS 경고 | 기준점 오입력 의심 — 점 목록 확인, 점 간 거리를 벌려 재캡처 |
 
 ---

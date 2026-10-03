@@ -351,6 +351,26 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/planning/assistant/propose", request, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 503(비활성)·502(Ollama 실패)·400 의 {error} 노출
+        return (await resp.Content.ReadFromJsonAsync<PlanChangeSetDto>(ct))!;
+    }
+
+    public async Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/planning/changesets/{changeSetId}/apply", new { userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 404(만료)·409(동시 변경)·400(검증 실패)
+        return (await resp.Content.ReadFromJsonAsync<PlanApplyResultDto>(ct))!;
+    }
+
+    public async Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/integrations/llm", ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<LlmStatusDto>(ct) : null;
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {

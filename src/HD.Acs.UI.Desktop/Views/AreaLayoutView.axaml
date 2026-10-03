@@ -98,6 +98,32 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <!-- 계획 어시스턴트 변경안 미리보기 [ADR-013]: 생성·수정=청록 점선, 삭제=빨강 점선, 용접선=청록 점선 -->
+                        <ItemsControl ItemsSource="{Binding ProposalAreas}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Polygon Points="{Binding Points, Converter={StaticResource Pts}}" Fill="#2216A085" Stroke="#1ABC9C" StrokeThickness="1.5" StrokeDashArray="4,3" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding ProposalRemovals}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Polygon Points="{Binding Points, Converter={StaticResource Pts}}" Fill="#22E74C3C" Stroke="#E74C3C" StrokeThickness="1.5" StrokeDashArray="4,3" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding ProposalSegments}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
+                                          Stroke="#1ABC9C" StrokeThickness="2" StrokeDashArray="4,3" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <!-- 정차점 = 영역 중심 (보라 채움) -->
                         <ItemsControl ItemsSource="{Binding StationMarkers}">
                             <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>

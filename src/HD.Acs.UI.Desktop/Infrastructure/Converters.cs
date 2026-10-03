@@ -115,6 +115,19 @@ public sealed class BoolToCursorConverter : IValueConverter
         BindingOperations.DoNothing;
 }
 
+/// <summary>bool → 브러시(True/False 각각 지정). 어시스턴트 대화 말풍선(운영자/응답) 배경.</summary>
+public sealed class BoolToBrushConverter : IValueConverter
+{
+    public IBrush? TrueBrush { get; set; }
+    public IBrush? FalseBrush { get; set; }
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? TrueBrush : FalseBrush;
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        BindingOperations.DoNothing;
+}
+
 /// <summary>코어 중립 색(Rgba) → Avalonia 색/브러시.</summary>
 public static class RgbaExtensions
 {

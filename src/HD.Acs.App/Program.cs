@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HD.Acs.App.Hubs;
+using HD.Acs.App.Planning;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
 using HD.Acs.Core.Planning;
@@ -60,6 +61,19 @@ builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 });
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
+
+// 계획 자연어 어시스턴트 [ADR-013] — Ollama(로컬 LLM). Acs:Llm:Enabled=false(기본)면 어시스턴트 API는 503.
+// 변경안 엔진(PlanChangeSetEngine)은 LLM 없이도 동작(연산 JSON 직접 미리보기·적용).
+var llmOptions = builder.Configuration.GetSection("Acs:Llm").Get<LlmOptions>() ?? new LlmOptions();
+builder.Services.AddSingleton(llmOptions);
+builder.Services.AddHttpClient(OllamaClient.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri(llmOptions.BaseUrl);
+    c.Timeout = TimeSpan.FromSeconds(llmOptions.TimeoutSec);
+});
+builder.Services.AddSingleton<OllamaClient>();
+builder.Services.AddScoped<PlanChangeSetEngine>();
+builder.Services.AddScoped<PlanningAssistantService>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
@@ -441,6 +455,18 @@ app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext 
     return Results.Ok();
 });
 
+// ── 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기, DB 무변경) → 운영자 승인 → 적용(전부 또는 전무) ──
+app.MapGet("/api/integrations/llm", async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
+
+app.MapPost("/api/planning/assistant/propose", async (ProposeRequest req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.ProposeAsync(req, ct)));
+
+app.MapPost("/api/planning/changesets/preview", async (PreviewOpsRequest req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.PreviewOpsAsync(req, ct)));
+
+app.MapPost("/api/planning/changesets/{id:guid}/apply", async (Guid id, ApplyChangeSetRequest? req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.ApplyAsync(id, req ?? new ApplyChangeSetRequest(null), ct)));
+
 // 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2, DORMANT — 운영 워크플로우 제외]. 유효 T_W_D 없으면 400.
 app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-seams",
     async (Guid scenarioId, GenerateFromSeamsRequest? req, SeamPlanningService planning) =>
@@ -806,6 +832,18 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
         .FirstOrDefaultAsync(c => c.MapId == mapId && c.MapVersion == map.Version);
     return cal is null ? Results.NotFound() : Results.Ok(cal);
 });
+
+// 계획 어시스턴트 API 공통 예외 → HTTP 상태 매핑
+static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
+{
+    try { return Results.Ok(await call()); }
+    catch (PlanningAssistantService.LlmDisabledException ex) { return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status503ServiceUnavailable); }
+    catch (PlanningAssistantService.ChangeSetNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (PlanChangeSetEngine.PlanConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (PlanningAssistantService.LlmReplyException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (HttpRequestException ex) { return Results.Json(new { error = $"LLM(Ollama) 호출 실패: {ex.Message}" }, statusCode: StatusCodes.Status502BadGateway); }
+}
 
 app.Run();
 

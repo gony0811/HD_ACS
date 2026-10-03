@@ -159,6 +159,24 @@ public class ShellSmokeTests
     }
 
     [AvaloniaFact]
+    public void PlanningAssistantPanel_IsBoundToAssistantViewModel()
+    {
+        var (host, window, shell) = CreateShell();
+        using (host)
+        {
+            shell.CurrentMode = AppMode.Planning; Dispatcher.UIThread.RunJobs();
+            var panel = Find<Border>(window, "AssistantPanel");
+            Assert.Same(shell.AreaPlanning.Assistant, panel.DataContext);
+            var a = shell.AreaPlanning.Assistant;
+            Assert.False(a.SendCommand.CanExecute(null));      // 입력 없음
+            a.Input = "PM 2층 영역 몇 개?";
+            Assert.True(a.SendCommand.CanExecute(null));
+            Assert.False(a.ApplyCommand.CanExecute(null));     // 변경안 없음
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Tank3DControl_RendersDrawList_WithoutData()
     {
         var (host, window, _) = CreateShell();

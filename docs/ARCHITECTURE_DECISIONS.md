@@ -239,6 +239,25 @@
 
 ---
 
+## ADR-013. 계획 자연어 어시스턴트 — 로컬 LLM(Ollama), 제안→미리보기→승인 모델 ✅
+
+**질문**: 계획 화면에서 영역·용접선을 한 건씩 숫자로 입력하는 방식으로는 CT1 규모(영역 1,276·작업 7,513)의 수정·대량 작업이 어렵다. 자연어 명령으로 계획을 고치거나 대량 생성할 수 있는가?
+
+**결정** (2026-10-03): 폐쇄망에서 돌아가는 **로컬 LLM(Ollama)** 을 HD_ACS 서버에 연결하되, LLM은 **변경안(ChangeSet)만** 만든다.
+1. **LLM = 의도 해석기, 계산기 아님** — LLM은 고수준 연산(`gridAreas`·`renameAreas`·`moveAreas`·`setSeamType`·`shiftTasks`·`delete*`·`setScenarioAreas`·`query` 및 직접 연산 `createArea/createTask/updateTask/deleteTask`)을 JSON(Ollama structured output, 스키마 강제)으로만 출력한다. 좌표 전개(격자·층-로컬 v→면-전체 v)·검증은 결정적 C# 코드(`PlanChangeSetEngine`)가 한다. 조회 답의 수치도 서버 집계 값만 쓴다.
+2. **제안 → 미리보기 → 승인 → 적용** — 제안은 DB 무변경(연산별 통과/사유 + 전개도 점선 미리보기). 운영자가 [적용]을 눌러야 반영되며, **전부 또는 전무**(SaveChanges 1회)로 적용한다. 미리보기 이후 계획 데이터가 바뀌었으면 409(지문 비교), 변경안은 1회용·10분 만료.
+3. **검증 정본 공유** — `AreaRules`·`AreaTaskRules`(1.44m·면 범위·층 유도·영역 내부·seamType 5종)를 REST 등록과 같이 쓴다. 매크로는 대상 필터 필수(전체는 `namePattern "*"` 명시), 격자는 기존 영역과 겹치는 칸·격벽 팔각 밖 칸을 건너뛴다.
+4. **범위 = 계획 데이터만**(ref.inspection_area·area_task·scenario·scenario_area). run·배차·VDA 5050·선창 지오메트리 재등록은 다루지 않는다 — 단일 상대 원칙(ADR-001)·로봇 인터페이스 무변경.
+5. **배치** — Ollama는 `Acs:Llm:BaseUrl` 하나로 지정(같은 서버 `http://127.0.0.1:11434` 또는 같은 폐쇄망의 GPU PC `http://{IP}:11434`, 그 PC는 `OLLAMA_HOST=0.0.0.0:11434`). 호출 주체는 HD_ACS 서버(UI 아님). 기본 비활성(`Enabled=false`), 모델은 오프라인 반입. 감사로그 `PLANNING_ASSISTANT_APPLY`(원문 명령·연산·건수).
+
+**근거**: 소형 로컬 모델은 산술·대량 좌표 생성과 정확한 ID 지정에 약하다 — 계산을 LLM에서 떼어내면 오답이 "검증 실패"로 드러나고 DB를 오염시키지 않는다. 승인 단계는 "시나리오는 데이터·운영자 수정 가능"(가이드라인 3)과 같은 취지다.
+
+**구현**: `src/HD.Acs.App/Planning/`(PlanChangeSet·PlanChangeSetEngine·OllamaClient·PlanningAssistantService), REST `POST /api/planning/assistant/propose`·`/api/planning/changesets/preview`(LLM 없이 연산 JSON 직접)·`/api/planning/changesets/{id}/apply`·`GET /api/integrations/llm`. UI: `PlanningAssistantViewModel` + Avalonia 계획 ▸ 영역·작업 우측 패널. WPF 헤드 미적용(Phase 5 은퇴 대상).
+
+**미결**: 운영 모델 선정(현장 GPU 사양 확인 후 대표 명령 성공률로 결정 — 기본값 `qwen2.5:14b-instruct`는 잠정), 도면(DXF) 기반 작업 자동 생성은 범위 밖(현행 `tools/build_hdacs_area_tasks.py` 유지).
+
+---
+
 ## 미결 질문 목록 (Open Questions)
 
 | # | 항목 | 관련 ADR | 상태/비고 |
