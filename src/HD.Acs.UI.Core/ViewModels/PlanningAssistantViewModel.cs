@@ -81,7 +81,14 @@ public sealed partial class PlanningAssistantViewModel : ObservableObject
         {
             var cs = await _api.ProposePlanAsync(new PlanProposeRequestDto(
                 _planning.TankId, prompt, _planning.SelectedWall?.WallCode, _planning.SelectedLevel?.Level, history));
-            var text = string.Join("\n", new[] { cs.Reply }.Concat(cs.Messages).Where(s => !string.IsNullOrWhiteSpace(s)));
+            var parts = new List<string?> { cs.Reply };
+            if (cs.OpsSummary is { Length: > 0 } ops)
+                parts.Add("해석: " + string.Join("; ", ops.Take(5)) + (ops.Length > 5 ? $" … 외 {ops.Length - 5}건" : ""));
+            parts.AddRange(cs.Messages);
+            // 답장은 "변경합니다"인데 연산이 0건이면 아무 일도 안 일어난다 — 조용히 넘기지 않고 알린다.
+            if (!cs.HasChanges && cs.OpsSummary is { Length: 0 })
+                parts.Add("※ 실행할 변경을 만들지 못했습니다 — 표현을 바꿔 다시 요청하세요 (예: 'F-SM-A0001 영역 이름을 F-A0001로 바꿔').");
+            var text = string.Join("\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
             Lines.Add(new PlanChatLine(false, text.Length > 0 ? text : "(응답 없음)"));
             ShowProposal(cs);
         }

@@ -21,7 +21,8 @@ public sealed record ChangeSetOpDto(
 /// <summary>제안(미리보기) 응답. ChangeSetId 는 적용 가능한 변경이 있고 전 연산이 통과했을 때만 발급된다.</summary>
 public sealed record ChangeSetDto(
     Guid? ChangeSetId, string TankId, string Reply, string[] Messages, PlanOp[] Ops, ChangeSetOpDto[] Results,
-    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges);
+    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges,
+    string[]? OpsSummary = null);   // LLM 이 낸 연산 요약(대화창 "해석:" 표시) — 직접 연산 미리보기에선 null
 
 public sealed record ApplyResultDto(Guid ChangeSetId, int Applied, int Creates, int Updates, int Deletes);
 
@@ -72,15 +73,35 @@ public sealed class PlanningAssistantService
         messages.Add(new ChatMessage("user", req.Prompt));
 
         var schema = ReplySchema(wallCodes);
-        AssistantReply? reply = null;
+        var (reply, raw) = await AskAsync(messages, schema, ct);
+        // 소형 모델은 reply 에 "변경합니다"라고 쓰고 ops 는 [] 로 내는 일이 잦다 → 1회만 되물어 연산을 채우게 한다.
+        if (reply.Ops is not { Length: > 0 })
+        {
+            messages.Add(new ChatMessage("assistant", raw));
+            messages.Add(new ChatMessage("user",
+                "방금 응답의 ops 가 비어 있습니다. 변경 요청이면 ops 배열에 연산을 넣어 다시 답하세요. " +
+                "조회나 되묻기라면 ops 를 비운 채 같은 답을 그대로 다시 쓰세요."));
+            var (second, raw2) = await AskAsync(messages, schema, ct);
+            if (second.Ops is { Length: > 0 }) { reply = second; raw = raw2; }
+        }
+        var opsSummary = (reply.Ops ?? []).Select(Summarize).ToArray();
+        _log.LogInformation("계획 어시스턴트 제안: \"{Prompt}\" → 연산 {N}건 [{Ops}] 원문 {Raw}",
+            req.Prompt, opsSummary.Length, string.Join("; ", opsSummary), raw.Length > 2048 ? raw[..2048] + "…" : raw);
+        var dto = await PreviewAndStoreAsync(tankId, reply.Ops ?? [], reply.Reply ?? "", req.Prompt, ct);
+        return dto with { OpsSummary = opsSummary };
+    }
+
+    /// <summary>LLM 1회 질의 + JSON 해석(깨진 JSON 이면 1회 재요청).</summary>
+    private async Task<(AssistantReply Reply, string Raw)> AskAsync(List<ChatMessage> messages, JsonNode schema, CancellationToken ct)
+    {
         string? parseError = null;
-        for (int attempt = 0; attempt < 2 && reply is null; attempt++)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
             var raw = await _llm.ChatJsonAsync(messages, schema, ct);
             try
             {
-                reply = JsonSerializer.Deserialize<AssistantReply>(raw, Web);
-                if (reply is null) parseError = "빈 응답";
+                if (JsonSerializer.Deserialize<AssistantReply>(raw, Web) is { } r) return (r, raw);
+                parseError = "빈 응답";
             }
             catch (JsonException ex)
             {
@@ -89,11 +110,20 @@ public sealed class PlanningAssistantService
                 messages.Add(new ChatMessage("user", $"방금 응답이 JSON 형식이 아닙니다({ex.Message}). 스키마대로 다시 답하세요."));
             }
         }
-        if (reply is null) throw new LlmReplyException($"LLM 응답을 해석하지 못했습니다: {parseError}");
-        _log.LogInformation("계획 어시스턴트 제안: \"{Prompt}\" → 연산 {N}건 [{Ops}]",
-            req.Prompt, reply.Ops?.Length ?? 0, string.Join(",", (reply.Ops ?? []).Select(o => o.Op)));
-        return await PreviewAndStoreAsync(tankId, reply.Ops ?? [], reply.Reply ?? "", req.Prompt, ct);
+        throw new LlmReplyException($"LLM 응답을 해석하지 못했습니다: {parseError}");
     }
+
+    /// <summary>연산 1건을 사람이 읽는 한 줄로 — 예: renameAreas(areaName=F-SM-A0001, name=F-A0001). 대화창 "해석:" 표시·로그용.</summary>
+    internal static string Summarize(PlanOp op)
+    {
+        var node = JsonSerializer.SerializeToNode(op, SummaryJson)!.AsObject();
+        var args = node.Where(kv => kv.Key != "op" && kv.Value is not null)
+            .Select(kv => $"{kv.Key}={(kv.Value is JsonValue v && v.TryGetValue<string>(out var str) ? str : kv.Value!.ToJsonString())}");
+        return $"{op.Op}({string.Join(", ", args)})";
+    }
+
+    private static readonly JsonSerializerOptions SummaryJson = new(JsonSerializerDefaults.Web)
+    { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
     /// <summary>LLM 없이 연산 JSON 을 직접 미리보기(고급 사용자·테스트·스크립트용).</summary>
     public Task<ChangeSetDto> PreviewOpsAsync(PreviewOpsRequest req, CancellationToken ct) =>
@@ -171,6 +201,7 @@ public sealed class PlanningAssistantService
 
         ## 규칙
         - 명령이 모호하면(면·층을 모름 등) ops 를 비우고 reply 로 되묻는다. 추측으로 삭제하지 않는다.
+        - reply 에 "바꿉니다/변경합니다/만듭니다/지웁니다"라고 썼다면 ops 는 절대 비어 있으면 안 된다. 실제 변경은 ops 로만 일어난다.
         - 여러 단계는 ops 를 순서대로 나열한다(앞 연산 결과 위에서 다음 연산이 실행된다).
         - reply 는 무엇을 하려는지 한국어 한두 문장.
 
@@ -211,9 +242,15 @@ public sealed class PlanningAssistantService
             ["properties"] = new JsonObject
             {
                 ["reply"] = Str(),
-                ["ops"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["required"] = new JsonArray("op") } },
+                ["ops"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    // additionalProperties=false — 모델이 newName 같은 정의 밖 필드를 쓰면 서버가 조용히 버려 "변경 없음"이 된다.
+                    ["items"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["required"] = new JsonArray("op"), ["additionalProperties"] = false },
+                },
             },
             ["required"] = new JsonArray("reply", "ops"),
+            ["additionalProperties"] = false,
         };
     }
 

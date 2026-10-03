@@ -318,7 +318,8 @@ public sealed record PlanChangeOpDto(
 /// <summary>변경안 미리보기. ChangeSetId = 적용 가능할 때만(변경 있음 + 전 연산 통과).</summary>
 public sealed record PlanChangeSetDto(
     Guid? ChangeSetId, string TankId, string Reply, string[] Messages, List<PlanChangeOpDto> Results,
-    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges);
+    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges,
+    string[]? OpsSummary = null);   // LLM 이 낸 연산 요약 — 대화창 "해석:" 줄(구서버는 없음)
 
 public sealed record PlanApplyResultDto(Guid ChangeSetId, int Applied, int Creates, int Updates, int Deletes);
 

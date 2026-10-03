@@ -100,6 +100,36 @@ public class PlanningAssistantVmTests
     }
 
     [Fact]
+    public async Task NoOps_ShowsWhyNothingHappened_AndInterpretationWhenPresent()
+    {
+        var server = new FakeAcs
+        {
+            Propose = new
+            {
+                changeSetId = (Guid?)null, tankId = "CT1", reply = "F-SM-A0001 영역의 이름을 F-A0001로 변경합니다.", messages = Array.Empty<string>(),
+                results = Array.Empty<object>(), creates = 0, updates = 0, deletes = 0, failed = 0, allOk = true, hasChanges = false,
+                opsSummary = Array.Empty<string>(),
+            },
+        };
+        var (vm, _) = await BuildAsync(server);
+        vm.Assistant.Input = "F-SM-A0001을 F-A0001로 변경해줘";
+        await vm.Assistant.SendCommand.ExecuteAsync(null);
+        Assert.Contains("실행할 변경을 만들지 못했습니다", vm.Assistant.Lines.Last().Text);
+
+        server.Propose = new
+        {
+            changeSetId = ChangeSet, tankId = "CT1", reply = "바꿉니다.", messages = Array.Empty<string>(),
+            results = new[] { Op(1, "updateArea", true, "PM", Box) }, creates = 0, updates = 1, deletes = 0, failed = 0, allOk = true, hasChanges = true,
+            opsSummary = new[] { "renameAreas(areaName=F-SM-A0001, name=F-A0001)" },
+        };
+        vm.Assistant.Input = "다시";
+        await vm.Assistant.SendCommand.ExecuteAsync(null);
+        Assert.Contains("해석: renameAreas(areaName=F-SM-A0001, name=F-A0001)", vm.Assistant.Lines.Last().Text);
+        Assert.DoesNotContain("만들지 못했습니다", vm.Assistant.Lines.Last().Text);
+        Assert.True(vm.Assistant.ApplyCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task ServerDisabled_ShowsReasonInChat()
     {
         var server = new FakeAcs { ProposeStatus = HttpStatusCode.ServiceUnavailable };

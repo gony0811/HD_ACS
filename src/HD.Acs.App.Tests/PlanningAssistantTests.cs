@@ -350,6 +350,45 @@ public class PlanningAssistantTests
     }
 
     [Fact]
+    public async Task Propose_EmptyOps_AsksOnceMore_ThenUsesFilledOps()
+    {
+        var fake = new FakeOllama(
+            JsonSerializer.Serialize(new { reply = "F-SM-A0001 영역의 이름을 F-A0001로 변경합니다.", ops = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { reply = "이름을 바꿉니다.", ops = new[] { new { op = "renameAreas", areaName = "PM-L2-01", name = "PM-A0001" } } }));
+        using var sp = Build(fake);
+        var cs = await sp.GetRequiredService<PlanningAssistantService>()
+            .ProposeAsync(new ProposeRequest("CT1", "PM-L2-01을 PM-A0001로 변경해줘", null, null, null), default);
+
+        Assert.Equal(2, fake.Requests.Count);
+        var nudge = JsonNode.Parse(fake.Requests[1])!["messages"]!.AsArray().Last()!["content"]!.GetValue<string>();
+        Assert.Contains("ops 가 비어 있습니다", nudge);
+        Assert.NotNull(cs.ChangeSetId);
+        Assert.Equal(["renameAreas(areaName=PM-L2-01, name=PM-A0001)"], cs.OpsSummary!);
+    }
+
+    [Fact]
+    public async Task Propose_EmptyOpsTwice_ReturnsNoChangesWithEmptySummary()
+    {
+        var empty = JsonSerializer.Serialize(new { reply = "변경합니다.", ops = Array.Empty<object>() });
+        var fake = new FakeOllama(empty, empty);
+        using var sp = Build(fake);
+        var cs = await sp.GetRequiredService<PlanningAssistantService>()
+            .ProposeAsync(new ProposeRequest("CT1", "바꿔줘", null, null, null), default);
+
+        Assert.Equal(2, fake.Requests.Count);   // 되묻기는 1회뿐
+        Assert.False(cs.HasChanges);
+        Assert.Empty(cs.OpsSummary!);
+    }
+
+    [Fact]
+    public void ReplySchema_ForbidsUnknownFields()
+    {
+        var schema = PlanningAssistantService.ReplySchema(["B"]);
+        Assert.False(schema["additionalProperties"]!.GetValue<bool>());
+        Assert.False(schema["properties"]!["ops"]!["items"]!["additionalProperties"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task Propose_RetriesOnceOnBrokenJson()
     {
         var fake = new FakeOllama("{not json", JsonSerializer.Serialize(new { reply = "조회합니다.", ops = new[] { new { op = "query", wallCode = "PM" } } }));
