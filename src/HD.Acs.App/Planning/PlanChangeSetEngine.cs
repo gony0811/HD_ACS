@@ -192,6 +192,45 @@ public sealed class PlanChangeSetEngine
                 }
                 break;
             }
+            case "copyArea":
+            {
+                // 원본 좌표는 서버가 안다 — LLM 은 "어느 영역을, 어느 쪽으로, 무슨 이름으로"만 정한다.
+                if (ResolveOneArea(ws, op, out var why) is not { } srcArea) return [Invalid(why!)];
+                if (string.IsNullOrWhiteSpace(op.Name)) return [Invalid("copyArea 에는 새 영역 이름(name)이 필요합니다.")];
+                double w = srcArea.UMax - srcArea.UMin, h = srcArea.VMax - srcArea.VMin, gap = op.Gap ?? 0;
+                double du, dv;
+                if (op.Du is not null || op.Dv is not null) { du = op.Du ?? 0; dv = op.Dv ?? 0; }
+                else
+                {
+                    (du, dv) = (op.Placement ?? "").ToLowerInvariant() switch
+                    {
+                        "left" => (-(w + gap), 0.0),
+                        "right" => (w + gap, 0.0),
+                        "above" => (0.0, h + gap),
+                        "below" => (0.0, -(h + gap)),
+                        _ => (double.NaN, double.NaN),
+                    };
+                    if (double.IsNaN(du)) return [Invalid("copyArea 에는 placement(left·right·above·below) 또는 du/dv 가 필요합니다.")];
+                }
+                var newId = Guid.NewGuid();
+                var srcCorners = JsonSerializer.Deserialize<double[][]>(srcArea.Corners)!;
+                list.Add(new AtomicOp
+                {
+                    Kind = "createArea", Source = src, AreaId = newId, WallCode = srcArea.WallCode, Name = op.Name.Trim(),
+                    StandoffM = op.StandoffM ?? srcArea.StationStandoffM,
+                    Corners = srcCorners.Select(p => new[] { p[0] + du, p[1] + dv }).ToArray(),
+                });
+                if (op.CopyTasks ?? true)
+                    foreach (var t in srcArea.Tasks.OrderBy(t => t.Seq))
+                        list.Add(new AtomicOp
+                        {
+                            Kind = "createTask", Source = src, AreaId = newId, TaskId = Guid.NewGuid(),
+                            Seq = t.Seq, TaskName = t.Name, SeamType = t.SeamType,
+                            StartU = t.StartU + du, StartV = t.StartV + dv, EndU = t.EndU + du, EndV = t.EndV + dv,
+                            SectionDxfId = t.SectionDxfId, ProfileId = t.ProfileId,
+                        });
+                break;
+            }
             case "gridAreas":
                 return ExpandGrid(ws, op, src, messages);
             case "renameAreas":
@@ -513,7 +552,8 @@ public sealed class PlanChangeSetEngine
             TaskId = a.TaskId ?? Guid.NewGuid(), AreaId = area.AreaId, Seq = seq, Name = a.TaskName,
             SeamType = (a.SeamType ?? "LINE").ToUpperInvariant(),
             StartU = a.StartU.Value, StartV = a.StartV.Value, EndU = a.EndU.Value, EndV = a.EndV.Value,
-            SectionDxfId = DefaultSectionDxfId, ProfileId = DefaultProfileId, CreatedBy = "planning-assistant",
+            SectionDxfId = string.IsNullOrWhiteSpace(a.SectionDxfId) ? DefaultSectionDxfId : a.SectionDxfId,
+            ProfileId = string.IsNullOrWhiteSpace(a.ProfileId) ? DefaultProfileId : a.ProfileId, CreatedBy = "planning-assistant",
         };
         _db.AreaTasks.Add(t);
         area.Tasks.Add(t);

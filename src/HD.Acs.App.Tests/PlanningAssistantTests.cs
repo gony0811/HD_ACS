@@ -220,6 +220,46 @@ public class PlanningAssistantTests
     }
 
     [Fact]
+    public async Task CopyArea_Left_SameSize_WithTasks()
+    {
+        using var sp = Build();
+        var (p, ok) = await PreviewApply(sp, new PlanOp { Op = "copyArea", WallCode = "PM", AreaName = "PM-L2-01", Name = "PM-L2-01b", Placement = "left" });
+
+        Assert.True(ok, string.Join(" / ", p.Ops.Select(o => o.Error)));
+        var db = Db(sp);
+        var src = await db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).SingleAsync(a => a.Name == "PM-L2-01");
+        var copy = await db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).SingleAsync(a => a.Name == "PM-L2-01b");
+        Assert.Equal((1.6, 3.0), (Math.Round(copy.UMin, 9), Math.Round(copy.UMax, 9)));      // 원본 u 3~4.4 → 폭 1.4만큼 왼쪽
+        Assert.Equal((src.VMin, src.VMax, src.Level), (copy.VMin, copy.VMax, copy.Level));
+        Assert.Equal(src.Tasks.Count, copy.Tasks.Count);
+        foreach (var t in src.Tasks)
+        {
+            var c = copy.Tasks.Single(x => x.Seq == t.Seq);
+            Assert.Equal(t.StartU - 1.4, c.StartU, 9);
+            Assert.Equal((t.StartV, t.EndV, t.SeamType, t.ProfileId), (c.StartV, c.EndV, c.SeamType, c.ProfileId));
+            Assert.NotEqual(t.TaskId, c.TaskId);   // 새 작업 = 새 taskId
+        }
+    }
+
+    [Fact]
+    public async Task CopyArea_OutOfLevelBand_FailsWithReason()
+    {
+        using var sp = Build();
+        var p = await Engine(sp).PreviewAsync("CT1", [new PlanOp { Op = "copyArea", AreaName = "PM-L2-01", Name = "X", Placement = "above" }], 5000);
+        Assert.False(p.AllOk);
+        Assert.Contains("층", p.Ops.First().Error);   // v 2.0~3.4 → L2 도달 구간(≤2.9) 밖
+    }
+
+    [Fact]
+    public async Task Context_IncludesSelectedWallAreaCoordinates_LevelLocal()
+    {
+        using var sp = Build();
+        var svc = sp.GetRequiredService<PlanningAssistantService>();
+        var ctx = await svc.BuildContextAsync("CT1", "PM", 2, default);
+        Assert.Contains("PM-L2-01 u 3~4.4 v 0.1~1.5 작업 2", ctx);   // 면-전체 v 0.6~2.0 − VOff 0.5
+    }
+
+    [Fact]
     public async Task MoveAreas_MovesTasksToo_AndRejectsLeavingFace()
     {
         using var sp = Build();

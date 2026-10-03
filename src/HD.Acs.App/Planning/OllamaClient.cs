@@ -31,9 +31,9 @@ public sealed record LlmStatus(
 {
     /// <summary>
     /// 계획 어시스턴트 서버 기능 개정 번호 — UI가 "서버가 구빌드"인지 판별한다(UI.Core PlanningAssistantViewModel.RequiredServerRevision 과 맞출 것).
-    /// 1=초판, 2=renameAreas name 지원, 3=빈 ops 재요청·opsSummary.
+    /// 1=초판, 2=renameAreas name 지원, 3=빈 ops 재요청·opsSummary, 4=copyArea·선택 면 영역 좌표 컨텍스트.
     /// </summary>
-    public int AssistantRevision => 3;
+    public int AssistantRevision => 4;
 }
 
 /// <summary>

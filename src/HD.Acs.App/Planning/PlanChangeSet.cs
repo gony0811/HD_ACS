@@ -10,7 +10,7 @@ public sealed record PlanOp
 {
     /// <summary>
     /// createArea · createTask · updateTask · deleteTask (직접 연산)
-    /// gridAreas · renameAreas · moveAreas · deleteAreas · setSeamType · shiftTasks · deleteTasks · setScenarioAreas (매크로)
+    /// copyArea · gridAreas · renameAreas · moveAreas · deleteAreas · setSeamType · shiftTasks · deleteTasks · setScenarioAreas (매크로)
     /// query (읽기 전용 — 변경 없음)
     /// </summary>
     public string Op { get; init; } = "";
@@ -58,6 +58,12 @@ public sealed record PlanOp
     public string? Prefix { get; init; }
     public string? Suffix { get; init; }
 
+    // ── copyArea ────────────────────────────────────
+    /// <summary>복사 위치(전개도 화면 기준): left(u 감소)·right(u 증가)·above(v 증가)·below(v 감소). du/dv 를 주면 그 값 우선.</summary>
+    public string? Placement { get; init; }
+    /// <summary>원본 영역의 작업(용접선)도 같은 상대 위치로 복사(기본 true).</summary>
+    public bool? CopyTasks { get; init; }
+
     // ── moveAreas / shiftTasks ──────────────────────
     public double? Du { get; init; }
     public double? Dv { get; init; }
@@ -98,6 +104,9 @@ public sealed record AtomicOp
     public double? EndU { get; init; }
     public double? EndV { get; init; }
     public Guid[]? AreaIds { get; init; }
+    /// <summary>createTask: 단면 DXF·프로파일 — null 이면 기본 임시값(copyArea 는 원본 값을 그대로 넘긴다).</summary>
+    public string? SectionDxfId { get; init; }
+    public string? ProfileId { get; init; }
 }
 
 /// <summary>원자 연산 검증 결과 + 미리보기용 표시 정보(면·층·영역명·면-전체 좌표).</summary>

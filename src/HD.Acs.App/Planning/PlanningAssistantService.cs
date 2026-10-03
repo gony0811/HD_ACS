@@ -42,7 +42,7 @@ public sealed class PlanningAssistantService
     public static readonly string[] OpNames =
     {
         "createArea", "createTask", "updateTask", "deleteTask",
-        "gridAreas", "renameAreas", "moveAreas", "deleteAreas", "setSeamType", "shiftTasks", "deleteTasks", "setScenarioAreas", "query",
+        "copyArea", "gridAreas", "renameAreas", "moveAreas", "deleteAreas", "setSeamType", "shiftTasks", "deleteTasks", "setScenarioAreas", "query",
     };
 
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
@@ -189,6 +189,7 @@ public sealed class PlanningAssistantService
         - createArea: wallCode, level, name, corners [[u,v]×4], (standoffM)
         - gridAreas: 면·층을 격자로 영역 생성. wallCode, level, cellU, cellV(기본 1.4), gap, (uFrom,uTo,vFrom,vTo), namePrefix. 기존 영역과 겹치는 칸은 서버가 건너뛴다.
         - renameAreas: 필터 + name(새 이름 — 대상 영역 1개일 때) 또는 find/replace(일부 글자 바꾸기·지우기, 여러 개 가능) 또는 prefix/suffix
+        - copyArea: 기존 영역을 같은 크기로 복사. areaName(+wallCode)=원본, name=새 이름, placement("left"|"right"|"above"|"below", 전개도 화면 기준 — left=u 감소·above=v 증가) 또는 du,dv, (gap 간격 m, copyTasks 기본 true=작업도 같은 상대 위치로 복사)
         - moveAreas: 필터 + du,dv (영역과 그 작업을 함께 이동)
         - deleteAreas: 필터 (작업도 함께 삭제)
         - createTask: areaName(+wallCode), startU,startV,endU,endV, seamType, (seq, taskName)
@@ -202,6 +203,7 @@ public sealed class PlanningAssistantService
         ## 규칙
         - 명령이 모호하면(면·층을 모름 등) ops 를 비우고 reply 로 되묻는다. 추측으로 삭제하지 않는다.
         - reply 에 "바꿉니다/변경합니다/만듭니다/지웁니다"라고 썼다면 ops 는 절대 비어 있으면 안 된다. 실제 변경은 ops 로만 일어난다.
+        - 기존 영역을 기준으로 한 명령(복사·옆에 만들기·같은 크기)은 좌표를 지어내지 말고 copyArea·moveAreas 같은 상대 연산을 쓴다. 좌표가 필요하면 아래 "현재 상태"의 영역 좌표만 사용한다.
         - 여러 단계는 ops 를 순서대로 나열한다(앞 연산 결과 위에서 다음 연산이 실행된다).
         - reply 는 무엇을 하려는지 한국어 한두 문장.
 
@@ -210,6 +212,7 @@ public sealed class PlanningAssistantService
         명령: "PM 2층 영역 이름 앞에 P2- 붙여" → {"reply":"PM L2 영역 이름에 접두어 P2-를 붙입니다.","ops":[{"op":"renameAreas","wallCode":"PM","level":2,"prefix":"P2-"}]}
         명령: "영역 F-SM-A0001 이름을 F-A0001로 바꿔" → {"reply":"영역 F-SM-A0001의 이름을 F-A0001로 바꿉니다.","ops":[{"op":"renameAreas","areaName":"F-SM-A0001","name":"F-A0001"}]}
         명령: "F-SM-로 시작하는 영역 이름에서 SM- 빼" → {"reply":"F-SM-* 영역 이름에서 'SM-'을 지웁니다.","ops":[{"op":"renameAreas","namePattern":"F-SM-*","find":"SM-","replace":""}]}
+        명령: "F-A0001과 같은 크기로 F-A0002를 바로 왼쪽에 만들고 작업도 똑같이 넣어" → {"reply":"F-A0001을 왼쪽에 F-A0002로 복사합니다(작업 포함).","ops":[{"op":"copyArea","wallCode":"F","areaName":"F-A0001","name":"F-A0002","placement":"left"}]}
         명령: "바닥 1층을 1.4m 격자로 채워" → {"reply":"B L1에 1.4m 격자 영역을 만듭니다.","ops":[{"op":"gridAreas","wallCode":"B","level":1,"cellU":1.4,"cellV":1.4}]}
         명령: "SL 1층 작업 전부 CROSS4로" → {"reply":"SL L1 작업의 seamType을 CROSS4로 바꿉니다.","ops":[{"op":"setSeamType","wallCode":"SL","level":1,"seamType":"CROSS4"}]}
         """;
@@ -233,6 +236,7 @@ public sealed class PlanningAssistantService
             ["cellU"] = Num(), ["cellV"] = Num(), ["gap"] = Num(), ["uFrom"] = Num(), ["uTo"] = Num(), ["vFrom"] = Num(), ["vTo"] = Num(),
             ["namePrefix"] = Str(), ["find"] = Str(), ["replace"] = Str(), ["prefix"] = Str(), ["suffix"] = Str(),
             ["du"] = Num(), ["dv"] = Num(),
+            ["placement"] = Enum(["left", "right", "above", "below"]), ["copyTasks"] = new JsonObject { ["type"] = "boolean" },
             ["scenarioName"] = Str(), ["mode"] = Enum(["add", "remove", "replace"]), ["createIfMissing"] = new JsonObject { ["type"] = "boolean" },
             ["aggregate"] = Enum(["count", "list"]),
         };
@@ -288,6 +292,23 @@ public sealed class PlanningAssistantService
             sb.AppendLine("시나리오: " + string.Join(", ", scenarios.Select(s => $"{s.Name}(대상 {(s.N == 0 ? "선창 전체" : s.N + "개")})")));
         if (selWall is not null || selLevel is not null)
             sb.AppendLine($"현재 화면 선택: 면 {selWall ?? "-"}, 층 {(selLevel is int l ? "L" + l : "-")} — 명령에 면·층이 없으면 이 선택을 뜻할 가능성이 높다.");
+        // 선택 면(·층)의 영역 좌표 — 상대 위치 명령("옆에", "같은 크기")을 LLM이 지어내지 않도록. v 는 층-로컬.
+        if (selWall is not null && walls.FirstOrDefault(w => w.WallCode == selWall) is { } sw)
+        {
+            double vOff = 0;
+            if (selLevel is int lv && bands.FirstOrDefault(b => b.Level == lv) is { } band)
+            {
+                var o = JsonSerializer.Deserialize<double[]>(sw.Origin)!; var va = JsonSerializer.Deserialize<double[]>(sw.VAxis)!;
+                vOff = LevelBands.ReachableVBand(o[2], va[2], sw.VLen, band)?.VLo ?? 0;
+            }
+            var near = await _db.InspectionAreas.AsNoTracking()
+                .Where(a => a.TankId == tankId && a.WallCode == selWall && (selLevel == null || a.Level == selLevel))
+                .OrderBy(a => a.Name).Take(30)
+                .Select(a => new { a.Name, a.UMin, a.UMax, a.VMin, a.VMax, Tasks = a.Tasks.Count }).ToListAsync(ct);
+            if (near.Count > 0)
+                sb.AppendLine($"선택 면 {selWall} 영역 좌표(u, 층-로컬 v, m): " + string.Join("; ",
+                    near.Select(a => $"{a.Name} u {a.UMin:0.##}~{a.UMax:0.##} v {a.VMin - vOff:0.##}~{a.VMax - vOff:0.##} 작업 {a.Tasks}")));
+        }
         return sb.ToString();
     }
 }
