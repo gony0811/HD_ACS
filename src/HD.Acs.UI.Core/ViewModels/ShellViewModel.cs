@@ -165,6 +165,11 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         // 파일 파싱 단계(매직/버전/GZip/JSON) — ProjectService가 InvalidDataException을 던짐
         InvalidDataException => $"프로젝트 {verb} 실패: 이 프로그램의 프로젝트 파일이 아니거나 손상되었습니다.\n\n{ex.Message}",
+        // DB 재적재 단계 — 서버가 응답했지만 내용을 거부(4xx/5xx). 연결 문제가 아니다.
+        HttpRequestException { StatusCode: { } code } => $"프로젝트 {verb} 실패: 관제 서버가 파일 내용을 거부했습니다 (HTTP {(int)code}).\n" +
+            "서버 연결은 정상입니다. 아래 사유를 고친 파일로 다시 여세요.\n\n" +
+            $"사유: {ex.Message}" +
+            (verb == "열기" ? "\n\n※ 열기는 선창을 먼저 다시 등록하므로, 이 선창의 기존 영역·작업이 지워졌을 수 있습니다. 정상 프로젝트 파일을 다시 열어 복원하세요." : ""),
         // DB 재적재 단계 — 관제 서버(:5199)/PostgreSQL 연결 실패
         HttpRequestException => $"프로젝트 {verb} 실패: 파일은 정상이지만 관제 서버에 연결하지 못했습니다.\n" +
             "HD.Acs.App(포트 5199)과 PostgreSQL이 실행 중인지 확인한 뒤 다시 시도하세요.\n\n" +

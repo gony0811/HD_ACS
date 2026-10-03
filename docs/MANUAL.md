@@ -375,6 +375,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | NuGet 복원 실패 | 폐쇄망에서 nuget.org 접근 불가 — 패키지 캐시 복사 또는 `HDACS_NUGET_SOURCE` 로 내부 미러 지정 |
 | 작업 시작 후 아무 반응이 없음 | 알람·이벤트 패널의 현재 상태·최근 실패 사유 확인. `로봇 이동 오류 … STO`(구동 토크 차단)·`경로 막힘`·`모터 … 제한됨`이면 로봇 측 비상정지/안전 회로/구동 전원 해제, 운전 모드가 수동이면 자동으로 전환 후 다시 시작 (재시도 2회 실패한 영역은 건너뛰고 run이 종료됨) |
 | 컨테이너는 healthy인데 서버가 DB 연결 실패 | 서버와 같은 조건(TCP+비밀번호)으로 확인: `docker exec -e PGPASSWORD=postgres dev-postgres psql -h 127.0.0.1 -U postgres -d hdacs -c "select 1"`. `password authentication failed`면 볼륨이 다른 비밀번호로 초기화된 것 — 데이터 유지한 채 `docker exec dev-postgres psql -U postgres -c "ALTER USER postgres PASSWORD 'postgres';"` 후 서버 재시작(또는 `ConnectionStrings:Default` 비밀번호를 실제 값으로). ※ `-h` 없는 `docker exec … psql`은 내부 소켓이라 **비밀번호를 검사하지 않아** 정상처럼 보인다. 그 외: Windows에 PostgreSQL 서비스가 따로 있으면 5432를 가로챔(`Get-Service *postgres*` → 중지) |
+| 프로젝트 열기 실패 "AREA 최대 크기는 … 1.44m" | 1.44m 제한(SPEC v3 §4) 이전에 만든 구파일 — 열기 전 사전 검사가 위반 영역 이름·크기를 알려주며 DB는 바꾸지 않는다. 영역을 1.44m 이하로 나눈 파일(예: `tools/build_hdacs_area_tasks.py` 산출물)을 사용 |
 | 계획 어시스턴트가 503 | `Acs:Llm:Enabled=false` — 서버 설정에서 켜고 재시작 |
 | 계획 어시스턴트가 502·시간 초과 | Ollama 주소/방화벽(`GET /api/integrations/llm`의 `reachable`), 모델 미설치(`modelAvailable=false` → `ollama pull`), GPU 없는 PC에서 큰 모델 — 작은 모델로 바꾸거나 `TimeoutSec` 상향 |
 | 어시스턴트 [적용]이 409 | 미리보기 후 다른 사람이 계획을 고침 — 같은 명령으로 다시 제안받기 |

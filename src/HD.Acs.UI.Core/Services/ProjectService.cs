@@ -101,6 +101,7 @@ public sealed class ProjectService : IProjectService
         }
 
         ValidateIdentities(doc);
+        ValidateAreaShapes(doc);   // 서버 규칙 위반을 DB를 건드리기 전에 거부(열기는 선창 재등록=기존 영역 삭제부터 시작)
 
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
@@ -161,6 +162,32 @@ public sealed class ProjectService : IProjectService
 
         CurrentPath = path;
         return doc;
+    }
+
+    /// <summary>AREA 최대 크기 [SPEC v3 §4] — 서버 AreaRules 와 같은 값. 구버전에서 만든 파일이 지금 규칙을 넘는 경우를 열기 전에 잡는다.</summary>
+    public const double MaxAreaSizeM = 1.44;
+
+    /// <summary>
+    /// 영역 형상 사전 검사 — 코너 3점 이상·유한값·u/v 폭 1.44m 이하. 위반 영역을 모두 모아 한 번에 알린다.
+    /// 서버 POST 가 같은 규칙으로 거부하지만, 그때는 이미 선창 재등록으로 기존 영역이 지워진 뒤다.
+    /// </summary>
+    private static void ValidateAreaShapes(ProjectDoc doc)
+    {
+        var bad = new List<string>();
+        foreach (var a in doc.Areas)
+        {
+            var c = a.Corners ?? new[] { new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMax } };
+            if (a.Corners is { Length: < 3 } || c.Any(p => p.Length < 2 || !double.IsFinite(p[0]) || !double.IsFinite(p[1])))
+            { bad.Add($"{a.WallCode} '{a.Name}': 코너가 잘못됨"); continue; }
+            double du = c.Max(p => p[0]) - c.Min(p => p[0]), dv = c.Max(p => p[1]) - c.Min(p => p[1]);
+            if (du > MaxAreaSizeM + 1e-9 || dv > MaxAreaSizeM + 1e-9)
+                bad.Add($"{a.WallCode} '{a.Name}': {du:0.###} × {dv:0.###} m");
+        }
+        if (bad.Count > 0)
+            throw new InvalidDataException(
+                $"영역 {bad.Count}개가 현재 규칙(AREA 최대 u/v 각 {MaxAreaSizeM}m, 코너 3점 이상)을 벗어나 열 수 없습니다 — DB는 변경하지 않았습니다.\n" +
+                string.Join("\n", bad.Take(10)) + (bad.Count > 10 ? $"\n… 외 {bad.Count - 10}개" : "") +
+                "\n\n규칙이 생기기 전에 만든 파일일 수 있습니다. 영역을 1.44m 이하로 나눈 파일을 사용하세요.");
     }
 
     private static void ValidateIdentities(ProjectDoc doc)

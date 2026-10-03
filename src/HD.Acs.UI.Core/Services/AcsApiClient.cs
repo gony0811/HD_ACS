@@ -382,7 +382,8 @@ public sealed class AcsApiClient : IAcsApiClient
             message = err?.Error;
         }
         catch (Exception) { /* 본문이 JSON이 아니면 상태코드로 폴백 */ }
-        throw new HttpRequestException(message ?? $"요청 실패 ({(int)resp.StatusCode})");
+        // StatusCode 를 실어 보낸다 — "서버가 거부함(4xx)"과 "서버에 못 붙음(StatusCode 없음)"을 호출 측이 구분한다.
+        throw new HttpRequestException(message ?? $"요청 실패 ({(int)resp.StatusCode})", null, resp.StatusCode);
     }
 
     private sealed record StartRunResult(Guid RunId);
