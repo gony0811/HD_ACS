@@ -118,13 +118,13 @@ public class OperationStatusTests
         Assert.Contains("F-01 / W1 실패", vm.Events[0].Text);
         Assert.Contains("STO", vm.LastFailure);
 
-        mission.WorkItems[0].Status = "SKIPPED";
-        mon.WorkItem(new WorkItemProgressDto(Run, Wi, Guid.NewGuid(), "CT1-L1", "SKIPPED", 2, "로봇 이동 오류 보고: STO"));
-        Assert.Contains("건너뜀", vm.Events[0].Text);
+        mission.WorkItems[0].Status = "FAILED";
+        mon.WorkItem(new WorkItemProgressDto(Run, Wi, Guid.NewGuid(), "CT1-L1", "FAILED", 1, "로봇 이동 오류 보고: STO"));
+        Assert.Contains("자동 재시도 안 함", vm.Events[0].Text);
         Assert.Contains("STO", vm.Events[0].Text);
 
         mon.RunState(Run, "COMPLETED");
-        Assert.Equal("작업 완료 — 건너뛴 작업 있음", vm.Events[0].Text);
+        Assert.Equal("작업 완료 — 실패한 작업 있음 (알람 확인)", vm.Events[0].Text);
         Assert.Contains(vm.Events, e => e.Text == "AMR-01 정지");
     }
 

@@ -26,7 +26,6 @@ public sealed class InspectionDispatcher
     private readonly IInspectionOrderingPolicy _policy;
     private readonly IHubContext<MonitoringHub> _hub;
     private readonly ILogger<InspectionDispatcher> _log;
-    private readonly int _maxRetries;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
 
@@ -35,13 +34,59 @@ public sealed class InspectionDispatcher
         IConfiguration config, ILogger<InspectionDispatcher> log)
     {
         _db = db; _vda = vda; _policy = policy; _hub = hub; _log = log;
-        _maxRetries = config.GetValue("Acs:Dispatch:MaxRetries", 2);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
         _allowedDevTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07);
+        _robotStaleAfter = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:RobotStateStaleSec", 10.0));
     }
+
+    /// <summary>로봇 state 수신이 이 시간 이상 끊기면 연결 안 됨으로 본다(state 주기 ~2 s). 설정 Acs:Dispatch:RobotStateStaleSec.</summary>
+    private readonly TimeSpan _robotStaleAfter;
+
+    /// <summary>
+    /// 명령(미션 시작·이어하기) 전 AMR 연결 확인 — connection ONLINE이고 최근 state를 받고 있어야 한다.
+    /// 아니면 ROBOT_NOT_CONNECTED 알람을 기록·푸시하고 RobotNotConnectedException(명령 차단).
+    /// 받을 로봇이 없는데 Order를 보내면 아무 일도 일어나지 않아 운영자가 "무반응"으로 오인한다(2026-10-02 현장).
+    /// </summary>
+    public async Task EnsureRobotConnectedAsync(string robotId, string command, CancellationToken ct)
+    {
+        var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
+        var now = DateTimeOffset.UtcNow;
+        string? reason =
+            ctx is null ? "로봇 상태를 한 번도 받지 못함"
+            : ctx.ConnectionState != "ONLINE" ? $"연결 상태 {ctx.ConnectionState ?? "알 수 없음"}"
+            : ctx.ReportedAt is null ? "로봇 상태를 한 번도 받지 못함"
+            : now - ctx.ReportedAt.Value > _robotStaleAfter
+                ? $"마지막 상태 수신 {(int)(now - ctx.ReportedAt.Value).TotalSeconds}초 전"
+            : null;
+        if (reason is null) return;
+
+        var title = $"AMR 미연결 — {command} 차단 ({robotId}: {reason})";
+        await RaiseAlarmAsync("ROBOT_NOT_CONNECTED", "WARNING", title, robotId, null, new
+        {
+            command, robotId, reason, ctx?.ConnectionState, lastStateAt = ctx?.ReportedAt,
+            action = "HD_AMR 실행·MQTT 연결을 확인한 뒤 다시 시도하세요.",
+        }, ct);
+        _log.LogWarning("{Command} 차단 — AMR {Robot} 미연결: {Reason}", command, robotId, reason);
+        throw new RobotNotConnectedException($"AMR {robotId}이(가) 연결되어 있지 않습니다({reason}) — {command}을(를) 보내지 않았습니다. HD_AMR 연결을 확인하세요.");
+    }
+
+    /// <summary>알람 기록(alarm.alarm) + 실시간 푸시. code는 alarm.spec에 있어야 한다(AlarmSpecSeed).</summary>
+    public async Task RaiseAlarmAsync(string code, string severity, string title, string? robotId, Guid? missionId,
+        object detail, CancellationToken ct)
+    {
+        var a = new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = robotId, MissionId = missionId,
+            Detail = JsonSerializer.Serialize(new { severity, title, detail }), RaisedAt = DateTimeOffset.UtcNow,
+        };
+        _db.Alarms.Add(a);
+        await _db.SaveChangesAsync(ct);
+        await PushAlarmAsync(a, severity, title, ct);
+    }
+
 
     private readonly double _stationStandoffM;
     private readonly double _allowedDevXy;
@@ -249,6 +294,71 @@ public sealed class InspectionDispatcher
         return (mx, my, mTheta, actionsJson.ToJsonString(), area.Tasks.Count);
     }
 
+    /// <summary>
+    /// 재개(resume) 시 잔여 정차 재계산 — run 시작 때 저장한 정차점·용접선 좌표 스냅샷 대신 **현재 계획**(영역·작업·면)과
+    /// **현재 T_W_D**로 다시 만든다. 계획을 고친 뒤 이어하기를 해도 옛 좌표로 움직이지 않게 하기 위함.
+    /// 영역 삭제·작업 0건·면 미등록·층 T_W_D 없음이면 갈 곳이 없으므로 그 정차는 SKIPPED. 층이 바뀌어 미션이 없으면 추가한다.
+    /// 진행률 분모(total_tasks)는 작업 수 증감만큼 보정. 저장은 호출자가 한다.
+    /// </summary>
+    public async Task<(int Refreshed, int Skipped)> RefreshOpenItemsAsync(
+        ScenarioRunEntity run, IReadOnlyList<WorkItemEntity> items, CancellationToken ct)
+    {
+        if (items.Count == 0) return (0, 0);
+        var areaIds = items.Select(w => w.AreaId).Distinct().ToList();
+        var areas = await _db.InspectionAreas.AsNoTracking()
+            .Include(a => a.Tasks)
+            .Where(a => areaIds.Contains(a.AreaId))
+            .ToDictionaryAsync(a => a.AreaId, ct);
+        var tankId = await _db.Scenarios.AsNoTracking().Where(sc => sc.ScenarioId == run.ScenarioId)
+                         .Select(sc => sc.TankId).FirstOrDefaultAsync(ct)
+                     ?? areas.Values.FirstOrDefault()?.TankId ?? "";
+        var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
+            .ToDictionaryAsync(w => w.WallCode, ct);
+        var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
+        var weldSchema = await WeldSchemaAsync(ct);
+
+        int refreshed = 0, skipped = 0;
+        foreach (var wi in items)
+        {
+            int oldTasks = 0;
+            try { oldTasks = JsonNode.Parse(wi.Actions ?? "[]")?.AsArray().Count ?? 0; } catch { /* 손상 — 0으로 */ }
+
+            string? reason = null;
+            (string MapId, DrawingTransform T) lv = default;
+            WallEntity? wall = null;
+            if (!areas.TryGetValue(wi.AreaId, out var area)) reason = "영역이 삭제됨";
+            else if (area.Tasks.Count == 0) reason = "영역에 검사 작업이 없음";
+            else if (!walls.TryGetValue(area.WallCode, out wall)) reason = $"면 {area.WallCode} 미등록";
+            else if (!tWdByLevel.TryGetValue(area.Level, out lv)) reason = $"층 L{area.Level} 캘리브레이션(T_W_D) 없음";
+
+            if (reason is not null)
+            {
+                wi.Status = "SKIPPED";
+                wi.UpdatedAt = DateTimeOffset.UtcNow;
+                skipped++;
+                if (run.TotalTasks is int tt) run.TotalTasks = Math.Max(0, tt - oldTasks);
+                _log.LogWarning("Run {Run}: 재개 — wi={Wi} 정차 재계산 불가({Reason}) → SKIPPED.", run.RunId, wi.WorkItemId, reason);
+                continue;
+            }
+
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, weldSchema);
+            _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
+                run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
+            wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
+            wi.Seq = area!.SortOrder; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
+            if (run.TotalTasks is int t0) run.TotalTasks = t0 + stop.TaskCount - oldTasks;
+            if (!run.Missions.Any(m => m.MapId == lv.MapId))
+                run.Missions.Add(new MissionEntity
+                {
+                    MissionId = Guid.NewGuid(), RunId = run.RunId, Seq = run.Missions.Count,
+                    MapId = lv.MapId, RobotId = run.RobotId,
+                    OrderId = Guid.NewGuid().ToString(), State = nameof(MissionState.Created),
+                });
+            refreshed++;
+        }
+        return (refreshed, skipped);
+    }
+
     /// <summary>층별 유효 T_W_D(맵 버전 일치). 맵 없음·무효 층은 빠진다(경고 로그).</summary>
     private async Task<Dictionary<int, (string MapId, DrawingTransform T)>> LoadTransformsAsync(
         string tankId, IEnumerable<int> levels, Guid runId, CancellationToken ct)
@@ -414,19 +524,35 @@ public sealed class InspectionDispatcher
     }
 
     /// <summary>work_item 상태 변화 단건 푸시 — 운영 UI 작업 현황 실시간 갱신용.</summary>
+    private static (AlarmEntity Entity, string Severity, string Title) NewAlarm(
+        string code, string severity, string title, MissionEntity mission, object detail) =>
+        (new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = mission.RobotId, MissionId = mission.MissionId,
+            Detail = JsonSerializer.Serialize(new { severity, title, detail }), RaisedAt = DateTimeOffset.UtcNow,
+        }, severity, title);
+
+    /// <summary>알람 실시간 푸시("AlarmRaised") — 운영 화면 알람·이벤트 패널 표시용. 저장 후 호출.</summary>
+    private Task PushAlarmAsync(AlarmEntity a, string severity, string title, CancellationToken ct) =>
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("AlarmRaised", new
+        {
+            a.AlarmId, a.AlarmCode, a.RobotId, a.MissionId, a.Detail,
+            Severity = severity, Title = title, a.RaisedAt, ClearedAt = (DateTimeOffset?)null, ClearedBy = (string?)null,
+        }, ct);
+
     /// <summary>Reason = 실패(재큐잉/스킵) 시 AMR 보고 사유 요약 — 운영 UI 이벤트 로그 표시용.</summary>
     private Task PushWorkItemAsync(Guid runId, WorkItemEntity wi, CancellationToken ct, string? reason = null) =>
-        _hub.Clients.All.SendAsync("WorkItemProgress", new
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("WorkItemProgress", new
         {
             RunId = runId, wi.WorkItemId, wi.AreaId, wi.MapId, wi.Status, wi.Attempts, Reason = reason,
         }, ct);
 
     /// <summary>run 상태 변화 푸시(RUNNING/WAITING_FLOOR_TRANSFER/COMPLETED/ABORTED) — 운영 UI 현재 상태 표시용.</summary>
     public Task PushRunStateAsync(Guid runId, string state, CancellationToken ct) =>
-        _hub.Clients.All.SendAsync("RunState", new { RunId = runId, State = state }, ct);
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("RunState", new { RunId = runId, State = state }, ct);
 
     // ── 정차 완료/실패 처리 후 다음 배차 (RobotStateService 완료 훅에서 호출) ──────────
-    /// <summary>현재 정차(mission.OrderId)의 액션 결과로 work_item을 DONE/FAILED(재큐잉/스킵) 처리하고 다음을 배차.</summary>
+    /// <summary>현재 정차(mission.OrderId)의 액션 결과로 work_item을 DONE / FAILED(자동 재시도 없음 + INSPECTION_FAILED 알람) 처리하고 다음을 배차.</summary>
     public async Task HandleStopOutcomeAsync(MissionEntity mission, CancellationToken ct)
     {
         var wi = await _db.WorkItems
@@ -435,6 +561,7 @@ public sealed class InspectionDispatcher
         {
             var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct);
             string? failureSummary = null;
+            (AlarmEntity Entity, string Severity, string Title)? alarm = null;
             bool anyFailed = acts.Any(a => a.Status == "FAILED");
             if (!anyFailed)
             {
@@ -442,39 +569,44 @@ public sealed class InspectionDispatcher
             }
             else
             {
-                var failureReasons = acts.Where(a => a.Status == "FAILED")
-                    .Select(a => ResultDescription(a.Result))
+                // 자동 재시도 없음 — 재시도 여부는 작업자가 결정한다(2026-10-02 운영 결정).
+                // 실패한 정차는 FAILED로 종결하고, 실패 항목(용접선별 사유)을 알람으로 기록·푸시한다.
+                var failed = acts.Where(a => a.Status == "FAILED").ToList();
+                var failureReasons = failed.Select(a => ResultDescription(a.Result))
                     .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToArray();
                 failureSummary = failureReasons.Length == 0 ? "AMR 실패 사유 미제공" : string.Join(" | ", failureReasons);
                 wi.Attempts++;
-                if (wi.Attempts < _maxRetries)
+                wi.Status = "FAILED";
+
+                var areaName = await _db.InspectionAreas.AsNoTracking().Where(x => x.AreaId == wi.AreaId)
+                    .Select(x => x.Name).FirstOrDefaultAsync(ct) ?? "영역";
+                var taskIds = failed.Where(a => a.TaskId is not null).Select(a => a.TaskId!.Value).Distinct().ToList();
+                var taskNames = await _db.AreaTasks.AsNoTracking().Where(t => taskIds.Contains(t.TaskId))
+                    .ToDictionaryAsync(t => t.TaskId, t => t.Name ?? $"라인 {t.Seq}", ct);
+                var items = failed.Select(a => new
                 {
-                    wi.Status = "PENDING";   // 재큐잉 — 다음 라운드 재배차
-                    _log.LogWarning("Run {Run}: wi={Wi} 실패 — 재시도 {N}/{Max}. 원인={Reason}",
-                        mission.RunId, wi.WorkItemId, wi.Attempts, _maxRetries, failureSummary);
-                }
-                else
+                    a.TaskId,
+                    taskName = a.TaskId is { } tid && taskNames.TryGetValue(tid, out var n) ? n : null,
+                    a.ActionId,
+                    reason = ResultDescription(a.Result) ?? "AMR 실패 사유 미제공",
+                }).ToList();
+                _log.LogWarning("Run {Run}: wi={Wi}({Area}) 검사 실패 {N}건 — 자동 재시도 없이 FAILED·알람. 원인={Reason}",
+                    mission.RunId, wi.WorkItemId, areaName, items.Count, failureSummary);
+
+                var first = failureReasons.FirstOrDefault() ?? "사유 미제공";
+                if (first.Length > 80) first = first[..80] + "…";
+                alarm = NewAlarm("INSPECTION_FAILED", "WARNING", $"검사 실패: {areaName} — {first}", mission, new
                 {
-                    wi.Status = "SKIPPED";
-                    _log.LogWarning("Run {Run}: wi={Wi} 재시도 초과 — 스킵. 원인={Reason}",
-                        mission.RunId, wi.WorkItemId, failureSummary);
-                    _db.Alarms.Add(new AlarmEntity
-                    {
-                        AlarmId = Guid.NewGuid(), AlarmCode = "INSPECTION_SKIPPED", RobotId = mission.RobotId,
-                        MissionId = mission.MissionId,
-                        Detail = JsonSerializer.Serialize(new
-                        {
-                            severity = "WARNING", title = "검사 작업 스킵(재시도 초과)",
-                            workItemId = wi.WorkItemId, wi.Attempts,
-                            reason = failureSummary, failureReasons
-                        }),
-                        RaisedAt = DateTimeOffset.UtcNow,
-                    });
-                }
+                    workItemId = wi.WorkItemId, areaId = wi.AreaId, areaName, wi.MapId, attempt = wi.Attempts,
+                    failedCount = items.Count, items,
+                    action = "자동 재시도하지 않음 — 원인 확인·조치 후 작업자가 재실행 여부를 결정하세요.",
+                });
+                _db.Alarms.Add(alarm.Value.Entity);
             }
             wi.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
-            await PushWorkItemAsync(mission.RunId, wi, ct, failureSummary);   // DONE / PENDING(재큐잉) / SKIPPED
+            await PushWorkItemAsync(mission.RunId, wi, ct, failureSummary);   // DONE / FAILED
+            if (alarm is { } al) await PushAlarmAsync(al.Entity, al.Severity, al.Title, ct);
         }
         await DispatchNextAsync(mission.RunId, ct);
     }
@@ -511,13 +643,15 @@ public sealed class InspectionDispatcher
             a.Status = "FAILED";
             a.Result = JsonSerializer.Serialize(new { ActionStatus = "FAILED", ResultDescription = "orderValidationError(Order 거부)" });
         }
-        _db.Alarms.Add(new AlarmEntity
+        var rejected = new AlarmEntity
         {
             AlarmId = Guid.NewGuid(), AlarmCode = "ORDER_REJECTED", RobotId = robotId,
             Detail = JsonSerializer.Serialize(new { severity = "WARNING", title = "Order 거부(AMR 검증 실패)", orderId = rejectedOrderId, description = errorDescription }),
             RaisedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        _db.Alarms.Add(rejected);
         await _db.SaveChangesAsync(ct);
+        await PushAlarmAsync(rejected, "WARNING", "Order 거부(AMR 검증 실패)", ct);
         _log.LogWarning("Run {Run}: Order {Order} 거부(orderValidationError) — 실패 정책 적용. desc={Desc}",
             run.RunId, rejectedOrderId, errorDescription);
 
@@ -549,3 +683,6 @@ public sealed record PlannedStations(Guid ScenarioId, string TankId, double Allo
 /// WallU/WallNormal=면 u축·내부향 법선의 수평 단위벡터(수평성분 없으면 null) — 오차를 "벽 따라/벽까지"로 분해하는 데 쓴다.</summary>
 public sealed record PlannedStation(Guid AreaId, string AreaName, string WallCode, int Level, string MapId,
     double X, double Y, double? Yaw, double StandoffM, bool Manual, double[]? WallU, double[]? WallNormal);
+
+/// <summary>AMR 미연결로 명령을 보내지 않음 — API는 409.</summary>
+public sealed class RobotNotConnectedException(string message) : Exception(message);

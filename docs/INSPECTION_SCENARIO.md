@@ -49,21 +49,23 @@ stateDiagram-v2
     [*] --> PENDING : run 시작 — 시나리오 연결 영역(미연결=선창 전체)을 큐로 전개 (T_W_D 유효 층만)
     PENDING --> DISPATCHED : 로봇 유휴 + 현재 층 최근접 선택 → DB 기록 → Order 발행
     DISPATCHED --> DONE : state 대조 — 노드 도달 + 전 액션 FINISHED
-    DISPATCHED --> PENDING : 액션 FAILED 있음 + attempts < MaxRetries(2) — attempts++ 재큐잉
-    DISPATCHED --> SKIPPED : 액션 FAILED 있음 + attempts ≥ MaxRetries — INSPECTION_SKIPPED 알람
+    DISPATCHED --> FAILED : 액션 FAILED 있음 — 자동 재시도 없음, INSPECTION_FAILED 알람(용접선별 사유)
     DONE --> [*]
-    SKIPPED --> [*]
+    FAILED --> [*]
 ```
 
 | 전이 | 트리거(코드 기준) |
 |---|---|
 | →PENDING (전개) | `InspectionDispatcher.BuildQueueAsync` — 영역→정차 맵좌표(standoff)+액션 payload 사전 구성, 발행 전 param_schema 검증(위반 시 run 시작 거부) |
 | PENDING→DISPATCHED | `DispatchNextAsync` greedy 최근접 1건 → `PublishStopAsync`(저장 후 발행, work_item.order_id·mission.order_id 갱신) |
-| DISPATCHED→DONE/PENDING/SKIPPED | `RobotStateService` 정차 완료 판정(잔여 액션 0 + lastNodeSequenceId 도달) → `HandleStopOutcomeAsync` 실패 집계 |
-| 재큐잉 재발행 | **신규 orderId의 새 Order** (order update 아님 — VDA5050_INTERFACE_SPEC §4.5) |
+| DISPATCHED→DONE/FAILED | `RobotStateService` 정차 완료 판정(잔여 액션 0 + lastNodeSequenceId 도달, 또는 미도달 전-FAILED) → `HandleStopOutcomeAsync` |
 
-재시도 상한: `Acs:Dispatch:MaxRetries`(기본 2). 층의 PENDING 소진 시 → 그 층 미션 Completed →
-다른 층 남으면 run WAITING_FLOOR_TRANSFER, 전부 소진이면 run COMPLETED (SKIPPED 포함 완료).
+**[2026-10-02] 자동 재시도 폐지** — 재시도 여부는 작업자가 결정한다. 정차에 FAILED 액션이 하나라도 있으면 그 정차는 즉시
+`FAILED`로 종결(attempts++)되고 `INSPECTION_FAILED` 알람이 기록·푸시된다(`detail.items` = 실패 용접선별 taskId·이름·사유,
+제목 "검사 실패: {영역} — {사유}"). 같은 정차에서 성공한 용접선은 성공으로 남는다(TaskOutcome). 종전 `Acs:Dispatch:MaxRetries`
+재큐잉·`INSPECTION_SKIPPED` 경로는 제거(SKIPPED는 재개 시 재계산 불가 정차에만 쓰임). Order 거부(orderValidationError)도 같은 경로.
+층의 PENDING 소진 시 → 그 층 미션 Completed → 다른 층 남으면 run WAITING_FLOOR_TRANSFER, 전부 소진이면 run COMPLETED(FAILED 포함 완료).
+재실행은 원인 조치 후 작업자가 새 run으로 시작한다.
 
 **중단(abort)·재개(resume) 규정** [2026-08-28]:
 - `POST /api/runs/{id}/abort` — run ABORTED·후속 배차 중지. **진행 중 Order는 회수하지 않음**(cancelOrder 미사용,
@@ -71,6 +73,12 @@ stateDiagram-v2
   중단 상태가 유지된다). 즉시 정지는 비상정지 사용.
 - `POST /api/runs/{id}/resume` — **DONE/SKIPPED 보존(재검사 없음)**, 중단 시점에 종결 못 한 DISPATCHED는
   PENDING으로 리셋(attempts 유지)해 재검사, 잔여 PENDING만 greedy 재배차. COMPLETED run은 재개 불가(400).
+- **[2026-10-02] 재개 시 남은 정차는 현재 계획으로 재계산** — run 시작 때 저장한 정차점·용접선 좌표(work_item 스냅샷)를 쓰지 않고
+  현재 영역·작업·면과 현재 층 T_W_D로 다시 만든다(큐 전개와 같은 `BuildStop`). 영역 삭제·작업 0건·면 미등록·T_W_D 없음이면
+  그 정차는 SKIPPED, 층이 바뀌면 미션 추가, 진행률 분모는 작업 수 증감만큼 보정. 응답 `{refreshedStops, skippedStops}`.
+  진행 중(RUNNING) run의 스냅샷 원칙은 그대로다 — 재계산은 운영자가 이어하기를 누른 시점에만.
+- **[2026-10-02] 가장 최근 run만 재개** — 그 로봇에 더 나중에 시작한 run이 있으면 재개 거부(400), `GET /api/runs/resumable`도
+  로봇의 최근 run 1개만 후보로 본다. (배경: 정차 이격 수정 후 이어하기 → 전날 중단 run이 전날 좌표로 재개되어 로봇이 엉뚱한 곳으로 이동)
 - 동일 로봇에 활성(RUNNING/WAITING_FLOOR_TRANSFER) run이 있으면 새 시작·타 run 재개 거부(409).
 - **새 run 시작 = 여전히 선창 전체 전개**(정기검사 사이클) — 완료 이력은 run 스코프이며 run 간 이월되지 않는다.
   이력의 영구 기록은 `hist.inspection_result`(리포트/추적용).
@@ -95,23 +103,24 @@ stateDiagram-v2
 | WAITING | Order에 실려 발행됨, 미시작 |
 | RUNNING | HD_AMR 실행 중 |
 | FINISHED | 성공 — hist.inspection_result SUCCESS 기록 |
-| FAILED | 실패 — 결과 기록 + work_item 실패 집계(§3.1 재큐잉/스킵) |
+| FAILED | 실패 — 결과 기록 + work_item FAILED·INSPECTION_FAILED 알람(§3.1, 자동 재시도 없음) |
 
 ## 4. 실패 처리 정책 (시나리오 데이터로 외부화 [ADR-010])
 
 ACS는 HD_AMR이 보고하는 실패(errors, actionStatus=FAILED)의 유형 코드를 기준으로 정책을 적용한다.
 실패의 원인 세부(자세 실패인지, 장비 오류인지)는 HD_AMR의 error 분류를 따른다.
 
-| HD_AMR 보고 실패 유형 | 기본 정책 (초안) |
+| HD_AMR 보고 실패 유형 | 정책 (2026-10-02 확정: 자동 재시도 없음) |
 |---|---|
-| 이동 실패 (경로 불가/장애물) | 재시도 2회 → 지점 스킵 + 알람 |
-| 이동 타임아웃 | 재시도 1회 → 스킵 + 알람 |
-| 검사 작업 실패 (액션 FAILED) | 해당 액션 재시도 1회 → 액션 스킵 기록 |
-| 촬영 실패 응답 [ADR-004] | 재시도 2회 → 실패 기록 + 알람 |
+| 이동 실패 (경로 불가/장애물, drivingFailed) | 정차 FAILED + INSPECTION_FAILED 알람 — 재실행은 작업자 결정 |
+| 검사 작업 실패 (액션 FAILED — 코봇 IK 도달 불가 등) | 정차 FAILED + INSPECTION_FAILED 알람(용접선별 사유) |
+| 촬영 실패 응답 [ADR-004] | 정차 FAILED + INSPECTION_FAILED 알람 |
+| Order 거부 (orderValidationError) | 정차 FAILED + ORDER_REJECTED·INSPECTION_FAILED 알람 |
 | 배터리 저전압 | 미션 일시정지 → 복귀 정책 (TBD) |
 | 로봇 측 비상 이벤트 | 미션 중단, 운영자 개입 필수 |
 
-정책 파라미터(재시도 횟수, 스킵 조건)는 시나리오 데이터에 저장되어 코드 수정 없이 조정 가능하다.
+자동 재시도는 두지 않는다 — 같은 정차·같은 자세의 재실행은 대개 같은 결과이고(예: IK 도달 불가), 정차 위치·이격·영역 수정 같은
+판단은 작업자 몫이기 때문이다.
 
 ## 5. 시나리오 예시 (개념)
 

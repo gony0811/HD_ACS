@@ -114,8 +114,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
                 break;
             case "COMPLETED":
                 // 건수는 직후 RunProgress 푸시로 확정되므로 카드에서 표시 — 여기서는 스킵 발생 여부만
-                bool skipped = Mission.WorkItems.Any(w => w.Status == "SKIPPED");
-                Add(skipped ? "warn" : "done", skipped ? "작업 완료 — 건너뛴 작업 있음" : "작업 완료");
+                bool notOk = Mission.WorkItems.Any(w => w.Status is "SKIPPED" or "FAILED");
+                Add(notOk ? "warn" : "done", notOk ? "작업 완료 — 실패한 작업 있음 (알람 확인)" : "작업 완료");
                 break;
             case "ABORTED":
                 Add("warn", "작업 중단됨 — '이어하기'로 남은 작업 재개 가능");
@@ -143,8 +143,12 @@ public sealed partial class AlarmsViewModel : ObservableObject
                 Add("warn", $"{area} 실패 ({p.Attempts}회) — 재시도 예정{reason}");
                 if (!string.IsNullOrWhiteSpace(p.Reason)) LastFailure = $"{area}: {p.Reason}";
                 break;
+            case "FAILED":
+                Add("fail", $"{area} 실패 — 자동 재시도 안 함{reason}");
+                if (!string.IsNullOrWhiteSpace(p.Reason)) LastFailure = $"{area}: {p.Reason}";
+                break;
             case "SKIPPED":
-                Add("fail", $"{area} 건너뜀 (재시도 초과){reason}");
+                Add("fail", $"{area} 건너뜀 ({p.Attempts}회 실패){reason}");
                 if (!string.IsNullOrWhiteSpace(p.Reason)) LastFailure = $"{area}: {p.Reason}";
                 break;
         }
@@ -180,7 +184,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
             "INFO" => "info",
             _ => "warn",
         };
-        Add(kind, $"알람 {a.AlarmCode}: {a.Title ?? a.Detail ?? ""}".TrimEnd(' ', ':'));
+        Add(kind, $"알람 — {a.Title ?? a.AlarmCode}");
     }
 
     private void OnMissionPropertyChanged(object? sender, PropertyChangedEventArgs e)

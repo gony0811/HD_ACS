@@ -558,6 +558,7 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 
 // run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
@@ -571,10 +572,15 @@ app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, MissionService mi
 // run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차 [INSPECTION_SCENARIO §3.1]
 app.MapPost("/api/runs/{runId:guid}/resume", async (Guid runId, MissionService missions) =>
 {
-    try { await missions.ResumeRunAsync(runId); return Results.Ok(new { runId, state = "RUNNING" }); }
+    try
+    {
+        var r = await missions.ResumeRunAsync(runId);
+        return Results.Ok(new { runId, state = "RUNNING", refreshedStops = r.Refreshed, skippedStops = r.Skipped });
+    }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
 });

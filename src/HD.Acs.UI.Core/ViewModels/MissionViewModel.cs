@@ -448,8 +448,10 @@ public sealed partial class MissionViewModel : ObservableObject
         if (WorkItems.Count == 0) { WorkSummary = "실행 중 작업 없음"; return; }
         int done = WorkItems.Count(w => w.Status == "DONE");
         int skipped = WorkItems.Count(w => w.Status == "SKIPPED");
+        int failed = WorkItems.Count(w => w.Status == "FAILED");
+        var fail = failed > 0 ? $" · 실패 {failed}" : "";
         var skip = skipped > 0 ? $" · 스킵 {skipped}" : "";
-        WorkSummary = $"완료 {done} / 전체 {WorkItems.Count}{skip}";
+        WorkSummary = $"완료 {done} / 전체 {WorkItems.Count}{fail}{skip}";
     }
 
     /// <summary>TASK 진행률 스냅샷을 요약 문자열·진행바 값으로 반영.</summary>
@@ -483,7 +485,7 @@ public sealed partial class MissionViewModel : ObservableObject
 
             var floorItems = WorkItems.Where(w => w.MapId == m.MapId).ToList();
             double frac = floorItems.Count > 0
-                ? floorItems.Count(w => w.Status is "DONE" or "SKIPPED") / (double)floorItems.Count
+                ? floorItems.Count(w => w.Status is "DONE" or "SKIPPED" or "FAILED") / (double)floorItems.Count
                 : kind switch { "done" => 1.0, "fail" => 1.0, "run" => 0.5, _ => 0.0 };
             FloorProgress.Add(new FloorProgressItem(level, m.MapId, m.State, kind, frac, m.Seq));
         }
