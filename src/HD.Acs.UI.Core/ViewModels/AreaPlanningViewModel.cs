@@ -459,13 +459,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             }
             else InactiveAreaBoxes.Add(poly);
         }
-        // 선택 영역의 작업(로컬 v → +off)
+        // 선택 영역의 작업(로컬 v → +off) — 교차(CROSS3/4)는 저장된 가지로 T/十자 [SeamGlyph]
         foreach (var t in AreaTasks)
-        {
-            var (x1, y1) = Proj(t.StartU, t.StartV + off);
-            var (x2, y2) = Proj(t.EndU, t.EndV + off);
-            TaskSegments.Add(new TaskSeg(x1, y1, x2, y2, x2 - 4, y2 - 4, (x1 + x2) / 2, (y1 + y2) / 2, t.Seq.ToString()));
-        }
+            TaskSegments.Add(SeamGlyph.ToSeg(t, Proj, off, null, BadgeStyle.Full));
         // 입력 미리보기(코너, 로컬 v → +off) — 활성 밴드 위치에 표시
         var draft = InputCorners();
         var (dmiu, dmiv, dmau, dmav) = AreaBboxLocal(draft);

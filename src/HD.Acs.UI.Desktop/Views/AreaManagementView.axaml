@@ -169,7 +169,7 @@
                 <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="순번" Binding="{Binding Seq}" Width="Auto" MinWidth="52" />
-                        <DataGridTextColumn Header="유형" Binding="{Binding SeamType}" Width="Auto" MinWidth="72" />
+                        <DataGridTextColumn Header="유형" Binding="{Binding TypeLabel}" Width="Auto" MinWidth="72" />
                         <DataGridTextColumn Header="시작 u(m)" Binding="{Binding StartU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="시작 v(m)" Binding="{Binding StartV, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="끝 u(m)" Binding="{Binding EndU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />

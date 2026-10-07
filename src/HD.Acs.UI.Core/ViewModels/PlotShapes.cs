@@ -1,4 +1,5 @@
 using HD.Acs.UI.Primitives;
+using HD.Acs.UI.Rendering;
 
 namespace HD.Acs.UI.ViewModels;
 
@@ -12,9 +13,11 @@ public sealed record AreaBox(double Left, double Top, double Width, double Heigh
 /// <summary>임의 4점 영역 폴리곤(캔버스 px) — Points=투영된 꼭짓점, 라벨 앵커. Status=work_item 상태(null=계획 표시).</summary>
 public sealed record AreaPoly(IReadOnlyList<Pt2> Points, double LabelX, double LabelY, string Label, string? Status = null);
 
-/// <summary>작업(용접선) 선분(캔버스 px) — 끝점 마커·중점 배지 앵커 포함. Status=액션 상태(null=계획 표시, 주황).</summary>
+/// <summary>작업(용접선) 선분(캔버스 px) — 끝점 마커·중점 배지 앵커 포함. Status=액션 상태(null=계획 표시, 주황).
+/// Kind/Arms=교차(CROSS3/4) 표시용 — Arms=가지 끝점 px(CROSS3은 [0]=줄기), 중심=(X1,Y1), 가지 없으면 null.
+/// 도형 산출은 <see cref="SeamGlyph.Build"/>.</summary>
 public sealed record TaskSeg(double X1, double Y1, double X2, double Y2, double EndX, double EndY, double MidX, double MidY, string Badge,
-    string? Status = null)
+    string? Status = null, SeamKind Kind = SeamKind.Line, IReadOnlyList<Pt2>? Arms = null)
 {
     // 점 형태 파생값 — Line.StartPoint/EndPoint(Avalonia)처럼 Point를 요구하는 바인딩용(좌표 직접 바인딩도 가능).
     public Pt2 Start => new(X1, Y1);

@@ -279,7 +279,12 @@ public sealed record AreaTaskDto(
     Guid TaskId, int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
     string SectionDxfId, string ProfileId,
-    double[][]? Points = null);   // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+    double[][]? Points = null)    // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+{
+    /// <summary>작업 목록 "유형" 열 표시 — ▲CROSS3·■CROSS4·가지 없음 표시(<see cref="HD.Acs.UI.Rendering.SeamGlyph.TypeLabel"/>).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string TypeLabel => HD.Acs.UI.Rendering.SeamGlyph.TypeLabel(SeamType, Points);
+}
 
 /// <summary>CROSS 교차 기하 미리보기 응답 [VDA §8.5.1] — 서버가 회전 유도·AMR 점 정렬.
 /// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>

@@ -290,13 +290,8 @@ public sealed partial class TankViewModel : ObservableObject
                         areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
                     }
                     if (!wantTasks) continue;
-                    foreach (var t in ov.Tasks)
-                    {
-                        var (x1, y1) = Proj(t.StartU, t.StartV);
-                        var (x2, y2) = Proj(t.EndU, t.EndV);
-                        tasks.Add(new TaskSeg(x1, y1, x2, y2, x2 - 4, y2 - 4, (x1 + x2) / 2, (y1 + y2) / 2, t.Seq.ToString(),
-                            TaskStatusOf(t.TaskId)));
-                    }
+                    foreach (var t in ov.Tasks)   // 교차(CROSS3/4)는 저장된 가지로 T/十자 [SeamGlyph]
+                        tasks.Add(SeamGlyph.ToSeg(t, Proj, 0, TaskStatusOf(t.TaskId), BadgeStyle.Compact));
                 }
             }
 
