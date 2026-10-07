@@ -217,6 +217,10 @@ public class AreaTaskEntity
     public double StartV { get; set; }
     public double EndU { get; set; }
     public double EndV { get; set; }
+    // CROSS3/CROSS4 교차 가지 끝점 [VDA §8.5.1, N13] — jsonb [[u,v],...] 면-로컬(ACS) 미터, 중심=Start.
+    // CROSS3=[줄기,통과1,통과2], CROSS4=가지 4개(무순). 발행 시 AMR 프레임 mm·규약 순으로 변환(CrossGeometry).
+    // LINE/CORNER=null. 선택(없어도 됨 — AMR이 교시 레시피로 폴백).
+    public string? Points { get; set; }
     public string SectionDxfId { get; set; } = "";
     public string ProfileId { get; set; } = "";
     public string? CreatedBy { get; set; }

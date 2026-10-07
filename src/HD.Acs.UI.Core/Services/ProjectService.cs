@@ -41,7 +41,7 @@ public sealed class ProjectService : IProjectService
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId, t.TaskId)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId, t.Points)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
                 a.StationStandoffM, a.AreaId));
@@ -125,7 +125,7 @@ public sealed class ProjectService : IProjectService
             foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId,
-                    seq: t.Seq, name: t.Name, taskId: t.SourceId, ct: ct);
+                    seq: t.Seq, name: t.Name, taskId: t.SourceId, points: t.Points, ct: ct);
         }
 
         // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.

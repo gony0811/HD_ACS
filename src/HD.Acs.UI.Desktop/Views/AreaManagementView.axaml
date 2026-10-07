@@ -108,8 +108,21 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="용접라인 타입" Classes="lbl" />
-                            <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}" />
+                            <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}"
+                                      IsEnabled="{Binding SeamTypeEditable}" />
                         </StackPanel>
+                        <!-- CROSS3/4 교차 그리기: 전개도에서 중심·가지 클릭 → 회전 자동 유도 [VDA §8.5.1] -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="교차 그리기" Classes="lbl" />
+                            <Button Classes="form" Content="CROSS3" MinWidth="70" Command="{Binding StartCrossDrawCommand}" CommandParameter="CROSS3"
+                                    ToolTip.Tip="T자 3갈래. 전개도에서 중심→줄기→통과2 클릭. 줄기 방향으로 회전(R0/R90/R180/R270) 자동 결정." />
+                            <Button Classes="form" Content="CROSS4" MinWidth="70" Margin="6,0,0,0" Command="{Binding StartCrossDrawCommand}" CommandParameter="CROSS4"
+                                    ToolTip.Tip="十자 4갈래. 전개도에서 중심→가지4 클릭." />
+                        </StackPanel>
+                        <TextBlock Text="{Binding CrossStepText}" Foreground="{DynamicResource AppAccentBrush}" FontSize="11" Margin="0,0,0,2"
+                                   IsVisible="{Binding CrossStepText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <TextBlock Text="{Binding SeamRotationText, StringFormat='회전: {0}'}" Foreground="{DynamicResource AppGoodBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"
+                                   IsVisible="{Binding SeamRotationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <StackPanel Orientation="Horizontal">
                             <Button Classes="form" Content="작업 등록" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
                             <Button Classes="form" Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"

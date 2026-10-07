@@ -318,26 +318,28 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
-        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default)
+        int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
             SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId,
             Seq = seq, Name = name,
-            TaskId = taskId   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
+            TaskId = taskId,   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
+            Points = points    // CROSS3/4 교차 가지 끝점 [VDA §8.5.1]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
     }
 
     public async Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
-        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default)
+        string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/area-tasks/{taskId}", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
-            SeamType = seamType, Seq = seq, Name = name, UserId = userId
+            SeamType = seamType, Seq = seq, Name = name, UserId = userId,
+            Points = points    // null=기존 유지, []=지움 [VDA §8.5.1]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
     }
@@ -349,6 +351,17 @@ public sealed class AcsApiClient : IAcsApiClient
     {
         var resp = await _http.DeleteAsync($"/api/area-tasks/{taskId}", ct);
         resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
+        double[][] arms, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/cross-preview", new
+        {
+            SeamType = seamType, CenterU = centerU, CenterV = centerV, Arms = arms
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(가지 없음)·404(area/면 없음) 메시지 노출
+        return await resp.Content.ReadFromJsonAsync<CrossPreviewResult>(ct);
     }
 
     public async Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default)

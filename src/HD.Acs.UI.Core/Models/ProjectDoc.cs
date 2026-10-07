@@ -48,4 +48,5 @@ public sealed record TaskDoc(
     int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
     string SectionDxfId, string ProfileId,
-    Guid? SourceId = null);
+    Guid? SourceId = null,
+    double[][]? Points = null);          // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m [VDA §8.5.1]. 구파일=null

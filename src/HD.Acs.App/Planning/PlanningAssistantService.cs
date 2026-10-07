@@ -233,7 +233,7 @@ public sealed class PlanningAssistantService
         - 면(wallCode): B=바닥, SL=우현 하부경사, PL=좌현 하부경사, SM=우현 수직벽, PM=좌현 수직벽, SU=우현 상부경사, PU=좌현 상부경사, T=천장, F=선수 격벽, A=선미 격벽
         - 층(level): 1부터. L1=바닥층. 영역은 반드시 한 층에 속한다.
         - 영역(area): 면 위 사각형(최대 1.44m×1.44m), 이름은 면 안에서 유일. 작업(task): 영역 안의 용접선 1개(시작·끝점), 영역 내 순번 seq.
-        - seamType: LINE(직선)·CROSS3(3갈래 교차)·CROSS4(十자 교차)·CORNER2(2면 코너)·CORNER3(3면 코너)
+        - seamType: LINE(직선)·CROSS3_R0/CROSS3_R90/CROSS3_R180/CROSS3_R270(T자 3갈래 회전 4종)·CROSS4(十자 교차)·CORNER2(2면 코너)·CORNER3(3면 코너). "CROSS3"만 쓰면 CROSS3_R0 으로, 구표기 "CROSS"→CROSS4·"CORNER"→CORNER3 으로 해석된다
         - 좌표(m): u = 면 가로(긴 벽면은 선미=0 → 선수 방향), v = 그 층 안에서의 높이/폭(층 도달 구간의 아래 끝=0, **층-로컬**). 계획 화면 입력과 같다.
 
         ## 연산(op) — 필요한 필드만 채운다

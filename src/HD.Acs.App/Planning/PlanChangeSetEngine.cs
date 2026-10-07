@@ -571,7 +571,7 @@ public sealed class PlanChangeSetEngine
         var t = new AreaTaskEntity
         {
             TaskId = a.TaskId ?? Guid.NewGuid(), AreaId = area.AreaId, Seq = seq, Name = a.TaskName,
-            SeamType = (a.SeamType ?? "LINE").ToUpperInvariant(),
+            SeamType = AreaTaskRules.Normalize(a.SeamType),   // canonical 저장(legacy 별칭 매핑 — §8.5.1)
             StartU = a.StartU.Value, StartV = a.StartV.Value, EndU = a.EndU.Value, EndV = a.EndV.Value,
             SectionDxfId = string.IsNullOrWhiteSpace(a.SectionDxfId) ? DefaultSectionDxfId : a.SectionDxfId,
             ProfileId = string.IsNullOrWhiteSpace(a.ProfileId) ? DefaultProfileId : a.ProfileId, CreatedBy = "planning-assistant",
@@ -589,8 +589,8 @@ public sealed class PlanChangeSetEngine
         double su = a.StartU ?? t.StartU, sv = a.StartV ?? t.StartV, eu = a.EndU ?? t.EndU, ev = a.EndV ?? t.EndV;
         if (AreaTaskRules.Validate(a.SeamType, area.Corners, su, sv, eu, ev) is { } v) return Fail(a, v, area);
         var changes = new List<string>();
-        if (a.SeamType is not null && !a.SeamType.Equals(t.SeamType, StringComparison.OrdinalIgnoreCase))
-        { changes.Add($"seamType {t.SeamType} → {a.SeamType.ToUpperInvariant()}"); t.SeamType = a.SeamType.ToUpperInvariant(); }
+        if (a.SeamType is not null && AreaTaskRules.Normalize(a.SeamType) is var norm && !norm.Equals(t.SeamType, StringComparison.Ordinal))
+        { changes.Add($"seamType {t.SeamType} → {norm}"); t.SeamType = norm; }
         if (su != t.StartU || sv != t.StartV || eu != t.EndU || ev != t.EndV)
         { changes.Add("좌표"); (t.StartU, t.StartV, t.EndU, t.EndV) = (su, sv, eu, ev); }
         if (a.TaskName is not null && a.TaskName != t.Name) { changes.Add("이름"); t.Name = a.TaskName.Length == 0 ? null : a.TaskName; }

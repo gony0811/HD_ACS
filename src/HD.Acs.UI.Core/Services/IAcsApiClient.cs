@@ -82,12 +82,15 @@ public interface IAcsApiClient
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
-        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default);
+        int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
-    /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지.</summary>
+    /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지. points: null=기존 유지, []=지움(CROSS 가지).</summary>
     Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
-        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default);
+        string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
+    /// <summary>CROSS 교차 기하 미리보기 — 중심·가지(면-전체 v)로 회전 유도·AMR 점 정렬(비영속) [VDA §8.5.1].</summary>
+    Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
+        double[][] arms, CancellationToken ct = default);
 
     // ── 계획 자연어 어시스턴트 [ADR-013] — 기본 구현은 미지원(기존 테스트 대역 무수정) ──
     /// <summary>자연어 명령 → 변경안 미리보기(DB 무변경). 서버 비활성 503·LLM 실패 502는 {error} 메시지 예외.</summary>

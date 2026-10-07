@@ -377,6 +377,8 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     // seamType 5종·영역 내부 판정 — PUT과 공통 규칙(AreaTaskRules). CROSS/CORNER 계열은 계획 데이터로 저장·전달만.
     if (AreaTaskRules.Validate(req.SeamType, a.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    if (AreaTaskRules.ValidatePoints(req.SeamType, a.Corners, req.Points) is { } pv)
+        return Results.BadRequest(new { error = pv });
     if (string.IsNullOrWhiteSpace(req.SectionDxfId) || string.IsNullOrWhiteSpace(req.ProfileId))
         return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
     // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
@@ -391,8 +393,9 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
         TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name,
-        SeamType = (req.SeamType ?? "LINE").ToUpperInvariant(),   // param_schema enum이 대문자 — 소문자 저장 시 run 시작 때 스키마 위반
+        SeamType = AreaTaskRules.Normalize(req.SeamType),   // canonical 저장(대문자+legacy 별칭 매핑) — 소문자/legacy 저장 시 run 시작 때 param_schema 위반
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
+        Points = req.Points is { Length: > 0 } ? JsonSerializer.Serialize(req.Points) : null,   // CROSS 가지 끝점 [VDA §8.5.1]
         SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
     db.AreaTasks.Add(task);
@@ -400,12 +403,33 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     return Results.Ok(new { taskId = task.TaskId, seq });
 });
 
+// CROSS3/4 교차 기하 미리보기 [VDA §8.5.1, N13] — 운영자가 전개도에서 그린 중심·가지(면-로컬 u,v)로
+// 회전(CROSS3_R*)을 유도하고 AMR 면-로컬 mm 점을 정렬해 돌려준다. **비영속**(DB 무변경 — changesets/preview 패턴).
+// 발행 경로(InspectionDispatcher.BuildStop)와 같은 CrossGeometry 를 쓰므로 화면 회전 = 실제 발행 회전.
+app.MapPost("/api/areas/{areaId:guid}/cross-preview", async (Guid areaId, CrossPreviewRequest req, AcsDbContext db) =>
+{
+    var area = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
+    if (area is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    if (req.Arms is null || req.Arms.Length == 0)
+        return Results.BadRequest(new { error = "arms(교차 가지 끝점)가 비어 있습니다." });
+    var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode);
+    if (wall is null) return Results.NotFound(new { error = $"면 '{area.WallCode}' 없음" });
+
+    var normal = JsonSerializer.Deserialize<double[]>(wall.Normal)!;
+    var wallU = JsonSerializer.Deserialize<double[]>(wall.UAxis)!;
+    var wallV = JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
+    // 회전 유도 + AMR 점 정렬 = Core 정본(발행 경로와 공유). 바닥/천장은 frameOk=false.
+    var r = CrossGeometry.Preview(AreaTaskRules.Normalize(req.SeamType), req.CenterU, req.CenterV, req.Arms, wallU, wallV, normal);
+    return Results.Ok(new { frameOk = r.FrameOk, seamType = r.SeamType, points = r.Points, snapResidualDeg = r.SnapResidualDeg });
+});
+
 app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
 {
     var tasks = await db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId).OrderBy(t => t.Seq).ToListAsync();
     return Results.Ok(tasks.Select(t => new
     {
-        t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId
+        t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
+        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
     }));
 });
 
@@ -421,6 +445,11 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 
     if (AreaTaskRules.Validate(req.SeamType, area.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    // points: 새 seamType(또는 기존)에 대해 검증 — req.Points 지정 시 그 값, 아니면 기존값 기준.
+    string effSeam = req.SeamType is not null ? AreaTaskRules.Normalize(req.SeamType) : t.SeamType;
+    double[][]? effPoints = req.Points ?? (t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points));
+    if (AreaTaskRules.ValidatePoints(effSeam, area.Corners, effPoints) is { } pv)
+        return Results.BadRequest(new { error = pv });
     if (req.SectionDxfId is not null && string.IsNullOrWhiteSpace(req.SectionDxfId) ||
         req.ProfileId is not null && string.IsNullOrWhiteSpace(req.ProfileId))
         return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
@@ -433,7 +462,10 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
     t.StartU = req.StartU; t.StartV = req.StartV; t.EndU = req.EndU; t.EndV = req.EndV;
     if (req.Seq is int s) t.Seq = s;
     if (req.Name is not null) t.Name = req.Name.Length == 0 ? null : req.Name;   // "" = 이름 지움
-    if (req.SeamType is not null) t.SeamType = req.SeamType.ToUpperInvariant();
+    if (req.SeamType is not null) t.SeamType = AreaTaskRules.Normalize(req.SeamType);
+    // points: 지정 시 교체([]=지움), 미지정 시 — 새 seamType이 비-CROSS로 바뀌면 자동 비움(stale 방지), 아니면 유지.
+    if (req.Points is not null) t.Points = req.Points.Length > 0 ? JsonSerializer.Serialize(req.Points) : null;
+    else if (!t.SeamType.StartsWith("CROSS", StringComparison.Ordinal)) t.Points = null;
     if (req.SectionDxfId is not null) t.SectionDxfId = req.SectionDxfId;
     if (req.ProfileId is not null) t.ProfileId = req.ProfileId;
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
@@ -884,8 +916,12 @@ public sealed record UpdateAreaRequest(string Name, double[][] Corners,
     int? SortOrder = null, string? UserId = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
-    Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+    Guid? TaskId = null,    // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+    double[][]? Points = null);   // (선택) CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
 // 검사 작업 수정(PUT) — 좌표 4값 필수, 나머지 null=기존값 유지. taskId·areaId는 바뀌지 않는다.
 public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double EndU, double EndV,
     int? Seq = null, string? Name = null, string? SeamType = null, string? SectionDxfId = null, string? ProfileId = null,
-    string? UserId = null);
+    string? UserId = null,
+    double[][]? Points = null);   // (선택) CROSS 가지 끝점 — null=기존 유지, []=지움 [VDA §8.5.1]
+// CROSS 교차 기하 미리보기 요청 [VDA §8.5.1] — 중심·가지(면-전체 v), seamType=CROSS3|CROSS4(계열)
+public sealed record CrossPreviewRequest(string SeamType, double CenterU, double CenterV, double[][] Arms);

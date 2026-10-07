@@ -272,6 +272,20 @@ public sealed class InspectionDispatcher
                 ["taskId"] = t.TaskId.ToString(),
             };
 
+            // CROSS3/4 교차 가지 끝점 → AMR 면-로컬 mm·규약 순서 [VDA §8.5.1, N13]. ACS 저장은 전개도 프레임이라
+            // 반드시 면 법선에서 AMR 프레임을 재구성해 변환한다(좌현·마구리 거울 흡수 — CrossGeometry).
+            if (!string.IsNullOrWhiteSpace(t.Points))
+            {
+                var amrPts = CrossGeometry.BuildAmrPoints(t.SeamType, t.StartU, t.StartV,
+                    Json<double[][]>(t.Points), pose.U, pose.V, Json<double[]>(wall.Normal));
+                if (amrPts is not null)
+                {
+                    var arr = new JsonArray();
+                    foreach (var p in amrPts) arr.Add(new JsonArray((JsonNode)p[0], p[1]));
+                    taskParams["points"] = arr;
+                }
+            }
+
             var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
             var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
             if (violations.Count > 0)

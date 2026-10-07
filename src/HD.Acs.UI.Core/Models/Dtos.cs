@@ -278,7 +278,12 @@ public sealed record AreaDto(
 public sealed record AreaTaskDto(
     Guid TaskId, int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
-    string SectionDxfId, string ProfileId);
+    string SectionDxfId, string ProfileId,
+    double[][]? Points = null);   // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+
+/// <summary>CROSS 교차 기하 미리보기 응답 [VDA §8.5.1] — 서버가 회전 유도·AMR 점 정렬.
+/// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>
+public sealed record CrossPreviewResult(string SeamType, double[][]? Points, double SnapResidualDeg, bool FrameOk);
 
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>

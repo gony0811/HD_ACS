@@ -121,6 +121,7 @@ public class AcsDbContext : DbContext
             e.HasMany(x => x.Tasks).WithOne().HasForeignKey(t => t.AreaId).OnDelete(DeleteBehavior.Cascade); });
 
         mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);
+            e.Property(x => x.Points).HasColumnType("jsonb");
             e.HasIndex(x => new { x.AreaId, x.Seq }).IsUnique(); });
 
         mb.Entity<ScenarioAreaEntity>(e => { e.ToTable("scenario_area", "ref");

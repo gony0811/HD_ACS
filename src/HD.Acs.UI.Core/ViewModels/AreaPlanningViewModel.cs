@@ -58,6 +58,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public ObservableCollection<TaskSeg> TaskSegments { get; } = new();
     public ObservableCollection<TaskSeg> DraftSegments { get; } = new();       // 입력 중 용접선 미리보기
     public ObservableCollection<StationMarker> StationMarkers { get; } = new(); // 정차점 = 영역 중심
+    public ObservableCollection<TaskSeg> CrossPreview { get; } = new();         // CROSS3/4 그리기 미리보기(중심→가지)
 
     [ObservableProperty] private string _tankId = "CT1";
     [ObservableProperty] private string? _statusMessage;
@@ -98,7 +99,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _c3U = 2.0; [ObservableProperty] private double _c3V = 2.0;
     [ObservableProperty] private double _c4U; [ObservableProperty] private double _c4V = 2.0;
     [ObservableProperty] private int _cornerIndex;   // 다음 클릭이 지정할 코너(0~3)
-    [ObservableProperty] private bool _pickMode;     // 도면에서 4점 선택(픽) 모드 — 켜면 캔버스 커서=크로스헤어
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanvasPickActive))]
+    private bool _pickMode;     // 도면에서 4점 선택(픽) 모드 — 켜면 캔버스 커서=크로스헤어
     [ObservableProperty] private bool _stationOverride;
     [ObservableProperty] private double _stationX;
     [ObservableProperty] private double _stationY;
@@ -112,11 +115,32 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _endU = 1.0;
     [ObservableProperty] private double _endV;
 
-    // 용접라인 형태(seamType) — 도면에서 추출한 형태를 운영자가 지정. VDA §8.5.1 카탈로그와 1:1(5종).
-    //   LINE=직선 · CROSS3=3갈래 교차 · CROSS4=4갈래 十자 교차 · CORNER2=2면 코너 · CORNER3=3면 코너.
-    // CROSS/CORNER 계열은 HD_AMR 미확정([협의 N13])이라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
-    public IReadOnlyList<string> SeamTypes { get; } = new[] { "LINE", "CROSS3", "CROSS4", "CORNER2", "CORNER3" };
+    // 용접라인 형태(seamType) — 도면에서 추출한 형태를 운영자가 지정. VDA §8.2/§8.5.1 카탈로그와 1:1(canonical 8종, 2026-10-07 개정).
+    //   LINE=직선 · CROSS3_R0/R90/R180/R270=T자 3갈래 회전 4종(면 자세 무관) · CROSS4=4갈래 十자 · CORNER2=2면 코너 · CORNER3=3면 코너.
+    // CROSS3*/CROSS4/CORNER* 는 HD_AMR 실행 게이트 OFF([협의 N13])라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
+    // ⚠️ CROSS3/4 는 시작·끝점 2점만으로 교차 형상을 정의할 수 없다 — 교차 중심+가지 입력은 후속(제안: 데이터 모델 points 확장).
+    public IReadOnlyList<string> SeamTypes { get; } =
+        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3" };
     [ObservableProperty] private string _selectedSeamType = "LINE";
+
+    // ── CROSS3/4 교차 그리기 [VDA §8.5.1, N13] — 중심+가지 클릭, 회전은 서버가 자동 유도·표시 ──
+    //   CROSS4 = 중심+가지4(5클릭), CROSS3 = 중심+줄기+통과2(4클릭, 줄기=회전 결정).
+    //   회전 유도·AMR 점 정렬은 서버(CrossGeometry) 정본 — UI는 도메인 Core 미참조라 /cross-preview 호출.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanvasPickActive))]
+    [NotifyPropertyChangedFor(nameof(SeamTypeEditable))]
+    private string? _crossDrawShape;            // null=비활성 / "CROSS3" / "CROSS4"
+    [ObservableProperty] private int _crossStep;        // 0=중심, 1..N=가지
+    [ObservableProperty] private string _crossStepText = "";
+    [ObservableProperty] private string _seamRotationText = "";
+    private (double U, double V)? _crossCenter;
+    private readonly List<(double U, double V)> _crossArms = new();   // 층-로컬 v
+    private double[][]? _crossPointsForRegister;    // 가지(층-로컬 v) — 등록 시 +VOff
+    private int _crossSeq;   // 비동기 프리뷰 경합 토큰
+
+    private int CrossArmCount => CrossDrawShape == "CROSS4" ? 4 : 3;
+    public bool CanvasPickActive => PickMode || CrossDrawShape is not null;   // 캔버스 크로스헤어 커서
+    public bool SeamTypeEditable => CrossDrawShape is null;                   // 그리기 중 seamType 콤보 잠금
 
     // 선택 층 로컬 v 오프셋 — (0,0)=그 층 도달 구간 좌하단. VM은 로컬 v로 동작, API 경계에서 ±VOff.
     private double VOff => SelectedWall?.ReachableVBand is { Length: 2 } b ? b[0] : 0;
@@ -262,10 +286,12 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         if (SelectedArea is not { } a) return;
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장
+        var pts = CrossPointsFaceGlobal(off);   // CROSS 그리기 버퍼가 있으면 가지 끝점(면-전체 v), 아니면 null
         try
         {
-            int seq = await _api.CreateAreaTaskAsync(a.AreaId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, "DXF-1", "PROF-1", _operatorId);
+            int seq = await _api.CreateAreaTaskAsync(a.AreaId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, "DXF-1", "PROF-1", _operatorId, points: pts);
             StatusMessage = $"작업 등록: seq {seq} [{SelectedSeamType}] ({StartU},{StartV})–({EndU},{EndV})(로컬)";
+            if (pts is not null) CancelCrossDraw();   // 교차 등록 완료 → 버퍼 비움
             await LoadTasksAndProjectAsync();
             await RefreshAreasAsync();
         }
@@ -283,9 +309,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         if (SelectedTask is not { } task) return;
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장
+        var pts = CrossPointsFaceGlobal(off);   // 재그리기 했으면 가지 교체, 아니면 null(기존 유지)
         try
         {
-            await _api.UpdateAreaTaskAsync(task.TaskId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, _operatorId);
+            await _api.UpdateAreaTaskAsync(task.TaskId, StartU, StartV + off, EndU, EndV + off, SelectedSeamType, _operatorId, points: pts);
             StatusMessage = $"작업 수정: seq {task.Seq} [{SelectedSeamType}] ({StartU},{StartV})–({EndU},{EndV})(로컬) — taskId 유지";
             await LoadTasksAndProjectAsync();
             await RefreshAreasAsync();
@@ -296,10 +323,23 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     partial void OnSelectedTaskChanged(AreaTaskDto? value)
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();
-        if (value is null) return;
+        // 작업 재선택 = 진행 중 교차 그리기 버퍼 비움(섞임 방지)
+        CrossDrawShape = null; CrossStep = 0; CrossStepText = "";
+        _crossCenter = null; _crossArms.Clear(); _crossPointsForRegister = null; CrossPreview.Clear();
+        if (value is null) { SeamRotationText = ""; return; }
         // 선택 작업의 값(층-로컬 v — AreaTasks가 이미 −VOff 적용분)을 폼에 채운다 → 전개도 점선 미리보기도 그 선분으로 이동
         StartU = value.StartU; StartV = value.StartV; EndU = value.EndU; EndV = value.EndV;
         if (SeamTypes.Contains(value.SeamType)) SelectedSeamType = value.SeamType;
+        // CROSS + 저장된 가지(points, 층-로컬 v) 백필 → 재편집 시 가지 복원, 재그리기 없이 수정하면 그대로 유지
+        if (value.Points is { Length: > 0 } pts && value.SeamType.StartsWith("CROSS", StringComparison.Ordinal))
+        {
+            _crossCenter = (value.StartU, value.StartV);
+            foreach (var p in pts) _crossArms.Add((p[0], p[1]));
+            _crossPointsForRegister = _crossArms.Select(p => new[] { p.U, p.V }).ToArray();
+            SeamRotationText = value.SeamType;
+        }
+        else SeamRotationText = "";
+        Project();   // CrossPreview 갱신
     }
 
     [RelayCommand]
@@ -340,7 +380,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             : (IReadOnlyList<AreaTaskDto>)Array.Empty<AreaTaskDto>();
         var keep = SelectedTask?.TaskId;   // 수정·새로고침 후에도 같은 작업을 계속 선택(연속 미세 조정)
         AreaTasks.Clear();
-        foreach (var t in list) AreaTasks.Add(t with { StartV = t.StartV - off, EndV = t.EndV - off });
+        foreach (var t in list) AreaTasks.Add(t with { StartV = t.StartV - off, EndV = t.EndV - off, Points = OffsetCornersV(t.Points, -off) });
         SelectedTask = keep is Guid id ? AreaTasks.FirstOrDefault(t => t.TaskId == id) : null;
         Project();
     }
@@ -385,6 +425,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         AreaBoxes.Clear(); InactiveAreaBoxes.Clear(); DraftAreas.Clear();
         TaskSegments.Clear(); StationMarkers.Clear(); DraftSegments.Clear();
         ProposalAreas.Clear(); ProposalRemovals.Clear(); ProposalSegments.Clear();
+        CrossPreview.Clear();
         if (SelectedWall is not { } w || w.ULen <= 0 || w.VLen <= 0) return;
 
         double off = VOff;                     // 층-로컬 → 면-전체 v
@@ -451,6 +492,16 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var (px2, py2) = Proj(EndU, EndV + off);
             DraftSegments.Add(new TaskSeg(px1, py1, px2, py2, px2 - 4, py2 - 4, (px1 + px2) / 2, (py1 + py2) / 2, "new"));
         }
+        // CROSS 그리기/백필 미리보기 — 중심에서 각 가지로 뻗는 선분(중심=start 점 표시)
+        if (_crossCenter is { } cc && _crossArms.Count > 0)
+        {
+            var (cx, cy) = Proj(cc.U, cc.V + off);
+            foreach (var arm in _crossArms)
+            {
+                var (ax, ay) = Proj(arm.U, arm.V + off);
+                CrossPreview.Add(new TaskSeg(cx, cy, ax, ay, ax - 4, ay - 4, cx, cy, ""));
+            }
+        }
     }
 
     private static double[][] RectCorners(double uMin, double vMin, double uMax, double vMax) => new[]
@@ -461,20 +512,24 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private static double[][]? OffsetCornersV(double[][]? corners, double dv) =>
         corners?.Select(p => new[] { p[0], p[1] + dv }).ToArray();
 
-    partial void OnPickModeChanged(bool value) { if (value) CornerIndex = 0; }   // 켜면 P1부터 지정 시작
+    partial void OnPickModeChanged(bool value) { if (value) { CornerIndex = 0; CancelCrossDraw(); } }   // 켜면 P1부터, 교차 그리기와 배타
 
-    /// <summary>픽 모드 해제 — 캔버스 우클릭 또는 ESC 키.</summary>
+    /// <summary>픽 모드 해제 — 캔버스 우클릭 또는 ESC 키. 교차 그리기 중이면 그것을 해제.</summary>
     [RelayCommand]
-    private void CancelPick() => PickMode = false;
+    private void CancelPick()
+    {
+        if (CrossDrawShape is not null) CancelCrossDraw();
+        else PickMode = false;
+    }
 
-    /// <summary>캔버스 클릭(px) → 면-로컬 (u,v, 층-로컬)로 역투영해 현재 코너에 지정하고 다음 코너로. 픽 모드에서만.</summary>
+    /// <summary>캔버스 클릭(px) → 면-로컬 (u,v, 층-로컬) 역투영. 교차 그리기 중이면 중심/가지, 아니면 코너 픽.</summary>
     public void CanvasClick(double px, double py)
     {
-        if (!PickMode || SelectedWall is not { } w || _projScale <= 0) return;
-        double u = (px - Margin) / _projScale;
-        double v = _projVlen - (py - Margin) / _projScale - VOff;   // 층-로컬 v
-        u = Math.Clamp(u, 0, w.ULen);
-        v = Math.Clamp(v, 0, SliceH > 1e-9 ? SliceH : w.VLen);
+        if (SelectedWall is not { } w || _projScale <= 0) return;
+        double u = Math.Clamp((px - Margin) / _projScale, 0, w.ULen);
+        double v = Math.Clamp(_projVlen - (py - Margin) / _projScale - VOff, 0, SliceH > 1e-9 ? SliceH : w.VLen);
+        if (CrossDrawShape is not null) { CrossClick(u, v); return; }
+        if (!PickMode) return;
         SetCorner(CornerIndex % 4, u, v);
         CornerIndex = (CornerIndex + 1) % 4;
         Project();
@@ -490,6 +545,94 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             default: C4U = u; C4V = v; break;
         }
     }
+
+    // ── CROSS3/4 교차 그리기 [VDA §8.5.1, N13] ──
+
+    /// <summary>교차 그리기 시작 — shape = "CROSS3" | "CROSS4". 영역 선택 필요. 코너 픽과 배타.</summary>
+    [RelayCommand]
+    private void StartCrossDraw(string? shape)
+    {
+        if (SelectedArea is null) { StatusMessage = "먼저 영역을 선택하세요."; return; }
+        if (shape is not ("CROSS3" or "CROSS4")) return;
+        PickMode = false;
+        _crossCenter = null; _crossArms.Clear(); _crossPointsForRegister = null;
+        CrossStep = 0; SeamRotationText = "";
+        CrossDrawShape = shape;   // 마지막에 설정(CanvasPickActive·SeamTypeEditable 갱신)
+        UpdateCrossStepText();
+        Project();
+    }
+
+    /// <summary>교차 그리기 취소 — 버퍼·미리보기 비움(우클릭/ESC/완료 후).</summary>
+    [RelayCommand]
+    private void CancelCrossDraw()
+    {
+        if (CrossDrawShape is null && _crossArms.Count == 0 && _crossCenter is null) return;
+        CrossDrawShape = null; CrossStep = 0; CrossStepText = "";
+        _crossCenter = null; _crossArms.Clear(); _crossPointsForRegister = null;
+        CrossPreview.Clear();
+        Project();
+    }
+
+    private void CrossClick(double u, double v)
+    {
+        if (CrossStep == 0)
+        {
+            _crossCenter = (u, v);
+            StartU = u; StartV = v; EndU = u; EndV = v;   // 중심 = seamStart=seamEnd(퇴화, §4.4)
+            CrossStep = 1;
+        }
+        else
+        {
+            _crossArms.Add((u, v));
+            CrossStep++;
+        }
+        UpdateCrossStepText();
+        Project();
+        if (_crossArms.Count >= CrossArmCount) _ = CompleteCrossDrawAsync();
+    }
+
+    /// <summary>가지 수집 완료 → 서버 /cross-preview 로 회전 유도·AMR 점 정렬. 비동기 경합은 토큰으로 차단.</summary>
+    private async Task CompleteCrossDrawAsync()
+    {
+        if (SelectedArea is not { } a || _crossCenter is not { } center || CrossDrawShape is not { } shape) return;
+        int token = ++_crossSeq;
+        double off = VOff;
+        var armsGlobal = _crossArms.Select(p => new[] { p.U, p.V + off }).ToArray();
+        try
+        {
+            var res = await _api.CrossPreviewAsync(a.AreaId, shape, center.U, center.V + off, armsGlobal);
+            if (token != _crossSeq) return;   // 더 최근 그리기로 대체됨
+            if (res is null) { SeamRotationText = "미리보기 실패"; return; }
+            if (!res.FrameOk)
+            {
+                SeamRotationText = "바닥/천장 CROSS3 미지원";
+                StatusMessage = "이 면(바닥/천장)은 CROSS3 회전을 정의할 수 없습니다 — AMR 역질의 중.";
+                return;
+            }
+            if (SeamTypes.Contains(res.SeamType)) SelectedSeamType = res.SeamType;   // 유도된 CROSS3_R* / CROSS4
+            SeamRotationText = shape == "CROSS4"
+                ? "CROSS4"
+                : res.SeamType + (res.SnapResidualDeg > 10 ? $" (격자 이탈 {res.SnapResidualDeg:0}°)" : " (자동)");
+            _crossPointsForRegister = _crossArms.Select(p => new[] { p.U, p.V }).ToArray();   // 층-로컬
+            StatusMessage = $"교차 그리기 완료 — 회전 {SeamRotationText}. [작업 등록]을 누르세요.";
+            Project();
+        }
+        catch (Exception ex) { if (token == _crossSeq) SeamRotationText = $"미리보기 오류: {ex.Message}"; }
+    }
+
+    private void UpdateCrossStepText()
+    {
+        if (CrossDrawShape is null) { CrossStepText = ""; return; }
+        if (CrossStep == 0) CrossStepText = "① 중심 클릭";
+        else if (CrossDrawShape == "CROSS3")
+            CrossStepText = CrossStep switch { 1 => "② 줄기 클릭(회전 결정)", 2 => "③ 통과선 1 클릭", 3 => "④ 통과선 2 클릭", _ => "완료" };
+        else
+            CrossStepText = CrossStep <= CrossArmCount ? $"가지 {CrossStep}/{CrossArmCount} 클릭" : "완료";
+    }
+
+    /// <summary>등록·수정용 가지 끝점(면-전체 v). 교차 그리기·백필 버퍼가 있을 때만 non-null.</summary>
+    private double[][]? CrossPointsFaceGlobal(double off) =>
+        _crossPointsForRegister?.Select(p => new[] { p[0], p[1] + off }).ToArray();
 
     /// <summary>
     /// 면을 v∈[vLo, vHi]로 클리핑한 (u,v) 정점(면-전체 v, 재원점 없음).

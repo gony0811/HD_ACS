@@ -29,7 +29,7 @@
                 <!-- 줌은 LayoutTransformControl(레이아웃 크기까지 반영 → 스크롤 범위가 함께 커짐) -->
                 <LayoutTransformControl x:Name="ZoomHost" HorizontalAlignment="Left" VerticalAlignment="Top">
                     <Canvas x:Name="PlotCanvas" Width="600" Height="600" Background="Transparent"
-                            Cursor="{Binding PickMode, Converter={StaticResource PickCursor}}"
+                            Cursor="{Binding CanvasPickActive, Converter={StaticResource PickCursor}}"
                             PointerPressed="PlotCanvas_PointerPressed">
                         <Rectangle Width="600" Height="600" Fill="{DynamicResource AppCanvasBrush}" Stroke="{DynamicResource AppBorderBrush}" StrokeThickness="1" />
                         <!-- 면 전체(회색 음영·비활성) — 마구리(F/A)는 팔각, 그 외 직사각형 -->
@@ -94,6 +94,20 @@
                                         <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
                                               Stroke="#D35400" StrokeThickness="2" StrokeDashArray="4,3" />
                                         <Ellipse Canvas.Left="{Binding X1}" Canvas.Top="{Binding Y1}" Width="7" Height="7" Fill="#27AE60" />
+                                    </Canvas>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- CROSS3/4 교차 그리기 미리보기 [VDA §8.5.1]: 중심→가지 선분(청록) + 중심 점(주황) -->
+                        <ItemsControl ItemsSource="{Binding CrossPreview}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Canvas>
+                                        <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
+                                              Stroke="#16A085" StrokeThickness="2.4" />
+                                        <Ellipse Canvas.Left="{Binding X2}" Canvas.Top="{Binding Y2}" Width="6" Height="6" Fill="#16A085" />
+                                        <Ellipse Canvas.Left="{Binding X1}" Canvas.Top="{Binding Y1}" Width="9" Height="9" Fill="#E67E22" />
                                     </Canvas>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

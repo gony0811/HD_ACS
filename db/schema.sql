@@ -138,7 +138,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType":            { "enum": ["LINE", "CROSS3", "CROSS4", "CORNER2", "CORNER3"] },
+        "seamType":            { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3"] },
         "points":              { "type": "array" },
         "sectionDxfId":        { "type": "string" },
         "inspectionProfileId": { "type": "string" },
@@ -283,6 +283,7 @@ CREATE TABLE ref.area_task (
   start_v        double precision NOT NULL,
   end_u          double precision NOT NULL,
   end_v          double precision NOT NULL,
+  points         jsonb,                     -- CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=start (VDA §8.5.1). LINE/CORNER=NULL
   section_dxf_id text NOT NULL DEFAULT '',
   profile_id     text NOT NULL DEFAULT '',
   created_by     text,
