@@ -26,9 +26,19 @@ public static class WallIds
         ["PU"] = WallId.PortUpper, ["SU"] = WallId.StbdUpper,
     };
 
+    // 역매핑은 위 표에서 파생시킨다 — 매핑을 두 곳에 적지 않기 위함(부록 A.1 정본은 ByCode 하나).
+    private static readonly Dictionary<int, string> ByIdCode =
+        ByCode.ToDictionary(kv => (int)kv.Value, kv => kv.Key);
+
     /// <summary>wall_code → wallId 정수. 미등록 코드는 0(예약 — 미지정).</summary>
     public static int FromCode(string? wallCode) =>
         wallCode is not null && ByCode.TryGetValue(wallCode, out var id) ? (int)id : 0;
+
+    /// <summary>
+    /// wallId 정수 → wall_code. 1~10 밖이면 null. 대외 질의의 wallId 필터를 **DB 조건으로 바꿀 때** 쓴다
+    /// (DB는 wall_code를 보관하므로, 이 변환 없이는 전 행을 적재한 뒤 메모리에서 걸러야 한다).
+    /// </summary>
+    public static string? ToCode(int wallId) => ByIdCode.TryGetValue(wallId, out var code) ? code : null;
 }
 
 /// <summary>대외 단위 환산 [부록 A.4] — HD_ACS 내부 m(실수) → SAIGE 연동 mm(정수).</summary>

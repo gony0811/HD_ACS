@@ -331,6 +331,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
 | `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
 | `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
+| `GET /api/tasks?tankId=&wallId=&level=&limit=&offset=` | **[이노로보틱스 요청 2026-09-22]** 면·층 단위 용접선 — 위 응답 + 소속 `areaId`·`areaName`·`wallId`·`wallCode`·`level`. `tankId` 필수, `wallId`(1~10)·`level` 미지정=전체. 화면 1장(면×층) = 조회 1회. 없는 선창 404 |
 | `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
 | `PUT /api/areas/{areaId}` | 영역 수정 — **areaId·소속 작업(taskId) 유지**. `{ name, corners, stationX/Y/Theta, stationStandoffM }` 전체 교체(정차 null=수동 지정 해제), 면은 변경 불가·층은 재유도. 면 범위/1.44m/층 유도 실패·**기존 작업이 새 영역 밖**이면 400, 이름 중복 409, 없음 404. 화면: 계획 ▸ 영역·작업에서 영역 행 선택 → 폼에 값 채워짐 → [선택 영역 수정] |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
