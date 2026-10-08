@@ -242,14 +242,35 @@ public static class TankSceneBuilder
             {
                 if (!TankShape.TryPoint(wall, t.StartU, t.StartV, out var s) || !TankShape.TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
                 s += off; e += off;
+                var color = TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId));
+                var kind = SeamGlyph.KindOf(t.SeamType);
+                string badge = SeamGlyph.Badge(t, BadgeStyle.NoScreen);   // 3D는 시점이 돌아가므로 화면 방향 없음
+
+                // 교차(가지 있음): 중심(=Start)→가지 선분, CROSS3 줄기(points[0])는 굵게 [SeamGlyph]
+                if (SeamGlyph.HasArms(kind, t.Points))
+                {
+                    if (layers.WeldLines)
+                    {
+                        for (int i = 0; i < t.Points!.Length; i++)
+                        {
+                            if (!TankShape.TryPoint(wall, t.Points[i][0], t.Points[i][1], out var arm)) continue;
+                            bool stem = kind == SeamKind.Cross3 && i == 0;
+                            scene.Segments.Add(new Segment3(s, arm + off, color, stem ? 5.5 : 3.0));
+                        }
+                        scene.Markers.Add(new Marker3(s, color, RadiusPx: 5.5, Stroke: LabelWhite));
+                    }
+                    if (layers.TaskSeq) scene.Labels.Add(new Label3(s, badge, LabelWheat, 11));
+                    continue;
+                }
+
                 if (layers.WeldLines)
-                    scene.Segments.Add(new Segment3(s, e, TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId)), 3.0));
-                if (layers.WeldEndpoints)
+                    scene.Segments.Add(new Segment3(s, e, color, 3.0));
+                if (layers.WeldEndpoints && kind == SeamKind.Line)
                 {
                     scene.Markers.Add(new Marker3(s, WeldStart, RadiusPx: 5.5));
                     scene.Markers.Add(new Marker3(e, WeldEnd, RadiusPx: 5.5));
                 }
-                if (layers.TaskSeq) scene.Labels.Add(new Label3((s + e) * 0.5, t.Seq.ToString(), LabelWheat, 11));
+                if (layers.TaskSeq) scene.Labels.Add(new Label3((s + e) * 0.5, badge, LabelWheat, 11));
             }
         }
     }

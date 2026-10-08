@@ -230,6 +230,28 @@ v = _projVlen − (py − Margin) / _projScale − VOff     // 층-로컬로 환
 줌·스크롤은 `AreaLayoutView.xaml.cs`가 `LayoutTransform`으로 처리하고, 클릭 좌표는
 **스케일 전 캔버스 좌표(0~600)** 로 받으므로 줌 배율이 역투영에 섞이지 않는다.
 
+### 6.5 용접선 유형 구분 — `Rendering/SeamGlyph` (2026-10-07)
+
+계획 전개도·운영 전개도·3D·작업 목록이 **같은 규칙**으로 LINE/CROSS3/CROSS4를 구분한다.
+
+| 유형 | 모양 | 교차점 마커 | 배지(전개도) |
+|---|---|---|---|
+| LINE | 시작–끝 직선 + 끝점 | 없음 | `3` |
+| CROSS3 | 중심(=Start)→가지 3개 T자, **줄기(points[0])만 굵게 + 끝 화살촉** | ▲ (꼭짓점이 줄기 쪽) | `3T R0 (화면 ←)` (운영 셀은 `3T R0←`, 3D는 `3T R0`) |
+| CROSS4 | 중심→가지 4개 十자, 같은 굵기 | ■ | `5+` |
+| 교차인데 가지 없음 | 시작–끝 **점선** + 중점 마커 | ▲/■ | `3T 가지 미지정` / `3T ?` |
+
+- 선 **색은 유형 구분에 쓰지 않는다** — 운영 화면에서 색은 진행 상태(§5.4)다. 계획 화면만 가지 없음=빨간 점선.
+- ⚠️ **그림은 저장된 가지 좌표로 그린다. 회전값(CROSS3_R*)으로 T자 템플릿을 돌려 그리지 않는다.**
+  R0~R270은 AMR 카메라 시점 프레임 기준이라 전개도(ACS 면 축)와 면마다 축이 뒤집혀 있다
+  (`Core/Planning/CrossGeometry.cs` — 좌현·격벽은 u·v 모두, 우현은 v만). 예: 같은 R0이 우현 면에서는
+  줄기 →, PL·F에서는 ←. 그래서 회전값은 라벨로만 보이고, **화면 방향(←↑→↓)은 줄기 좌표에서 따로 계산**해
+  운영자가 둘을 대조하게 한다.
+- 구현: `SeamGlyph.ToSeg`(DTO→`TaskSeg`, Kind·Arms 채움) → `SeamGlyph.Build`(px 도형: 선분·화살촉·마커·배지 앵커).
+  Avalonia는 `SeamGlyphPainter`가 그리며, 계획 캔버스는 `TaskGlyphLayer`(DrawingContext, 클릭 통과),
+  운영 전개도는 `FacePlotCanvas`. 3D(`TankSceneBuilder.AddOverlays`)는 줄기 두께 5.5·교차점 원 마커·`3T R0` 라벨.
+  작업 목록 "유형" 열은 `AreaTaskDto.TypeLabel`(`▲ CROSS3_R90` / `■ CROSS4` / `· 가지 없음`).
+
 ---
 
 ## 7. 코드 지도

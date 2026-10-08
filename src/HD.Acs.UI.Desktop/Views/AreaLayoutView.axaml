@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="using:HD.Acs.UI.Desktop.Infrastructure"
+             xmlns:views="using:HD.Acs.UI.Desktop.Views"
              x:Class="HD.Acs.UI.Desktop.Views.AreaLayoutView">
     <!-- DataContext = AreaPlanningViewModel(상속). 선택 면 (u,v) 전개도 — 영역 폴리곤·정차 마커·작업 선분·입력 미리보기. -->
     <UserControl.Resources>
@@ -14,7 +15,7 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <TextBlock Text="{Binding SelectedWallInfo, StringFormat='벽면-로컬 (u,v): {0}'}" FontWeight="Bold" VerticalAlignment="Center" />
                     <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"
-                               Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq). 입력 중=파란 점선 박스·주황 점선. 휠=확대/축소." />
+                               Text="영역=녹색 박스 · 정차점=보라(영역 중심) · 작업=주황 선분(seq) · ▲CROSS3=T자(굵은 줄기 화살표=줄기 방향) · ■CROSS4=十자 · 빨간 점선=가지 미지정. 입력 중=파란 점선. 휠=확대/축소." />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock x:Name="ZoomLabel" Text="100%" VerticalAlignment="Center" Margin="0,0,8,0" MinWidth="42" TextAlignment="Right" />
@@ -69,22 +70,9 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <!-- 작업 용접선 + 끝점 + seq 배지 -->
-                        <ItemsControl ItemsSource="{Binding TaskSegments}">
-                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Canvas>
-                                        <Line StartPoint="{Binding Start, Converter={StaticResource Pt}}" EndPoint="{Binding End, Converter={StaticResource Pt}}"
-                                              Stroke="#E67E22" StrokeThickness="2.5" />
-                                        <Ellipse Canvas.Left="{Binding EndX}" Canvas.Top="{Binding EndY}" Width="8" Height="8" Fill="#CA6F1E" />
-                                        <Border Canvas.Left="{Binding MidX}" Canvas.Top="{Binding MidY}" Background="#FEF9E7" BorderBrush="#B7950B" BorderThickness="1" CornerRadius="2" Padding="2,0">
-                                            <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="#7D6608" />
-                                        </Border>
-                                    </Canvas>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <!-- 작업 용접선 + 끝점 + seq 배지. CROSS3=T자(굵은 줄기+화살촉·▲·회전 라벨), CROSS4=十자(■),
+                             가지 없는 교차=빨간 점선 [SeamGlyph] -->
+                        <views:TaskGlyphLayer Width="600" Height="600" Tasks="{Binding TaskSegments}" />
                         <!-- 입력 중 용접선 미리보기 (점선) -->
                         <ItemsControl ItemsSource="{Binding DraftSegments}">
                             <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas Width="600" Height="600" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
