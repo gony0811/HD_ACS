@@ -26,7 +26,6 @@ public sealed class InspectionDispatcher
     private readonly IInspectionOrderingPolicy _policy;
     private readonly IHubContext<MonitoringHub> _hub;
     private readonly ILogger<InspectionDispatcher> _log;
-    private readonly int _maxRetries;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
 
@@ -35,17 +34,133 @@ public sealed class InspectionDispatcher
         IConfiguration config, ILogger<InspectionDispatcher> log)
     {
         _db = db; _vda = vda; _policy = policy; _hub = hub; _log = log;
-        _maxRetries = config.GetValue("Acs:Dispatch:MaxRetries", 2);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
         _allowedDevTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07);
+        _robotStaleAfter = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:RobotStateStaleSec", 10.0));
     }
+
+    /// <summary>로봇 state 수신이 이 시간 이상 끊기면 연결 안 됨으로 본다(state 주기 ~2 s). 설정 Acs:Dispatch:RobotStateStaleSec.</summary>
+    private readonly TimeSpan _robotStaleAfter;
+
+    /// <summary>
+    /// 명령(미션 시작·이어하기) 전 AMR 연결 확인 — connection ONLINE이고 최근 state를 받고 있어야 한다.
+    /// 아니면 ROBOT_NOT_CONNECTED 알람을 기록·푸시하고 RobotNotConnectedException(명령 차단).
+    /// 받을 로봇이 없는데 Order를 보내면 아무 일도 일어나지 않아 운영자가 "무반응"으로 오인한다(2026-10-02 현장).
+    /// </summary>
+    public async Task EnsureRobotConnectedAsync(string robotId, string command, CancellationToken ct)
+    {
+        var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
+        var now = DateTimeOffset.UtcNow;
+        string? reason =
+            ctx is null ? "로봇 상태를 한 번도 받지 못함"
+            : ctx.ConnectionState != "ONLINE" ? $"연결 상태 {ctx.ConnectionState ?? "알 수 없음"}"
+            : ctx.ReportedAt is null ? "로봇 상태를 한 번도 받지 못함"
+            : now - ctx.ReportedAt.Value > _robotStaleAfter
+                ? $"마지막 상태 수신 {(int)(now - ctx.ReportedAt.Value).TotalSeconds}초 전"
+            : null;
+        if (reason is null) return;
+
+        var title = $"AMR 미연결 — {command} 차단 ({robotId}: {reason})";
+        await RaiseAlarmAsync("ROBOT_NOT_CONNECTED", "WARNING", title, robotId, null, new
+        {
+            command, robotId, reason, ctx?.ConnectionState, lastStateAt = ctx?.ReportedAt,
+            action = "HD_AMR 실행·MQTT 연결을 확인한 뒤 다시 시도하세요.",
+        }, ct);
+        _log.LogWarning("{Command} 차단 — AMR {Robot} 미연결: {Reason}", command, robotId, reason);
+        throw new RobotNotConnectedException($"AMR {robotId}이(가) 연결되어 있지 않습니다({reason}) — {command}을(를) 보내지 않았습니다. HD_AMR 연결을 확인하세요.");
+    }
+
+    /// <summary>알람 기록(alarm.alarm) + 실시간 푸시. code는 alarm.spec에 있어야 한다(AlarmSpecSeed).</summary>
+    public async Task RaiseAlarmAsync(string code, string severity, string title, string? robotId, Guid? missionId,
+        object detail, CancellationToken ct)
+    {
+        var a = new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = robotId, MissionId = missionId,
+            Detail = JsonSerializer.Serialize(new { severity, title, detail }), RaisedAt = DateTimeOffset.UtcNow,
+        };
+        _db.Alarms.Add(a);
+        await _db.SaveChangesAsync(ct);
+        await PushAlarmAsync(a, severity, title, ct);
+    }
+
 
     private readonly double _stationStandoffM;
     private readonly double _allowedDevXy;
     private readonly double _allowedDevTheta;
+
+    /// <summary>
+    /// 시나리오 검사 대상 영역(작업 포함). 연결 영역이 있으면 그것만, 없으면 선창 전체(하위호환) [부분 검사 계획].
+    /// 순서 = 층 → 연결 sort_order → 영역 sort_order. 큐 전개와 계획 정차점 조회가 공유한다.
+    /// </summary>
+    private async Task<(List<InspectionAreaEntity> Areas, int LinkedCount, int Total)> LoadScenarioAreasAsync(
+        Guid scenarioId, string tankId, CancellationToken ct)
+    {
+        var areas = await _db.InspectionAreas.AsNoTracking()
+            .Include(a => a.Tasks.OrderBy(t => t.Seq))
+            .Where(a => a.TankId == tankId)
+            .OrderBy(a => a.Level).ThenBy(a => a.SortOrder)
+            .ToListAsync(ct);
+        var total = areas.Count;
+        var linked = await _db.ScenarioAreas.AsNoTracking()
+            .Where(sa => sa.ScenarioId == scenarioId)
+            .ToDictionaryAsync(sa => sa.AreaId, sa => sa.SortOrder, ct);
+        if (linked.Count > 0)
+            areas = areas.Where(a => linked.ContainsKey(a.AreaId))
+                .OrderBy(a => a.Level).ThenBy(a => linked[a.AreaId]).ThenBy(a => a.SortOrder)
+                .ToList();
+        return (areas, linked.Count, total);
+    }
+
+    /// <summary>
+    /// 영역의 정차점(도면 프레임) — 수동 오버라이드 우선, 없으면 영역 중심 + 내부향 법선 수평성분 × 이격
+    /// (B/T는 수평성분 없음 → 중심 폴백). 방향 = station_theta ?? 면 facing_yaw. 큐 전개와 계획 정차점 조회의 단일 정본.
+    /// </summary>
+    public static (double X, double Y, double? Yaw) StationDrawingOf(
+        InspectionAreaEntity area, WallEntity wall, double defaultStandoffM)
+    {
+        var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
+        var (uc, vc) = AreaGeometry.Centroid(Json<double[][]>(area.Corners));
+        var standoffM = area.StationStandoffM ?? defaultStandoffM;
+        var d = AreaGeometry.StationDrawing(pose, uc, vc, Json<double[]>(wall.Normal), standoffM);
+        return (area.StationX ?? d[0], area.StationY ?? d[1], area.StationTheta ?? wall.FacingYaw);
+    }
+
+    /// <summary>
+    /// 시나리오의 계획 정차점 목록(도면 프레임) — 운영 화면이 로봇 현재 위치와 비교해 정차점을 사전 평가한다.
+    /// 배차와 같은 식(StationDrawingOf)·같은 영역 선택을 쓰며, 도착 판정 허용 오차도 함께 돌려준다.
+    /// 면 미등록 영역은 정차점을 산출할 수 없어 제외. 시나리오가 없으면 null.
+    /// </summary>
+    public async Task<PlannedStations?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct)
+    {
+        var sc = await _db.Scenarios.AsNoTracking().FirstOrDefaultAsync(s => s.ScenarioId == scenarioId, ct);
+        if (sc is null) return null;
+        var (areas, _, _) = await LoadScenarioAreasAsync(scenarioId, sc.TankId, ct);
+        var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == sc.TankId)
+            .ToDictionaryAsync(w => w.WallCode, ct);
+        var list = new List<PlannedStation>();
+        foreach (var a in areas)
+        {
+            if (!walls.TryGetValue(a.WallCode, out var wall)) continue;
+            var (x, y, yaw) = StationDrawingOf(a, wall, _stationStandoffM);
+            var u = Json<double[]>(wall.UAxis);
+            var n = Json<double[]>(wall.Normal);
+            list.Add(new PlannedStation(a.AreaId, a.Name, a.WallCode, a.Level, $"{sc.TankId}-L{a.Level}",
+                x, y, yaw, a.StationStandoffM ?? _stationStandoffM,
+                a.StationX is not null || a.StationY is not null,
+                Horizontal(u), Horizontal(n)));
+        }
+        return new PlannedStations(scenarioId, sc.TankId, _allowedDevXy, _allowedDevTheta, list);
+
+        static double[]? Horizontal(double[] v)
+        {
+            var h = Math.Sqrt(v[0] * v[0] + v[1] * v[1]);
+            return h < 1e-9 ? null : new[] { v[0] / h, v[1] / h };
+        }
+    }
 
     // ── Phase 0: 선창 영역 → 작업 큐 전개 + 층별 미션 생성 ──────────────────────────
     /// <summary>
@@ -55,29 +170,12 @@ public sealed class InspectionDispatcher
     /// </summary>
     public async Task BuildQueueAsync(ScenarioRunEntity run, string tankId, CancellationToken ct)
     {
-        var areas = await _db.InspectionAreas.AsNoTracking()
-            .Include(a => a.Tasks.OrderBy(t => t.Seq))
-            .Where(a => a.TankId == tankId)
-            .OrderBy(a => a.Level).ThenBy(a => a.SortOrder)
-            .ToListAsync(ct);
-
-        // 부분 검사 계획: 시나리오에 연결된 영역이 있으면 그 영역만 전개, 없으면 선창 전체(하위호환)
-        var linked = await _db.ScenarioAreas.AsNoTracking()
-            .Where(sa => sa.ScenarioId == run.ScenarioId)
-            .ToDictionaryAsync(sa => sa.AreaId, sa => sa.SortOrder, ct);
-        if (linked.Count > 0)
-        {
-            var total = areas.Count;
-            areas = areas.Where(a => linked.ContainsKey(a.AreaId))
-                .OrderBy(a => a.Level).ThenBy(a => linked[a.AreaId]).ThenBy(a => a.SortOrder)
-                .ToList();
+        var (areas, linkedCount, total) = await LoadScenarioAreasAsync(run.ScenarioId, tankId, ct);
+        if (linkedCount > 0)
             _log.LogInformation("Run {Run}: 부분 검사 계획 — 시나리오 대상 {N}개 영역 전개 (선창 전체 {Total}개 중).",
                 run.RunId, areas.Count, total);
-        }
         else
-        {
             _log.LogInformation("Run {Run}: 시나리오에 연결된 영역 없음 — 선창 전체 {Total}개 영역 전개.", run.RunId, areas.Count);
-        }
 
         if (areas.Count == 0)
         {
@@ -89,30 +187,9 @@ public sealed class InspectionDispatcher
             .ToDictionaryAsync(w => w.WallCode, ct);
 
         // 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
-        var weldSchema = (await _db.ActionCatalog.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
+        var weldSchema = await WeldSchemaAsync(ct);
 
-        // 층별 유효 T_W_D 캐시
-        var tWdByLevel = new Dictionary<int, (string MapId, DrawingTransform T)>();
-        var levels = areas.Select(a => a.Level).Distinct();
-        foreach (var level in levels)
-        {
-            var mapId = $"{tankId}-L{level}";
-            var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct);
-            if (map is null) { _log.LogWarning("Run {Run}: map {Map} 없음 — 층 {Lv} 제외.", run.RunId, mapId, level); continue; }
-            var cal = await _db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
-                .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
-            try
-            {
-                var t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion,
-                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
-                tWdByLevel[level] = (mapId, t);
-            }
-            catch (CalibrationInvalidException ex)
-            {
-                _log.LogWarning("Run {Run}: 층 {Lv} T_W_D 무효 — 제외 ({Msg})", run.RunId, level, ex.Message);
-            }
-        }
+        var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
 
         var seq = 0;
         var missionMaps = new HashSet<string>();
@@ -127,69 +204,12 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
-            var corners = Json<double[][]>(area.Corners);
-            var (uc, vc) = AreaGeometry.Centroid(corners);
-            // standoff 정차점: 영역 중심 + 내부향 법선 수평성분 × 이격 (B/T는 수평성분 없음 → 중심 폴백)
-            var standoffM = area.StationStandoffM ?? _stationStandoffM;
-            var stationDrawing = AreaGeometry.StationDrawing(pose, uc, vc, Json<double[]>(wall.Normal), standoffM);
-
-            // 정차 맵좌표: 오버라이드(맵 프레임 가정) 우선, 없으면 centroid→도면→T_W_D
-            double mx, my;
-            if (area.StationX is double sx && area.StationY is double sy) { mx = sx; my = sy; }
-            else (mx, my) = lv.T.DrawingToMap(stationDrawing[0], stationDrawing[1]);
-            double? mTheta = area.StationTheta
-                ?? (wall.FacingYaw is double fy ? lv.T.DrawingYawToMap(fy) : (double?)null);
-
-            // 액션 payload(정차의 용접선들) 사전 구성 — 발행 시 actionId만 새로 발급.
-            // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
-            var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
-            var actionsJson = new JsonArray();
-            foreach (var t in area.Tasks)
-            {
-                var startD = pose.LocalToDrawing(t.StartU, t.StartV);
-                var endD = pose.LocalToDrawing(t.EndU, t.EndV);
-                var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
-                var worldPos = WeldInspectionPayload.BuildPosition(lv.T, d);
-                var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
-                var taskParams = new JsonObject
-                {
-                    ["seamType"] = t.SeamType,
-                    ["sectionDxfId"] = t.SectionDxfId,
-                    ["inspectionProfileId"] = t.ProfileId,
-                    ["standoffMm"] = _standoffMm,
-                    ["workingDistanceMm"] = _workingDistanceMm,
-                    ["anchorGroupId"] = anchorGroupId,
-                    ["seqInGroup"] = t.Seq,
-                    // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
-                    // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
-                    ["taskId"] = t.TaskId.ToString(),
-                };
-
-                var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
-                var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
-                if (violations.Count > 0)
-                {
-                    _log.LogWarning("Run {Run}: {Job} payload 스키마 위반 — run 시작 중단: {V}",
-                        run.RunId, jobRef, string.Join("; ", violations));
-                    throw new WeldPayloadSchemaException(violations);
-                }
-
-                actionsJson.Add(new JsonObject
-                {
-                    ["actionType"] = "startWeldInspection",
-                    ["taskId"] = t.TaskId.ToString(),
-                    ["jobRef"] = jobRef,
-                    ["position"] = worldPos,
-                    ["params"] = taskParams.DeepClone(),
-                });
-            }
-
+            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, weldSchema);
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
-                MapId = lv.MapId, X = mx, Y = my, Theta = mTheta, Seq = area.SortOrder,
-                Status = "PENDING", Actions = actionsJson.ToJsonString(),
+                MapId = lv.MapId, X = stop.X, Y = stop.Y, Theta = stop.Theta, Seq = area.SortOrder,
+                Status = "PENDING", Actions = stop.Actions,
             });
             missionMaps.Add(lv.MapId);
         }
@@ -209,6 +229,179 @@ public sealed class InspectionDispatcher
                 OrderId = Guid.NewGuid().ToString(), State = nameof(MissionState.Created),
             });
     }
+
+    /// <summary>
+    /// 영역 1개 → 정차 1곳(맵 프레임 x/y/θ) + 그 영역 작업들의 startWeldInspection 액션 payload(json 배열).
+    /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
+    /// </summary>
+    private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
+        Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd, string? weldSchema)
+    {
+        var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
+        // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
+        // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
+        var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, _stationStandoffM);
+        var (mx, my) = tWd.DrawingToMap(stationDx, stationDy);
+        double? mTheta = stationYaw is double sy ? tWd.DrawingYawToMap(sy) : null;
+
+        // 액션 payload(정차의 용접선들) 사전 구성 — 발행 시 actionId만 새로 발급.
+        // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
+        var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
+        var actionsJson = new JsonArray();
+        foreach (var t in area.Tasks.OrderBy(x => x.Seq))
+        {
+            if (string.IsNullOrWhiteSpace(t.SectionDxfId) || string.IsNullOrWhiteSpace(t.ProfileId))
+                throw new InvalidOperationException(
+                    $"TASK {t.TaskId} 검사 참조 누락: sectionDxfId/profileId를 등록한 뒤 RUN을 시작하세요.");
+            var startD = pose.LocalToDrawing(t.StartU, t.StartV);
+            var endD = pose.LocalToDrawing(t.EndU, t.EndV);
+            var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
+            var worldPos = WeldInspectionPayload.BuildPosition(tWd, d);
+            var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
+            var taskParams = new JsonObject
+            {
+                ["seamType"] = t.SeamType,
+                ["sectionDxfId"] = t.SectionDxfId,
+                ["inspectionProfileId"] = t.ProfileId,
+                ["standoffMm"] = _standoffMm,
+                ["workingDistanceMm"] = _workingDistanceMm,
+                ["anchorGroupId"] = anchorGroupId,
+                ["seqInGroup"] = t.Seq,
+                // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
+                // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
+                ["taskId"] = t.TaskId.ToString(),
+            };
+
+            // CROSS3/4 교차 가지 끝점 → AMR 면-로컬 mm·규약 순서 [VDA §8.5.1, N13]. ACS 저장은 전개도 프레임이라
+            // 반드시 면 법선에서 AMR 프레임을 재구성해 변환한다(좌현·마구리 거울 흡수 — CrossGeometry).
+            if (!string.IsNullOrWhiteSpace(t.Points))
+            {
+                var amrPts = CrossGeometry.BuildAmrPoints(t.SeamType, t.StartU, t.StartV,
+                    Json<double[][]>(t.Points), pose.U, pose.V, Json<double[]>(wall.Normal));
+                if (amrPts is not null)
+                {
+                    var arr = new JsonArray();
+                    foreach (var p in amrPts) arr.Add(new JsonArray((JsonNode)p[0], p[1]));
+                    taskParams["points"] = arr;
+                }
+            }
+
+            var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
+            var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
+            if (violations.Count > 0)
+            {
+                _log.LogWarning("Run {Run}: {Job} payload 스키마 위반 — run 시작 중단: {V}",
+                    runId, jobRef, string.Join("; ", violations));
+                throw new WeldPayloadSchemaException(violations);
+            }
+
+            actionsJson.Add(new JsonObject
+            {
+                ["actionType"] = "startWeldInspection",
+                ["taskId"] = t.TaskId.ToString(),
+                ["jobRef"] = jobRef,
+                ["position"] = worldPos,
+                ["params"] = taskParams.DeepClone(),
+            });
+        }
+
+        return (mx, my, mTheta, actionsJson.ToJsonString(), area.Tasks.Count);
+    }
+
+    /// <summary>
+    /// 재개(resume) 시 잔여 정차 재계산 — run 시작 때 저장한 정차점·용접선 좌표 스냅샷 대신 **현재 계획**(영역·작업·면)과
+    /// **현재 T_W_D**로 다시 만든다. 계획을 고친 뒤 이어하기를 해도 옛 좌표로 움직이지 않게 하기 위함.
+    /// 영역 삭제·작업 0건·면 미등록·층 T_W_D 없음이면 갈 곳이 없으므로 그 정차는 SKIPPED. 층이 바뀌어 미션이 없으면 추가한다.
+    /// 진행률 분모(total_tasks)는 작업 수 증감만큼 보정. 저장은 호출자가 한다.
+    /// </summary>
+    public async Task<(int Refreshed, int Skipped)> RefreshOpenItemsAsync(
+        ScenarioRunEntity run, IReadOnlyList<WorkItemEntity> items, CancellationToken ct)
+    {
+        if (items.Count == 0) return (0, 0);
+        var areaIds = items.Select(w => w.AreaId).Distinct().ToList();
+        var areas = await _db.InspectionAreas.AsNoTracking()
+            .Include(a => a.Tasks)
+            .Where(a => areaIds.Contains(a.AreaId))
+            .ToDictionaryAsync(a => a.AreaId, ct);
+        var tankId = await _db.Scenarios.AsNoTracking().Where(sc => sc.ScenarioId == run.ScenarioId)
+                         .Select(sc => sc.TankId).FirstOrDefaultAsync(ct)
+                     ?? areas.Values.FirstOrDefault()?.TankId ?? "";
+        var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
+            .ToDictionaryAsync(w => w.WallCode, ct);
+        var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
+        var weldSchema = await WeldSchemaAsync(ct);
+
+        int refreshed = 0, skipped = 0;
+        foreach (var wi in items)
+        {
+            int oldTasks = 0;
+            try { oldTasks = JsonNode.Parse(wi.Actions ?? "[]")?.AsArray().Count ?? 0; } catch { /* 손상 — 0으로 */ }
+
+            string? reason = null;
+            (string MapId, DrawingTransform T) lv = default;
+            WallEntity? wall = null;
+            if (!areas.TryGetValue(wi.AreaId, out var area)) reason = "영역이 삭제됨";
+            else if (area.Tasks.Count == 0) reason = "영역에 검사 작업이 없음";
+            else if (!walls.TryGetValue(area.WallCode, out wall)) reason = $"면 {area.WallCode} 미등록";
+            else if (!tWdByLevel.TryGetValue(area.Level, out lv)) reason = $"층 L{area.Level} 캘리브레이션(T_W_D) 없음";
+
+            if (reason is not null)
+            {
+                wi.Status = "SKIPPED";
+                wi.UpdatedAt = DateTimeOffset.UtcNow;
+                skipped++;
+                if (run.TotalTasks is int tt) run.TotalTasks = Math.Max(0, tt - oldTasks);
+                _log.LogWarning("Run {Run}: 재개 — wi={Wi} 정차 재계산 불가({Reason}) → SKIPPED.", run.RunId, wi.WorkItemId, reason);
+                continue;
+            }
+
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, weldSchema);
+            _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
+                run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
+            wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
+            wi.Seq = area!.SortOrder; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
+            if (run.TotalTasks is int t0) run.TotalTasks = t0 + stop.TaskCount - oldTasks;
+            if (!run.Missions.Any(m => m.MapId == lv.MapId))
+                run.Missions.Add(new MissionEntity
+                {
+                    MissionId = Guid.NewGuid(), RunId = run.RunId, Seq = run.Missions.Count,
+                    MapId = lv.MapId, RobotId = run.RobotId,
+                    OrderId = Guid.NewGuid().ToString(), State = nameof(MissionState.Created),
+                });
+            refreshed++;
+        }
+        return (refreshed, skipped);
+    }
+
+    /// <summary>층별 유효 T_W_D(맵 버전 일치). 맵 없음·무효 층은 빠진다(경고 로그).</summary>
+    private async Task<Dictionary<int, (string MapId, DrawingTransform T)>> LoadTransformsAsync(
+        string tankId, IEnumerable<int> levels, Guid runId, CancellationToken ct)
+    {
+        var tWdByLevel = new Dictionary<int, (string MapId, DrawingTransform T)>();
+        foreach (var level in levels)
+        {
+            var mapId = $"{tankId}-L{level}";
+            var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct);
+            if (map is null) { _log.LogWarning("Run {Run}: map {Map} 없음 — 층 {Lv} 제외.", runId, mapId, level); continue; }
+            var cal = await _db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
+                .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
+            try
+            {
+                var t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion,
+                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+                tWdByLevel[level] = (mapId, t);
+            }
+            catch (CalibrationInvalidException ex)
+            {
+                _log.LogWarning("Run {Run}: 층 {Lv} T_W_D 무효 — 제외 ({Msg})", runId, level, ex.Message);
+            }
+        }
+        return tWdByLevel;
+    }
+
+    private async Task<string?> WeldSchemaAsync(CancellationToken ct) =>
+        (await _db.ActionCatalog.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
 
     // ── Phase 2: greedy 최근접 1건 배차 (유휴 시 호출) ────────────────────────────
     /// <summary>
@@ -246,6 +439,7 @@ public sealed class InspectionDispatcher
             run.State = anyLeft ? "WAITING_FLOOR_TRANSFER" : "COMPLETED";
             if (!anyLeft) run.EndedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
+            await PushRunStateAsync(run.RunId, run.State, ct);
             _log.LogInformation("Run {Run}: 층 {Floor} 검사 완료 → {State}", runId, floor, run.State);
             return;
         }
@@ -332,24 +526,47 @@ public sealed class InspectionDispatcher
         mission.OrderId = orderId;
         mission.State = nameof(MissionState.Released);
         mission.StartedAt ??= DateTimeOffset.UtcNow;
+        bool runStateChanged = run.State != "RUNNING";
         run.State = "RUNNING";
 
         // 저장을 발행보다 먼저 — 저장 실패 시 로봇에 미기록 Order가 나가는 실행-기록 불일치 방지
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+        if (runStateChanged) await PushRunStateAsync(run.RunId, run.State, ct);
         await PushWorkItemAsync(run.RunId, tracked, ct);
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
     /// <summary>work_item 상태 변화 단건 푸시 — 운영 UI 작업 현황 실시간 갱신용.</summary>
-    private Task PushWorkItemAsync(Guid runId, WorkItemEntity wi, CancellationToken ct) =>
-        _hub.Clients.All.SendAsync("WorkItemProgress", new
+    private static (AlarmEntity Entity, string Severity, string Title) NewAlarm(
+        string code, string severity, string title, MissionEntity mission, object detail) =>
+        (new AlarmEntity
         {
-            RunId = runId, wi.WorkItemId, wi.AreaId, wi.MapId, wi.Status, wi.Attempts,
+            AlarmId = Guid.NewGuid(), AlarmCode = code, RobotId = mission.RobotId, MissionId = mission.MissionId,
+            Detail = JsonSerializer.Serialize(new { severity, title, detail }), RaisedAt = DateTimeOffset.UtcNow,
+        }, severity, title);
+
+    /// <summary>알람 실시간 푸시("AlarmRaised") — 운영 화면 알람·이벤트 패널 표시용. 저장 후 호출.</summary>
+    private Task PushAlarmAsync(AlarmEntity a, string severity, string title, CancellationToken ct) =>
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("AlarmRaised", new
+        {
+            a.AlarmId, a.AlarmCode, a.RobotId, a.MissionId, a.Detail,
+            Severity = severity, Title = title, a.RaisedAt, ClearedAt = (DateTimeOffset?)null, ClearedBy = (string?)null,
         }, ct);
 
+    /// <summary>Reason = 실패(재큐잉/스킵) 시 AMR 보고 사유 요약 — 운영 UI 이벤트 로그 표시용.</summary>
+    private Task PushWorkItemAsync(Guid runId, WorkItemEntity wi, CancellationToken ct, string? reason = null) =>
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("WorkItemProgress", new
+        {
+            RunId = runId, wi.WorkItemId, wi.AreaId, wi.MapId, wi.Status, wi.Attempts, Reason = reason,
+        }, ct);
+
+    /// <summary>run 상태 변화 푸시(RUNNING/WAITING_FLOOR_TRANSFER/COMPLETED/ABORTED) — 운영 UI 현재 상태 표시용.</summary>
+    public Task PushRunStateAsync(Guid runId, string state, CancellationToken ct) =>
+        _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("RunState", new { RunId = runId, State = state }, ct);
+
     // ── 정차 완료/실패 처리 후 다음 배차 (RobotStateService 완료 훅에서 호출) ──────────
-    /// <summary>현재 정차(mission.OrderId)의 액션 결과로 work_item을 DONE/FAILED(재큐잉/스킵) 처리하고 다음을 배차.</summary>
+    /// <summary>현재 정차(mission.OrderId)의 액션 결과로 work_item을 DONE / FAILED(자동 재시도 없음 + INSPECTION_FAILED 알람) 처리하고 다음을 배차.</summary>
     public async Task HandleStopOutcomeAsync(MissionEntity mission, CancellationToken ct)
     {
         var wi = await _db.WorkItems
@@ -357,6 +574,8 @@ public sealed class InspectionDispatcher
         if (wi is not null)
         {
             var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct);
+            string? failureSummary = null;
+            (AlarmEntity Entity, string Severity, string Title)? alarm = null;
             bool anyFailed = acts.Any(a => a.Status == "FAILED");
             if (!anyFailed)
             {
@@ -364,32 +583,44 @@ public sealed class InspectionDispatcher
             }
             else
             {
+                // 자동 재시도 없음 — 재시도 여부는 작업자가 결정한다(2026-10-02 운영 결정).
+                // 실패한 정차는 FAILED로 종결하고, 실패 항목(용접선별 사유)을 알람으로 기록·푸시한다.
+                var failed = acts.Where(a => a.Status == "FAILED").ToList();
+                var failureReasons = failed.Select(a => ResultDescription(a.Result))
+                    .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToArray();
+                failureSummary = failureReasons.Length == 0 ? "AMR 실패 사유 미제공" : string.Join(" | ", failureReasons);
                 wi.Attempts++;
-                if (wi.Attempts < _maxRetries)
+                wi.Status = "FAILED";
+
+                var areaName = await _db.InspectionAreas.AsNoTracking().Where(x => x.AreaId == wi.AreaId)
+                    .Select(x => x.Name).FirstOrDefaultAsync(ct) ?? "영역";
+                var taskIds = failed.Where(a => a.TaskId is not null).Select(a => a.TaskId!.Value).Distinct().ToList();
+                var taskNames = await _db.AreaTasks.AsNoTracking().Where(t => taskIds.Contains(t.TaskId))
+                    .ToDictionaryAsync(t => t.TaskId, t => t.Name ?? $"라인 {t.Seq}", ct);
+                var items = failed.Select(a => new
                 {
-                    wi.Status = "PENDING";   // 재큐잉 — 다음 라운드 재배차
-                    _log.LogWarning("Run {Run}: wi={Wi} 실패 — 재시도 {N}/{Max}", mission.RunId, wi.WorkItemId, wi.Attempts, _maxRetries);
-                }
-                else
+                    a.TaskId,
+                    taskName = a.TaskId is { } tid && taskNames.TryGetValue(tid, out var n) ? n : null,
+                    a.ActionId,
+                    reason = ResultDescription(a.Result) ?? "AMR 실패 사유 미제공",
+                }).ToList();
+                _log.LogWarning("Run {Run}: wi={Wi}({Area}) 검사 실패 {N}건 — 자동 재시도 없이 FAILED·알람. 원인={Reason}",
+                    mission.RunId, wi.WorkItemId, areaName, items.Count, failureSummary);
+
+                var first = failureReasons.FirstOrDefault() ?? "사유 미제공";
+                if (first.Length > 80) first = first[..80] + "…";
+                alarm = NewAlarm("INSPECTION_FAILED", "WARNING", $"검사 실패: {areaName} — {first}", mission, new
                 {
-                    wi.Status = "SKIPPED";
-                    _log.LogWarning("Run {Run}: wi={Wi} 재시도 초과 — 스킵.", mission.RunId, wi.WorkItemId);
-                    _db.Alarms.Add(new AlarmEntity
-                    {
-                        AlarmId = Guid.NewGuid(), AlarmCode = "INSPECTION_SKIPPED", RobotId = mission.RobotId,
-                        MissionId = mission.MissionId,
-                        Detail = JsonSerializer.Serialize(new
-                        {
-                            severity = "WARNING", title = "검사 작업 스킵(재시도 초과)",
-                            workItemId = wi.WorkItemId, wi.Attempts
-                        }),
-                        RaisedAt = DateTimeOffset.UtcNow,
-                    });
-                }
+                    workItemId = wi.WorkItemId, areaId = wi.AreaId, areaName, wi.MapId, attempt = wi.Attempts,
+                    failedCount = items.Count, items,
+                    action = "자동 재시도하지 않음 — 원인 확인·조치 후 작업자가 재실행 여부를 결정하세요.",
+                });
+                _db.Alarms.Add(alarm.Value.Entity);
             }
             wi.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
-            await PushWorkItemAsync(mission.RunId, wi, ct);   // DONE / PENDING(재큐잉) / SKIPPED
+            await PushWorkItemAsync(mission.RunId, wi, ct, failureSummary);   // DONE / FAILED
+            if (alarm is { } al) await PushAlarmAsync(al.Entity, al.Severity, al.Title, ct);
         }
         await DispatchNextAsync(mission.RunId, ct);
     }
@@ -426,13 +657,15 @@ public sealed class InspectionDispatcher
             a.Status = "FAILED";
             a.Result = JsonSerializer.Serialize(new { ActionStatus = "FAILED", ResultDescription = "orderValidationError(Order 거부)" });
         }
-        _db.Alarms.Add(new AlarmEntity
+        var rejected = new AlarmEntity
         {
             AlarmId = Guid.NewGuid(), AlarmCode = "ORDER_REJECTED", RobotId = robotId,
             Detail = JsonSerializer.Serialize(new { severity = "WARNING", title = "Order 거부(AMR 검증 실패)", orderId = rejectedOrderId, description = errorDescription }),
             RaisedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        _db.Alarms.Add(rejected);
         await _db.SaveChangesAsync(ct);
+        await PushAlarmAsync(rejected, "WARNING", "Order 거부(AMR 검증 실패)", ct);
         _log.LogWarning("Run {Run}: Order {Order} 거부(orderValidationError) — 실패 정책 적용. desc={Desc}",
             run.RunId, rejectedOrderId, errorDescription);
 
@@ -442,4 +675,28 @@ public sealed class InspectionDispatcher
     }
 
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
+
+    private static string? ResultDescription(string? resultJson)
+    {
+        if (string.IsNullOrWhiteSpace(resultJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            return doc.RootElement.TryGetProperty("ResultDescription", out var d) && d.ValueKind == JsonValueKind.String
+                ? d.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
 }
+
+/// <summary>GET /api/scenarios/{id}/area-stations 응답 — 계획 정차점(도면 프레임)과 도착 허용 오차.</summary>
+public sealed record PlannedStations(Guid ScenarioId, string TankId, double AllowedDevXy, double AllowedDevTheta,
+    IReadOnlyList<PlannedStation> Stations);
+
+/// <summary>영역 1개의 계획 정차점. Yaw=도면 yaw[rad](B/T 등 미지정이면 null), Manual=수동 오버라이드,
+/// WallU/WallNormal=면 u축·내부향 법선의 수평 단위벡터(수평성분 없으면 null) — 오차를 "벽 따라/벽까지"로 분해하는 데 쓴다.</summary>
+public sealed record PlannedStation(Guid AreaId, string AreaName, string WallCode, int Level, string MapId,
+    double X, double Y, double? Yaw, double StandoffM, bool Manual, double[]? WallU, double[]? WallNormal);
+
+/// <summary>AMR 미연결로 명령을 보내지 않음 — API는 409.</summary>
+public sealed class RobotNotConnectedException(string message) : Exception(message);

@@ -18,6 +18,10 @@ public static class AlarmSpecSeed
     {
         ("SAIGE_UNREACHABLE", "WARNING", "SAIGE 전송 불가",
             "로봇 상태(robot-health-check) 전송이 임계 횟수 이상 연속 실패 — SAIGE 기동/네트워크 확인 [SAIGE §9.5]"),
+        ("INSPECTION_FAILED", "WARNING", "검사 실패",
+            "정차 검사(용접선) 실패 — 자동 재시도하지 않음. detail.items에 용접선별 실패 사유, 재실행 여부는 작업자가 결정"),
+        ("ROBOT_NOT_CONNECTED", "WARNING", "AMR 미연결",
+            "AMR 미연결(connection ≠ ONLINE 또는 state 수신 끊김) 상태에서 미션 시작·이어하기 요청 — 명령을 보내지 않고 차단됨. HD_AMR 실행·MQTT 연결 확인"),
         ("SAIGE_BAD_REQUEST", "WARNING", "SAIGE 형식 오류",
             "SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]"),
     };

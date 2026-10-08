@@ -45,6 +45,17 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<TaskActionDto>>($"/api/runs/{runId}/task-actions", ct) ?? new();
 
+    public async Task<IReadOnlyList<RunSummaryDto>> GetRunsAsync(int limit = 50, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<List<RunSummaryDto>>($"/api/runs?limit={limit}", ct) ?? new();
+
+    public async Task<RunResultsDto?> GetRunResultsAsync(Guid runId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/runs/{runId}/results?limit=1000", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<RunResultsDto>(ct);
+    }
+
     public async Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/runs/{runId}/progress", ct);
@@ -167,6 +178,14 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(참조 run 존재)의 {error} 메시지 노출
     }
 
+    public async Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/area-stations", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<PlannedStationsDto>(ct);
+    }
+
     public async Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/areas", ct);
@@ -268,6 +287,21 @@ public sealed class AcsApiClient : IAcsApiClient
         return (r?.AreaId ?? Guid.Empty, r?.Level ?? 0);
     }
 
+    public async Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
+        double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/areas/{areaId}", new
+        {
+            Name = name, Corners = corners,
+            StationX = stationX, StationY = stationY, StationTheta = stationTheta,
+            StationStandoffM = stationStandoffM, UserId = userId
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404 메시지 노출
+        var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
+        return r?.Level ?? 0;
+    }
+
     public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)
     {
         var url = $"/api/internal/areas?tankId={Uri.EscapeDataString(tankId)}"
@@ -284,26 +318,28 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
-        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default)
+        int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/tasks", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
             SeamType = seamType, SectionDxfId = sectionDxfId, ProfileId = profileId, UserId = userId,
             Seq = seq, Name = name,
-            TaskId = taskId   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
+            TaskId = taskId,   // null=서버 발급. 지정=영구 식별자 보존 등록 [SAIGE §2.5]
+            Points = points    // CROSS3/4 교차 가지 끝점 [VDA §8.5.1]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<AreaTaskResult>(ct))?.Seq ?? 0;
     }
 
     public async Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
-        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default)
+        string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/area-tasks/{taskId}", new
         {
             StartU = startU, StartV = startV, EndU = endU, EndV = endV,
-            SeamType = seamType, Seq = seq, Name = name, UserId = userId
+            SeamType = seamType, Seq = seq, Name = name, UserId = userId,
+            Points = points    // null=기존 유지, []=지움 [VDA §8.5.1]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
     }
@@ -317,6 +353,37 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
+        double[][] arms, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/areas/{areaId}/cross-preview", new
+        {
+            SeamType = seamType, CenterU = centerU, CenterV = centerV, Arms = arms
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(가지 없음)·404(area/면 없음) 메시지 노출
+        return await resp.Content.ReadFromJsonAsync<CrossPreviewResult>(ct);
+    }
+
+    public async Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/planning/assistant/propose", request, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 503(비활성)·502(Ollama 실패)·400 의 {error} 노출
+        return (await resp.Content.ReadFromJsonAsync<PlanChangeSetDto>(ct))!;
+    }
+
+    public async Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/planning/changesets/{changeSetId}/apply", new { userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 404(만료)·409(동시 변경)·400(검증 실패)
+        return (await resp.Content.ReadFromJsonAsync<PlanApplyResultDto>(ct))!;
+    }
+
+    public async Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/integrations/llm", ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<LlmStatusDto>(ct) : null;
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
@@ -328,7 +395,8 @@ public sealed class AcsApiClient : IAcsApiClient
             message = err?.Error;
         }
         catch (Exception) { /* 본문이 JSON이 아니면 상태코드로 폴백 */ }
-        throw new HttpRequestException(message ?? $"요청 실패 ({(int)resp.StatusCode})");
+        // StatusCode 를 실어 보낸다 — "서버가 거부함(4xx)"과 "서버에 못 붙음(StatusCode 없음)"을 호출 측이 구분한다.
+        throw new HttpRequestException(message ?? $"요청 실패 ({(int)resp.StatusCode})", null, resp.StatusCode);
     }
 
     private sealed record StartRunResult(Guid RunId);

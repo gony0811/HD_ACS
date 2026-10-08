@@ -48,7 +48,7 @@ public sealed partial class TankViewModel : ObservableObject
         if (statusByTask is not null)
             foreach (var (taskId, status) in statusByTask) _workStatusByTask[taskId] = status;
         BuildFacePlots();
-        ViewChanged?.Invoke(this, EventArgs.Empty);
+        SceneInvalidated?.Invoke(this, EventArgs.Empty);   // 색만 바뀜 — 카메라는 유지(ViewChanged는 맞춤을 다시 함)
     }
 
     /// <summary>영역의 현재 work_item 상태 (없으면 null = 계획 보기).</summary>
@@ -79,10 +79,21 @@ public sealed partial class TankViewModel : ObservableObject
     public static Rgba WeldLineColor(string? status) =>
         status is null ? Rgba.FromRgb(0xE6, 0x7E, 0x22) : StatusColors(status).Line;
 
-    /// <summary>전개도 탭 — 면별 2D 도면(실제 비율 형상 + 영역·작업 오버레이, 이미 캔버스 px로 투영).</summary>
+    /// <summary>전개도 탭 — 면별 2D 도면(실제 비율 형상 + 영역·작업 오버레이, 이미 캔버스 px로 투영).
+    /// Layers=전개도 표시 항목 스냅샷 — 꺼진 항목의 도형은 목록에 넣지 않고(영역 채움만 예외: 라벨 위치에 필요),
+    /// 뷰는 이 목록을 한 번에 그린다.</summary>
     public sealed record FacePlot(string Code, string Dim, IReadOnlyList<Pt2> Outline,
-        IReadOnlyList<AreaPoly> Areas, IReadOnlyList<TaskSeg> Tasks);
+        IReadOnlyList<AreaPoly> Areas, IReadOnlyList<TaskSeg> Tasks, SceneLayers Layers);
     public ObservableCollection<FacePlot> FacePlots { get; } = new();
+
+    /// <summary>3D 뷰 세부 표시 항목(우클릭 메뉴). 바뀌면 <see cref="SceneInvalidated"/>로 정적 씬만 다시 만든다.</summary>
+    public OverlayLayers View3DLayers { get; } = new();
+
+    /// <summary>전개도 세부 표시 항목(우클릭 메뉴). 바뀌면 전개도 목록을 다시 만든다.</summary>
+    public OverlayLayers FlatLayers { get; } = new();
+
+    /// <summary>씬 내용(색·표시 항목)만 바뀜 — 뷰는 다시 그리되 카메라 맞춤은 하지 않는다.</summary>
+    public event EventHandler? SceneInvalidated;
 
     // 전개도 셀(면당) 렌더 크기(px)
     private const double CellW = 240, CellH = 150, CellMargin = 14;
@@ -200,6 +211,8 @@ public sealed partial class TankViewModel : ObservableObject
     {
         _api = api;
         monitoring.RobotStateReceived += OnRobotState;
+        View3DLayers.PropertyChanged += (_, _) => SceneInvalidated?.Invoke(this, EventArgs.Empty);
+        FlatLayers.PropertyChanged += (_, _) => BuildFacePlots();
     }
 
     /// <summary>선창 파라미터(팔각 치수·유도값). 마구리(F/A) 팔각 윤곽 렌더에 사용.</summary>
@@ -251,6 +264,7 @@ public sealed partial class TankViewModel : ObservableObject
     private void BuildFacePlots()
     {
         FacePlots.Clear();
+        var layers = FlatLayers.Snapshot();
         foreach (var w in ShellWalls)
         {
             if (w.ULen <= 0 || w.VLen <= 0) continue;
@@ -264,12 +278,18 @@ public sealed partial class TankViewModel : ObservableObject
             var tasks = new List<TaskSeg>();
             if (ShowOverlays)
             {
+                bool wantAreas = layers.AreaFills || layers.AreaLabels;
+                bool wantTasks = layers.WeldLines || layers.WeldEndpoints || layers.TaskSeq;
                 foreach (var ov in Overlays.Where(o => o.Area.WallCode == w.WallCode))
                 {
-                    var corners = ov.Area.Corners ?? RectUv(ov.Area.UMin, ov.Area.VMin, ov.Area.UMax, ov.Area.VMax);
-                    var pc = PC(corners);
-                    var (cx, cy) = Plot2D.Centroid(pc);
-                    areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
+                    if (wantAreas)
+                    {
+                        var corners = ov.Area.Corners ?? RectUv(ov.Area.UMin, ov.Area.VMin, ov.Area.UMax, ov.Area.VMax);
+                        var pc = PC(corners);
+                        var (cx, cy) = Plot2D.Centroid(pc);
+                        areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
+                    }
+                    if (!wantTasks) continue;
                     foreach (var t in ov.Tasks)
                     {
                         var (x1, y1) = Proj(t.StartU, t.StartV);
@@ -280,7 +300,7 @@ public sealed partial class TankViewModel : ObservableObject
                 }
             }
 
-            FacePlots.Add(new FacePlot(w.WallCode, $"{w.ULen:0.#} × {w.VLen:0.#} m", outline, areas, tasks));
+            FacePlots.Add(new FacePlot(w.WallCode, $"{w.ULen:0.#} × {w.VLen:0.#} m", outline, areas, tasks, layers));
         }
     }
 

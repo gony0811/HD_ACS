@@ -16,6 +16,8 @@ public interface IAcsApiClient
     Task<RunProgressDto?> GetRunProgressAsync(Guid runId, CancellationToken ct = default);
     Task<IReadOnlyList<WorkItemDto>> GetWorkItemsAsync(Guid runId, CancellationToken ct = default);
     Task<IReadOnlyList<TaskActionDto>> GetTaskActionsAsync(Guid runId, CancellationToken ct = default);
+    Task<IReadOnlyList<RunSummaryDto>> GetRunsAsync(int limit = 50, CancellationToken ct = default);
+    Task<RunResultsDto?> GetRunResultsAsync(Guid runId, CancellationToken ct = default);
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);
@@ -46,6 +48,9 @@ public interface IAcsApiClient
     // 부분 검사 계획 — 시나리오 검사 대상 영역 (빈 목록 = 전체 검사)
     Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default);
     Task SetScenarioAreasAsync(Guid scenarioId, IReadOnlyList<Guid> areaIds, CancellationToken ct = default);
+    // 계획 정차점(도면 프레임) — 로봇 상태 카드의 "계획 정차점까지 거리". 시나리오 없음(404)=null
+    Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
+        Task.FromResult<PlannedStationsDto?>(null);
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);
@@ -69,16 +74,32 @@ public interface IAcsApiClient
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
         double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default);
+    /// <summary>영역 수정(PUT) — areaId·면 유지, 이름·코너(면-전체 v)·정차 전체 교체. 반환=재유도된 층.</summary>
+    Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
+        double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
+        CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
-        int? seq = null, string? name = null, Guid? taskId = null, CancellationToken ct = default);
+        int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
-    /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지.</summary>
+    /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지. points: null=기존 유지, []=지움(CROSS 가지).</summary>
     Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
-        string? seamType, string userId, int? seq = null, string? name = null, CancellationToken ct = default);
+        string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
+    /// <summary>CROSS 교차 기하 미리보기 — 중심·가지(면-전체 v)로 회전 유도·AMR 점 정렬(비영속) [VDA §8.5.1].</summary>
+    Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
+        double[][] arms, CancellationToken ct = default);
+
+    // ── 계획 자연어 어시스턴트 [ADR-013] — 기본 구현은 미지원(기존 테스트 대역 무수정) ──
+    /// <summary>자연어 명령 → 변경안 미리보기(DB 무변경). 서버 비활성 503·LLM 실패 502는 {error} 메시지 예외.</summary>
+    Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default) =>
+        throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
+    /// <summary>미리보기한 변경안 적용(전부 또는 전무). 만료 404·동시 변경 409.</summary>
+    Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default) =>
+        throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
+    Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
 
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);

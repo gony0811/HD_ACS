@@ -30,6 +30,7 @@ public static class AppHost
         {
             var opts = sp.GetRequiredService<IOptions<AcsOptions>>().Value;
             http.BaseAddress = new Uri(opts.BaseUrl);
+            http.Timeout = TimeSpan.FromMinutes(3);   // 계획 어시스턴트 제안은 LLM 추론을 기다린다(서버 Acs:Llm:TimeoutSec 기본 120s보다 길게)
         });
 
         // Avalonia 어댑터(HD.Acs.UI.Core 추상화 구현) — UI 스레드 마샬링·메시지 대화상자·프로젝트 대화상자
@@ -51,6 +52,7 @@ public static class AppHost
         builder.Services.AddSingleton<CalibrationViewModel>();
         builder.Services.AddSingleton<AreaPlanningViewModel>();
         builder.Services.AddSingleton<TankViewModel>();
+        builder.Services.AddSingleton<HistoryViewModel>();
 
         builder.Services.AddSingleton<MainWindow>();
 

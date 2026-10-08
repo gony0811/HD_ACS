@@ -1,13 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="using:HD.Acs.UI.Desktop.Views"
+             xmlns:infra="using:HD.Acs.UI.Desktop.Infrastructure"
              x:Class="HD.Acs.UI.Desktop.Views.AreaManagementView">
     <!-- DataContext = AreaPlanningViewModel. ESC: 도면 4점 선택(픽) 모드 해제 (폼·전개도 캔버스 공통 서브트리) -->
+    <UserControl.Resources>
+        <infra:BoolToBrushConverter x:Key="ChatBg" TrueBrush="#33305A7A" FalseBrush="#1A1ABC9C" />
+    </UserControl.Resources>
     <UserControl.KeyBindings>
         <KeyBinding Gesture="Escape" Command="{Binding CancelPickCommand}" />
     </UserControl.KeyBindings>
 
-    <Grid Margin="14" ColumnDefinitions="Auto,*" TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <Grid Margin="14" ColumnDefinitions="Auto,*,360" TextBlock.Foreground="{DynamicResource AppTextBrush}">
         <!-- ── 좌: 등록 폼 (영역 → 작업) ── -->
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
             <StackPanel Width="450">
@@ -23,7 +27,8 @@
                 <!-- ② 영역 등록 (면 로컬 u,v) -->
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
-                        <TextBlock Text="② 영역 등록 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock Text="② 영역 등록·수정 (면 로컬 u,v · m)" FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="영역 목록에서 행을 선택하면 값이 폼에 채워집니다 → 고친 뒤 [선택 영역 수정]." Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="층 필터" Classes="lbl" />
                             <ComboBox Classes="field" Width="100" ItemsSource="{Binding Levels}" DisplayMemberBinding="{Binding Label}"
@@ -77,7 +82,11 @@
                             <TextBlock Text="θ" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationTheta}" />
                         </StackPanel>
-                        <Button Classes="form" Content="영역 등록" HorizontalAlignment="Left" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Classes="form" Content="영역 등록" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
+                            <Button Classes="form" Content="선택 영역 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateAreaCommand}"
+                                    ToolTip.Tip="영역 목록에서 고른 영역의 이름·4점·정차를 고칩니다. 삭제 후 재등록과 달리 areaId와 작업(taskId)이 유지됩니다. 면은 바꿀 수 없고, 층은 새 코너로 다시 유도됩니다." />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -85,7 +94,8 @@
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel>
                         <TextBlock Text="{Binding SelectedArea.Name, StringFormat='③ 검사 작업 등록 — 영역 {0}', FallbackValue='③ 검사 작업 등록 (영역 선택)'}"
-                                   FontWeight="SemiBold" Margin="0,0,0,6" />
+                                   FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="작업 목록에서 행을 선택하면 값이 폼에 채워집니다 → 고친 뒤 [선택 작업 수정]." Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="시작 u,v" Classes="lbl" />
                             <NumericUpDown Classes="field" Value="{Binding StartU}" Margin="0,0,6,0" />
@@ -98,8 +108,21 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="용접라인 타입" Classes="lbl" />
-                            <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}" />
+                            <ComboBox Classes="field" Width="120" ItemsSource="{Binding SeamTypes}" SelectedItem="{Binding SelectedSeamType}"
+                                      IsEnabled="{Binding SeamTypeEditable}" />
                         </StackPanel>
+                        <!-- CROSS3/4 교차 그리기: 전개도에서 중심·가지 클릭 → 회전 자동 유도 [VDA §8.5.1] -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="교차 그리기" Classes="lbl" />
+                            <Button Classes="form" Content="CROSS3" MinWidth="70" Command="{Binding StartCrossDrawCommand}" CommandParameter="CROSS3"
+                                    ToolTip.Tip="T자 3갈래. 전개도에서 중심→줄기→통과2 클릭. 줄기 방향으로 회전(R0/R90/R180/R270) 자동 결정." />
+                            <Button Classes="form" Content="CROSS4" MinWidth="70" Margin="6,0,0,0" Command="{Binding StartCrossDrawCommand}" CommandParameter="CROSS4"
+                                    ToolTip.Tip="十자 4갈래. 전개도에서 중심→가지4 클릭." />
+                        </StackPanel>
+                        <TextBlock Text="{Binding CrossStepText}" Foreground="{DynamicResource AppAccentBrush}" FontSize="11" Margin="0,0,0,2"
+                                   IsVisible="{Binding CrossStepText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <TextBlock Text="{Binding SeamRotationText, StringFormat='회전: {0}'}" Foreground="{DynamicResource AppGoodBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"
+                                   IsVisible="{Binding SeamRotationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <StackPanel Orientation="Horizontal">
                             <Button Classes="form" Content="작업 등록" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
                             <Button Classes="form" Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
@@ -117,17 +140,17 @@
             <views:AreaLayoutView Grid.Row="0" Margin="0,0,0,8" />
 
             <DockPanel Grid.Row="1" MinHeight="130" Margin="0,0,0,8">
-                <TextBlock DockPanel.Dock="Top" Text="선택 면 영역 목록 (선택 시 작업 등록)" FontWeight="Bold" Margin="0,0,0,4" />
-                <DataGrid x:Name="AreaGrid" ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea}"
+                <TextBlock DockPanel.Dock="Top" Text="선택 면 영역 목록 (선택 시 수정·작업 등록)" FontWeight="Bold" Margin="0,0,0,4" />
+                <DataGrid x:Name="AreaGrid" ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea, Mode=TwoWay}"
                           AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="이름" Binding="{Binding Name}" Width="70" />
-                        <DataGridTextColumn Header="Lv" Binding="{Binding Level}" Width="40" />
-                        <DataGridTextColumn Header="u" Binding="{Binding UMin, StringFormat='{}{0:N2}'}" Width="60" />
-                        <DataGridTextColumn Header="~u" Binding="{Binding UMax, StringFormat='{}{0:N2}'}" Width="60" />
-                        <DataGridTextColumn Header="v" Binding="{Binding VMin, StringFormat='{}{0:N2}'}" Width="60" />
-                        <DataGridTextColumn Header="~v" Binding="{Binding VMax, StringFormat='{}{0:N2}'}" Width="60" />
-                        <DataGridTextColumn Header="작업" Binding="{Binding TaskCount}" Width="50" />
+                        <DataGridTextColumn Header="영역 이름" Binding="{Binding Name}" Width="Auto" MinWidth="100" />
+                        <DataGridTextColumn Header="층" Binding="{Binding Level, StringFormat='L{0}'}" Width="Auto" MinWidth="44" />
+                        <DataGridTextColumn Header="u 시작(m)" Binding="{Binding UMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="u 끝(m)" Binding="{Binding UMax, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="v 시작(m)" Binding="{Binding VMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="v 끝(m)" Binding="{Binding VMax, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="작업 수" Binding="{Binding TaskCount}" Width="Auto" MinWidth="64" />
                         <DataGridTemplateColumn Header="" Width="Auto">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
@@ -142,14 +165,15 @@
             </DockPanel>
 
             <DockPanel Grid.Row="2" MinHeight="120">
-                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록" FontWeight="Bold" Margin="0,0,0,4" />
+                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록 (선택 시 수정)" FontWeight="Bold" Margin="0,0,0,4" />
                 <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="seq" Binding="{Binding Seq}" Width="46" />
-                        <DataGridTextColumn Header="시작 u" Binding="{Binding StartU, StringFormat='{}{0:N2}'}" Width="64" />
-                        <DataGridTextColumn Header="시작 v" Binding="{Binding StartV, StringFormat='{}{0:N2}'}" Width="64" />
-                        <DataGridTextColumn Header="끝 u" Binding="{Binding EndU, StringFormat='{}{0:N2}'}" Width="64" />
-                        <DataGridTextColumn Header="끝 v" Binding="{Binding EndV, StringFormat='{}{0:N2}'}" Width="64" />
+                        <DataGridTextColumn Header="순번" Binding="{Binding Seq}" Width="Auto" MinWidth="52" />
+                        <DataGridTextColumn Header="유형" Binding="{Binding SeamType}" Width="Auto" MinWidth="72" />
+                        <DataGridTextColumn Header="시작 u(m)" Binding="{Binding StartU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="시작 v(m)" Binding="{Binding StartV, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="끝 u(m)" Binding="{Binding EndU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
+                        <DataGridTextColumn Header="끝 v(m)" Binding="{Binding EndV, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTemplateColumn Header="" Width="Auto">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
@@ -163,5 +187,56 @@
                 </DataGrid>
             </DockPanel>
         </Grid>
+
+        <!-- ── 우측: 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기) → [적용] ── -->
+        <Border x:Name="AssistantPanel" Grid.Column="2" Margin="12,0,0,0" DataContext="{Binding Assistant}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+                <TextBlock Grid.Row="0" Text="계획 어시스턴트 (자연어)" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1" Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="11" Margin="0,2,0,6"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <ScrollViewer Grid.Row="2" x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" Background="{DynamicResource AppCanvasBrush}">
+                    <ItemsControl ItemsSource="{Binding Lines}" Margin="6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,6" Padding="8,5" CornerRadius="4"
+                                        Background="{Binding IsUser, Converter={StaticResource ChatBg}}">
+                                    <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <StackPanel Grid.Row="3" Margin="0,6,0,0" IsVisible="{Binding HasProposal}">
+                    <TextBlock Text="{Binding ProposalSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,4" />
+                    <ListBox ItemsSource="{Binding ProposalOps}" MaxHeight="160" FontSize="11">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Error}" IsVisible="{Binding !Ok}" TextWrapping="Wrap" Foreground="{DynamicResource AppErrorBrush}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Classes="form" Content="적용" MinWidth="80" Command="{Binding ApplyCommand}"
+                                ToolTip.Tip="변경안 전체를 한 번에 반영합니다(하나라도 실패하면 아무것도 반영하지 않음)." />
+                        <Button Classes="form" Content="버리기" MinWidth="80" Margin="6,0,0,0" Command="{Binding DiscardCommand}" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBox Grid.Row="4" Margin="0,6,0,0" Text="{Binding Input}" AcceptsReturn="False" TextWrapping="Wrap" MinHeight="54"
+                         Watermark="예: PM 2층 작업 전부 CROSS4로 바꿔">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding SendCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Classes="form" Content="보내기" MinWidth="80" Command="{Binding SendCommand}" />
+                    <Button Classes="form" Content="연결 확인" MinWidth="80" Margin="6,0,0,0" Command="{Binding CheckStatusCommand}" />
+                    <TextBlock Text="처리 중…" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

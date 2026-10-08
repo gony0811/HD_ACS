@@ -57,8 +57,8 @@ public class ProjectIdentityTests : IDisposable
         var v2 = """
         {"version":2,"tankId":"CT1",
          "geometry":{"lengthL":45,"wFloor":8.2,"thetaLowDeg":45,"hLow":1.9,"hWall":5.4,"thetaUpDeg":45,"hUp":1.9,"levelZ":[0,2.4],"originOx":0,"originOy":0},
-         "areas":[{"wallCode":"PM","level":1,"name":"PM-L1-01","uMin":3,"vMin":0.2,"uMax":6,"vMax":1.5,
-                   "tasks":[{"seq":1,"name":null,"seamType":"LINE","startU":3.2,"startV":0.5,"endU":5.8,"endV":0.5,"sectionDxfId":"","profileId":""}]}]}
+         "areas":[{"wallCode":"PM","level":1,"name":"PM-L1-01","uMin":3,"vMin":0.2,"uMax":4.4,"vMax":1.5,
+                   "tasks":[{"seq":1,"name":null,"seamType":"LINE","startU":3.2,"startV":0.5,"endU":4.2,"endV":0.5,"sectionDxfId":"","profileId":""}]}]}
         """;
         WriteContainer(_path, formatVersion: 2, v2);
 
@@ -89,6 +89,29 @@ public class ProjectIdentityTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidDataException>(() => svc.OpenAsync(_path));
         Assert.Empty(server.Posts);   // 선창 재등록(=기존 영역 CASCADE 삭제)조차 시작하지 않음
+    }
+
+    [Fact]
+    public async Task OversizedAreas_FromOldFile_RejectedBeforeAnyDbWrite()
+    {
+        // 사용자 제보 파일(v2 구파일)과 같은 모양: 1.44m 제한 이전에 만든 3m 영역들.
+        var (svc, server) = Build();
+        const string json = """
+            {"version":2,"tankId":"CT1","geometry":{"lengthL":30,"wFloor":10,"thetaLowDeg":45,"hLow":3,"hWall":8,"thetaUpDeg":45,"hUp":2,
+             "levelZ":[0,3.2,6.4,9.6],"originOx":0,"originOy":0,"reachZMin":0,"reachZMax":3.6},
+             "areas":[
+              {"wallCode":"A","level":1,"name":"L1-A-001","uMin":0,"vMin":0,"uMax":3,"vMax":3.2,"tasks":[],"corners":[[0,3.2],[0,3],[3,0],[3,3.2]]},
+              {"wallCode":"A","level":1,"name":"L1-A-002","uMin":6,"vMin":0.5,"uMax":9,"vMax":2.5,"tasks":[],"corners":[[6,0.5],[9,0.5],[9,2.5],[6,2.5]]},
+              {"wallCode":"A","level":1,"name":"ok","uMin":10,"vMin":0.5,"uMax":11,"vMax":1.5,"tasks":[]}]}
+            """;
+        WriteContainer(_path, 2, json);
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => svc.OpenAsync(_path));
+        Assert.Contains("영역 2개", ex.Message);
+        Assert.Contains("L1-A-001': 3 × 3.2 m", ex.Message);
+        Assert.Contains("L1-A-002': 3 × 2 m", ex.Message);
+        Assert.DoesNotContain("'ok'", ex.Message);
+        Assert.Empty(server.Posts);   // 선창 재등록(=기존 영역 삭제)을 시작하지 않음
     }
 
     [Fact]
@@ -140,16 +163,18 @@ public class ProjectIdentityTests : IDisposable
                     new
                     {
                         areaId = AreaA, tankId = "CT1", wallCode = "PM", level = 2, name = "PM-L2-01",
-                        corners = new[] { new[] { 3.0, 0.6 }, new[] { 6.0, 0.6 }, new[] { 6.0, 2.4 }, new[] { 3.0, 2.4 } },
-                        uMin = 3.0, vMin = 0.6, uMax = 6.0, vMax = 2.4, sortOrder = 0, taskCount = 2,
+                        corners = new[] { new[] { 3.0, 0.6 }, new[] { 4.4, 0.6 }, new[] { 4.4, 2.0 }, new[] { 3.0, 2.0 } },
+                        uMin = 3.0, vMin = 0.6, uMax = 4.4, vMax = 2.0, sortOrder = 0, taskCount = 2,
                     },
                 });
             if (path == $"/api/internal/areas/{AreaA}/tasks")
                 return Json(new object[]
                 {
-                    new { taskId = Task1, seq = 1, name = "W1", seamType = "LINE", startU = 3.2, startV = 0.9, endU = 5.8, endV = 0.9, sectionDxfId = "DXF-1", profileId = "PROF-1" },
+                    new { taskId = Task1, seq = 1, name = "W1", seamType = "LINE", startU = 3.2, startV = 0.9, endU = 4.2, endV = 0.9, sectionDxfId = "DXF-1", profileId = "PROF-1" },
                     new { taskId = Task2, seq = 5, name = "W5-cross", seamType = "CROSS4", startU = 4.0, startV = 1.2, endU = 4.4, endV = 1.2, sectionDxfId = "DXF-1", profileId = "PROF-1" },
                 });
+            if (path == "/api/scenarios")
+                return Json(Array.Empty<object>());
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 

@@ -29,6 +29,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public CalibrationViewModel Calibration { get; }
     public AreaPlanningViewModel AreaPlanning { get; }
     public TankViewModel Tank { get; }
+    public HistoryViewModel History { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
@@ -49,7 +50,8 @@ public sealed partial class ShellViewModel : ObservableObject
         ManualZoneChangeViewModel manualZoneChange,
         CalibrationViewModel calibration,
         AreaPlanningViewModel areaPlanning,
-        TankViewModel tank)
+        TankViewModel tank,
+        HistoryViewModel history)
     {
         _monitoring = monitoring;
         _api = api;
@@ -64,9 +66,12 @@ public sealed partial class ShellViewModel : ObservableObject
         Calibration = calibration;
         AreaPlanning = areaPlanning;
         Tank = tank;
+        History = history;
 
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
+        // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산
+        AreaPlanning.PlanningChanged += (_, _) => RobotStatus.InvalidatePlannedStations();
 
         // 실행 큐(work_item)·용접라인(액션) 상태 변화 → TankView 영역/용접선 상태색 갱신 (운영 진행 지도)
         Mission.WorkItemsChanged += (_, _) =>
@@ -85,6 +90,11 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>모드 탭 전환. 탭 버튼이 CommandParameter로 AppMode를 전달한다(토글 해제 방지).</summary>
     [RelayCommand]
     private void SetMode(AppMode mode) => CurrentMode = mode;
+
+    partial void OnCurrentModeChanged(AppMode value)
+    {
+        if (value == AppMode.History) _ = History.LoadAsync();
+    }
 
     /// <summary>앱 시작 시 호출 — 실시간 연결 개시 + 각 패널 초기 로드. 서버 미기동이어도 UI는 유지된다.</summary>
     public async Task InitializeAsync()
@@ -128,10 +138,17 @@ public sealed partial class ShellViewModel : ObservableObject
             AreaPlanning.TankId = doc.TankId;
             Tank.TankId = doc.TankId;
             Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
-            await AreaPlanning.LoadAsync();
-            await Tank.LoadAsync();   // 열린 지오메트리로 3D 셸 갱신
+            // 프로젝트 재적재 결과를 모두 다시 조회한다. 특히 Calibration을 갱신하지 않으면
+            // 앱 시작 때 로컬 DB에서 읽은 포인트가 파일에서 복원된 것처럼 화면에 남는다.
+            await Task.WhenAll(
+                AreaPlanning.LoadAsync(),
+                Tank.LoadAsync(),          // 열린 지오메트리로 3D 셸 갱신
+                Calibration.LoadAsync(),
+                Mission.LoadAsync());
             UpdateTitle();
-            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)}";
+            var calibrationCount = doc.Calibrations?.Length ?? 0;
+            var pointCount = doc.Calibrations?.Sum(c => c.Points.Length) ?? 0;
+            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)} · 캘리브레이션 {calibrationCount}개/{pointCount}점 복원";
         }
         catch (Exception ex)
         {
@@ -148,6 +165,11 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         // 파일 파싱 단계(매직/버전/GZip/JSON) — ProjectService가 InvalidDataException을 던짐
         InvalidDataException => $"프로젝트 {verb} 실패: 이 프로그램의 프로젝트 파일이 아니거나 손상되었습니다.\n\n{ex.Message}",
+        // DB 재적재 단계 — 서버가 응답했지만 내용을 거부(4xx/5xx). 연결 문제가 아니다.
+        HttpRequestException { StatusCode: { } code } => $"프로젝트 {verb} 실패: 관제 서버가 파일 내용을 거부했습니다 (HTTP {(int)code}).\n" +
+            "서버 연결은 정상입니다. 아래 사유를 고친 파일로 다시 여세요.\n\n" +
+            $"사유: {ex.Message}" +
+            (verb == "열기" ? "\n\n※ 열기는 선창을 먼저 다시 등록하므로, 이 선창의 기존 영역·작업이 지워졌을 수 있습니다. 정상 프로젝트 파일을 다시 열어 복원하세요." : ""),
         // DB 재적재 단계 — 관제 서버(:5199)/PostgreSQL 연결 실패
         HttpRequestException => $"프로젝트 {verb} 실패: 파일은 정상이지만 관제 서버에 연결하지 못했습니다.\n" +
             "HD.Acs.App(포트 5199)과 PostgreSQL이 실행 중인지 확인한 뒤 다시 시도하세요.\n\n" +
@@ -198,12 +220,8 @@ public sealed partial class ShellViewModel : ObservableObject
         var robot = RobotStatus.SelectedRobot;
         if (robot is null) return;
 
-        var confirm = await _dialog.ConfirmAsync(
-            $"로봇 '{robot.RobotId}' 비상정지를 실행합니다.\n" +
-            "※ 기능적 정지(VDA 5050)이며 안전규격 정지는 로봇측 하드웨어입니다. [ADR-007]\n계속하시겠습니까?",
-            "비상정지 확인");
-        if (!confirm) return;
-
+        // 확인 팝업 없음 — 비상정지는 누르는 즉시 전송되어야 한다(확인 단계가 정지를 지연시킨다).
+        // 기능적 정지(VDA 5050 instantActions)이며 안전규격 정지는 로봇측 하드웨어 [ADR-007].
         try
         {
             await _api.EmergencyStopAsync(robot.RobotId, _operatorId);

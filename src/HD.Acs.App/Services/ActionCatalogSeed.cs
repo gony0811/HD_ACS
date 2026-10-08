@@ -20,7 +20,9 @@ namespace HD.Acs.App.Services;
 public static class ActionCatalogSeed
 {
     // startWeldInspection param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8.2.
-    // seamType enum = LINE·CROSS3·CROSS4·CORNER2·CORNER3 (§8.5.1, 2026-09-15 — 카탈로그 1:1 5종).
+    // seamType enum = LINE·CROSS3_R0/R90/R180/R270·CROSS4·CORNER2·CORNER3 (§8.2/§8.5.1, 개정 2026-10-07 —
+    //   CROSS3 회전 4종 확장, 면 자세 무관). 입력의 legacy 별칭(CROSS→CROSS4·CORNER→CORNER3·bare CROSS3→CROSS3_R0)은
+    //   AreaTaskRules.Normalize 가 등록/수정 시점에 canonical 로 바꾸므로, 발행 payload 에는 canonical 값만 실린다.
     // params.taskId·attempt (개정 1.4, 2026-09-21) — 선택 필드(구버전 AMR 호환). attempt는 발행 시점 발급이라
     // 큐 전개 시 검증 payload에는 없다 → required에 넣지 않는다.
     public const string StartWeldInspectionParamSchema = """
@@ -51,7 +53,7 @@ public static class ActionCatalogSeed
           "type": "object",
           "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
           "properties": {
-            "seamType":            { "enum": ["LINE", "CROSS3", "CROSS4", "CORNER2", "CORNER3"] },
+            "seamType":            { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3"] },
             "points":              { "type": "array" },
             "sectionDxfId":        { "type": "string" },
             "inspectionProfileId": { "type": "string" },

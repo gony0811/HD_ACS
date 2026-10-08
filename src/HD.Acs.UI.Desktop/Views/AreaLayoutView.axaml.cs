@@ -53,9 +53,9 @@ public partial class AreaLayoutView : UserControl
             var p = e.GetPosition(PlotCanvas);   // 스케일 전 캔버스 좌표(0..600)
             vm.CanvasClick(p.X, p.Y);            // VM 내부에서 PickMode가 아니면 무시
         }
-        else if (props.IsRightButtonPressed && vm.PickMode)
+        else if (props.IsRightButtonPressed && (vm.PickMode || vm.CrossDrawShape is not null))
         {
-            vm.PickMode = false;
+            vm.CancelPickCommand.Execute(null);   // 픽/교차 그리기 해제
             e.Handled = true;   // 컨텍스트 동작 차단
         }
     }

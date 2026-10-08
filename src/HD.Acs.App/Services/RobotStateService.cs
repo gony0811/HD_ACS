@@ -122,7 +122,12 @@ public sealed class RobotStateService
         {
             robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY, ctx.BatteryPct,
             state.OrderId, state.LastNodeId, state.Driving, Errors = state.Errors.Count,
-            ctx.ReportedTheta   // 맵 프레임 heading(rad) — UI가 T_W_D yaw 보정 후 3D 방향 화살표로 표시
+            ctx.ReportedTheta,  // 맵 프레임 heading(rad) — UI가 T_W_D yaw 보정 후 3D 방향 화살표로 표시
+            // 운영 UI 현재 상태 표시용 — 수동 모드·비상정지·오류 내용을 작업자에게 그대로 보인다
+            state.OperatingMode,
+            EStop = state.SafetyState?.EStop,
+            ErrorDescriptions = state.Errors.Select(e => string.IsNullOrWhiteSpace(e.ErrorDescription)
+                ? e.ErrorType : $"{e.ErrorType}: {e.ErrorDescription}").ToArray(),
         }, ct);
 
         // TASK 단위 진행률 푸시 — SaveChanges 이후(종결 상태 반영분)를 집계해 전파.

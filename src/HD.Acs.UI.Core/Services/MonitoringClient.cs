@@ -23,6 +23,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
     public event EventHandler<RobotConnectionDto>? RobotConnectionReceived;
     public event EventHandler<MissionProgressDto>? MissionProgressReceived;
     public event EventHandler<RunProgressDto>? RunProgressReceived;
+    public event EventHandler<RunStateDto>? RunStateReceived;
     public event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;
     public event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;
     public event EventHandler<AlarmDto>? AlarmRaised;
@@ -42,6 +43,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
         _hub.On<RobotConnectionDto>("RobotConnection", p => Raise(RobotConnectionReceived, p));
         _hub.On<MissionProgressDto>("MissionProgress", p => Raise(MissionProgressReceived, p));
         _hub.On<RunProgressDto>("RunProgress", p => Raise(RunProgressReceived, p));
+        _hub.On<RunStateDto>("RunState", p => Raise(RunStateReceived, p));
         _hub.On<WorkItemProgressDto>("WorkItemProgress", p => Raise(WorkItemProgressReceived, p));
         _hub.On<TaskActionProgressDto>("TaskActionProgress", p => Raise(TaskActionProgressReceived, p));
         _hub.On<AlarmDto>("AlarmRaised", p => Raise(AlarmRaised, p)); // 미발화여도 무해

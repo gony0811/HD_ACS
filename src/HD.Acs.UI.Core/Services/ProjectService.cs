@@ -14,8 +14,7 @@ namespace HD.Acs.UI.Services;
 public sealed class ProjectService : IProjectService
 {
     public const string Extension = ".hdacs";
-    // v3: 영역·작업 식별자(areaId·taskId) 보존. v2: 영역 corners(임의 4점). v1(구파일)=bbox 사각형 폴백
-    internal const int FormatVersion = 3;
+    private const int FormatVersion = 3;   // v3: 캘리브레이션 + 시나리오/영역 연결 포함
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("HDACSPRJ"); // 8 bytes
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -42,17 +41,36 @@ public sealed class ProjectService : IProjectService
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId, t.TaskId)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId, t.Points)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
                 a.StationStandoffM, a.AreaId));
+        }
+
+        var calibrations = new List<CalibrationDoc>();
+        for (var level = 1; level <= (geom.LevelZ?.Length ?? 0); level++)
+        {
+            var mapId = $"{tankId}-L{level}";
+            var cal = await _api.GetCalibrationAsync(mapId, ct);
+            if (cal is null) continue;
+            var points = await _api.GetCalibrationPointsAsync(mapId, ct);
+            calibrations.Add(new CalibrationDoc(mapId,
+                points.Select(p => new CalibrationPointDoc(p.DrawingXM, p.DrawingYM, p.MapX, p.MapY)).ToArray(),
+                cal.Tx, cal.Ty, cal.YawRad, cal.RmsM));
+        }
+
+        var scenarios = new List<ScenarioDoc>();
+        foreach (var scenario in (await _api.GetScenariosAsync(ct)).Where(s => s.TankId == tankId))
+        {
+            var links = await _api.GetScenarioAreasAsync(scenario.ScenarioId, ct);
+            scenarios.Add(new ScenarioDoc(scenario.Name, links.OrderBy(x => x.SortOrder).Select(x => x.AreaId).ToArray()));
         }
 
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
                 geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
-            areaDocs.ToArray());
+            areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray());
 
         await using (var fs = File.Create(path))
         {
@@ -82,9 +100,8 @@ public sealed class ProjectService : IProjectService
                 ?? throw new InvalidDataException("프로젝트 파일을 읽을 수 없습니다 (내용 없음).");
         }
 
-        // 재적재 전에 파일 자체의 식별자 무결성 검증 — 중복 ID는 서버 409로 중간에 멈춰 DB가 반쯤 적재된 상태가 되므로
-        // DB를 건드리기 전에 걸러낸다.
         ValidateIdentities(doc);
+        ValidateAreaShapes(doc);   // 서버 규칙 위반을 DB를 건드리기 전에 거부(열기는 선창 재등록=기존 영역 삭제부터 시작)
 
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
@@ -92,6 +109,7 @@ public sealed class ProjectService : IProjectService
             g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
             g.ReachZMin, g.ReachZMax, ct);
 
+        var restoredAreaIds = new Dictionary<Guid, Guid>();
         foreach (var a in doc.Areas)
         {
             // v3.1: level은 서버가 영역 z범위로 유도(저장된 a.Level은 무시). AreaId만 사용.
@@ -100,36 +118,99 @@ public sealed class ProjectService : IProjectService
             {
                 new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMin }, new[] { a.UMax, a.VMax }, new[] { a.UMin, a.VMax },
             };
-            // v3: areaId·taskId를 그대로 복원한다 — taskId는 SAIGE productId·진행률·검사 이력을 잇는 영구 키이므로
-            // 파일을 다시 열었다고 바뀌면 같은 용접선의 이력이 끊긴다 [SAIGE v2.6 §2.5]. 구파일(null)은 서버가 새로 발급.
-            // seq·name도 저장값 그대로(종전엔 열 때 name이 사라지고 seq가 재부여됐다).
             var (areaId, _) = await _api.CreateAreaAsync(doc.TankId, a.WallCode, a.Name,
-                corners, a.StationX, a.StationY, a.StationTheta, _operatorId, a.StationStandoffM, a.AreaId, ct);
-            foreach (var t in a.Tasks.OrderBy(t => t.Seq))
+                corners, a.StationX, a.StationY, a.StationTheta, _operatorId,
+                stationStandoffM: a.StationStandoffM, areaId: a.SourceId, ct: ct);
+            if (a.SourceId is Guid sourceId) restoredAreaIds[sourceId] = areaId;
+            foreach (var t in a.Tasks)
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
-                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId, t.Seq, t.Name, t.TaskId, ct);
+                    t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId,
+                    seq: t.Seq, name: t.Name, taskId: t.SourceId, points: t.Points, ct: ct);
+        }
+
+        // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.
+        foreach (var cal in doc.Calibrations ?? Array.Empty<CalibrationDoc>())
+        {
+            foreach (var old in await _api.GetCalibrationPointsAsync(cal.MapId, ct))
+                await _api.DeleteCalibrationPointAsync(cal.MapId, old.Id, ct);
+            foreach (var p in cal.Points)
+                await _api.CaptureCalibrationPointAsync(cal.MapId, p.DrawingXM, p.DrawingYM, "m", _operatorId,
+                    ct, p.MapX, p.MapY);
+            if (cal.Points.Length >= 2)
+                await _api.SolveCalibrationAsync(cal.MapId, ct);
+
+            // 가져오기 API가 다른 서버를 향하거나 구버전 서버에서 일부 요청이 누락돼도
+            // 성공으로 가장하지 않는다. 실제 서버 상태를 다시 읽어 파일 내용과 대조한다.
+            var restoredPoints = await _api.GetCalibrationPointsAsync(cal.MapId, ct);
+            var restoredCalibration = await _api.GetCalibrationAsync(cal.MapId, ct);
+            if (restoredPoints.Count != cal.Points.Length || (cal.Points.Length >= 2 && restoredCalibration is null))
+                throw new InvalidDataException(
+                    $"캘리브레이션 복원 검증 실패: {cal.MapId} — 파일 {cal.Points.Length}점, " +
+                    $"서버 {restoredPoints.Count}점, T_W_D {(restoredCalibration is null ? "없음" : "있음")}. " +
+                    "다른 PC의 HD.Acs.App 주소와 실행 버전을 확인하세요.");
+        }
+
+        // 같은 선창/이름의 시나리오는 재사용하여 중복 생성을 피하고, 없으면 새로 만든다.
+        var existingScenarios = (await _api.GetScenariosAsync(ct)).Where(s => s.TankId == doc.TankId).ToList();
+        foreach (var scenario in doc.Scenarios ?? Array.Empty<ScenarioDoc>())
+        {
+            var existing = existingScenarios.FirstOrDefault(s => s.Name == scenario.Name);
+            var scenarioId = existing?.ScenarioId ?? await _api.CreateScenarioAsync(scenario.Name, doc.TankId, ct);
+            var areaIds = scenario.AreaIds.Where(restoredAreaIds.ContainsKey).Select(id => restoredAreaIds[id]).ToArray();
+            await _api.SetScenarioAreasAsync(scenarioId, areaIds, ct);
         }
 
         CurrentPath = path;
         return doc;
     }
 
-    /// <summary>파일 내 식별자 무결성 — 빈 GUID·중복 areaId/taskId·영역 내 중복 seq는 손상/수기 편집 파일로 보고 거부.</summary>
-    internal static void ValidateIdentities(ProjectDoc doc)
+    /// <summary>AREA 최대 크기 [SPEC v3 §4] — 서버 AreaRules 와 같은 값. 구버전에서 만든 파일이 지금 규칙을 넘는 경우를 열기 전에 잡는다.</summary>
+    public const double MaxAreaSizeM = 1.44;
+
+    /// <summary>
+    /// 영역 형상 사전 검사 — 코너 3점 이상·유한값·u/v 폭 1.44m 이하. 위반 영역을 모두 모아 한 번에 알린다.
+    /// 서버 POST 가 같은 규칙으로 거부하지만, 그때는 이미 선창 재등록으로 기존 영역이 지워진 뒤다.
+    /// </summary>
+    private static void ValidateAreaShapes(ProjectDoc doc)
+    {
+        var bad = new List<string>();
+        foreach (var a in doc.Areas)
+        {
+            var c = a.Corners ?? new[] { new[] { a.UMin, a.VMin }, new[] { a.UMax, a.VMax } };
+            if (a.Corners is { Length: < 3 } || c.Any(p => p.Length < 2 || !double.IsFinite(p[0]) || !double.IsFinite(p[1])))
+            { bad.Add($"{a.WallCode} '{a.Name}': 코너가 잘못됨"); continue; }
+            double du = c.Max(p => p[0]) - c.Min(p => p[0]), dv = c.Max(p => p[1]) - c.Min(p => p[1]);
+            if (du > MaxAreaSizeM + 1e-9 || dv > MaxAreaSizeM + 1e-9)
+                bad.Add($"{a.WallCode} '{a.Name}': {du:0.###} × {dv:0.###} m");
+        }
+        if (bad.Count > 0)
+            throw new InvalidDataException(
+                $"영역 {bad.Count}개가 현재 규칙(AREA 최대 u/v 각 {MaxAreaSizeM}m, 코너 3점 이상)을 벗어나 열 수 없습니다 — DB는 변경하지 않았습니다.\n" +
+                string.Join("\n", bad.Take(10)) + (bad.Count > 10 ? $"\n… 외 {bad.Count - 10}개" : "") +
+                "\n\n규칙이 생기기 전에 만든 파일일 수 있습니다. 영역을 1.44m 이하로 나눈 파일을 사용하세요.");
+    }
+
+    private static void ValidateIdentities(ProjectDoc doc)
     {
         var areaIds = new HashSet<Guid>();
         var taskIds = new HashSet<Guid>();
-        foreach (var a in doc.Areas)
+
+        foreach (var area in doc.Areas)
         {
-            if (a.AreaId is Guid aid && (aid == Guid.Empty || !areaIds.Add(aid)))
-                throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}'의 areaId가 비었거나 중복됩니다 ({aid}).");
+            if (area.SourceId == Guid.Empty)
+                throw new InvalidDataException("프로젝트 파일의 영역 식별자가 비어 있습니다.");
+            if (area.SourceId is Guid areaId && !areaIds.Add(areaId))
+                throw new InvalidDataException($"프로젝트 파일에 중복 영역 식별자가 있습니다: {areaId}");
+
             var seqs = new HashSet<int>();
-            foreach (var t in a.Tasks)
+            foreach (var task in area.Tasks)
             {
-                if (t.TaskId is Guid tid && (tid == Guid.Empty || !taskIds.Add(tid)))
-                    throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}' 작업 #{t.Seq}의 taskId가 비었거나 중복됩니다 ({tid}).");
-                if (!seqs.Add(t.Seq))
-                    throw new InvalidDataException($"프로젝트 파일 손상: 영역 '{a.Name}'에 seq {t.Seq}가 중복됩니다.");
+                if (!seqs.Add(task.Seq))
+                    throw new InvalidDataException($"영역 '{area.Name}'에 중복 작업 순번이 있습니다: {task.Seq}");
+                if (task.SourceId == Guid.Empty)
+                    throw new InvalidDataException("프로젝트 파일의 작업 식별자가 비어 있습니다.");
+                if (task.SourceId is Guid taskId && !taskIds.Add(taskId))
+                    throw new InvalidDataException($"프로젝트 파일에 중복 작업 식별자가 있습니다: {taskId}");
             }
         }
     }

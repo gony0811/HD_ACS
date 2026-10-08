@@ -52,7 +52,11 @@ cd D:\Github\HD_ACS\docker
 docker compose up -d
 # dev-postgres(5432)·dev-rabbitmq(1883/5672/15672) 확인
 docker ps
+# 서버와 같은 조건(TCP+비밀번호)으로 접속 확인 — "1 row"면 정상
+docker exec -e PGPASSWORD=postgres dev-postgres psql -h 127.0.0.1 -U postgres -d hdacs -c "select 1"
 ```
+> `.env` 값은 볼륨 최초 생성 때만 반영된다. 위 확인이 `password authentication failed`면
+> `docker exec dev-postgres psql -U postgres -c "ALTER USER postgres PASSWORD 'postgres';"`로 맞춘다(데이터 유지).
 
 - PostgreSQL 볼륨이 **비어 있는 최초 기동**이면 `db/schema.sql`이 **자동 적용**된다(3단계 생략 가능).
 - RabbitMQ는 MQTT 플러그인이 활성화돼 1883에서 MQTT를 서비스한다.

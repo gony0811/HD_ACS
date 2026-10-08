@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HD.Acs.App.Hubs;
+using HD.Acs.App.Planning;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Geometry;
 using HD.Acs.Core.Integration;
@@ -61,6 +62,19 @@ builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 });
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
+
+// 계획 자연어 어시스턴트 [ADR-013] — Ollama(로컬 LLM). Acs:Llm:Enabled=false(기본)면 어시스턴트 API는 503.
+// 변경안 엔진(PlanChangeSetEngine)은 LLM 없이도 동작(연산 JSON 직접 미리보기·적용).
+var llmOptions = builder.Configuration.GetSection("Acs:Llm").Get<LlmOptions>() ?? new LlmOptions();
+builder.Services.AddSingleton(llmOptions);
+builder.Services.AddHttpClient(OllamaClient.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri(llmOptions.BaseUrl);
+    c.Timeout = TimeSpan.FromSeconds(llmOptions.TimeoutSec);
+});
+builder.Services.AddSingleton<OllamaClient>();
+builder.Services.AddScoped<PlanChangeSetEngine>();
+builder.Services.AddScoped<PlanningAssistantService>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
@@ -156,6 +170,14 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, Acs
         orderby sa.SortOrder, a.WallCode, a.Name
         select new { sa.AreaId, a.WallCode, a.Level, a.Name, sa.SortOrder }).ToListAsync());
 });
+
+// 계획 정차점(도면 프레임) — 운영 화면 로봇 상태 카드가 현재 위치와 비교해 정차점을 사전 평가한다.
+// 배차와 같은 산출식(InspectionDispatcher.StationDrawingOf)·같은 영역 선택(연결 0건=선창 전체).
+app.MapGet("/api/scenarios/{scenarioId:guid}/area-stations",
+    async (Guid scenarioId, InspectionDispatcher dispatcher, CancellationToken ct) =>
+        await dispatcher.GetPlannedStationsAsync(scenarioId, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"시나리오 '{scenarioId}' 없음" }));
 
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
 app.MapPut("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, SetScenarioAreasRequest req, AcsDbContext db) =>
@@ -255,33 +277,18 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         ? req.Corners
         : new[] { new[] { req.UMin, req.VMin }, new[] { req.UMax, req.VMin }, new[] { req.UMax, req.VMax }, new[] { req.UMin, req.VMax } })
         .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
-    if (corners.Count < 3)
-        return Results.BadRequest(new { error = "영역 코너가 3점 미만입니다." });
-
     var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
     if (wall is null)
         return Results.NotFound(new { error = $"면이 없습니다: {req.TankId}/{req.WallCode} (선창 파라미터를 먼저 등록하세요)." });
-    // 전 코너가 면 범위 내인지 검사(대각 2점만 검사하면 회전 사각형이 면 밖으로 나가도 통과됨).
-    if (corners.Any(p => !HD.Acs.Core.Planning.AreaGeometry.InBounds(p[0], p[1], 0, 0, wall.ULen, wall.VLen)))
-        return Results.BadRequest(new { error = $"영역 코너가 면 범위를 벗어났습니다 (면 {req.WallCode}: u∈[0,{wall.ULen:0.###}], v∈[0,{wall.VLen:0.###}])." });
-    var (uMin, vMin, uMax, vMax) = HD.Acs.Core.Planning.AreaGeometry.Bbox(corners);
-    if (uMax - uMin < 1e-6 || vMax - vMin < 1e-6)
-        return Results.BadRequest(new { error = "영역이 퇴화(면적 0)했습니다 — 유효한 사각형 4점을 입력하세요." });
-    if (!HD.Acs.Core.Planning.AreaGeometry.WithinMaxSize(uMin, vMin, uMax, vMax))
-        return Results.BadRequest(new { error = "AREA 최대 크기는 벽면 로컬 u/v 각 1.44m(1440mm)입니다." });
+    if (AreaRules.ValidateCorners(corners, req.WallCode, wall.ULen, wall.VLen, out var bb) is { } cornerViolation)
+        return Results.BadRequest(new { error = cornerViolation });
+    var (uMin, vMin, uMax, vMax) = bb;
 
     // ── 층 자동 유도 [SPEC v3.1 §5-A] — 요청의 Level은 무시하고 영역 z범위(코너 v의 min/max)로 유도한다 ──
     var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
     if (g is null)
         return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {req.TankId} (파라미터를 먼저 등록하세요)." });
-    var geom = new HD.Acs.Core.Planning.TankGeometry(
-        g.LengthL, g.WFloor, g.ThetaLow, g.HLow, g.HWall, g.ThetaUp, g.HUp,
-        System.Text.Json.JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(),
-        g.OriginOx, g.OriginOy, g.ReachZMin, g.ReachZMax);
-    var vAxis = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
-    var origin = System.Text.Json.JsonSerializer.Deserialize<double[]>(wall.Origin)!;
-    var (zLo, zHi) = HD.Acs.Core.Planning.LevelBands.AreaZRange(origin[2], vAxis[2], vMin, vMax);
-    int? derivedLevel = HD.Acs.Core.Planning.LevelBands.Derive(zLo, zHi, geom.LevelBandList(), out var reason);
+    int? derivedLevel = AreaRules.DeriveLevel(g, wall, vMin, vMax, out var reason);
     if (derivedLevel is null)
         return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
 
@@ -308,6 +315,55 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
     db.InspectionAreas.Add(area);
     await db.SaveChangesAsync();
     return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
+});
+
+// 영역 수정 — **areaId를 유지한 채** 이름·4점 코너·정차 설정을 고친다. 삭제→재등록은 area_task까지 CASCADE로 지워
+// taskId(SAIGE productId·attempt 누적의 영구 키)가 끊기므로 수정 경로를 따로 둔다 [SAIGE v2.6 §2.5].
+// 면(wallCode)은 바꿀 수 없다 — 작업 (u,v)가 면 기준이다. 층은 새 코너로 다시 유도한다.
+// 기존 작업이 새 폴리곤 밖으로 나가면 거부(작업 등록 규칙 = 영역 내부). 진행 중 run 무영향(work_item 스냅샷).
+app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req, AcsDbContext db) =>
+{
+    var area = await db.InspectionAreas.Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId);
+    if (area is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    if (string.IsNullOrWhiteSpace(req.Name))
+        return Results.BadRequest(new { error = "영역 이름은 빈 값일 수 없습니다." });
+    var corners = (req.Corners ?? Array.Empty<double[]>())
+        .Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList();
+
+    var wall = await db.Walls.AsNoTracking().FirstAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode);
+    if (AreaRules.ValidateCorners(corners, area.WallCode, wall.ULen, wall.VLen, out var bb) is { } cornerViolation)
+        return Results.BadRequest(new { error = cornerViolation });
+    var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == area.TankId);
+    if (g is null)
+        return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {area.TankId}." });
+    int? derivedLevel = AreaRules.DeriveLevel(g, wall, bb.MinV, bb.MaxV, out var reason);
+    if (derivedLevel is null)
+        return Results.BadRequest(new { error = $"층 유도 실패 (면 {area.WallCode}): {reason}", reason });
+    if (req.StationStandoffM is < 0)
+        return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
+    var outside = AreaRules.TasksOutside(corners, area.Tasks);
+    if (outside.Count > 0)
+        return Results.BadRequest(new { error = $"기존 작업이 새 영역 밖으로 나갑니다 (seq {string.Join(", ", outside)}) — 작업을 먼저 옮기거나 영역을 넓히세요." });
+    if (await db.InspectionAreas.AsNoTracking().AnyAsync(a =>
+            a.AreaId != areaId && a.TankId == area.TankId && a.WallCode == area.WallCode && a.Name == req.Name))
+        return Results.Conflict(new { error = $"면 {area.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+
+    int oldLevel = area.Level;
+    area.Name = req.Name;
+    area.Corners = System.Text.Json.JsonSerializer.Serialize(corners);
+    (area.UMin, area.VMin, area.UMax, area.VMax) = bb;
+    area.Level = derivedLevel.Value;
+    area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
+    area.StationStandoffM = req.StationStandoffM;
+    if (req.SortOrder is int so) area.SortOrder = so;
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_UPDATE", Target = areaId.ToString(),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new
+        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { areaId, level = area.Level });
 });
 
 app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? level, AcsDbContext db) =>
@@ -341,6 +397,10 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     // seamType 5종·영역 내부 판정 — PUT과 공통 규칙(AreaTaskRules). CROSS/CORNER 계열은 계획 데이터로 저장·전달만.
     if (AreaTaskRules.Validate(req.SeamType, a.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    if (AreaTaskRules.ValidatePoints(req.SeamType, a.Corners, req.Points) is { } pv)
+        return Results.BadRequest(new { error = pv });
+    if (string.IsNullOrWhiteSpace(req.SectionDxfId) || string.IsNullOrWhiteSpace(req.ProfileId))
+        return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
     // taskId 보존 [SAIGE v2.6 §2.5 / VDA §8.6] — taskId는 용접선 1구간의 **영구 식별자**(도면·진행률·촬영 이미지를 잇는 키)라
     // 프로젝트 파일(.hdacs) 재적재 때 같은 값으로 복원해야 한다. 지정 시 그 값으로 등록하되, 이미 존재하면 거부(덮어쓰기 금지).
     if (req.TaskId == Guid.Empty)
@@ -353,8 +413,9 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     var task = new HD.Acs.Data.Entities.AreaTaskEntity
     {
         TaskId = req.TaskId ?? Guid.NewGuid(), AreaId = areaId, Seq = seq, Name = req.Name,
-        SeamType = (req.SeamType ?? "LINE").ToUpperInvariant(),   // param_schema enum이 대문자 — 소문자 저장 시 run 시작 때 스키마 위반
+        SeamType = AreaTaskRules.Normalize(req.SeamType),   // canonical 저장(대문자+legacy 별칭 매핑) — 소문자/legacy 저장 시 run 시작 때 param_schema 위반
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
+        Points = req.Points is { Length: > 0 } ? JsonSerializer.Serialize(req.Points) : null,   // CROSS 가지 끝점 [VDA §8.5.1]
         SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
     };
     db.AreaTasks.Add(task);
@@ -362,12 +423,33 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
     return Results.Ok(new { taskId = task.TaskId, seq });
 });
 
+// CROSS3/4 교차 기하 미리보기 [VDA §8.5.1, N13] — 운영자가 전개도에서 그린 중심·가지(면-로컬 u,v)로
+// 회전(CROSS3_R*)을 유도하고 AMR 면-로컬 mm 점을 정렬해 돌려준다. **비영속**(DB 무변경 — changesets/preview 패턴).
+// 발행 경로(InspectionDispatcher.BuildStop)와 같은 CrossGeometry 를 쓰므로 화면 회전 = 실제 발행 회전.
+app.MapPost("/api/areas/{areaId:guid}/cross-preview", async (Guid areaId, CrossPreviewRequest req, AcsDbContext db) =>
+{
+    var area = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
+    if (area is null) return Results.NotFound(new { error = $"area '{areaId}' 없음" });
+    if (req.Arms is null || req.Arms.Length == 0)
+        return Results.BadRequest(new { error = "arms(교차 가지 끝점)가 비어 있습니다." });
+    var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode);
+    if (wall is null) return Results.NotFound(new { error = $"면 '{area.WallCode}' 없음" });
+
+    var normal = JsonSerializer.Deserialize<double[]>(wall.Normal)!;
+    var wallU = JsonSerializer.Deserialize<double[]>(wall.UAxis)!;
+    var wallV = JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
+    // 회전 유도 + AMR 점 정렬 = Core 정본(발행 경로와 공유). 바닥/천장은 frameOk=false.
+    var r = CrossGeometry.Preview(AreaTaskRules.Normalize(req.SeamType), req.CenterU, req.CenterV, req.Arms, wallU, wallV, normal);
+    return Results.Ok(new { frameOk = r.FrameOk, seamType = r.SeamType, points = r.Points, snapResidualDeg = r.SnapResidualDeg });
+});
+
 app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbContext db) =>
 {
     var tasks = await db.AreaTasks.AsNoTracking().Where(t => t.AreaId == areaId).OrderBy(t => t.Seq).ToListAsync();
     return Results.Ok(tasks.Select(t => new
     {
-        t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId
+        t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
+        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
     }));
 });
 
@@ -383,6 +465,14 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 
     if (AreaTaskRules.Validate(req.SeamType, area.Corners, req.StartU, req.StartV, req.EndU, req.EndV) is { } violation)
         return Results.BadRequest(new { error = violation });
+    // points: 새 seamType(또는 기존)에 대해 검증 — req.Points 지정 시 그 값, 아니면 기존값 기준.
+    string effSeam = req.SeamType is not null ? AreaTaskRules.Normalize(req.SeamType) : t.SeamType;
+    double[][]? effPoints = req.Points ?? (t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points));
+    if (AreaTaskRules.ValidatePoints(effSeam, area.Corners, effPoints) is { } pv)
+        return Results.BadRequest(new { error = pv });
+    if (req.SectionDxfId is not null && string.IsNullOrWhiteSpace(req.SectionDxfId) ||
+        req.ProfileId is not null && string.IsNullOrWhiteSpace(req.ProfileId))
+        return Results.BadRequest(new { error = "sectionDxfId와 profileId는 빈 값일 수 없습니다." });
     if (req.Seq is < 1)
         return Results.BadRequest(new { error = "seq 는 1 이상이어야 합니다 (seqInGroup 계약)." });
     if (req.Seq is int newSeq && newSeq != t.Seq &&
@@ -392,7 +482,10 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
     t.StartU = req.StartU; t.StartV = req.StartV; t.EndU = req.EndU; t.EndV = req.EndV;
     if (req.Seq is int s) t.Seq = s;
     if (req.Name is not null) t.Name = req.Name.Length == 0 ? null : req.Name;   // "" = 이름 지움
-    if (req.SeamType is not null) t.SeamType = req.SeamType.ToUpperInvariant();
+    if (req.SeamType is not null) t.SeamType = AreaTaskRules.Normalize(req.SeamType);
+    // points: 지정 시 교체([]=지움), 미지정 시 — 새 seamType이 비-CROSS로 바뀌면 자동 비움(stale 방지), 아니면 유지.
+    if (req.Points is not null) t.Points = req.Points.Length > 0 ? JsonSerializer.Serialize(req.Points) : null;
+    else if (!t.SeamType.StartsWith("CROSS", StringComparison.Ordinal)) t.Points = null;
     if (req.SectionDxfId is not null) t.SectionDxfId = req.SectionDxfId;
     if (req.ProfileId is not null) t.ProfileId = req.ProfileId;
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
@@ -413,6 +506,18 @@ app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext 
     await db.SaveChangesAsync();
     return Results.Ok();
 });
+
+// ── 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기, DB 무변경) → 운영자 승인 → 적용(전부 또는 전무) ──
+app.MapGet("/api/integrations/llm", async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
+
+app.MapPost("/api/planning/assistant/propose", async (ProposeRequest req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.ProposeAsync(req, ct)));
+
+app.MapPost("/api/planning/changesets/preview", async (PreviewOpsRequest req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.PreviewOpsAsync(req, ct)));
+
+app.MapPost("/api/planning/changesets/{id:guid}/apply", async (Guid id, ApplyChangeSetRequest? req, PlanningAssistantService svc, CancellationToken ct) =>
+    await PlanningCall(() => svc.ApplyAsync(id, req ?? new ApplyChangeSetRequest(null), ct)));
 
 // 도면 seam → 스테이션/TASK 자동 생성 [PHASE2 WP-2, DORMANT — 운영 워크플로우 제외]. 유효 T_W_D 없으면 400.
 app.MapPost("/api/scenarios/{scenarioId:guid}/generate-from-seams",
@@ -505,6 +610,7 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 
 // run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
@@ -518,10 +624,15 @@ app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, MissionService mi
 // run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차 [INSPECTION_SCENARIO §3.1]
 app.MapPost("/api/runs/{runId:guid}/resume", async (Guid runId, MissionService missions) =>
 {
-    try { await missions.ResumeRunAsync(runId); return Results.Ok(new { runId, state = "RUNNING" }); }
+    try
+    {
+        var r = await missions.ResumeRunAsync(runId);
+        return Results.Ok(new { runId, state = "RUNNING", refreshedStops = r.Refreshed, skippedStops = r.Skipped });
+    }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -780,6 +891,18 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
     return cal is null ? Results.NotFound() : Results.Ok(cal);
 });
 
+// 계획 어시스턴트 API 공통 예외 → HTTP 상태 매핑
+static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
+{
+    try { return Results.Ok(await call()); }
+    catch (PlanningAssistantService.LlmDisabledException ex) { return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status503ServiceUnavailable); }
+    catch (PlanningAssistantService.ChangeSetNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (PlanChangeSetEngine.PlanConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (PlanningAssistantService.LlmReplyException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (HttpRequestException ex) { return Results.Json(new { error = $"LLM(Ollama) 호출 실패: {ex.Message}" }, statusCode: StatusCodes.Status502BadGateway); }
+}
+
 app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
@@ -807,10 +930,18 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
     double[][]? Corners = null, double? StationStandoffM = null,
     Guid? AreaId = null);   // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
+// 영역 수정(PUT) — 이름·코너·정차 전체 교체(정차 null=수동 지정 해제, 이격 null=서버 기본). SortOrder null=유지. 면·areaId 불변.
+public sealed record UpdateAreaRequest(string Name, double[][] Corners,
+    double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
+    int? SortOrder = null, string? UserId = null);
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
-    Guid? TaskId = null);   // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+    Guid? TaskId = null,    // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
+    double[][]? Points = null);   // (선택) CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
 // 검사 작업 수정(PUT) — 좌표 4값 필수, 나머지 null=기존값 유지. taskId·areaId는 바뀌지 않는다.
 public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double EndU, double EndV,
     int? Seq = null, string? Name = null, string? SeamType = null, string? SectionDxfId = null, string? ProfileId = null,
-    string? UserId = null);
+    string? UserId = null,
+    double[][]? Points = null);   // (선택) CROSS 가지 끝점 — null=기존 유지, []=지움 [VDA §8.5.1]
+// CROSS 교차 기하 미리보기 요청 [VDA §8.5.1] — 중심·가지(면-전체 v), seamType=CROSS3|CROSS4(계열)
+public sealed record CrossPreviewRequest(string SeamType, double CenterU, double CenterV, double[][] Arms);

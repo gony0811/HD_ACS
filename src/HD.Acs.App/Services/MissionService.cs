@@ -42,6 +42,9 @@ public sealed class MissionService
             throw new RunConflictException(
                 $"로봇 {robotId}에 진행 중인 run({active})이 있습니다 — 이어하기(resume) 또는 중단(abort) 후 시작하세요.");
 
+        // AMR 미연결이면 run을 만들지 않고 알람 — 받을 로봇 없이 Order가 나가 "무반응"이 되는 것을 막는다
+        await _dispatcher.EnsureRobotConnectedAsync(robotId, "미션 시작", ct);
+
         var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
 
         var run = new ScenarioRunEntity
@@ -81,6 +84,7 @@ public sealed class MissionService
             m.EndedAt = DateTimeOffset.UtcNow;
         }
         await _db.SaveChangesAsync(ct);
+        await _dispatcher.PushRunStateAsync(runId, run.State, ct);
         _log.LogInformation("Run {Run} 중단(ABORTED) — 완료 이력은 보존, resume으로 이어하기 가능.", runId);
     }
 
@@ -88,12 +92,20 @@ public sealed class MissionService
     /// run 재개 — DONE/SKIPPED는 보존(재검사 없음), 중단 시점에 종결 못 한 DISPATCHED는 PENDING으로
     /// 리셋해 재검사, 남은 PENDING만 greedy 재배차. [INSPECTION_SCENARIO §3.1 재개 규정]
     /// </summary>
-    public async Task ResumeRunAsync(Guid runId, CancellationToken ct = default)
+    public async Task<ResumeSummary> ResumeRunAsync(Guid runId, CancellationToken ct = default)
     {
         var run = await _db.ScenarioRuns.Include(r => r.Missions).FirstOrDefaultAsync(r => r.RunId == runId, ct)
                   ?? throw new KeyNotFoundException($"run '{runId}' 없음");
         if (run.State == "COMPLETED")
             throw new RunStateException("완료된 run은 재개할 수 없습니다 — 새 run으로 시작하세요(전체 재검사 사이클).");
+
+        // 가장 최근 run만 재개 — 그 뒤에 시작한 run이 있으면 계획이 바뀌었을 가능성이 크고,
+        // 오래된 run을 되살리면 운영자가 의도하지 않은 작업이 재개된다(2026-10-02 현장: 전날 중단 run이 재개됨).
+        var newer = await _db.ScenarioRuns.AsNoTracking()
+            .AnyAsync(r => r.RobotId == run.RobotId && r.RunId != runId && r.StartedAt > run.StartedAt, ct);
+        if (newer)
+            throw new RunStateException(
+                "이 run 이후에 시작한 run이 있어 재개할 수 없습니다 — 가장 최근 run만 이어할 수 있습니다. '미션 시작'으로 새로 시작하세요.");
 
         var otherActive = await _db.ScenarioRuns.AsNoTracking()
             .Where(r => r.RobotId == run.RobotId && r.RunId != runId
@@ -103,15 +115,21 @@ public sealed class MissionService
             throw new RunConflictException(
                 $"로봇 {run.RobotId}에 다른 진행 중 run({otherActive})이 있습니다 — 먼저 중단하세요.");
 
-        // 배차만 되고 종결 못 한 정차 복구 — attempts는 유지(실패 정책 연속성)
-        var stale = await _db.WorkItems
-            .Where(w => w.RunId == runId && w.Status == "DISPATCHED").ToListAsync(ct);
-        foreach (var w in stale) { w.Status = "PENDING"; w.OrderId = null; w.UpdatedAt = DateTimeOffset.UtcNow; }
+        await _dispatcher.EnsureRobotConnectedAsync(run.RobotId, "이어하기", ct);
 
-        var pending = await _db.WorkItems.CountAsync(
-            w => w.RunId == runId && w.Status == "PENDING", ct) ;
-        if (pending == 0 && stale.Count == 0)
+        // 배차만 되고 종결 못 한 정차 복구 — attempts는 유지(실패 정책 연속성)
+        var open = await _db.WorkItems
+            .Where(w => w.RunId == runId && (w.Status == "DISPATCHED" || w.Status == "PENDING")).ToListAsync(ct);
+        if (open.Count == 0)
             throw new RunStateException("재개할 작업이 없습니다(전부 종결됨).");
+        int stale = 0;
+        foreach (var w in open.Where(w => w.Status == "DISPATCHED"))
+        {
+            w.Status = "PENDING"; w.OrderId = null; w.UpdatedAt = DateTimeOffset.UtcNow; stale++;
+        }
+
+        // 남은 정차의 좌표·액션을 현재 계획/캘리브레이션으로 다시 계산 — 시작 시점 스냅샷으로 움직이지 않는다
+        var (refreshed, skipped) = await _dispatcher.RefreshOpenItemsAsync(run, open, ct);
 
         run.State = "RUNNING";
         run.EndedAt = null;
@@ -119,30 +137,29 @@ public sealed class MissionService
             m.EndedAt = null;   // 상태는 재배차 시 디스패처가 Released/Running으로 갱신
         await _db.SaveChangesAsync(ct);
 
-        _log.LogInformation("Run {Run} 재개 — DISPATCHED 리셋 {Stale}건, 잔여 PENDING {Pending}건.",
-            runId, stale.Count, pending + stale.Count);
+        _log.LogInformation("Run {Run} 재개 — DISPATCHED 리셋 {Stale}건, 현재 계획으로 재계산 {Refreshed}건, 재계산 불가 스킵 {Skipped}건.",
+            runId, stale, refreshed, skipped);
         await _dispatcher.DispatchNextAsync(runId, ct);
+        return new ResumeSummary(refreshed, skipped);
     }
 
-    /// <summary>로봇의 가장 최근 재개 가능 run(RUNNING/WAITING_FLOOR_TRANSFER/ABORTED 중 미종결 작업 보유). 없으면 null.</summary>
+    /// <summary>로봇의 가장 최근 run이 재개 가능(미완료 + 미종결 작업 보유)하면 그 run, 아니면 null.
+    /// 더 오래된 run은 후보로 삼지 않는다 — 재개는 직전 작업을 이어갈 때만 쓴다.</summary>
     public async Task<object?> FindResumableRunAsync(string robotId, CancellationToken ct = default)
     {
-        var candidates = await _db.ScenarioRuns.AsNoTracking()
-            .Where(r => r.RobotId == robotId && r.State != "COMPLETED")
-            .OrderByDescending(r => r.StartedAt)
-            .Select(r => new { r.RunId, r.ScenarioId, r.State, r.StartedAt })
-            .Take(5).ToListAsync(ct);
-        foreach (var r in candidates)
-        {
-            var counts = await _db.WorkItems.Where(w => w.RunId == r.RunId)
-                .GroupBy(w => w.Status).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct);
-            int Of(string s) => counts.FirstOrDefault(c => c.Key == s)?.N ?? 0;
-            int open = Of("PENDING") + Of("DISPATCHED");
-            if (open == 0) continue;
-            return new { r.RunId, r.ScenarioId, r.State, r.StartedAt,
-                         Pending = open, Done = Of("DONE"), Skipped = Of("SKIPPED") };
-        }
-        return null;
+        var r = await _db.ScenarioRuns.AsNoTracking()
+            .Where(x => x.RobotId == robotId)
+            .OrderByDescending(x => x.StartedAt)
+            .Select(x => new { x.RunId, x.ScenarioId, x.State, x.StartedAt })
+            .FirstOrDefaultAsync(ct);
+        if (r is null || r.State == "COMPLETED") return null;
+        var counts = await _db.WorkItems.Where(w => w.RunId == r.RunId)
+            .GroupBy(w => w.Status).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct);
+        int Of(string s) => counts.FirstOrDefault(c => c.Key == s)?.N ?? 0;
+        int open = Of("PENDING") + Of("DISPATCHED");
+        if (open == 0) return null;
+        return new { r.RunId, r.ScenarioId, r.State, r.StartedAt,
+                     Pending = open, Done = Of("DONE"), Skipped = Of("SKIPPED") };
     }
 
     /// <summary>
@@ -358,3 +375,6 @@ public sealed class RunConflictException(string message) : Exception(message);
 
 /// <summary>run 상태상 불가한 요청(완료 run 재개 등) — 400으로 매핑.</summary>
 public sealed class RunStateException(string message) : Exception(message);
+
+/// <summary>재개 결과 — 현재 계획으로 다시 계산한 정차 수 / 재계산 불가로 건너뛴 정차 수.</summary>
+public sealed record ResumeSummary(int Refreshed, int Skipped);

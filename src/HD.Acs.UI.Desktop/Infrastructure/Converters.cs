@@ -73,9 +73,9 @@ public sealed class PointConverter : IValueConverter
 }
 
 /// <summary>
-/// 층 진행 레일 Kind(done/run/wait/fail) → 브러시. WPF DataTrigger 대체.
+/// 층 진행 레일·운영 상태 Kind(done/run/wait/fail + warn/info) → 브러시. WPF DataTrigger 대체.
 /// ConverterParameter="bar"(ProgressBar 채움: done=Good, fail=Error, wait=Muted, 그 외 Accent)
-/// | "text"(라벨: done=Good, run=Accent, fail=Error, 그 외 Muted). 앱 리소스 브러시를 조회한다.
+/// | "text"(라벨: done=Good, run=Accent, fail=Error, warn=WarnFg, info=Text, 그 외 Muted). warn은 bar에서도 WarnFg. 앱 리소스 브러시를 조회한다.
 /// </summary>
 public sealed class KindToBrushConverter : IValueConverter
 {
@@ -87,6 +87,8 @@ public sealed class KindToBrushConverter : IValueConverter
         {
             ("done", _) => "AppGoodBrush",
             ("fail", _) => "AppErrorBrush",
+            ("warn", _) => "AppWarnFgBrush",
+            ("info", false) => "AppTextBrush",
             ("wait", true) => "AppMutedTextBrush",
             ("run", false) => "AppAccentBrush",
             (_, true) => "AppAccentBrush",
@@ -108,6 +110,19 @@ public sealed class BoolToCursorConverter : IValueConverter
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is true ? Cross : Cursor.Default;
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        BindingOperations.DoNothing;
+}
+
+/// <summary>bool → 브러시(True/False 각각 지정). 어시스턴트 대화 말풍선(운영자/응답) 배경.</summary>
+public sealed class BoolToBrushConverter : IValueConverter
+{
+    public IBrush? TrueBrush { get; set; }
+    public IBrush? FalseBrush { get; set; }
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? TrueBrush : FalseBrush;
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         BindingOperations.DoNothing;

@@ -8,7 +8,23 @@ public sealed record ProjectDoc(
     int Version,
     string TankId,
     GeometryDoc Geometry,
-    AreaDoc[] Areas);
+    AreaDoc[] Areas,
+    CalibrationDoc[]? Calibrations = null,
+    ScenarioDoc[]? Scenarios = null);
+
+/// <summary>층별 캘리브레이션과 재계산 가능한 원본 대응점.</summary>
+public sealed record CalibrationDoc(
+    string MapId,
+    CalibrationPointDoc[] Points,
+    double Tx, double Ty, double YawRad, double RmsM);
+
+public sealed record CalibrationPointDoc(
+    double DrawingXM, double DrawingYM, double MapX, double MapY);
+
+/// <summary>시나리오와 영역 선택. AreaIds는 같은 파일의 AreaDoc.SourceId를 참조한다.</summary>
+public sealed record ScenarioDoc(
+    string Name,
+    Guid[] AreaIds);
 
 /// <summary>선창 3D 정의 파라미터 [SPEC v3 §2] — 면은 열기 시 재생성되므로 저장하지 않는다.</summary>
 public sealed record GeometryDoc(
@@ -25,13 +41,12 @@ public sealed record AreaDoc(
     TaskDoc[] Tasks,
     double[][]? Corners = null,          // 임의 4점 사각형. 구파일(null)=bbox 사각형 폴백
     double? StationStandoffM = null,     // 정차 이격 [m]. 구파일(null)=서버 기본
-    Guid? AreaId = null);                // v3: 영역 식별자 보존. 구파일(null)=열 때 서버가 새로 발급
+    Guid? SourceId = null);              // v3: 시나리오-영역 연결 복원용 파일 내부 ID
 
 /// <summary>검사 작업 스냅샷 (벽면-로컬 u,v).</summary>
 public sealed record TaskDoc(
     int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
     string SectionDxfId, string ProfileId,
-    // v3: 용접선 1구간의 **영구 식별자** [SAIGE v2.6 §2.5] — 도면·진행률·촬영 이미지(productId)를 잇는 키라
-    // 파일을 다시 열어도 같은 값이어야 한다. 구파일(null)=열 때 서버가 새로 발급(이력 연결 끊김).
-    Guid? TaskId = null);
+    Guid? SourceId = null,
+    double[][]? Points = null);          // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m [VDA §8.5.1]. 구파일=null

@@ -138,7 +138,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType":            { "enum": ["LINE", "CROSS3", "CROSS4", "CORNER2", "CORNER3"] },
+        "seamType":            { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3"] },
         "points":              { "type": "array" },
         "sectionDxfId":        { "type": "string" },
         "inspectionProfileId": { "type": "string" },
@@ -259,7 +259,7 @@ CREATE TABLE ref.inspection_area (
   v_min         double precision NOT NULL,
   u_max         double precision NOT NULL,
   v_max         double precision NOT NULL,
-  station_x     double precision,          -- 정차 수동 오버라이드 (전역 x,y + theta). FL/CL은 필수(§5)
+  station_x     double precision,          -- 정차 수동 오버라이드 (도면 프레임 x,y + theta; 발행 시 T_W_D 적용). FL/CL은 필수(§5)
   station_y     double precision,
   station_theta double precision,
   station_standoff_m double precision,     -- 정차 이격 [m] — 영역 중심에서 내부향 법선 수평성분 방향. NULL=설정 기본
@@ -283,6 +283,7 @@ CREATE TABLE ref.area_task (
   start_v        double precision NOT NULL,
   end_u          double precision NOT NULL,
   end_v          double precision NOT NULL,
+  points         jsonb,                     -- CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=start (VDA §8.5.1). LINE/CORNER=NULL
   section_dxf_id text NOT NULL DEFAULT '',
   profile_id     text NOT NULL DEFAULT '',
   created_by     text,
@@ -457,6 +458,8 @@ CREATE TABLE alarm.spec (           -- NA_A_ALARMSPEC 승계
 -- 알람 코드 시드 — alarm.alarm.alarm_code FK 대상 (코드에서 발행하는 코드는 반드시 여기 등재)
 INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('INSPECTION_SKIPPED', 'WARNING', '검사 스킵', '재시도 상한 초과로 검사 작업이 스킵됨 (디스패처 실패 정책)'),
+  ('ROBOT_NOT_CONNECTED', 'WARNING', 'AMR 미연결', 'AMR 미연결(connection ≠ ONLINE 또는 state 수신 끊김) 상태에서 미션 시작·이어하기 요청 — 명령을 보내지 않고 차단됨. HD_AMR 실행·MQTT 연결 확인'),
+  ('INSPECTION_FAILED',  'WARNING', '검사 실패', '정차 검사(용접선) 실패 — 자동 재시도하지 않음. detail.items에 용접선별 실패 사유, 재실행 여부는 작업자가 결정'),
   ('ORDER_REJECTED',     'WARNING', 'Order 거부', 'AMR이 Order 검증 실패로 폐기(orderValidationError) — 실패 정책 적용됨 [§4.5.2]'),
   ('LOCALIZATION_LOST',  'WARNING', '측위 상실', '맵 일치율 저하·재측위 실패 — 재시도 무의미, 재측위/수동 개입 필요 [§6.4]'),
   ('EQUIPMENT_ERROR',    'WARNING', '장비 이상', '코봇/카메라 등 온보드 장비 이상 보고 [§6.4]'),

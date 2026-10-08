@@ -78,6 +78,9 @@ cd docker
 docker compose up -d       # PostgreSQL :5432, RabbitMQ :5672/:15672(관리콘솔)/:1883(MQTT)
 ```
 
+> ⚠ `.env`의 `POSTGRES_*` 값(비밀번호·DB명)은 **볼륨이 처음 만들어질 때 한 번만** 반영된다. 이후 `.env`를 고쳐도 기존 볼륨에는 적용되지 않는다.
+> 서버 기본 접속 문자열은 `postgres/postgres/hdacs`이므로 값이 다르면 서버가 `password authentication failed`로 접속하지 못한다(§7 트러블슈팅).
+
 **방법 B — 로컬 설치**: PostgreSQL + Mosquitto (`brew install mosquitto` / `apt install mosquitto`).
 
 **DB 스키마 적용** (최초 1회, DB명은 appsettings 기본값 기준 `hdacs`):
@@ -178,6 +181,7 @@ tools/publish_desktop.sh linux-x64
 - 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
 - 파일 메뉴(새 프로젝트·열기·저장·다른 이름으로 저장)는 전 플랫폼에서 창 상단 앱바에 표시된다. macOS에서는 추가로 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장·⌘⇧S 다른 이름으로 저장)에도 같은 명령이 뜬다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
 - 3D 뷰 조작: 좌드래그 회전 · 우드래그(또는 휠 클릭 드래그) 이동 · 휠 확대/축소 · 우상단 "맞춤". 트랙패드는 두 손가락 스크롤=줌.
+- 표시 항목(3D 뷰·전개도 각각): 탭 안에서 **마우스 오른쪽 버튼을 드래그 없이 클릭**하면 메뉴가 뜬다 — 영역(채움·윤곽)·영역 이름·용접선·용접 시작·끝점·작업 순번(3D는 바닥 격자·지면 격자 추가)을 켜고 끌 수 있다. 여러 항목을 연달아 바꿔도 메뉴가 닫히지 않는다. 영역·작업이 많아 화면이 느리면 **"빠른 보기"**(윤곽·용접선만)를 쓴다. 기본값은 시작·끝점과 작업 순번이 꺼진 상태이며, 설정은 앱을 다시 켜면 기본값으로 돌아간다.
 - 3D 뷰의 로봇 마커(빨간 원) 중심에서 **3D 방향 화살표**(축+화살촉, 입체)가 뻗어 나온다 — AMR이 보고한 heading(VDA `agvPosition.theta`)을 층 캘리브레이션(T_W_D) yaw로 보정한 도면 방향. theta를 보고하지 않는 동안(부팅 직후 등)은 원만 보인다. 같은 값은 로봇 상태 카드 "방향(도면 x축 기준)"에 도 단위로 표시된다.
 
 ---
@@ -257,6 +261,19 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 ### 단계 5 — 모니터링·예외 대응
 
 - 실시간 현황은 SignalR `/hubs/monitoring` → UI 로봇상태/미션 패널에 푸시.
+- **계획 정차점까지 거리(운영 탭 좌측 로봇 상태 카드)** — 정차점을 미리 평가하는 용도: 로봇을 수동으로 정차하고 싶은 자리에 세우면
+  카드 하단에 비교 대상 정차점(진행 중 작업 영역, 없으면 같은 층의 가장 가까운 계획 정차점), **거리**(허용 오차 이내=녹 / 밖=노랑),
+  **벽 따라 좌현·우현(또는 선수·선미) 쪽 n m · 벽까지 n m(계획 이격) · 방향 차**가 실시간으로 표시된다. 기준 시나리오 = 진행 중 run의 시나리오,
+  없으면 미션 바에서 선택한 시나리오. 허용 오차는 서버 도착 판정과 같음(`Acs:Dispatch:AllowedDevXy` 0.08 m · `AllowedDevTheta` 0.07 rad≈4°).
+  정차점은 배차와 같은 식(영역 중심 + 벽 법선 × 정차 이격, 수동 지정 우선)으로 계산하며 비교는 도면 프레임이라 **층 캘리브레이션(T_W_D)이 필요**하다
+  (오차에 캘리브레이션 RMS가 섞인다). 영역을 수정하면 즉시, 다른 단말 수정분은 15초 안에 반영.
+- **알람 · 이벤트 패널(운영 탭 우측)** — 작업자가 지금 무슨 일이 일어나는지 한눈에 보는 곳:
+  - **현재 상태 카드**: 단계 헤드라인(대기 / 이동 준비 → 영역 / 주행 중 → 영역 / 검사 중 — 영역 / 층 이동 대기 / 작업 완료 / 작업 중단됨 /
+    로봇 수동 모드 / 로봇 오류 보고 중 / 비상정지 상태 / 로봇 통신 두절)과 다음에 할 일 안내, TASK 진행바·건수, 로봇 요약(운전 모드·주행·배터리·오류 수),
+    **최근 실패 사유**(빨간 글씨 — 예: `로봇 이동 오류 보고: W12_004 STO`). 색: 진행=시안 · 완료=녹 · 주의=노랑 · 오류=빨강 · 대기=회색.
+  - **이벤트 기록**(최신이 위, 최대 300건): 작업 지시·재시도 지시, 용접선 검사 시작/성공/실패(사유), 재시도 예정·건너뜀(사유), run 진행/완료/중단/층 이동 대기,
+    로봇 운전 모드·비상정지·오류·통신 변화, 주행 시작/정지, 미션 시작·재개·중단 명령 결과(실패 사유 포함).
+  - 앱을 다시 켜거나 다른 단말에서 시작한 run도 진행 중이면 자동으로 이어서 표시한다.
 - **작업 현황(실행 큐)**: 운영 탭 좌측 "작업 현황" 탭에서 정차 단위 항목(순번·영역·층·상태·재시도)을 실시간 확인
   (`WorkItemProgress` 푸시 — 배차/완료/재큐잉/스킵 시점). 같은 상태가 TankView 3D·전개도의 **영역 색**으로도 표시:
   대기=회색 · 배차중=파랑 · 완료=녹색 · 스킵/실패=빨강 (run이 없으면 계획 보기 기본 녹색). 층 진행 레일의 미니 바는
@@ -267,7 +284,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
   TankView의 **용접선 선분**도 같은 상태색으로 칠해진다(run 없으면 계획 기본 주황).
 - 상태의 진실은 항상 로봇(robot-is-truth): ACS는 state 보고의 lastNodeId/actionStates를 actionId로 대조해 DB를 갱신.
 - 통신 두절 시 connection Last Will로 OFFLINE 표시 — 로봇은 릴리즈된 Order를 계속 실행, 복귀 시 state 기준 재동기화.
-- **비상정지**: UI 툴바 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
+- **비상정지**: UI 툴바(■비상정지 — **확인 팝업 없이 누르는 즉시 전송**, 대상=로봇 상태 패널 선택 로봇) 또는 `POST /api/robots/{robotId}/emergency-stop` (instantAction 발행 + 감사로그).
   ⚠️ 이는 기능적 정지이며 안전 규격 정지가 아니다 — 인명 안전은 로봇 측 하드웨어 E-Stop 체계가 담당 [ADR-007].
 
 ---
@@ -308,6 +325,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 |---|---|
 | `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
 | `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
+| `GET /api/scenarios/{id}/area-stations` | 계획 정차점(도면 프레임, 배차와 같은 산출식) + 도착 허용 오차 — 로봇 상태 카드 "계획 정차점까지" 표시용. 없는 시나리오 404 |
 | `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
 | `GET /api/tanks/{tankId}/geometry` | **[SAIGE §4.6.1 대외 계약]** 선창 파라미터+유도값 — **mm 정수**·각도 deg, `derived{beam,wCeil,height}`. 없는 선창 404 |
 | `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
@@ -315,6 +333,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/areas/{areaId}/tasks` | **[SAIGE §4.6.3]** 용접선 — `taskId`·`seq`·시작/끝 (u,v) mm·`seamLength`·`seamType`. 없는 영역 404 |
 | `GET /api/tasks?tankId=&wallId=&level=&limit=&offset=` | **[이노로보틱스 요청 2026-09-22]** 면·층 단위 용접선 — 위 응답 + 소속 `areaId`·`areaName`·`wallId`·`wallCode`·`level`. `tankId` 필수, `wallId`(1~10)·`level` 미지정=전체. 화면 1장(면×층) = 조회 1회. 없는 선창 404 |
 | `GET /api/internal/tanks/…` · `/api/internal/areas…` | 위 4종의 **운영 UI 전용 판**(m 실수 + 법선·facingYaw·정차 오버라이드 등 화면용 필드). 계약 아님 — UI와 함께 바뀐다. 등록·수정·삭제(POST/PUT/DELETE)는 `/api/…` 그대로(m 입력) |
+| `PUT /api/areas/{areaId}` | 영역 수정 — **areaId·소속 작업(taskId) 유지**. `{ name, corners, stationX/Y/Theta, stationStandoffM }` 전체 교체(정차 null=수동 지정 해제), 면은 변경 불가·층은 재유도. 면 범위/1.44m/층 유도 실패·**기존 작업이 새 영역 밖**이면 400, 이름 중복 409, 없음 404. 화면: 계획 ▸ 영역·작업에서 영역 행 선택 → 폼에 값 채워짐 → [선택 영역 수정] |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
@@ -328,10 +347,21 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs/{runId}/task-actions` | 용접라인(액션) 단위 상태 조회 |
 | `POST /api/runs/{runId}/release-next` | 층 전환 후 다음 층 미션 릴리즈 |
 
+### 계획 자연어 어시스턴트 [ADR-013]
+| 메서드/경로 | 설명 |
+|---|---|
+| `GET /api/integrations/llm` | Ollama 연결 상태 — `enabled`·`baseUrl`·`model`·`reachable`·`modelAvailable`·`installedModels`·`lastError` |
+| `POST /api/planning/assistant/propose` | 자연어 → 변경안 미리보기(DB 무변경) — `{ tankId, prompt, wallCode?, level?, history? }` → `{ changeSetId?, reply, messages[], results[], creates, updates, deletes, failed, allOk, hasChanges }`. 비활성 503·Ollama 실패 502 |
+| `POST /api/planning/changesets/preview` | LLM 없이 연산 JSON 직접 미리보기 — `{ tankId, ops: [ { op: "gridAreas", wallCode: "B", level: 1, cellU: 1.4 }, … ] }` |
+| `POST /api/planning/changesets/{id}/apply` | 변경안 적용(전부 또는 전무) — `{ userId }`. 만료/재사용 404·미리보기 이후 데이터 변경 409·검증 실패 400 |
+
+**설정** (`appsettings.json` `Acs:Llm`): `Enabled`(기본 false) · `BaseUrl`(같은 서버 `http://127.0.0.1:11434` / 별도 GPU PC `http://{IP}:11434` — 그 PC에서 `OLLAMA_HOST=0.0.0.0:11434`로 외부 수신 허용·방화벽은 ACS 서버만) · `Model`(기본 `qwen2.5:14b-instruct`, 폐쇄망은 인터넷 PC에서 `ollama pull` 후 모델 폴더 복사) · `TimeoutSec` 120 · `MaxOps` 5000 · `ChangeSetTtlMin` 10.
+**화면**: 계획 ▸ 영역·작업 우측 "계획 어시스턴트" — 명령 입력 → 응답·변경 요약·실패 사유 → 전개도 점선(청록=생성·수정, 빨강=삭제, 선택 면만 표시) 확인 → [적용]/[버리기]. 좌표 v는 계획 폼과 같이 **층-로컬**. 명령 예: "PM 2층 영역 이름 앞에 P2- 붙여", "영역 F-SM-A0001 이름을 F-A0001로 바꿔"(새 이름 지정은 영역 1개만), "F-SM-로 시작하는 영역 이름에서 SM- 빼"(여러 개), "F-A0001과 같은 크기로 F-A0002를 바로 왼쪽에 만들고 작업도 똑같이"(copyArea — 서버가 원본 좌표로 계산, 왼쪽/오른쪽/위/아래=전개도 화면 기준), "F-A0002 영역을 아래로 0.3 옮겨"(방향+거리 — **명령문의 방향어(위로·아래·왼쪽·오른쪽 등)가 하나면 서버가 그 방향으로 고정**하고 대화창에 "방향: …" 줄로 알린다. 방향어가 없을 때만 "v를 -1.2"처럼 숫자 부호를 그대로 쓴다. 방향어가 둘 이상("왼쪽 위로")이면 LLM 해석을 따른다), "바닥 1층을 1.4m 격자로 채워", "SL 1층 작업 전부 CROSS4로", "좌현 수직벽 2층 영역을 시나리오 '좌현 정기'에 추가", "PM 3층 작업 몇 개야?".
+
 ### 실시간
 | 경로 | 설명 |
 |---|---|
-| `/hubs/monitoring` (SignalR) | 로봇 상태·미션 진행률·알람 푸시 |
+| `/hubs/monitoring` (SignalR) | 로봇 상태(운전 모드·eStop·오류 내용 포함)·run 상태(`RunState`)·미션/작업/액션 진행·진행률 푸시 |
 
 ---
 
@@ -344,6 +374,13 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | generate-from-seams 실패 | 유효 T_W_D 없음(의도된 명시적 실패) — 단계 1 먼저 수행 |
 | Order가 릴리즈되지 않음 | 릴리즈 가드 — 로봇 보고 층과 미션 층 불일치. 시뮬레이터 4번째 인자(mapId)를 미션 층과 맞출 것 |
 | NuGet 복원 실패 | 폐쇄망에서 nuget.org 접근 불가 — 패키지 캐시 복사 또는 `HDACS_NUGET_SOURCE` 로 내부 미러 지정 |
+| 작업 시작 후 아무 반응이 없음 | 알람·이벤트 패널의 현재 상태·최근 실패 사유 확인. `로봇 이동 오류 … STO`(구동 토크 차단)·`경로 막힘`·`모터 … 제한됨`이면 로봇 측 비상정지/안전 회로/구동 전원 해제, 운전 모드가 수동이면 자동으로 전환 후 다시 시작 (재시도 2회 실패한 영역은 건너뛰고 run이 종료됨) |
+| 컨테이너는 healthy인데 서버가 DB 연결 실패 | 서버와 같은 조건(TCP+비밀번호)으로 확인: `docker exec -e PGPASSWORD=postgres dev-postgres psql -h 127.0.0.1 -U postgres -d hdacs -c "select 1"`. `password authentication failed`면 볼륨이 다른 비밀번호로 초기화된 것 — 데이터 유지한 채 `docker exec dev-postgres psql -U postgres -c "ALTER USER postgres PASSWORD 'postgres';"` 후 서버 재시작(또는 `ConnectionStrings:Default` 비밀번호를 실제 값으로). ※ `-h` 없는 `docker exec … psql`은 내부 소켓이라 **비밀번호를 검사하지 않아** 정상처럼 보인다. 그 외: Windows에 PostgreSQL 서비스가 따로 있으면 5432를 가로챔(`Get-Service *postgres*` → 중지) |
+| 프로젝트 열기 실패 "AREA 최대 크기는 … 1.44m" | 1.44m 제한(SPEC v3 §4) 이전에 만든 구파일 — 열기 전 사전 검사가 위반 영역 이름·크기를 알려주며 DB는 바꾸지 않는다. 영역을 1.44m 이하로 나눈 파일(예: `tools/build_hdacs_area_tasks.py` 산출물)을 사용 |
+| 계획 어시스턴트가 503 | `Acs:Llm:Enabled=false` — 서버 설정에서 켜고 재시작 |
+| 계획 어시스턴트가 502·시간 초과 | Ollama 주소/방화벽(`GET /api/integrations/llm`의 `reachable`), 모델 미설치(`modelAvailable=false` → `ollama pull`), GPU 없는 PC에서 큰 모델 — 작은 모델로 바꾸거나 `TimeoutSec` 상향 |
+| 어시스턴트가 "변경합니다"라고만 답하고 [적용]이 안 뜸 | 대화창의 "해석:" 줄 확인 — 없거나 "실행할 변경을 만들지 못했습니다"면 LLM이 연산을 비워 보낸 것(서버가 1회 자동 재요청 후에도 비었음). 표현을 바꿔 다시 요청하거나 더 큰 모델 사용. 서버 콘솔 로그 `계획 어시스턴트 제안: … → 연산 N건 [...] 원문 …`에서 LLM 원문 확인 |
+| 어시스턴트 [적용]이 409 | 미리보기 후 다른 사람이 계획을 고침 — 같은 명령으로 다시 제안받기 |
 | solve 결과 RMS 경고 | 기준점 오입력 의심 — 점 목록 확인, 점 간 거리를 벌려 재캡처 |
 
 ---

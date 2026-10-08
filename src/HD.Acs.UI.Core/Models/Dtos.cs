@@ -38,7 +38,10 @@ public sealed record RobotStateDto(
     string? LastNodeId,
     bool Driving,
     int Errors,
-    double? ReportedTheta = null);   // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
+    double? ReportedTheta = null,    // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
+    string? OperatingMode = null,    // AUTOMATIC | SEMIAUTOMATIC | MANUAL | SERVICE | TEACHIN. 구서버 → null
+    string? EStop = null,            // safetyState.eStop: NONE | AUTOACK | MANUAL | REMOTE
+    string[]? ErrorDescriptions = null);   // 활성 errors "errorType: description" 목록
 
 /// <summary>SignalR "RobotConnection" 푸시. ConnectionState: ONLINE | OFFLINE | CONNECTIONBROKEN</summary>
 public sealed record RobotConnectionDto(
@@ -87,6 +90,21 @@ public sealed record TaskActionProgressDto(
     string Status,
     string? ResultDescription);
 
+/// <summary>GET /api/runs — 이력 목록.</summary>
+public sealed record RunSummaryDto(
+    Guid RunId, Guid ScenarioId, string? ScenarioName, string? TankId,
+    string RobotId, string State, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+
+/// <summary>GET /api/runs/{id}/results — TASK별 최종 성공/실패 이력.</summary>
+public sealed record RunResultsDto(Guid RunId, int Total, IReadOnlyList<RunTaskResultDto> Items);
+public sealed record RunTaskResultDto(
+    Guid TaskId, Guid AreaId, string? AreaName, int WallId, string? WallCode, int? Level,
+    string Status, int Attempts, DateTimeOffset OccurredAt, string? Description,
+    TaskSeamPositionDto? Position);
+public sealed record TaskSeamPositionDto(
+    int WallId, UvMmDto SeamStart, UvMmDto SeamEnd, int SeamLength, string SeamType);
+public sealed record UvMmDto(int U, int V);
+
 /// <summary>SignalR "WorkItemProgress" 푸시 — work_item 상태 변화 단건(배차/완료/재큐잉/스킵).</summary>
 public sealed record WorkItemProgressDto(
     Guid RunId,
@@ -94,7 +112,11 @@ public sealed record WorkItemProgressDto(
     Guid AreaId,
     string MapId,
     string Status,
-    int Attempts);
+    int Attempts,
+    string? Reason = null);   // 실패(재큐잉 PENDING/SKIPPED) 시 AMR 보고 사유 요약
+
+/// <summary>SignalR "RunState" 푸시 — run 상태 변화(RUNNING | WAITING_FLOOR_TRANSFER | COMPLETED | ABORTED).</summary>
+public sealed record RunStateDto(Guid RunId, string State);
 
 /// <summary>SignalR "RunProgress" 푸시 / GET /api/runs/{id}/progress — Run 단위 TASK 진행률.
 /// Percent = CompletedTasks / TotalTasks × 100 (종결 기준). Completed = Succeeded + Failed.</summary>
@@ -256,7 +278,12 @@ public sealed record AreaDto(
 public sealed record AreaTaskDto(
     Guid TaskId, int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV,
-    string SectionDxfId, string ProfileId);
+    string SectionDxfId, string ProfileId,
+    double[][]? Points = null);   // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+
+/// <summary>CROSS 교차 기하 미리보기 응답 [VDA §8.5.1] — 서버가 회전 유도·AMR 점 정렬.
+/// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>
+public sealed record CrossPreviewResult(string SeamType, double[][]? Points, double SnapResidualDeg, bool FrameOk);
 
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
@@ -271,3 +298,36 @@ public sealed record AlarmDto(
     DateTimeOffset RaisedAt,
     DateTimeOffset? ClearedAt,
     string? ClearedBy);
+
+/// <summary>GET /api/scenarios/{id}/area-stations — 시나리오 계획 정차점(도면 프레임) + 도착 허용 오차(m, rad).</summary>
+public sealed record PlannedStationsDto(Guid ScenarioId, string TankId, double AllowedDevXy, double AllowedDevTheta,
+    List<PlannedStationDto> Stations);
+
+/// <summary>영역 1개의 계획 정차점. Yaw=도면 yaw[rad](없으면 null), WallU/WallNormal=면 u축·내부향 법선 수평 단위벡터.</summary>
+public sealed record PlannedStationDto(Guid AreaId, string AreaName, string WallCode, int Level, string MapId,
+    double X, double Y, double? Yaw, double StandoffM, bool Manual, double[]? WallU, double[]? WallNormal);
+
+// ── 계획 자연어 어시스턴트 [ADR-013] — 서버 PlanningAssistantService 페이로드 미러 ──
+
+/// <summary>대화 1줄(role = user | assistant) — LLM에 직전 대화로 전달.</summary>
+public sealed record PlanChatMessageDto(string Role, string Content);
+
+/// <summary>POST /api/planning/assistant/propose 요청. WallCode/Level = 현재 화면 선택(명령에 면·층이 없을 때의 힌트).</summary>
+public sealed record PlanProposeRequestDto(string TankId, string Prompt, string? WallCode, int? Level, PlanChatMessageDto[]? History);
+
+/// <summary>원자 연산 1건의 검증 결과. Corners/Segment 는 **면-전체 v**(미리보기 그리기용).</summary>
+public sealed record PlanChangeOpDto(
+    int Index, int Source, string Kind, bool Ok, string? Error,
+    string? WallCode, int? Level, string? AreaName, double[][]? Corners, double[]? Segment, string Summary);
+
+/// <summary>변경안 미리보기. ChangeSetId = 적용 가능할 때만(변경 있음 + 전 연산 통과).</summary>
+public sealed record PlanChangeSetDto(
+    Guid? ChangeSetId, string TankId, string Reply, string[] Messages, List<PlanChangeOpDto> Results,
+    int Creates, int Updates, int Deletes, int Failed, bool AllOk, bool HasChanges,
+    string[]? OpsSummary = null);   // LLM 이 낸 연산 요약 — 대화창 "해석:" 줄(구서버는 없음)
+
+public sealed record PlanApplyResultDto(Guid ChangeSetId, int Applied, int Creates, int Updates, int Deletes);
+
+/// <summary>GET /api/integrations/llm — Ollama 연결 상태(Reachable·ModelAvailable 은 조회 시 점검).</summary>
+public sealed record LlmStatusDto(bool Enabled, string BaseUrl, string Model, DateTimeOffset? LastOkAt, string? LastError,
+    bool? Reachable, bool? ModelAvailable, int? AssistantRevision = null);   // null = 개정 번호 도입 전 구빌드 서버
