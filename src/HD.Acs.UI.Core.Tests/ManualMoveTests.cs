@@ -91,6 +91,7 @@ public class ManualMoveTests
         public Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AreaTaskDto>>(Array.Empty<AreaTaskDto>());
         public Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV, double[][] arms, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<SeamStartTestResultDto?> MoveToSeamStartTestAsync(string robotId, Guid taskId, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private static (TankViewModel vm, FakeAcsApiClient api, FakeMonitoringClient monitoring) CreateVm()

@@ -128,6 +128,10 @@
                             <Button Classes="form" Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
                                     ToolTip.Tip="작업 목록에서 선택한 용접선의 좌표·타입을 고칩니다. 삭제 후 재등록과 달리 taskId(검사 이력 키)가 유지됩니다." />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Button Classes="form" Content="코봇 이동 시험(시작점)" MinWidth="150" Command="{Binding TestSeamStartCommand}"
+                                    ToolTip.Tip="선택 용접선의 정차점으로 AMR을 보낸 뒤 코봇을 seam 시작점까지만 이동시켜 reach를 확인합니다(촬영 없음). 실행은 HD_AMR. 진행 중 run이 없고 로봇이 해당 층에 있어야 합니다." />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource AppErrorBrush}" FontSize="12" />

@@ -159,6 +159,41 @@ ON CONFLICT (action_type) DO UPDATE SET
   blocking_type = EXCLUDED.blocking_type,
   description   = EXCLUDED.description;
 
+-- moveToSeamStart: 코봇툴 seam 시작점 이동 시험(촬영 없음) [VDA §8]. position 서브스키마는 startWeldInspection과 동일.
+INSERT INTO ref.action_catalog (action_type, scope, blocking_type, param_schema, description)
+VALUES ('moveToSeamStart', 'NODE', 'HARD',
+'{
+  "type": "object",
+  "required": ["jobRef", "position"],
+  "properties": {
+    "jobRef": { "type": "string" },
+    "position": {
+      "type": "object",
+      "required": ["seamStartW", "seamEndW", "drawingPos"],
+      "properties": {
+        "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "drawingPos": {
+          "type": "object",
+          "required": ["tank", "level", "wall_code", "u", "v", "x", "y", "z"],
+          "properties": {
+            "tank": { "type": "string" }, "level": { "type": "integer" },
+            "wall_code": { "type": "string" },
+            "u": { "type": "number" }, "v": { "type": "number" },
+            "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}',
+        '코봇툴 seam 시작점 이동 시험(촬영 없음) [VDA §8]')
+ON CONFLICT (action_type) DO UPDATE SET
+  param_schema  = EXCLUDED.param_schema,
+  scope         = EXCLUDED.scope,
+  blocking_type = EXCLUDED.blocking_type,
+  description   = EXCLUDED.description;
+
 -- ═══════════════════════════ ③ 시나리오 (ref) ═══════════════════════════
 
 CREATE TABLE ref.scenario (

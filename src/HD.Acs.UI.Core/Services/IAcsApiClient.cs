@@ -91,6 +91,8 @@ public interface IAcsApiClient
     /// <summary>CROSS 교차 기하 미리보기 — 중심·가지(면-전체 v)로 회전 유도·AMR 점 정렬(비영속) [VDA §8.5.1].</summary>
     Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
         double[][] arms, CancellationToken ct = default);
+    /// <summary>코봇 seam 시작점 이동 시험 — 지정 용접선의 정차점으로 주행 후 코봇을 seam 시작점까지만 이동(촬영 없음) [VDA §8].</summary>
+    Task<SeamStartTestResultDto?> MoveToSeamStartTestAsync(string robotId, Guid taskId, CancellationToken ct = default);
 
     // ── 계획 자연어 어시스턴트 [ADR-013] — 기본 구현은 미지원(기존 테스트 대역 무수정) ──
     /// <summary>자연어 명령 → 변경안 미리보기(DB 무변경). 서버 비활성 503·LLM 실패 502는 {error} 메시지 예외.</summary>

@@ -285,6 +285,9 @@ public sealed record AreaTaskDto(
 /// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>
 public sealed record CrossPreviewResult(string SeamType, double[][]? Points, double SnapResidualDeg, bool FrameOk);
 
+/// <summary>코봇 seam 시작점 이동 시험 응답 [VDA §8 moveToSeamStart] — 발행된 Order·정차점·seam 시작 맵좌표.</summary>
+public sealed record SeamStartTestResultDto(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[]? SeamStartW);
+
 /// <summary>SignalR "AlarmRaised" 푸시 대비 (백엔드 미발화 — 스키마 기반 예상 shape).
 /// Severity: INFO | WARNING | CRITICAL</summary>
 public sealed record AlarmDto(

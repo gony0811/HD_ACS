@@ -364,6 +364,13 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<CrossPreviewResult>(ct);
     }
 
+    public async Task<SeamStartTestResultDto?> MoveToSeamStartTestAsync(string robotId, Guid taskId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/robots/{robotId}/test/seam-start", new { TaskId = taskId, UserId = "operator" }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 404(없음)·409(run중·타층)·400(T_W_D 무효) 메시지 노출
+        return await resp.Content.ReadFromJsonAsync<SeamStartTestResultDto>(ct);
+    }
+
     public async Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/planning/assistant/propose", request, ct);

@@ -270,6 +270,26 @@ async Task ExecuteActionAsync(VdaAction action)
         actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}";
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
+    else if (action.ActionType == "moveToSeamStart")
+    {
+        // 코봇툴 seam 시작점 이동 시험 [VDA §8] — 주행 후 코봇을 seamStartW까지만 이동(촬영 없음).
+        string seam = "?";
+        try
+        {
+            var posParam = action.ActionParameters.FirstOrDefault(p => p.Key == "position");
+            if (posParam?.Value is not null)
+            {
+                var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(posParam.Value));
+                if (node?["seamStartW"]?.AsArray() is { Count: 3 } sw)
+                    seam = $"({sw[0]},{sw[1]},{sw[2]})";
+            }
+        }
+        catch { /* 로그용 — 파싱 실패 무해 */ }
+        await Task.Delay(fullMs);
+        actionState.ActionStatus = "FINISHED";
+        actionState.ResultDescription = "OK;moveToSeamStart";
+        Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam}");
+    }
     else
     {
         // 기타 액션 — 기존 동작 유지 (촬영 성공 응답 [ADR-004])

@@ -320,9 +320,28 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"작업 수정 실패: {ex.Message}"; }   // 경계 밖 400·없음 404
     }
 
+    /// <summary>코봇 seam 시작점 이동 시험 [VDA §8 moveToSeamStart] — 선택 용접선의 정차점으로 주행 후
+    /// 코봇을 seam 시작점까지만 이동(촬영 없음). 본검사 전 reach 확인. 실행은 HD_AMR. 로봇은 활성 로봇(단일) 사용.</summary>
+    [RelayCommand(CanExecute = nameof(CanUpdateTask))]
+    private async Task TestSeamStartAsync()
+    {
+        if (SelectedTask is not { } task) return;
+        try
+        {
+            var robots = await _api.GetRobotsAsync();
+            if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
+            var r = await _api.MoveToSeamStartTestAsync(robot.RobotId, task.TaskId);
+            StatusMessage = r?.SeamStartW is { Length: >= 2 } sw
+                ? $"코봇 이동 시험 발행: {robot.RobotId} → seam 시작점 ({sw[0]:F2},{sw[1]:F2}) @{r.MapId} (실행은 HD_AMR)"
+                : $"코봇 이동 시험 발행: {robot.RobotId} ← 용접선 seq {task.Seq}";
+        }
+        catch (Exception ex) { StatusMessage = $"코봇 이동 시험 실패: {ex.Message}"; }   // 409 run중/타층·404·400 사유
+    }
+
     partial void OnSelectedTaskChanged(AreaTaskDto? value)
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();
+        TestSeamStartCommand.NotifyCanExecuteChanged();
         // 작업 재선택 = 진행 중 교차 그리기 버퍼 비움(섞임 방지)
         CrossDrawShape = null; CrossStep = 0; CrossStepText = "";
         _crossCenter = null; _crossArms.Clear(); _crossPointsForRegister = null; CrossPreview.Clear();

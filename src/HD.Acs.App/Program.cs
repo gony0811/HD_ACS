@@ -791,6 +791,17 @@ app.MapPost("/api/robots/{robotId}/goto",
     return Results.Ok(new { orderId, mapId, mapX = mx, mapY = my, mapTheta });
 });
 
+// 코봇 seam 시작점 이동 시험 [VDA §8 moveToSeamStart] — 지정 용접선의 정차점으로 주행 후 코봇을 seam 시작점까지만 이동(촬영 없음).
+// 본검사 전 reach 확인용. 실행은 HD_AMR 책임(ACS는 액션만 발행). idle·해당 층에서만.
+app.MapPost("/api/robots/{robotId}/test/seam-start",
+    async (string robotId, SeamStartTestRequest req, InspectionDispatcher dispatcher) =>
+{
+    try { return Results.Ok(await dispatcher.MoveToSeamStartAsync(robotId, req.TaskId, req.UserId)); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1] ──────────────────────────
 // 맵버전 바인딩: 대응쌍/변환은 현재 ref.map.version에 귀속. 맵 재생성 시 자동 무효 [§2.5].
 
@@ -909,6 +920,8 @@ public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);
+// 코봇 seam 시작점 이동 시험 [VDA §8 moveToSeamStart] — 대상 용접선 taskId 지정
+public sealed record SeamStartTestRequest(Guid TaskId, string? UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId,
     double? MapX = null, double? MapY = null);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);

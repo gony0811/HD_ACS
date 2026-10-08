@@ -69,35 +69,64 @@ public static class ActionCatalogSeed
     }
     """;
 
+    // moveToSeamStart param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8 (코봇 seam 시작점 이동 시험).
+    // position 서브스키마는 startWeldInspection과 동일(seamStartW/seamEndW/drawingPos). params 없음(촬영 안 함).
+    public const string MoveToSeamStartParamSchema = """
+    {
+      "type": "object",
+      "required": ["jobRef", "position"],
+      "properties": {
+        "jobRef": { "type": "string" },
+        "position": {
+          "type": "object",
+          "required": ["seamStartW", "seamEndW", "drawingPos"],
+          "properties": {
+            "seamStartW":  { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+            "seamEndW":    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+            "drawingPos": {
+              "type": "object",
+              "required": ["tank", "level", "wall_code", "u", "v", "x", "y", "z"],
+              "properties": {
+                "tank": { "type": "string" }, "level": { "type": "integer" },
+                "wall_code": { "type": "string" },
+                "u": { "type": "number" }, "v": { "type": "number" },
+                "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    }
+    """;
+
     /// <summary>
-    /// action_catalog 의 startWeldInspection 행을 canonical param_schema 로 맞춘다(없으면 insert).
+    /// action_catalog 의 커스텀 액션 행을 canonical param_schema 로 맞춘다(없으면 insert).
     /// 멱등 — 저장된 값과 의미상 동일하면 write 하지 않는다(jsonb 공백 재포맷 무시 위해 정규화 비교).
     /// </summary>
     public static async Task EnsureAsync(AcsDbContext db, ILogger logger, CancellationToken ct = default)
     {
-        const string actionType = "startWeldInspection";
+        await UpsertAsync(db, logger, "startWeldInspection", StartWeldInspectionParamSchema, "단일 용접라인 구간 자동 검사 [WP-3]", ct);
+        await UpsertAsync(db, logger, "moveToSeamStart", MoveToSeamStartParamSchema, "코봇툴 seam 시작점 이동 시험(촬영 없음) [VDA §8]", ct);
+    }
 
+    private static async Task UpsertAsync(AcsDbContext db, ILogger logger, string actionType, string schema, string description, CancellationToken ct)
+    {
         var row = await db.ActionCatalog.FirstOrDefaultAsync(x => x.ActionType == actionType, ct);
         if (row is null)
         {
             db.ActionCatalog.Add(new ActionCatalogEntity
             {
-                ActionType = actionType,
-                Scope = "NODE",
-                BlockingType = "HARD",
-                ParamSchema = StartWeldInspectionParamSchema,
-                Description = "단일 용접라인 구간 자동 검사 [WP-3]",
+                ActionType = actionType, Scope = "NODE", BlockingType = "HARD", ParamSchema = schema, Description = description,
             });
             await db.SaveChangesAsync(ct);
             logger.LogInformation("action_catalog 기동 시드 삽입: {ActionType}", actionType);
             return;
         }
-
-        if (!SameJson(row.ParamSchema, StartWeldInspectionParamSchema))
+        if (!SameJson(row.ParamSchema, schema))
         {
-            row.ParamSchema = StartWeldInspectionParamSchema;
+            row.ParamSchema = schema;
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema (VDA 사양서 개정 1.6 — taskId·attempt)", actionType);
+            logger.LogInformation("action_catalog 기동 시드 갱신: {ActionType} param_schema", actionType);
         }
     }
 

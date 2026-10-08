@@ -537,6 +537,85 @@ public sealed class InspectionDispatcher
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
+    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW);
+
+    /// <summary>
+    /// 코봇툴 seam 시작점 이동 시험 [VDA §8 moveToSeamStart, N협의] — 지정 용접선(area-task)의 정차점(standoff)으로
+    /// 주행한 뒤 코봇을 seam 시작점까지만 이동·정지(촬영 없음). 본검사(startWeldInspection) 전 reach 확인용.
+    /// **실행은 HD_AMR 책임**(단일 상대 원칙) — ACS는 액션만 발행. idle(진행 중 run 없음)·해당 층에서만.
+    /// 예외: 로봇/작업/면/맵 없음=KeyNotFound(404), run 진행 중·타 층=RunConflict(409), T_W_D 무효=CalibrationInvalid(400).
+    /// </summary>
+    public async Task<SeamStartTestResult> MoveToSeamStartAsync(string robotId, Guid taskId, string? userId, CancellationToken ct = default)
+    {
+        var robot = await _db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId, ct)
+            ?? throw new KeyNotFoundException($"robot '{robotId}' 없음");
+        var task = await _db.AreaTasks.AsNoTracking().FirstOrDefaultAsync(t => t.TaskId == taskId, ct)
+            ?? throw new KeyNotFoundException($"area-task '{taskId}' 없음");
+        var area = await _db.InspectionAreas.AsNoTracking().FirstAsync(a => a.AreaId == task.AreaId, ct);
+        var wall = await _db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode, ct)
+            ?? throw new KeyNotFoundException($"면 '{area.WallCode}' 없음");
+
+        if (await _db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"), ct))
+            throw new RunConflictException("진행 중인 run이 있습니다 — 시험은 중단(abort) 후 사용하세요.");
+
+        var mapId = $"{area.TankId}-L{area.Level}";
+        var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
+        if (ctx?.ReportedMapId is not { } reported)
+            throw new RunConflictException("로봇 보고 층(mapId)이 없습니다 — 로봇 연결 상태를 확인하세요.");
+        if (!string.Equals(reported, mapId, StringComparison.OrdinalIgnoreCase))
+            throw new RunConflictException($"로봇이 다른 층({reported})에 있습니다 — L{area.Level} 시험은 수동 층 변경 후 가능합니다.");
+
+        // T_W_D (단일 층, goto식 인라인) — 무효면 CalibrationInvalidException(400)
+        var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct)
+            ?? throw new KeyNotFoundException($"map '{mapId}' 없음");
+        var cal = await _db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
+            .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
+        var tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+
+        // 정차점(standoff) 도면 → 맵 (배차와 동일식 StationDrawingOf)
+        var (sdx, sdy, syaw) = StationDrawingOf(area, wall, _stationStandoffM);
+        var (mx, my) = tWd.DrawingToMap(sdx, sdy);
+        double? mTheta = syaw is double sy ? tWd.DrawingYawToMap(sy) : null;
+
+        // seam 시작점 position (BuildStop와 동일 — seamStartW는 맵 좌표)
+        var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
+        var startD = pose.LocalToDrawing(task.StartU, task.StartV);
+        var endD = pose.LocalToDrawing(task.EndU, task.EndV);
+        var d = new WeldDrawingData(area.TankId, area.Level, area.WallCode, startD, endD, task.StartU, task.StartV);
+        var position = WeldInspectionPayload.BuildPosition(tWd, d);
+        var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
+
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta);
+
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = userId ?? "", Action = "TEST_SEAM_START",
+            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2})",
+        });
+        await _db.SaveChangesAsync(ct);
+        await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
+        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2})", robotId, taskId, mapId, mx, my);
+        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW);
+    }
+
+    /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션). 순수 — 테스트 대상.</summary>
+    public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta)
+    {
+        var orderId = Guid.NewGuid().ToString();
+        var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
+        action.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = jobRef });
+        action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
+        var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
+        order.Nodes.Add(new OrderNode
+        {
+            NodeId = $"TEST-{orderId[..8]}", SequenceId = 0, Released = true,
+            NodePosition = new NodePosition { X = mx, Y = my, Theta = mTheta, MapId = mapId, AllowedDeviationXY = allowedXy, AllowedDeviationTheta = allowedTheta },
+            Actions = { action },
+        });
+        return order;
+    }
+
     /// <summary>work_item 상태 변화 단건 푸시 — 운영 UI 작업 현황 실시간 갱신용.</summary>
     private static (AlarmEntity Entity, string Severity, string Title) NewAlarm(
         string code, string severity, string title, MissionEntity mission, object detail) =>

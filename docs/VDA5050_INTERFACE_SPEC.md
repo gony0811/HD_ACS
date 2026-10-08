@@ -488,7 +488,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 
 | actionType | scope | blockingType | 용도 |
 |---|---|---|---|
-| `startWeldInspection` | NODE | HARD | 단일 용접라인 구간 자동 검사 (본 절) |
+| `startWeldInspection` | NODE | HARD | 단일 용접라인 구간 자동 검사 (§8.1) |
+| `moveToSeamStart` | NODE | HARD | 코봇툴을 seam 시작점까지만 이동(촬영 없음) — reach 시험 (§8.7) `[N19]` |
 | `initPosition` | INSTANT | HARD | 재측위 (§5.2) |
 | `emergencyStop` | INSTANT | HARD | 기능적 비상정지 (§5.1) |
 
@@ -774,6 +775,20 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
 | N15 | 촬영 좌표의 면-로컬 원점 정합 | CAPTURE_REQ `PosX/PosY`는 **면의 (u=0, v=0) 모서리 기준** 면-로컬 좌표여야 SAIGE가 용접선(tasks API의 u,v)과 같은 캔버스에 겹칠 수 있다(SAIGE v2.6 §8.4 `s=(P−A)·e`). HD_AMR 현행은 코봇 wobj pose를 항등 매핑(`FaceLocalMapper`)하므로, **wobj 원점이 면 원점에 티칭되어 있지 않다면** 값이 "정차 기준 로컬"이 된다. 이 경우 ACS가 이미 보내는 `position.drawingPos.u/v`(용접선 시작점의 면-로컬 좌표, m)를 기준점 오프셋으로 환산에 사용할 수 있다. 면 축 방향 정본 = ACS `TankGeometry.GenerateWalls()` = SAIGE v2.6 §2.3 = 비전 v3.2 §5 (세 문서 일치 확인 2026-09-21 — **ACS 측 축 정정 불요**) |
 | N16 | `taskId` 바이트 순서 | HD_AMR은 GUID를 RFC 4122 빅엔디안 16B로 기입한다. 비전 S/W가 같은 순서로 문자열화해야 SAIGE `productId`가 ACS `taskId` 문자열과 일치한다 — **문자열 대조로 1회 확인**(.NET `Guid.ToByteArray()` 기본은 앞 3필드가 리틀엔디안이라 혼동 주의) |
 
+### 8.7 `moveToSeamStart` — 코봇 seam 시작점 이동 시험 `(신규)` `[N19]`
+
+본검사(`startWeldInspection`) 전에 **코봇툴이 용접선 시작점에 실제로 도달하는지(reach)**만 확인하는
+가벼운 시험 액션이다. AMR은 정차 노드에 도달한 뒤 **코봇툴을 `position.seamStartW`(맵 좌표)까지만 이동하고
+정지**한다 — **촬영·측정·자세 시퀀스 없음**. `wall_code`(§8.1)로 툴 자세를 정한다.
+
+- **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(nodePosition=검사 정차점 standoff) + 액션 1건.
+- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`). `params` 없음.
+- **완료 판정**: `state.actionStates`로 `FINISHED`(도달 성공) / `FAILED`(reach 불가·특이자세 등 — `errors`에 사유). 이 시험의 FAILED가 곧 **N10(정차 이격) 실측 근거**가 된다.
+- **발행**: `POST /api/robots/{id}/test/seam-start { taskId }` — ACS가 area→정차점·task→seamStartW·wall_code 산출.
+  진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).
+- **ACS 책임 경계**: ACS는 이 액션을 **정의·발행만** 한다. 코봇툴 이동 실행·reach 판정은 **HD_AMR 책임**(단일 상대 원칙).
+  ※구현(2026-10-08): ACS 발행·시뮬레이터 처리 완료. **HD_AMR 핸들러 구현 대기**(N19).
+
 ---
 
 ## 9. 운영 시퀀스
@@ -861,6 +876,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N14 | 검사 작업 식별자 관통 | `params.taskId`(GUID 문자열, 영구) + `params.attempt`(1~255, taskId별 누적·ACS 발급) — 둘 다 선택 필드(§8.1·§8.6) | ✅ **양측 구현 완료(2026-09-21)** — ACS 발행 / HD_AMR 파서→`SequenceContext.AcsTaskId/AcsAttempt` 주입(`52b6e19`)→CAPTURE_REQ v3.2. 키 위치(`params.*`)·attempt 누적 규칙은 구현으로 합의된 것으로 본다. **실기 관통 확인 잔여**(N16과 함께 1회) |
 | N15 | 촬영 좌표 면-로컬 원점 정합 | CAPTURE_REQ `PosX/PosY` = 면 (0,0) 모서리 기준 (u,v). 필요 시 `drawingPos.u/v`를 기준점 오프셋으로 사용(§8.6.4) | ⏳ 연동 시험 확인 — wobj 티칭 원점 규약 회신 요청 (VDA 계약 무변경) |
 | N16 | `taskId` 바이트 순서 | RFC 4122 빅엔디안 16B ↔ 문자열 표기 일치 (§8.6.4) | ⏳ 비전 S/W와 문자열 대조 1회 확인 |
+| N19 | **코봇 seam 시작점 이동 시험 액션** `moveToSeamStart` (§8.7) | 신규 NODE 커스텀 액션 — 정차 노드 도달 후 코봇툴을 `position.seamStartW`(맵 좌표)까지만 이동·정지(촬영 없음). `wall_code` 티칭 자세. 본검사 전 reach 확인용·N10(정차 이격) 실측 근거. ACS 발행 경로(`POST /api/robots/{id}/test/seam-start`)·시뮬레이터 처리 구현 완료(2026-10-08) | ⏳ **HD_AMR 핸들러 구현 대기** — actionParameters 파서(`position.seamStartW`·`wall_code`) → 코봇툴 이동(촬영 없음) → `actionState` FINISHED/FAILED(reach 불가=errors) 보고. ※ 번호: AMR 보유본의 out-of-tree N17(seam z)·N18(거리 파라미터)와 겹치지 않게 **N19** 사용 — 양측 사양서 통합 시 번호 정리 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
