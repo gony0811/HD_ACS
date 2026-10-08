@@ -554,7 +554,7 @@ public sealed class InspectionDispatcher
             Severity = severity, Title = title, a.RaisedAt, ClearedAt = (DateTimeOffset?)null, ClearedBy = (string?)null,
         }, ct);
 
-    /// <summary>Reason = 실패(재큐잉/스킵) 시 AMR 보고 사유 요약 — 운영 UI 이벤트 로그 표시용.</summary>
+    /// <summary>Reason = 실패(FAILED) 시 AMR 보고 사유 요약 — 운영 UI 이벤트 로그 표시용.</summary>
     private Task PushWorkItemAsync(Guid runId, WorkItemEntity wi, CancellationToken ct, string? reason = null) =>
         _hub is null ? Task.CompletedTask : _hub.Clients.All.SendAsync("WorkItemProgress", new
         {
@@ -628,7 +628,7 @@ public sealed class InspectionDispatcher
     // ── Order 거부(orderValidationError) 자동 처리 [VDA 사양서 §4.5.2, N11 확정] ──────
     /// <summary>
     /// AMR이 Order를 거부(폐기 + errors 보고)하면 배차만 된 정차가 DISPATCHED로 정체한다.
-    /// 거부 errorDescription의 orderId를 현재 DISPATCHED work_item과 대조해 실패로 집계(재시도→스킵 정책)하고
+    /// 거부 errorDescription의 orderId를 현재 DISPATCHED work_item과 대조해 실패로 집계(자동 재시도 없음 — FAILED·알람)하고
     /// ORDER_REJECTED 알람을 기록한다. orderId 불일치/처리 완료면 false — 반복 state 수신에 멱등.
     /// </summary>
     public async Task<bool> HandleOrderRejectedAsync(string robotId, string? errorDescription, CancellationToken ct)
@@ -650,7 +650,7 @@ public sealed class InspectionDispatcher
             return false;
         }
 
-        // 미실행 액션들을 FAILED로 종결(거부=폐기, 실행 없음) 후 기존 실패 정책(재시도→스킵) 경로 재사용
+        // 미실행 액션들을 FAILED로 종결(거부=폐기, 실행 없음) 후 기존 실패 처리 경로(자동 재시도 없음 — FAILED·알람) 재사용
         var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId && a.Status != "FINISHED").ToListAsync(ct);
         foreach (var a in acts)
         {
