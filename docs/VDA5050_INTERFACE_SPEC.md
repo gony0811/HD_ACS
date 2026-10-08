@@ -788,6 +788,7 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
   진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).
 - **ACS 책임 경계**: ACS는 이 액션을 **정의·발행만** 한다. 코봇툴 이동 실행·reach 판정은 **HD_AMR 책임**(단일 상대 원칙).
   ※구현(2026-10-08): ACS 발행·시뮬레이터 처리 완료. **HD_AMR 핸들러 구현 대기**(N19).
+  HD_AMR 구현 착수 가이드: [HD_AMR_MOVE_TO_SEAM_START_SPEC](HD_AMR_MOVE_TO_SEAM_START_SPEC.md).
 
 ---
 
