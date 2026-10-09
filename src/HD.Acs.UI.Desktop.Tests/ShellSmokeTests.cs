@@ -129,6 +129,10 @@ public class ShellSmokeTests
             Assert.Equal(5, Find<DataGrid>(window, "ScenarioGrid").Columns.Count);
             tabs.SelectedIndex = 2; Dispatcher.UIThread.RunJobs();
             Assert.Equal(5, Find<DataGrid>(window, "PointGrid").Columns.Count);
+            // 배터리 교체 장소 탭 [HD_AMR 배터리관리] — 6열(층·이름·X·Y·theta·nodeId) + VM 바인딩
+            tabs.SelectedIndex = 3; Dispatcher.UIThread.RunJobs();
+            Assert.Equal(6, Find<DataGrid>(window, "NodesGrid").Columns.Count);
+            Assert.Same(shell.BatterySwapNodes, Find<DataGrid>(window, "NodesGrid").DataContext);
             window.Close();
         }
     }
@@ -148,6 +152,7 @@ public class ShellSmokeTests
             var planningTabs = Find<TabControl>(window, "Tabs");
             planningTabs.SelectedIndex = 1; Dispatcher.UIThread.RunJobs();
             planningTabs.SelectedIndex = 2; Dispatcher.UIThread.RunJobs();
+            planningTabs.SelectedIndex = 3; Dispatcher.UIThread.RunJobs();   // 배터리 교체 장소 탭 — 바인딩 평가
             shell.CurrentMode = AppMode.History; Dispatcher.UIThread.RunJobs();
             window.Close();
         }

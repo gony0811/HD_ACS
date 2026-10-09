@@ -35,7 +35,8 @@ CREATE TABLE ref.node (
   allowed_dev_xy    double precision,            -- VDA5050 allowedDeviationXY
   allowed_dev_theta double precision,
   node_type         text NOT NULL DEFAULT 'WAYPOINT',
-    -- WAYPOINT | INSPECTION_STOP | ELEVATOR | CHARGING | PARKING
+    -- WAYPOINT | INSPECTION_STOP | ELEVATOR | CHARGING | PARKING | BATTERY_SWAP
+    -- BATTERY_SWAP: 층(mapId)별 배터리 교체 장소 (HD_AMR 배터리관리 사양 §6, mapId당 1곳)
   metadata          jsonb
 );
 CREATE INDEX ix_node_map ON ref.node (map_id);
@@ -499,6 +500,9 @@ INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('LOCALIZATION_LOST',  'WARNING', '측위 상실', '맵 일치율 저하·재측위 실패 — 재시도 무의미, 재측위/수동 개입 필요 [§6.4]'),
   ('EQUIPMENT_ERROR',    'WARNING', '장비 이상', '코봇/카메라 등 온보드 장비 이상 보고 [§6.4]'),
   ('BATTERY_LOW',        'WARNING', '배터리 부족', 'AMR 배터리 부족 보고 [§6.4]'),
+  ('BATTERY_CRITICAL',   'CRITICAL','배터리 위험', 'AMR 배터리 임계(≤10%) — 그 자리 안전정지 보고 [HD_AMR 배터리관리 §2]'),
+  ('ORDER_REJECTED_BATTERY_LOW', 'WARNING', '배터리 저전력 — Order 거부', 'AMR이 저전력 상태에서 작업 Order를 거부(WARNING, 실패 아님) — 교체 장소로 보내거나 교체 완료 후 재시도 [HD_AMR 배터리관리 §8]'),
+  ('BATTERY_SWAP_DISPATCHED', 'INFO', '배터리 교체 이동 발행', '운영자가 배터리 교체 장소로 이동 Order를 수동 발행 — 활성 run이 있으면 함께 중단됨, 교체 완료 후 이어하기로 재배차'),
   ('EMERGENCY_STOP',     'WARNING', '비상정지 중', 'AMR측 기능 정지(emergencyStopActive) 보고 — 활성 run 자동 중단됨 [§6.4]'),
   ('SAIGE_UNREACHABLE',  'WARNING', 'SAIGE 전송 불가', '로봇 상태(robot-health-check) 전송이 임계 횟수 이상 연속 실패 — SAIGE 기동/네트워크 확인 [SAIGE §9.5]'),
   ('SAIGE_BAD_REQUEST',  'WARNING', 'SAIGE 형식 오류', 'SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]')

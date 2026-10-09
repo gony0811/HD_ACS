@@ -124,6 +124,45 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] ──
+    public async Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrWhiteSpace(mapId)
+            ? "/api/battery-swap-nodes"
+            : $"/api/battery-swap-nodes?mapId={Uri.EscapeDataString(mapId)}";
+        return await _http.GetFromJsonAsync<List<BatterySwapNodeDto>>(url, ct) ?? new();
+    }
+
+    public async Task<BatterySwapNodeDto> CreateBatterySwapNodeAsync(string mapId, string name, double x, double y,
+        double? theta, string? userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/battery-swap-nodes",
+            new { MapId = mapId, Name = name, X = x, Y = y, Theta = theta, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        // 서버가 Created 응답에 nodes list를 돌려주지만 UI는 전체 재조회로 처리한다 — 반환은 요청 값으로 복원.
+        var list = await resp.Content.ReadFromJsonAsync<List<BatterySwapNodeDto>>(ct);
+        return list?.FirstOrDefault(n => n.MapId == mapId && n.Name == name)
+            ?? new BatterySwapNodeDto("", mapId, name, x, y, theta);
+    }
+
+    public async Task DeleteBatterySwapNodeAsync(string nodeId, string? userId, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrWhiteSpace(userId)
+            ? $"/api/battery-swap-nodes/{Uri.EscapeDataString(nodeId)}"
+            : $"/api/battery-swap-nodes/{Uri.EscapeDataString(nodeId)}?userId={Uri.EscapeDataString(userId)}";
+        var resp = await _http.DeleteAsync(url, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+    }
+
+    public async Task<BatterySwapDispatchResultDto?> DispatchBatterySwapAsync(string robotId, string? reason, string? userId,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/robots/{Uri.EscapeDataString(robotId)}/battery-swap/dispatch",
+            new { Reason = reason, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 400(미등록·층 미확인)·404(로봇)·409(미연결)의 {error} 메시지 노출
+        return await resp.Content.ReadFromJsonAsync<BatterySwapDispatchResultDto>(ct);
+    }
+
     // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     public async Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
         double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default,

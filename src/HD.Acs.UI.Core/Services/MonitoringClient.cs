@@ -27,6 +27,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
     public event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;
     public event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;
     public event EventHandler<AlarmDto>? AlarmRaised;
+    public event EventHandler<BatterySwapDispatchedDto>? BatterySwapDispatched;
 
     public MonitoringClient(IOptions<AcsOptions> options, ILogger<MonitoringClient> log, IUiDispatcher dispatcher)
     {
@@ -47,6 +48,7 @@ public sealed class MonitoringClient : IMonitoringClient, IAsyncDisposable
         _hub.On<WorkItemProgressDto>("WorkItemProgress", p => Raise(WorkItemProgressReceived, p));
         _hub.On<TaskActionProgressDto>("TaskActionProgress", p => Raise(TaskActionProgressReceived, p));
         _hub.On<AlarmDto>("AlarmRaised", p => Raise(AlarmRaised, p)); // 미발화여도 무해
+        _hub.On<BatterySwapDispatchedDto>("BatterySwapDispatched", p => Raise(BatterySwapDispatched, p));
 
         _hub.Reconnecting += _ => { SetStatus(HubStatus.Reconnecting); return Task.CompletedTask; };
         _hub.Reconnected += _ => { SetStatus(HubStatus.Connected); return Task.CompletedTask; };

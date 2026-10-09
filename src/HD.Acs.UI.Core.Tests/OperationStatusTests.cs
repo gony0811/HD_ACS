@@ -22,6 +22,7 @@ public class OperationStatusTests
         public event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;
         public event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;
         public event EventHandler<AlarmDto>? AlarmRaised;
+        public event EventHandler<BatterySwapDispatchedDto>? BatterySwapDispatched;
 #pragma warning restore CS0067
         public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task StopAsync() => Task.CompletedTask;

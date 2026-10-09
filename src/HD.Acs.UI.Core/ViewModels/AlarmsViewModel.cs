@@ -46,6 +46,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
         monitoring.WorkItemProgressReceived += OnWorkItemProgress;
         monitoring.TaskActionProgressReceived += OnTaskActionProgress;
         monitoring.AlarmRaised += OnAlarmRaised;
+        monitoring.BatterySwapDispatched += OnBatterySwapDispatched;
         monitoring.StatusChanged += OnHubStatus;
 
         mission.PropertyChanged += OnMissionPropertyChanged;
@@ -65,7 +66,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
             // 첫 수신: 이미 작업을 막는 상태면 바로 알린다
             if (s.OperatingMode == "MANUAL") Add("warn", $"{s.RobotId} 수동(MANUAL) 모드 — 자동 작업 불가");
             if (IsEStop(s)) Add("fail", $"{s.RobotId} 비상정지 상태");
-            foreach (var e in errors) Add("warn", $"{s.RobotId} 오류 보고: {e}");
+            foreach (var e in errors) Add(ClassifyErrorKind(e), $"{s.RobotId} 오류 보고: {e}");
         }
         else
         {
@@ -78,7 +79,12 @@ public sealed partial class AlarmsViewModel : ObservableObject
                 Add("info", s.Driving ? $"{s.RobotId} 주행 시작" : $"{s.RobotId} 정지");
 
             var before = prev.ErrorDescriptions ?? Array.Empty<string>();
-            foreach (var e in errors.Except(before)) Add("warn", $"{s.RobotId} 오류 보고: {e}");
+            foreach (var e in errors.Except(before))
+            {
+                // 배터리 관련은 kind를 세분 — critical=fail, 거부/저전력=warn 유지(사양서 §8: 거부는 WARNING, FATAL 아님)
+                var kind = ClassifyErrorKind(e);
+                Add(kind, $"{s.RobotId} 오류 보고: {e}");
+            }
             if (errors.Length == 0 && before.Length > 0) Add("info", $"{s.RobotId} 오류 해제");
         }
         Recompute();
@@ -180,11 +186,32 @@ public sealed partial class AlarmsViewModel : ObservableObject
     {
         var kind = a.Severity?.ToUpperInvariant() switch
         {
-            "CRITICAL" => "fail",
+            "CRITICAL" or "FATAL" => "fail",
             "INFO" => "info",
             _ => "warn",
         };
         Add(kind, $"알람 — {a.Title ?? a.AlarmCode}");
+    }
+
+    private void OnBatterySwapDispatched(object? sender, BatterySwapDispatchedDto p)
+    {
+        var abortText = p.AbortedRunId is Guid r ? $", run {r.ToString()[..8]} 중단" : "";
+        Add("info", $"{p.RobotId} 배터리 교체 이동 발행 → {p.MapId}/{p.TargetNodeId} ({p.Reason}){abortText}");
+        Recompute();
+    }
+
+    /// <summary>errorDescriptions 항목(예: "batteryCritical: SoC 8%")의 kind 분류.
+    /// 사양서 §8: orderRejectedBatteryLow는 WARNING(실패 아님). batteryCritical는 FATAL.</summary>
+    public static string ClassifyErrorKind(string errorText)
+    {
+        var head = errorText;
+        int colon = errorText.IndexOf(':');
+        if (colon > 0) head = errorText[..colon];
+        var t = head.Trim();
+        if (t.Equals("batteryCritical", StringComparison.OrdinalIgnoreCase)) return "fail";
+        if (t.Equals("batteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
+        if (t.Equals("orderRejectedBatteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
+        return "warn";   // 기존 거동 유지(알 수 없는 오류는 경고)
     }
 
     private void OnMissionPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -247,6 +274,13 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (robot is not null && IsEStop(robot))
             return new("fail", "비상정지 상태",
                 "로봇 비상정지를 해제한 뒤 '이어하기'로 남은 작업을 재개하세요.");
+        // 배터리 — 비상정지 다음(=작업자가 즉시 조치해야 할 순위). 수동 모드·run 상태 판단보다 앞 [HD_AMR 배터리관리 §8].
+        if (robot is not null && HasErrorType(robot, "batteryCritical"))
+            return new("fail", "배터리 위험 — AMR 그 자리 안전정지",
+                "로봇 위치에서 배터리를 교체(핫스왑)하세요. 교체 완료 후 자동 복귀, '이어하기'로 남은 작업 재개.");
+        if (robot is not null && HasErrorType(robot, "batteryLow"))
+            return new("warn", "배터리 저전력",
+                "로봇을 현재 층 배터리 교체 장소로 보내려면 '배터리 교체 이동' 버튼을 누르세요. 교체 완료 후 '이어하기'로 재개.");
 
         bool manual = robot?.OperatingMode == "MANUAL";
         switch (runState)
@@ -300,6 +334,11 @@ public sealed partial class AlarmsViewModel : ObservableObject
     private static bool IsEStop(RobotStateDto s) =>
         (s.EStop is not null && s.EStop != "NONE")
         || (s.ErrorDescriptions?.Any(e => e.StartsWith("emergencyStop", StringComparison.OrdinalIgnoreCase)) ?? false);
+
+    /// <summary>errorDescriptions에 특정 errorType이 활성 중인지(접두 매칭, "errorType: desc" / "errorType" 모두 수용).</summary>
+    public static bool HasErrorType(RobotStateDto s, string errorType) =>
+        s.ErrorDescriptions?.Any(e => e.StartsWith(errorType + ":", StringComparison.OrdinalIgnoreCase)
+                                   || e.Equals(errorType, StringComparison.OrdinalIgnoreCase)) ?? false;
 
     private static string ModeText(string? mode) => mode switch
     {

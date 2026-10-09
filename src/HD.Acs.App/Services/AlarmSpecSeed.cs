@@ -24,6 +24,12 @@ public static class AlarmSpecSeed
             "AMR 미연결(connection ≠ ONLINE 또는 state 수신 끊김) 상태에서 미션 시작·이어하기 요청 — 명령을 보내지 않고 차단됨. HD_AMR 실행·MQTT 연결 확인"),
         ("SAIGE_BAD_REQUEST", "WARNING", "SAIGE 형식 오류",
             "SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]"),
+        ("BATTERY_CRITICAL", "CRITICAL", "배터리 위험",
+            "AMR 배터리 임계(≤10%) — 그 자리 안전정지 보고 [HD_AMR 배터리관리 §2]"),
+        ("ORDER_REJECTED_BATTERY_LOW", "WARNING", "배터리 저전력 — Order 거부",
+            "AMR이 저전력 상태에서 작업 Order를 거부(WARNING, 실패 아님) — 교체 장소로 보내거나 교체 완료 후 재시도 [HD_AMR 배터리관리 §8]"),
+        ("BATTERY_SWAP_DISPATCHED", "INFO", "배터리 교체 이동 발행",
+            "운영자가 배터리 교체 장소로 이동 Order를 수동 발행 — 활성 run이 있으면 함께 중단됨, 교체 완료 후 이어하기로 재배차"),
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

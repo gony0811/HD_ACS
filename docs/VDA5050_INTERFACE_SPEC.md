@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.7** |
-| 작성일 | 2026-08-27 (최종 개정 2026-10-07) |
+| 문서 버전 | **1.8** |
+| 작성일 | 2026-08-27 (최종 개정 2026-10-10) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상 |
@@ -15,6 +15,7 @@
 | 개정 1.3c | 2026-09-15 — **`seamType` enum 5값 확장(카탈로그 1:1)**: 종전 3값 `LINE`·`CROSS`·`CORNER`를 `LINE`·`CROSS3`·`CROSS4`·`CORNER2`·`CORNER3`로 세분(CROSS=갈래 수 3/4, CORNER=접합 면 수 2/3). §8.1/§8.2 `param_schema`·등록 게이트·계획 UI 드롭다운·§8.5 카탈로그·§8.5.1 매핑·§10 N13 반영. **ACS 수용·발행·UI 지정만 구현**(`POLYLINE` 거부 유지) — HD_AMR 레시피 실행은 여전히 미구현(스텁), 계획 데이터 전달만 |
 | 개정 1.4·1.5 | 2026-09-15 — **HD_AMR 보유본에서 진행된 온보드 개정의 병합**(계약 무변경). 1.4: 검사 타입 카탈로그 정본화(독립 5종 형상·17 profileId, 코너부=브릿지 플레이트라 6-DOF 캡처 교시 전용, CROSS3·CROSS4 캡처 교시 단일화). 1.5: `seamType` 5값 AMR 파서·resolver·17종 시드 구현(legacy `CROSS`→`CROSS4`·`CORNER`→`CORNER3` 수용). 두 저장소 사본이 갈라져 있던 것을 본 1.6에서 단일 정본으로 통합 — §8.5.1 (5)·(5-1) 현행 상태 각주와 §10 N13 행이 HD_AMR 구현 기준으로 갱신됨 |
 | 개정 1.6 | 2026-09-21 — **검사 작업 식별자 `params.taskId`·`params.attempt` 추가**(§8.1·§8.2·§8.4·신설 §8.6, §9.5, §10 N14~N16, 부록 C). 배경: SAIGE 연동 사양서 v2.6(§2.5·§8.1) + 로봇↔비전 인터페이스 v3.2(CAPTURE_REQ 34B)가 **ACS 발급 taskId·attempt**를 전제로 확정됨 — AMR은 두 값을 모든 CAPTURE_REQ에 실어 비전→SAIGE `productId`(=taskId)까지 관통시킨다. 두 필드 모두 **선택(optional)** 이라 구버전 AMR과 호환(미탑재 시 AMR 폴백 = taskId 미지정·attempt 1). **양측 구현 완료(2026-09-21)**: ACS 발행 + HD_AMR 파서(`WeldInspectionActionParser`)→`WeldInspectionOrchestrator`→`SequenceContext.AcsTaskId/AcsAttempt` 주입(HD_AMR `52b6e19`) → 그 액션의 모든 CAPTURE_REQ [15-30]·[31]에 실린다. 미탑재·JSON null=폴백, 형식 오류=액션 `FAILED`+`orderValidationError`. 남은 것은 실기 관통 확인(N16 겸용). 아울러 1.4·1.5 병합(위 행) |
+| 개정 1.8 | 2026-10-10 — **배터리 교체 유도 액션 `batterySwapMove` 신설(§8.8) + 배터리 errors 분기 명문화 `[N20]`**: HD_AMR 배터리관리 사양(rev.1, 2026-10-09) ACS 측 반응. ① §8.8 신규 NODE 커스텀 액션(`targetNodeId`·`mapId`·`reason` LOW/CRITICAL/MANUAL) — `ref.node`에 `BATTERY_SWAP` 타입 추가, mapId당 1곳. ② `errors[]`에 `batteryCritical`(FATAL, 그 자리 안전정지) · `orderRejectedBatteryLow`(WARNING, **FATAL 실패 집계 금지**) 분기(사양서 §8). ③ 디스패치 = 운영자 수동 트리거(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run abort + 교체 Order 1건 발행, 교체 완료 후 '이어하기'로 재배차(사양서 §5 "잔여 회수"를 abort/resume으로 매핑). ④ 알람 코드 `BATTERY_CRITICAL`·`ORDER_REJECTED_BATTERY_LOW`·`BATTERY_SWAP_DISPATCHED` 추가. ACS 상태머신 복제·cancelOrder instantAction 발행·자동 디스패치는 **범위 외**(사양서 §1·§6·§9.6). HD_AMR 핸들러 구현 대기(N20) |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -790,6 +791,21 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
   ※구현(2026-10-08): ACS 발행·시뮬레이터 처리 완료. **HD_AMR 핸들러 구현 대기**(N19).
   HD_AMR 구현 착수 가이드: [HD_AMR_MOVE_TO_SEAM_START_SPEC](HD_AMR_MOVE_TO_SEAM_START_SPEC.md).
 
+### 8.8 `batterySwapMove` — 배터리 교체 장소 이동 `(신규)` `[N20]`
+
+HD_AMR 로컬 배터리 상태(LOW/CRITICAL)에 반응해 운영자가 **수동 트리거**로 발행하는 교체 유도 Order.
+교체 자체는 사람이 수행(핫스왑, 사양서 §4·§7)하며 ACS는 **단일 노드 이동만** 담당한다.
+
+- **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(교체 장소 `ref.node` nodeType=`BATTERY_SWAP`) + 액션 1건.
+- **actionParameters**:
+  - `targetNodeId`(string): 교체 장소 노드 ID — `nodeId`와 동일(멱등 참조).
+  - `mapId`(string): 로봇의 현재 보고 층. ACS는 다른 층으로 보내지 않는다(사양서 §6 "최악 복귀거리를 층 내 한정").
+  - `reason`(enum): `LOW` / `CRITICAL` / `MANUAL`(사전 예방·점검).
+- **완료 판정**: `actionStates`로 `FINISHED`(교체 장소 도착) 또는 `FAILED`(주행 실패 등). AMR은 도착 후 **구동 인터락**(사양서 §7-C)과 **교체 대기**를 자율로 처리한다.
+- **발행**: `POST /api/robots/{id}/battery-swap/dispatch { reason, userId }` — ACS는 로봇 보고 `mapId`의 BATTERY_SWAP 노드를 찾아 Order 1건 발행. 활성 run이 있으면 함께 abort(사양서 §5 "잔여 회수" 패턴을 abort/resume으로 매핑). 교체 완료 후 운영자가 '이어하기'로 재배차한다.
+- **배터리 LOW/CRITICAL 판정 자체는 AMR 로컬**(사양서 §1·§2). ACS는 `errors[]`의 `batteryLow`/`batteryCritical`/`orderRejectedBatteryLow`에 반응만 한다 — `orderRejectedBatteryLow`는 `WARNING`이며 **FATAL 실패로 집계 금지**(사양서 §8).
+- **ACS 책임 경계**: ACS는 교체 장소를 **등록·조회**하고 교체 이동 Order를 **발행만** 한다. 교체 완료 감지(BMS)·핫스왑 전원 유지·구동 인터락은 HD_AMR 책임.
+
 ---
 
 ## 9. 운영 시퀀스
@@ -878,6 +894,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N15 | 촬영 좌표 면-로컬 원점 정합 | CAPTURE_REQ `PosX/PosY` = 면 (0,0) 모서리 기준 (u,v). 필요 시 `drawingPos.u/v`를 기준점 오프셋으로 사용(§8.6.4) | ⏳ 연동 시험 확인 — wobj 티칭 원점 규약 회신 요청 (VDA 계약 무변경) |
 | N16 | `taskId` 바이트 순서 | RFC 4122 빅엔디안 16B ↔ 문자열 표기 일치 (§8.6.4) | ⏳ 비전 S/W와 문자열 대조 1회 확인 |
 | N19 | **코봇 seam 시작점 이동 시험 액션** `moveToSeamStart` (§8.7) | 신규 NODE 커스텀 액션 — 정차 노드 도달 후 코봇툴을 `position.seamStartW`(맵 좌표)까지만 이동·정지(촬영 없음). `wall_code` 티칭 자세. 본검사 전 reach 확인용·N10(정차 이격) 실측 근거. ACS 발행 경로(`POST /api/robots/{id}/test/seam-start`)·시뮬레이터 처리 구현 완료(2026-10-08) | ⏳ **HD_AMR 핸들러 구현 대기** — actionParameters 파서(`position.seamStartW`·`wall_code`) → 코봇툴 이동(촬영 없음) → `actionState` FINISHED/FAILED(reach 불가=errors) 보고. ※ 번호: AMR 보유본의 out-of-tree N17(seam z)·N18(거리 파라미터)와 겹치지 않게 **N19** 사용 — 양측 사양서 통합 시 번호 정리 |
+| N20 | **배터리 교체 이동 액션** `batterySwapMove` (§8.8) + 배터리 errors 분기 | 신규 NODE 커스텀 액션 — 로봇 보고 층(mapId)의 `ref.node`(nodeType=BATTERY_SWAP) 1곳으로 단일 노드 이동. `errors[]`에서 **`orderRejectedBatteryLow`는 WARNING**이며 ACS는 **FATAL 실패로 집계하지 않는다**(사양서 §8). `batteryCritical`은 FATAL(그 자리 안전정지 보고). 교체 Order 디스패치는 **운영자 수동 트리거**(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run 있으면 함께 abort, 교체 완료 후 '이어하기'로 재배차(§5 "잔여 회수" 패턴을 abort/resume으로 매핑). ACS 구현 완료(2026-10-10) | ⏳ **HD_AMR 핸들러 구현 대기** — `batterySwapMove` 파라미터 파서(`targetNodeId`·`mapId`·`reason`) → 교체 장소 주행 → 구동 인터락 → 교체 완료 감지 → `actionState` FINISHED 보고. §4·§7의 로컬 PowerMode 상태머신(핫스왑·BMS 자동 인식·브릿지 전원)은 AMR 측 구현 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 

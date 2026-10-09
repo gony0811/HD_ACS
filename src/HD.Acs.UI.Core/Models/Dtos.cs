@@ -339,3 +339,14 @@ public sealed record PlanApplyResultDto(Guid ChangeSetId, int Applied, int Creat
 /// <summary>GET /api/integrations/llm — Ollama 연결 상태(Reachable·ModelAvailable 은 조회 시 점검).</summary>
 public sealed record LlmStatusDto(bool Enabled, string BaseUrl, string Model, DateTimeOffset? LastOkAt, string? LastError,
     bool? Reachable, bool? ModelAvailable, int? AssistantRevision = null);   // null = 개정 번호 도입 전 구빌드 서버
+
+/// <summary>GET /api/battery-swap-nodes — 층(mapId)별 배터리 교체 장소 [HD_AMR 배터리관리 §6].</summary>
+public sealed record BatterySwapNodeDto(string NodeId, string MapId, string? Name, double X, double Y, double? Theta);
+
+/// <summary>POST /api/robots/{id}/battery-swap/dispatch 결과 — 발행된 Order와 함께 중단된 run(있으면).</summary>
+public sealed record BatterySwapDispatchResultDto(string OrderId, string TargetNodeId, string MapId,
+    string Reason, Guid? AbortedRunId);
+
+/// <summary>SignalR "BatterySwapDispatched" 푸시 — 운영자 교체 디스패치 사실을 UI 이벤트 로그가 흡수.</summary>
+public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, string TargetNodeId,
+    string MapId, string Reason, Guid? AbortedRunId);

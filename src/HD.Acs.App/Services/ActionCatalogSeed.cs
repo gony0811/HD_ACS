@@ -69,6 +69,21 @@ public static class ActionCatalogSeed
     }
     """;
 
+    // batterySwapMove param_schema (JSON Schema draft-07) — HD_AMR 배터리관리 §6 / VDA5050_INTERFACE_SPEC §8.
+    // 운영자 수동 트리거 — 현재 층(mapId) 배터리 교체 장소(ref.node, node_type=BATTERY_SWAP)로 단일 노드 이동.
+    // reason: LOW(저전력 알람 수신 후) / CRITICAL(위험 알람) / MANUAL(사전 예방·점검).
+    public const string BatterySwapMoveParamSchema = """
+    {
+      "type": "object",
+      "required": ["targetNodeId", "mapId"],
+      "properties": {
+        "targetNodeId": { "type": "string" },
+        "mapId":        { "type": "string" },
+        "reason":       { "enum": ["LOW", "CRITICAL", "MANUAL"] }
+      }
+    }
+    """;
+
     // moveToSeamStart param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8 (코봇 seam 시작점 이동 시험).
     // position 서브스키마는 startWeldInspection과 동일(seamStartW/seamEndW/drawingPos). params 없음(촬영 안 함).
     public const string MoveToSeamStartParamSchema = """
@@ -107,6 +122,7 @@ public static class ActionCatalogSeed
     {
         await UpsertAsync(db, logger, "startWeldInspection", StartWeldInspectionParamSchema, "단일 용접라인 구간 자동 검사 [WP-3]", ct);
         await UpsertAsync(db, logger, "moveToSeamStart", MoveToSeamStartParamSchema, "코봇툴 seam 시작점 이동 시험(촬영 없음) [VDA §8]", ct);
+        await UpsertAsync(db, logger, "batterySwapMove", BatterySwapMoveParamSchema, "현재 층 배터리 교체 장소로 이동(핫스왑 전제) [HD_AMR 배터리관리 §6]", ct);
     }
 
     private static async Task UpsertAsync(AcsDbContext db, ILogger logger, string actionType, string schema, string description, CancellationToken ct)

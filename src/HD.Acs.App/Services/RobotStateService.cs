@@ -186,10 +186,11 @@ public sealed class RobotStateService
     }
 
     /// <summary>
-    /// state.errors 유형별 정책 [§6.4]:
+    /// state.errors 유형별 정책 [§6.4 + HD_AMR 배터리관리 §8]:
     /// - orderValidationError → 거부된 정차를 실패 집계(재시도→스킵) + ORDER_REJECTED 알람 (orderId 대조로 멱등)
+    /// - orderRejectedBatteryLow → 실패 집계 **금지**(사양서 §8: WARNING, FATAL 아님) — WARNING 알람만, 재시도 스핀 방지
     /// - emergencyStopActive(신규 등장) → 활성 run 자동 중단 (AMR측 정지 — ACS발 비상정지와 동일 방어)
-    /// - localizationLost / equipmentError / batteryLow(신규 등장) → 알람 기록 (같은 유형 반복 보고는 무시)
+    /// - localizationLost / equipmentError / batteryLow / batteryCritical(신규 등장) → 알람 기록 (같은 유형 반복 보고는 무시)
     /// - drivingFailed / inspectionFailed → 별도 처리 없음(액션 FAILED 종결 경로가 정책 수행)
     /// </summary>
     private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state, CancellationToken ct)
@@ -197,6 +198,8 @@ public sealed class RobotStateService
         var appeared = _errorTracker.Update(robot.RobotId, state.Errors.Select(e => e.ErrorType));
         if (state.Errors.Count == 0) return;
 
+        // orderValidationError는 실패 집계로 간다. orderRejectedBatteryLow는 **같은 범주처럼 보이지만**
+        // 사양서(HD_AMR 배터리관리 §8)가 "FATAL(실패)로 오해 금지"를 명시하므로 여기서 분리한다.
         foreach (var e in state.Errors.Where(e =>
                      string.Equals(e.ErrorType, "orderValidationError", StringComparison.OrdinalIgnoreCase)))
             await _dispatcher.HandleOrderRejectedAsync(robot.RobotId, e.ErrorDescription, ct);
@@ -230,6 +233,14 @@ public sealed class RobotStateService
                     break;
                 case "batterylow":
                     AddErrorAlarm("BATTERY_LOW", robot.RobotId, "배터리 부족", err);
+                    break;
+                case "batterycritical":
+                    AddErrorAlarm("BATTERY_CRITICAL", robot.RobotId, "배터리 위험 — 그 자리 안전정지", err);
+                    break;
+                case "orderrejectedbatterylow":
+                    // 사양서 §8: WARNING, 실패 아님 — HandleOrderRejectedAsync 경로를 타지 않고 알람만 기록.
+                    AddErrorAlarm("ORDER_REJECTED_BATTERY_LOW", robot.RobotId,
+                        "AMR이 저전력으로 Order 거부 — 교체 장소로 보내거나 교체 후 재시도", err);
                     break;
                 // drivingFailed/inspectionFailed/orderValidationError: 위 또는 액션 종결 경로에서 처리
             }

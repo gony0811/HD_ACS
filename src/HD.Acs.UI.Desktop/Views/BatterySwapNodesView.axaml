@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HD.Acs.UI.Desktop.Views.BatterySwapNodesView"
+             TextBlock.Foreground="{DynamicResource AppTextBrush}">
+    <!-- DataContext = BatterySwapNodesViewModel. [HD_AMR 배터리관리 §6] -->
+    <Grid Margin="14" ColumnDefinitions="380,16,*" RowDefinitions="Auto,*,Auto">
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="3" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"
+                   Text="배터리 교체 장소 (층별 1곳)" />
+
+        <!-- 좌: 등록 폼 -->
+        <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource AppSurfaceBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <StackPanel Spacing="8">
+                <TextBlock Text="신규 등록" FontWeight="SemiBold" />
+                <TextBlock Text="층(mapId)" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Floors}"
+                          SelectedItem="{Binding SelectedFloor}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock>
+                                <Run Text="{Binding Level}" />
+                                <Run Text=" (" /><Run Text="{Binding MapId}" /><Run Text=")" />
+                            </TextBlock>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="이름" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                <TextBox Text="{Binding Name}" Watermark="예: BAT-01" MinHeight="30" />
+                <TextBlock Text="좌표 (맵 프레임, m)" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                <Grid ColumnDefinitions="*,8,*">
+                    <NumericUpDown Grid.Column="0" Value="{Binding X}" FormatString="0.###" Watermark="맵 X" />
+                    <NumericUpDown Grid.Column="2" Value="{Binding Y}" FormatString="0.###" Watermark="맵 Y" />
+                </Grid>
+                <TextBlock Text="정차각 theta (rad, 선택)" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                <NumericUpDown Value="{Binding Theta}" FormatString="0.###" Watermark="비워 두면 자유" />
+                <Button Content="등록" MinHeight="32" Margin="0,8,0,0"
+                        Command="{Binding CreateCommand}" HorizontalAlignment="Stretch" />
+                <TextBlock FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"
+                           Text="좌표는 ref.node/맵 프레임(SLAM 좌표). 운영 흐름: 로봇을 교체 지점에 수동 이동시킨 뒤 그 위치의 ReportedX/Y를 입력." />
+            </StackPanel>
+        </Border>
+
+        <!-- 우: 등록된 교체 장소 그리드 -->
+        <Grid Grid.Row="1" Grid.Column="2" RowDefinitions="*,Auto">
+            <DataGrid Grid.Row="0" x:Name="NodesGrid" ItemsSource="{Binding Nodes}"
+                      SelectedItem="{Binding SelectedNode}"
+                      AutoGenerateColumns="False" IsReadOnly="True">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="층(mapId)" Binding="{Binding MapId}" Width="120" />
+                    <DataGridTextColumn Header="이름" Binding="{Binding Name}" Width="*" />
+                    <DataGridTextColumn Header="X (m)" Binding="{Binding X, StringFormat={}{0:F3}}" Width="90" />
+                    <DataGridTextColumn Header="Y (m)" Binding="{Binding Y, StringFormat={}{0:F3}}" Width="90" />
+                    <DataGridTextColumn Header="theta (rad)" Binding="{Binding Theta, StringFormat={}{0:F3}}" Width="100" />
+                    <DataGridTextColumn Header="nodeId" Binding="{Binding NodeId}" Width="160" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0" Spacing="8">
+                <Button Content="새로고침" Command="{Binding LoadCommand}" />
+                <Button Content="선택 삭제" Command="{Binding DeleteCommand}" />
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Margin="0,8,0,0" TextWrapping="Wrap"
+                   FontSize="12" Foreground="{DynamicResource AppMutedTextBrush}"
+                   Text="{Binding StatusMessage}" />
+    </Grid>
+</UserControl>

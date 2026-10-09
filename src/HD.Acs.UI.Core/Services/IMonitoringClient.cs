@@ -22,6 +22,7 @@ public interface IMonitoringClient
     event EventHandler<WorkItemProgressDto>? WorkItemProgressReceived;   // 실행 큐 항목 상태 변화 단건
     event EventHandler<TaskActionProgressDto>? TaskActionProgressReceived;   // 용접라인(액션) 상태 변화 단건
     event EventHandler<AlarmDto>? AlarmRaised;   // 백엔드 미발화 — 대비용 구독
+    event EventHandler<BatterySwapDispatchedDto>? BatterySwapDispatched;   // 운영자 교체 디스패치 발행 [HD_AMR 배터리관리]
 
     Task StartAsync(CancellationToken ct = default);
     Task StopAsync();

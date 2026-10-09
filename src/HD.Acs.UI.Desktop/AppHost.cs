@@ -51,6 +51,7 @@ public static class AppHost
         builder.Services.AddSingleton<ManualZoneChangeViewModel>();
         builder.Services.AddSingleton<CalibrationViewModel>();
         builder.Services.AddSingleton<AreaPlanningViewModel>();
+        builder.Services.AddSingleton<BatterySwapNodesViewModel>();
         builder.Services.AddSingleton<TankViewModel>();
         builder.Services.AddSingleton<HistoryViewModel>();
 

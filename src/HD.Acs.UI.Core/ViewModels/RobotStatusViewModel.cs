@@ -1,17 +1,27 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HD.Acs.UI.Abstractions;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.Services;
 
 namespace HD.Acs.UI.ViewModels;
 
+/// <summary>배터리 상태 표시 등급 [HD_AMR 배터리관리 §2]. 판정 정본은 AMR의 errors[](batteryLow/batteryCritical);
+/// errors가 없어도 수치가 낮으면 "AMR 미확인" 톤으로 Low를 노출(UI 참고용). ACS는 상태머신을 복제하지 않는다(§1).</summary>
+public enum BatteryLevel { Normal, Low, Critical }
+
 /// <summary>로봇 목록 + 선택 로봇의 실시간 상태(배터리/위치/연결/주행). RobotState·RobotConnection 푸시로 갱신.</summary>
 public sealed partial class RobotStatusViewModel : ObservableObject
 {
     private readonly IAcsApiClient _api;
+    private readonly IDialogService? _dialog;
     private readonly Dictionary<string, (MapCalibrationDto? Calibration, DateTimeOffset LoadedAt)> _calibrations = new();
     private int _positionUpdateVersion;
+
+    // 사양서 §2 임계. UI 표시 전용 — AMR errors[]가 정본이고 ACS는 상태머신을 복제하지 않는다(§1).
+    public const double LowThresholdPct = 20.0;
+    public const double CriticalThresholdPct = 10.0;
 
     public ObservableCollection<RobotDto> Robots { get; } = new();
 
@@ -25,6 +35,13 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     [ObservableProperty] private bool _driving;
     [ObservableProperty] private int _errors;
     [ObservableProperty] private string? _statusMessage;
+
+    /// <summary>현재 활성 errorType 집합(소문자, "errorType: desc"에서 앞부분만). batteryLow·batteryCritical 등 판정 근거.</summary>
+    [ObservableProperty] private IReadOnlyList<string> _activeErrorTypes = Array.Empty<string>();
+    [ObservableProperty] private string? _operatingMode;
+    [ObservableProperty] private BatteryLevel _batteryLevel = BatteryLevel.Normal;
+    /// <summary>표시 라벨: "정상 (85%)" / "저전력 (18%)" / "위험 — 안전정지 (8%)" / "AMR 미확인(수치 추정)".</summary>
+    [ObservableProperty] private string _batteryStatusLabel = "-";
 
     // ── 계획 정차점까지 거리 (정차점 사전 평가) ──
     /// <summary>비교 대상 정차점 또는 비교 불가 사유(예: "F-01 (현재 작업) · 면 F", "이 층에 계획 정차점 없음").</summary>
@@ -46,9 +63,11 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     /// <summary>계획 정차점 재조회 주기 — 영역 수정이 다른 단말에서 일어나도 따라가도록.</summary>
     private static readonly TimeSpan PlanTtl = TimeSpan.FromSeconds(15);
 
-    public RobotStatusViewModel(IAcsApiClient api, IMonitoringClient monitoring, MissionViewModel? mission = null)
+    public RobotStatusViewModel(IAcsApiClient api, IMonitoringClient monitoring,
+        MissionViewModel? mission = null, IDialogService? dialog = null)
     {
         _api = api;
+        _dialog = dialog;
         monitoring.RobotStateReceived += OnRobotState;
         monitoring.RobotConnectionReceived += OnRobotConnection;
         _mission = mission;
@@ -146,7 +165,11 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedRobotChanged(RobotDto? value) => _ = LoadContextAsync();
+    partial void OnSelectedRobotChanged(RobotDto? value)
+    {
+        _ = LoadContextAsync();
+        DispatchBatterySwapCommand.NotifyCanExecuteChanged();
+    }
 
     private async Task LoadContextAsync()
     {
@@ -176,7 +199,85 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         _ = UpdateDrawingPositionAsync(s.RobotId, s.ReportedMapId, s.ReportedX, s.ReportedY, s.ReportedTheta);
         Driving = s.Driving;
         Errors = s.Errors;
+        OperatingMode = s.OperatingMode;
+        ActiveErrorTypes = ExtractErrorTypes(s.ErrorDescriptions);
+        RefreshBatteryLevel();
+        DispatchBatterySwapCommand.NotifyCanExecuteChanged();
     }
+
+    /// <summary>errorDescriptions 요소는 "errorType" 또는 "errorType: description" — 앞 부분만 추출(소문자화).</summary>
+    private static IReadOnlyList<string> ExtractErrorTypes(string[]? descriptions)
+    {
+        if (descriptions is null || descriptions.Length == 0) return Array.Empty<string>();
+        var types = new List<string>(descriptions.Length);
+        foreach (var d in descriptions)
+        {
+            if (string.IsNullOrWhiteSpace(d)) continue;
+            int colon = d.IndexOf(':');
+            types.Add((colon > 0 ? d[..colon] : d).Trim().ToLowerInvariant());
+        }
+        return types;
+    }
+
+    /// <summary>등급 판정: errors의 batteryCritical/batteryLow가 정본, 없고 수치만 낮으면 참고 등급(라벨에 "추정" 표기).</summary>
+    private void RefreshBatteryLevel()
+    {
+        bool hasCritical = ActiveErrorTypes.Any(t => t == "batterycritical");
+        bool hasLow = ActiveErrorTypes.Any(t => t == "batterylow");
+        BatteryLevel lv;
+        string label;
+        var pctText = BatteryPct is double p ? $"{p:F0}%" : "미보고";
+        if (hasCritical)      { lv = BatteryLevel.Critical; label = $"위험 — 안전정지 ({pctText})"; }
+        else if (hasLow)      { lv = BatteryLevel.Low;      label = $"저전력 ({pctText})"; }
+        else if (BatteryPct is double pc && pc <= CriticalThresholdPct)
+                              { lv = BatteryLevel.Critical; label = $"위험 추정 — AMR 미보고 ({pctText})"; }
+        else if (BatteryPct is double pl && pl <= LowThresholdPct)
+                              { lv = BatteryLevel.Low;      label = $"저전력 추정 — AMR 미보고 ({pctText})"; }
+        else                  { lv = BatteryLevel.Normal;   label = BatteryPct is null ? "배터리 미보고" : $"정상 ({pctText})"; }
+        BatteryLevel = lv;
+        BatteryStatusLabel = label;
+    }
+
+    partial void OnBatteryPctChanged(double? value) => RefreshBatteryLevel();
+
+    /// <summary>운영자 수동 교체 디스패치. ONLINE + 로봇 선택 시 활성.</summary>
+    [RelayCommand(CanExecute = nameof(CanDispatchBatterySwap))]
+    public async Task DispatchBatterySwapAsync()
+    {
+        if (SelectedRobot is not { } robot) return;
+        var reason = BatteryLevel switch
+        {
+            BatteryLevel.Critical => "CRITICAL",
+            BatteryLevel.Low => "LOW",
+            _ => "MANUAL",
+        };
+        if (_dialog is not null)
+        {
+            var ok = await _dialog.ConfirmAsync(
+                $"로봇 {robot.RobotId}을(를) 현재 층의 배터리 교체 장소로 이동시킵니다.\n" +
+                "활성 run이 있으면 중단되며, 교체 완료 후 '이어하기'로 재배차하세요.\n\n계속할까요?",
+                "배터리 교체 이동");
+            if (!ok) return;
+        }
+        try
+        {
+            var r = await _api.DispatchBatterySwapAsync(robot.RobotId, reason, "operator");
+            StatusMessage = r is null
+                ? "배터리 교체 이동 요청 완료."
+                : $"배터리 교체 이동 발행 — {r.MapId}/{r.TargetNodeId} ({r.Reason})"
+                  + (r.AbortedRunId is Guid run ? $", run {run} 중단." : ".");
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"배터리 교체 이동 실패: {ex.Message}";
+        }
+    }
+
+    public bool CanDispatchBatterySwap() => SelectedRobot is not null
+        && string.Equals(ConnectionState, "ONLINE", StringComparison.OrdinalIgnoreCase);
+
+    partial void OnConnectionStateChanged(string value) =>
+        DispatchBatterySwapCommand.NotifyCanExecuteChanged();
 
     private void OnRobotConnection(object? sender, RobotConnectionDto c)
     {

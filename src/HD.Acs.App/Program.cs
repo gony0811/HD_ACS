@@ -50,6 +50,7 @@ builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
+builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
@@ -740,6 +741,33 @@ app.MapPost("/api/robots/{robotId}/emergency-stop",
         abortedRunId = runId;
     }
     return Results.Ok(new { robotId, abortedRunId });
+});
+
+// ── 배터리 교체 장소 (ref.node, node_type=BATTERY_SWAP) [HD_AMR 배터리관리 §6] ──
+// mapId당 1곳. 운영자 수동 트리거(POST /battery-swap/dispatch)로 교체 이동 Order 1건 발행.
+app.MapGet("/api/battery-swap-nodes", async (string? mapId, BatterySwapService svc, CancellationToken ct) =>
+    Results.Ok(await svc.ListAsync(mapId, ct)));
+
+app.MapPost("/api/battery-swap-nodes",
+    async (BatterySwapService.SwapRegisterRequest req, BatterySwapService svc, CancellationToken ct) =>
+{
+    try { return Results.Created($"/api/battery-swap-nodes/{(await svc.RegisterAsync(req, ct)).NodeId}", await svc.ListAsync(req.MapId, ct)); }
+    catch (BatterySwapException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode); }
+});
+
+app.MapDelete("/api/battery-swap-nodes/{nodeId}",
+    async (string nodeId, string? userId, BatterySwapService svc, CancellationToken ct) =>
+{
+    try { await svc.DeleteAsync(nodeId, userId, ct); return Results.NoContent(); }
+    catch (BatterySwapException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode); }
+});
+
+app.MapPost("/api/robots/{robotId}/battery-swap/dispatch",
+    async (string robotId, BatterySwapService.SwapDispatchRequest req, BatterySwapService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.DispatchSwapAsync(robotId, req, ct)); }
+    catch (BatterySwapException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode); }
+    catch (RobotNotConnectedException ex) { return Results.Json(new { error = ex.Message }, statusCode: 409); }
 });
 
 // 수동 이동(goto) — 이동 테스트용. 도면 좌표를 T_W_D로 맵 좌표로 변환해 **액션 없는 단일 노드 Order** 발행.

@@ -115,6 +115,26 @@ public sealed class BoolToCursorConverter : IValueConverter
         BindingOperations.DoNothing;
 }
 
+/// <summary>BatteryLevel → 브러시. Normal=Good, Low=WarnFg, Critical=Error. [HD_AMR 배터리관리 §2]</summary>
+public sealed class BatteryLevelToBrushConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var key = value?.ToString() switch
+        {
+            "Critical" => "AppErrorBrush",
+            "Low" => "AppWarnFgBrush",
+            "Normal" => "AppGoodBrush",
+            _ => "AppMutedTextBrush",
+        };
+        return Application.Current is { } app && app.TryFindResource(key, app.ActualThemeVariant, out var res) && res is IBrush b
+            ? b : Brushes.Gray;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        BindingOperations.DoNothing;
+}
+
 /// <summary>bool → 브러시(True/False 각각 지정). 어시스턴트 대화 말풍선(운영자/응답) 배경.</summary>
 public sealed class BoolToBrushConverter : IValueConverter
 {

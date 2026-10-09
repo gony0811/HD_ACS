@@ -28,6 +28,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public ManualZoneChangeViewModel ManualZoneChange { get; }
     public CalibrationViewModel Calibration { get; }
     public AreaPlanningViewModel AreaPlanning { get; }
+    public BatterySwapNodesViewModel BatterySwapNodes { get; }
     public TankViewModel Tank { get; }
     public HistoryViewModel History { get; }
 
@@ -50,6 +51,7 @@ public sealed partial class ShellViewModel : ObservableObject
         ManualZoneChangeViewModel manualZoneChange,
         CalibrationViewModel calibration,
         AreaPlanningViewModel areaPlanning,
+        BatterySwapNodesViewModel batterySwapNodes,
         TankViewModel tank,
         HistoryViewModel history)
     {
@@ -65,6 +67,7 @@ public sealed partial class ShellViewModel : ObservableObject
         ManualZoneChange = manualZoneChange;
         Calibration = calibration;
         AreaPlanning = areaPlanning;
+        BatterySwapNodes = batterySwapNodes;
         Tank = tank;
         History = history;
 
@@ -107,6 +110,7 @@ public sealed partial class ShellViewModel : ObservableObject
             ManualZoneChange.LoadAsync(),
             Calibration.LoadAsync(),
             AreaPlanning.LoadAsync(),
+            BatterySwapNodes.LoadAsync(),
             Tank.LoadAsync());   // 3D 셸(지오메트리 10면) 로드
         Mission.TankId = AreaPlanning.TankId;   // 시나리오 생성 대상 선창 동기화
     }

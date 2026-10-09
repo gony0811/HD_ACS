@@ -112,5 +112,8 @@
         <TabItem Header="캘리브레이션 (T_W_D)">
             <views:CalibrationView DataContext="{Binding Calibration}" />
         </TabItem>
+        <TabItem Header="배터리 교체 장소">
+            <views:BatterySwapNodesView DataContext="{Binding BatterySwapNodes}" />
+        </TabItem>
     </TabControl>
 </UserControl>

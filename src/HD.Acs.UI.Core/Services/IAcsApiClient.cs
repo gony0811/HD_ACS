@@ -103,6 +103,19 @@ public interface IAcsApiClient
         throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
     Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
 
+    // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] — mapId당 1곳, 운영자 수동 디스패치 ──
+    Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<BatterySwapNodeDto>>(Array.Empty<BatterySwapNodeDto>());
+    /// <summary>신규 교체 장소 등록. 서버가 nodeId 생성(요청에 포함 시 그 값), 중복 mapId 409.</summary>
+    Task<BatterySwapNodeDto> CreateBatterySwapNodeAsync(string mapId, string name, double x, double y,
+        double? theta, string? userId, CancellationToken ct = default) =>
+        throw new NotSupportedException("배터리 교체 장소 미지원 클라이언트");
+    Task DeleteBatterySwapNodeAsync(string nodeId, string? userId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+    /// <summary>운영자 수동 교체 디스패치 — 현재 층 교체 장소로 Order 1건 발행. 활성 run 있으면 함께 abort.</summary>
+    Task<BatterySwapDispatchResultDto?> DispatchBatterySwapAsync(string robotId, string? reason, string? userId,
+        CancellationToken ct = default) => Task.FromResult<BatterySwapDispatchResultDto?>(null);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

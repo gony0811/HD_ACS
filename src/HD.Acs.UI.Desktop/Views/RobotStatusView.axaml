@@ -6,6 +6,7 @@
     <!-- DataContext = RobotStatusViewModel -->
     <UserControl.Resources>
         <conv:KindToBrushConverter x:Key="KindBrush" />
+        <conv:BatteryLevelToBrushConverter x:Key="BatteryBrush" />
     </UserControl.Resources>
     <Grid Margin="10" RowDefinitions="Auto,Auto,*,Auto">
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
@@ -25,9 +26,14 @@
 
         <StackPanel Grid.Row="2">
             <TextBlock Text="배터리" Margin="0,0,0,2" />
-            <ProgressBar Minimum="0" Maximum="100" Height="18" Value="{Binding BatteryPct, FallbackValue=0}" />
-            <TextBlock Text="{Binding BatteryPct, StringFormat='{}{0:F0} %', FallbackValue='- %'}"
-                       HorizontalAlignment="Right" Margin="0,0,0,10" />
+            <ProgressBar Minimum="0" Maximum="100" Height="18" Value="{Binding BatteryPct, FallbackValue=0}"
+                         Foreground="{Binding BatteryLevel, Converter={StaticResource BatteryBrush}}" />
+            <TextBlock Text="{Binding BatteryStatusLabel}" FontWeight="SemiBold"
+                       Foreground="{Binding BatteryLevel, Converter={StaticResource BatteryBrush}}"
+                       HorizontalAlignment="Right" Margin="0,2,0,6" />
+            <Button Content="배터리 교체 이동" HorizontalAlignment="Stretch" Margin="0,0,0,10"
+                    Command="{Binding DispatchBatterySwapCommand}"
+                    ToolTip.Tip="현재 층의 배터리 교체 장소로 이동 Order 발행. 활성 run은 함께 중단, 교체 후 '이어하기'로 재개." />
 
             <TextBlock Text="{Binding ConnectionState, StringFormat='연결: {0}'}" />
             <TextBlock Text="{Binding MapId, StringFormat='층(mapId): {0}'}" />
