@@ -122,6 +122,7 @@ public sealed class RobotStateService
         {
             robot.RobotId, ctx.ReportedMapId, ctx.ReportedX, ctx.ReportedY, ctx.BatteryPct,
             state.OrderId, state.LastNodeId, state.Driving, Errors = state.Errors.Count,
+            state.Paused,       // 통신 단절 PAUSE 등 일시정지 — 재개는 운영자 stopPause [통신단절 Fail-Safe §5]
             ctx.ReportedTheta,  // 맵 프레임 heading(rad) — UI가 T_W_D yaw 보정 후 3D 방향 화살표로 표시
             // 운영 UI 현재 상태 표시용 — 수동 모드·비상정지·오류 내용을 작업자에게 그대로 보인다
             state.OperatingMode,
@@ -191,6 +192,10 @@ public sealed class RobotStateService
     /// - orderRejectedBatteryLow → 실패 집계 **금지**(사양서 §8: WARNING, FATAL 아님) — WARNING 알람만, 재시도 스핀 방지
     /// - emergencyStopActive(신규 등장) → 활성 run 자동 중단 (AMR측 정지 — ACS발 비상정지와 동일 방어)
     /// - localizationLost / equipmentError / batteryLow / batteryCritical(신규 등장) → 알람 기록 (같은 유형 반복 보고는 무시)
+    /// - communicationLostPause → COMM_LOSS_PAUSED 알람만 — **실패 집계·재시도·재배차 금지** [통신단절 Fail-Safe §6].
+    ///   AMR이 진행 액션을 PAUSED로 두므로 정차 종결 판정(FINISHED/FAILED만 종결)에 걸리지 않아 work_item은 DISPATCHED 유지.
+    ///   PAUSE→HOLD는 같은 errorType(설명만 변경)이라 edge 1회만 알람.
+    /// - resumeRejected → RESUME_REJECTED 알람(사유=설명). 재개는 운영자가 원인 해소 후 다시 요청
     /// - drivingFailed / inspectionFailed → 별도 처리 없음(액션 FAILED 종결 경로가 정책 수행)
     /// </summary>
     private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state, CancellationToken ct)
@@ -241,6 +246,15 @@ public sealed class RobotStateService
                     // 사양서 §8: WARNING, 실패 아님 — HandleOrderRejectedAsync 경로를 타지 않고 알람만 기록.
                     AddErrorAlarm("ORDER_REJECTED_BATTERY_LOW", robot.RobotId,
                         "AMR이 저전력으로 Order 거부 — 교체 장소로 보내거나 교체 후 재시도", err);
+                    break;
+                case "communicationlostpause":
+                    // 통신단절 Fail-Safe §6: 실패 아님 — HandleOrderRejectedAsync·abort 경로를 타지 않는다.
+                    AddErrorAlarm("COMM_LOSS_PAUSED", robot.RobotId,
+                        "통신 단절로 AMR 작업 일시정지 — 통신 복구 후 현장 확인, 재개(stopPause) 또는 run 중단", err);
+                    break;
+                case "resumerejected":
+                    AddErrorAlarm("RESUME_REJECTED", robot.RobotId,
+                        "AMR이 재개 요청을 거부 — 사유 해소 후 다시 재개", err);
                     break;
                 // drivingFailed/inspectionFailed/orderValidationError: 위 또는 액션 종결 경로에서 처리
             }

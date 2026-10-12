@@ -16,6 +16,10 @@ using MQTTnet.Protocol;
 //     ── 관측 계약: FINISHED 시 resultDescription="OK;anchor=FULL|SHARED;jobRef=<...>"
 //        (테스트 드라이버 HD.Acs.SimTest가 이 문자열로 앵커 동작을 검증한다.)
 //     앵커 무효화: 주행 발생 / 직전 액션 FAILED / 새 Order 수신(재시도 포함).
+//  4. 통신 단절 일시정지 주입 [HD_AMR 통신단절 Fail-Safe §3/§5]: SIM_COMM_LOSS_PAUSE_ORDERS=N 이면 처음 N개 액션을
+//     RUNNING 직후 PAUSED + state.paused=true + errors communicationLostPause 로 멈추고 stopPause/cancelOrder 대기.
+//     (실제 MQTT 단절 판정은 시뮬레이터 범위 밖 — "복구 직후 PAUSE 보고" 시점부터 재현.)
+//     SIM_RESUME_REJECT=1 이면 첫 stopPause를 resumeRejected로 거부.
 //  3. 실패 주입: 환경변수 SIM_FAIL_ACTION_IDS(콤마 구분 actionId)에 해당하면
 //     FAILED, resultDescription="FAIL;reason=INJECTED".
 //
@@ -48,6 +52,12 @@ var driveFailCount = 0;
 var rejectMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_REJECT_MAX"), out var rj) ? rj : 0;
 var rejectCount = 0;
 
+// 통신 단절 일시정지 주입 [통신단절 Fail-Safe] — 처음 N개 액션을 PAUSED로 멈추고 stopPause/cancelOrder 대기
+var commLossMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_COMM_LOSS_PAUSE_ORDERS"), out var cl) ? cl : 0;
+var commLossCount = 0;
+var resumeRejectPending = Environment.GetEnvironmentVariable("SIM_RESUME_REJECT") == "1";
+TaskCompletionSource<string>? pauseWait = null;   // "resume" | "cancel"
+
 // 상시 오류 주입 — 모든 state에 해당 errorType 포함 (예: localizationLost, emergencyStopActive — §6.4 분기 검증용)
 var raiseErrorType = Environment.GetEnvironmentVariable("SIM_RAISE_ERROR");
 
@@ -63,6 +73,7 @@ var stateTopic = Vda5050Topics.State(robot);
 var options = new MqttClientOptionsBuilder()
     .WithTcpServer(broker)
     .WithClientId($"sim-{robot.SerialNumber}")
+    .WithKeepAlivePeriod(TimeSpan.FromSeconds(5))   // 통신단절 Fail-Safe §2.2 — 로봇·관제 동일 5 s
     // Last Will: 비정상 종료 시 CONNECTIONBROKEN (두절 감지의 근거 [ADR-002])
     .WithWillTopic(connTopic)
     .WithWillPayload(JsonSerializer.Serialize(new Vda5050Connection
@@ -132,6 +143,25 @@ client.ApplicationMessageReceivedAsync += async e =>
             }
             if (a.ActionType == "emergencyStop")
                 Console.WriteLine("[SIM] !! 비상정지 (기능적 정지) !!");
+            if (a.ActionType == "stopPause")
+            {
+                if (pauseWait is null) Console.WriteLine("[SIM] stopPause — 일시정지 상태 아님(무시)");
+                else if (resumeRejectPending)
+                {
+                    resumeRejectPending = false;
+                    state.Errors.RemoveAll(er => er.ErrorType == "resumeRejected");
+                    state.Errors.Add(new VdaError { ErrorType = "resumeRejected", ErrorLevel = "WARNING",
+                        ErrorDescription = "재개 거부(주입): 비상정지 해제 필요" });
+                    Console.WriteLine("[SIM] stopPause 거부(주입) — resumeRejected 보고");
+                    await PublishStateAsync();
+                }
+                else pauseWait.TrySetResult("resume");
+            }
+            if (a.ActionType == "cancelOrder")
+            {
+                if (pauseWait is null) Console.WriteLine("[SIM] cancelOrder — 일시정지 중 Order 없음(무시)");
+                else pauseWait.TrySetResult("cancel");
+            }
         }
     }
 };
@@ -211,20 +241,56 @@ async Task ExecuteOrderAsync(Vda5050Order order)
             }
             Console.WriteLine($"[SIM] 노드 도착: {node.NodeId}");
 
+            bool cancelled = false;
             foreach (var action in node.Actions)
-                await ExecuteActionAsync(action);
+                if (!await ExecuteActionAsync(action)) { cancelled = true; break; }
             await PublishStateAsync();
+            if (cancelled) { Console.WriteLine($"[SIM] Order 취소됨: {order.OrderId}"); return; }
         }
         Console.WriteLine($"[SIM] Order 완료: {order.OrderId}");
     }
     finally { gate.Release(); }
 }
 
-async Task ExecuteActionAsync(VdaAction action)
+/// <returns>false = cancelOrder로 Order 취소됨(이후 액션 실행 중단)</returns>
+async Task<bool> ExecuteActionAsync(VdaAction action)
 {
     var actionState = state.ActionStates.First(s => s.ActionId == action.ActionId);
     actionState.ActionStatus = "RUNNING";
     await PublishStateAsync();
+
+    // ── 0. 통신 단절 일시정지 주입 [통신단절 Fail-Safe §3/§5] ──
+    if (commLossCount < commLossMax)
+    {
+        commLossCount++;
+        var t0 = DateTimeOffset.UtcNow;
+        pauseWait = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        actionState.ActionStatus = "PAUSED";
+        state.Paused = true;
+        state.Errors.RemoveAll(er => er.ErrorType == "communicationLostPause");
+        state.Errors.Add(new VdaError { ErrorType = "communicationLostPause", ErrorLevel = "WARNING",
+            ErrorDescription = $"PAUSE(주입 {commLossCount}/{commLossMax}) t0={t0:HH:mm:ss} 조건=A" });
+        Console.WriteLine($"[SIM]   통신 단절 일시정지(주입): {action.ActionId} — stopPause/cancelOrder 대기");
+        await PublishStateAsync();
+
+        var outcome = await pauseWait.Task;
+        pauseWait = null;
+        state.Paused = false;
+        state.Errors.RemoveAll(er => er.ErrorType is "communicationLostPause" or "resumeRejected");
+        if (outcome == "cancel")
+        {
+            // cancelOrder: 미완료 액션은 FAILED(VDA 표준), communicationLostPause 클리어 [Fail-Safe §5]
+            foreach (var a in state.ActionStates.Where(a => a.ActionStatus is not ("FINISHED" or "FAILED")))
+            { a.ActionStatus = "FAILED"; a.ResultDescription = "FAIL;reason=CANCELLED"; }
+            currentAnchorGroup = null;
+            Console.WriteLine("[SIM]   cancelOrder 수신 — Order 폐기");
+            await PublishStateAsync();
+            return false;
+        }
+        actionState.ActionStatus = "RUNNING";
+        Console.WriteLine($"[SIM]   stopPause 수신 — 재개(정지 직전 웨이포인트부터 재촬영), 정지 {(DateTimeOffset.UtcNow - t0).TotalSeconds:F0}s");
+        await PublishStateAsync();
+    }
 
     // ── 1. 실패 주입 [WP-4 §5.3] ──
     if (failActionIds.Contains(action.ActionId)
@@ -235,7 +301,7 @@ async Task ExecuteActionAsync(VdaAction action)
         Fail(actionState, "INJECTED");
         Console.WriteLine($"[SIM]   액션 실패(주입): {action.ActionId}");
         await PublishStateAsync();
-        return;
+        return true;
     }
 
     if (action.ActionType == "startWeldInspection")
@@ -252,7 +318,7 @@ async Task ExecuteActionAsync(VdaAction action)
             });
             Fail(actionState, $"PARAM({string.Join(",", violations)})");
             await PublishStateAsync();
-            return;
+            return true;
         }
 
         // ── 3. 앵커 공유 판정 [WP-4 §5.2] ──
@@ -299,6 +365,7 @@ async Task ExecuteActionAsync(VdaAction action)
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType}");
     }
     await PublishStateAsync();
+    return true;
 }
 
 void Fail(ActionState actionState, string reason)

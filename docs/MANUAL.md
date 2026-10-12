@@ -298,6 +298,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/robots/{robotId}/context` | 로봇 컨텍스트 — 보고 pose(ReportedX/Y/Theta), 층(mapId), 온라인 여부 |
 | `POST /api/robots/{robotId}/zone` | 수동 층 지정 — `{ mapId, userId }`; AMR 보고 mapId 검증 게이트 설정 |
 | `POST /api/robots/{robotId}/emergency-stop` | 비상정지 — `{ userId }` (활성 run 자동 중단) |
+| `POST /api/robots/{robotId}/resume-pause` | 통신 단절 일시정지 재개 — `{ userId }` → `stopPause` 발행. 로봇이 `communicationLostPause` 보고 중이 아니면 409, 미연결 409 |
 | `POST /api/robots/{robotId}/goto` | 수동 이동 — `{ level, xDrawing, yDrawing, thetaDrawing? }` 도면 pose→T_W_D→액션 없는 단일 노드 Order. 진행 run/타층 409 |
 
 ### 캘리브레이션 (T_W_D)
@@ -339,7 +340,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |
-| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지 |
+| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지. 로봇이 통신 단절 일시정지 중이면 `cancelOrder`도 발행(응답 `cancelOrderSent`) |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
 | `GET /api/runs/{runId}/progress` | TASK 진행률 [SAIGE §5.4/§6] — 분모 `totalTasks`는 run 시작 시 고정, 분자는 **고유 taskId** 종결 수(재시도 중복 없음). `skippedTasks`⊂`failedTasks`, `excludedTasks`(미보정 층 등 제외분, 분모 미포함), `percent`·`fraction`. ~1초 TTL 캐시(1~5초 polling 대응) |
@@ -369,6 +370,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 
 | 증상 | 원인/조치 |
 |---|---|
+| "통신 복구 — 재개 확인 필요" 표시, 로봇이 멈춰 있음 | Order 수행 중 통신이 30 s 이상 끊겨 AMR이 스스로 일시정지(PAUSE, 60 s 후 HOLD+부저)한 상태 — **실패가 아니며 자동 재개하지 않는다**. 현장에서 로봇 주변 안전 확인 → 로봇 상태 카드 '작업 재개'(검사 중이었다면 직전 웨이포인트부터 재촬영). 그만두려면 미션 바 '중단'(cancelOrder 함께 발행). '재개 거부' 사유가 뜨면(비상정지·배터리·측위/층·수동 모드) 원인 해소 후 다시 재개 |
 | 기준점 캡처가 409 | 로봇이 보고하는 mapId ≠ 대상 mapId — 로봇 층 확인 또는 수동 층 변경 먼저 |
 | `GET .../calibration`이 404 | T_W_D 미등록이거나 **맵버전 불일치**(맵 재생성됨) — 재캘리브레이션 |
 | generate-from-seams 실패 | 유효 T_W_D 없음(의도된 명시적 실패) — 단계 1 먼저 수행 |

@@ -163,6 +163,14 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<BatterySwapDispatchResultDto>(ct);
     }
 
+    public async Task<ResumePauseResultDto?> ResumePauseAsync(string robotId, string? userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/robots/{Uri.EscapeDataString(robotId)}/resume-pause",
+            new { UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);   // 409(일시정지 아님·미연결)·404의 {error} 메시지 노출
+        return await resp.Content.ReadFromJsonAsync<ResumePauseResultDto>(ct);
+    }
+
     // ── 캘리브레이션 (T_W_D) [PHASE2 WP-1/5a] ──────────
     public async Task<CalibrationPointDto> CaptureCalibrationPointAsync(string mapId,
         double drawingX, double drawingY, string unit, string userId, CancellationToken ct = default,

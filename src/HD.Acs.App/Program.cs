@@ -39,7 +39,8 @@ builder.Services.AddDbContext<AcsDbContext>(o =>
 
 builder.Services.AddSingleton(sp => new Vda5050MasterClient(
     builder.Configuration["Acs:Mqtt:Host"] ?? "localhost",
-    builder.Configuration.GetValue("Acs:Mqtt:Port", 1883)));
+    builder.Configuration.GetValue("Acs:Mqtt:Port", 1883),
+    builder.Configuration.GetValue("Acs:Mqtt:KeepAliveSec", 5)));   // 통신단절 Fail-Safe §2.2 — 5 s 명시
 
 builder.Services.AddSingleton<HD.Acs.Core.Planning.IInspectionOrderingPolicy, HD.Acs.Core.Planning.GreedyNearestPolicy>();
 builder.Services.AddScoped<InspectionDispatcher>();
@@ -51,6 +52,7 @@ builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
 builder.Services.AddScoped<BatterySwapService>();
+builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddHostedService<VdaBridgeService>();
@@ -615,9 +617,10 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 });
 
 // run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
-app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, MissionService missions) =>
+// 로봇이 통신 단절 일시정지 중이면 cancelOrder도 발행(PAUSE AMR은 Order를 쥐고 있음) [통신단절 Fail-Safe §4.1, VDA §4.5.3]
+app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, CommLossService commLoss) =>
 {
-    try { await missions.AbortRunAsync(runId); return Results.Ok(new { runId, state = "ABORTED" }); }
+    try { return Results.Ok(await commLoss.AbortRunAsync(runId, default)); }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -741,6 +744,16 @@ app.MapPost("/api/robots/{robotId}/emergency-stop",
         abortedRunId = runId;
     }
     return Results.Ok(new { robotId, abortedRunId });
+});
+
+// 통신 단절 일시정지 재개 — 운영자 확인 후 stopPause 1건 [HD_AMR 통신단절 Fail-Safe §4.1/§6].
+// 일시정지 보고 중이 아니면 409, 미연결 409. 재개 가능 여부는 AMR이 판정(거부 시 errors[] resumeRejected).
+app.MapPost("/api/robots/{robotId}/resume-pause",
+    async (string robotId, CommLossService.ResumePauseRequest? req, CommLossService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.ResumePauseAsync(robotId, req ?? new(null), ct)); }
+    catch (CommLossException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode); }
+    catch (RobotNotConnectedException ex) { return Results.Json(new { error = ex.Message }, statusCode: 409); }
 });
 
 // ── 배터리 교체 장소 (ref.node, node_type=BATTERY_SWAP) [HD_AMR 배터리관리 §6] ──

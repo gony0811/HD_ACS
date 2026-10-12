@@ -35,6 +35,18 @@
                     Command="{Binding DispatchBatterySwapCommand}"
                     ToolTip.Tip="현재 층의 배터리 교체 장소로 이동 Order 발행. 활성 run은 함께 중단, 교체 후 '이어하기'로 재개." />
 
+            <!-- 통신 단절 일시정지 — AMR은 통신 복구 후에도 자동 재개하지 않는다 [HD_AMR 통신단절 Fail-Safe §6] -->
+            <Border IsVisible="{Binding CommLossPaused}" BorderBrush="{DynamicResource AppWarnBorderBrush}" Background="{DynamicResource AppWarnBgBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="{Binding CommLossLabel}" TextWrapping="Wrap" FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppWarnFgBrush}" Margin="0,0,0,6" />
+                    <Button Content="작업 재개" HorizontalAlignment="Stretch"
+                            Command="{Binding ResumePauseCommand}"
+                            ToolTip.Tip="현장 안전 확인 후 AMR에 재개(stopPause) 요청. 작업을 그만두려면 미션 바의 '중단'(cancelOrder 함께 발행)." />
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="{Binding ConnectionState, StringFormat='연결: {0}'}" />
             <TextBlock Text="{Binding MapId, StringFormat='층(mapId): {0}'}" />
             <TextBlock Text="{Binding Position, StringFormat='도면 위치: {0}'}" />

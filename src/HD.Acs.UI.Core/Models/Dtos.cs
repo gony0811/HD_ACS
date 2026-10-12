@@ -41,7 +41,8 @@ public sealed record RobotStateDto(
     double? ReportedTheta = null,    // 맵 프레임 heading(rad, VDA agvPosition.theta). 구서버 미포함 → null
     string? OperatingMode = null,    // AUTOMATIC | SEMIAUTOMATIC | MANUAL | SERVICE | TEACHIN. 구서버 → null
     string? EStop = null,            // safetyState.eStop: NONE | AUTOACK | MANUAL | REMOTE
-    string[]? ErrorDescriptions = null);   // 활성 errors "errorType: description" 목록
+    string[]? ErrorDescriptions = null,    // 활성 errors "errorType: description" 목록
+    bool? Paused = null);                  // state.paused — 통신 단절 PAUSE 등. 구서버 → null
 
 /// <summary>SignalR "RobotConnection" 푸시. ConnectionState: ONLINE | OFFLINE | CONNECTIONBROKEN</summary>
 public sealed record RobotConnectionDto(
@@ -346,6 +347,9 @@ public sealed record BatterySwapNodeDto(string NodeId, string MapId, string? Nam
 /// <summary>POST /api/robots/{id}/battery-swap/dispatch 결과 — 발행된 Order와 함께 중단된 run(있으면).</summary>
 public sealed record BatterySwapDispatchResultDto(string OrderId, string TargetNodeId, string MapId,
     string Reason, Guid? AbortedRunId);
+
+/// <summary>POST /api/robots/{id}/resume-pause 응답 — 통신 단절 일시정지 재개(stopPause) 발행.</summary>
+public sealed record ResumePauseResultDto(string RobotId, string ActionType);
 
 /// <summary>SignalR "BatterySwapDispatched" 푸시 — 운영자 교체 디스패치 사실을 UI 이벤트 로그가 흡수.</summary>
 public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, string TargetNodeId,

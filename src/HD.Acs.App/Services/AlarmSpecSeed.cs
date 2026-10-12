@@ -30,6 +30,10 @@ public static class AlarmSpecSeed
             "AMR이 저전력 상태에서 작업 Order를 거부(WARNING, 실패 아님) — 교체 장소로 보내거나 교체 완료 후 재시도 [HD_AMR 배터리관리 §8]"),
         ("BATTERY_SWAP_DISPATCHED", "INFO", "배터리 교체 이동 발행",
             "운영자가 배터리 교체 장소로 이동 Order를 수동 발행 — 활성 run이 있으면 함께 중단됨, 교체 완료 후 이어하기로 재배차"),
+        ("COMM_LOSS_PAUSED", "WARNING", "통신 단절 일시정지 — 재개 확인 필요",
+            "Order 수행 중 통신 단절로 AMR이 로컬 일시정지(PAUSE/HOLD) — 실패 아님, 자동 재개 없음. 현장 확인 후 재개(stopPause) 또는 run 중단 [HD_AMR 통신단절 Fail-Safe §6]"),
+        ("RESUME_REJECTED", "WARNING", "재개 거부",
+            "AMR이 재개 요청을 거부(비상정지·배터리·측위/mapId·운전 모드 중 불충족) — 사유 해소 후 다시 재개 [HD_AMR 통신단절 Fail-Safe §4.2]"),
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

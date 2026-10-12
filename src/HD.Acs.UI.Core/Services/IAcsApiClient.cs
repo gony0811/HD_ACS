@@ -116,6 +116,10 @@ public interface IAcsApiClient
     Task<BatterySwapDispatchResultDto?> DispatchBatterySwapAsync(string robotId, string? reason, string? userId,
         CancellationToken ct = default) => Task.FromResult<BatterySwapDispatchResultDto?>(null);
 
+    /// <summary>통신 단절 일시정지 재개 — stopPause 1건 발행 [HD_AMR 통신단절 Fail-Safe §4.1]. 409=일시정지 아님/미연결.</summary>
+    Task<ResumePauseResultDto?> ResumePauseAsync(string robotId, string? userId, CancellationToken ct = default) =>
+        Task.FromResult<ResumePauseResultDto?>(null);
+
     // ── 미구현 백엔드 대비 (엔드포인트 추가 시 연결) ──────────
     // Task<IReadOnlyList<AlarmDto>> GetActiveAlarmsAsync(CancellationToken ct = default);
 }

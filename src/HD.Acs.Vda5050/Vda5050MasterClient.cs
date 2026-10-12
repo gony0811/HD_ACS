@@ -18,6 +18,7 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
     private readonly IMqttClient _client;
     private readonly string _host;
     private readonly int _port;
+    private readonly int _keepAliveSec;
     private readonly ConcurrentDictionary<string, RobotRef> _robotsByTopicKey = new();
     private readonly Dictionary<string, int> _headerIdByTopic = new();   // 토픽별 단조 증가 [SPEC §3 N1]
     private readonly object _disconnectSync = new();
@@ -37,10 +38,15 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
     /// </summary>
     public event Action<Vda5050Diagnostic>? DiagnosticRaised;
 
-    public Vda5050MasterClient(string host, int port = 1883)
+    /// <param name="keepAliveSec">
+    /// MQTT keep-alive. 통신 단절 Fail-Safe 사양 §2.2: 로봇·관제 모두 5 s 명시 — 브로커의 상대 단절 감지가
+    /// 최대 1.5×keep-alive(7.5 s)로 묶여야 AMR의 T1(PAUSE) 판정이 제때 이뤄진다.
+    /// </param>
+    public Vda5050MasterClient(string host, int port = 1883, int keepAliveSec = 5)
     {
         _host = host;
         _port = port;
+        _keepAliveSec = keepAliveSec;
         _client = new MqttFactory().CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageAsync;
         _client.DisconnectedAsync += _ =>
@@ -64,6 +70,7 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(_host, _port)
             .WithClientId("hd-acs-master")
+            .WithKeepAlivePeriod(TimeSpan.FromSeconds(_keepAliveSec))
             .WithCleanSession()
             .WithWillTopic(Vda5050Topics.AcsConnection())
             .WithWillPayload(JsonSerializer.Serialize(will, Json))
@@ -125,6 +132,26 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         => PublishInstantActionsAsync(robot, new Vda5050InstantActions
         {
             Actions = { new VdaAction { ActionType = "emergencyStop", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
+        }, ct);
+
+    /// <summary>
+    /// 통신 단절 PAUSE 해제(재개) 요청 [통신단절 Fail-Safe §4.1/§5]. 재개 전 확인(비상정지·배터리·측위·mapId·모드)은
+    /// AMR이 수행하며, 어긋나면 errors[] resumeRejected로 거부 사유를 보고한다.
+    /// </summary>
+    public Task StopPauseAsync(RobotRef robot, CancellationToken ct = default)
+        => PublishInstantActionsAsync(robot, new Vda5050InstantActions
+        {
+            Actions = { new VdaAction { ActionType = "stopPause", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
+        }, ct);
+
+    /// <summary>
+    /// Order 취소 — **통신 단절 PAUSE 중 run 중단 시에만** 사용 [VDA 사양서 §4.5.3 개정 1.9].
+    /// PAUSE 상태 AMR은 Order를 폐기하지 않고 쥐고 있으므로 명시적으로 놓게 한다.
+    /// </summary>
+    public Task CancelOrderAsync(RobotRef robot, CancellationToken ct = default)
+        => PublishInstantActionsAsync(robot, new Vda5050InstantActions
+        {
+            Actions = { new VdaAction { ActionType = "cancelOrder", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
         }, ct);
 
     private void Stamp(Vda5050Header msg, RobotRef robot, string topic)

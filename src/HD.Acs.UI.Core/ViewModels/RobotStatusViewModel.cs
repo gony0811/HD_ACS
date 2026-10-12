@@ -43,6 +43,14 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     /// <summary>표시 라벨: "정상 (85%)" / "저전력 (18%)" / "위험 — 안전정지 (8%)" / "AMR 미확인(수치 추정)".</summary>
     [ObservableProperty] private string _batteryStatusLabel = "-";
 
+    /// <summary>
+    /// 통신 단절 일시정지 보고 중(errors[] communicationLostPause) [HD_AMR 통신단절 Fail-Safe §6].
+    /// AMR은 통신이 복구돼도 자동 재개하지 않으므로 운영자 확인 후 '작업 재개'(stopPause)가 필요하다.
+    /// </summary>
+    [ObservableProperty] private bool _commLossPaused;
+    /// <summary>배너 문구 — "통신 복구 — 재개 확인 필요" + AMR 설명(HOLD 단계·단절 시각 등).</summary>
+    [ObservableProperty] private string _commLossLabel = "";
+
     // ── 계획 정차점까지 거리 (정차점 사전 평가) ──
     /// <summary>비교 대상 정차점 또는 비교 불가 사유(예: "F-01 (현재 작업) · 면 F", "이 층에 계획 정차점 없음").</summary>
     [ObservableProperty] private string _stationTarget = "-";
@@ -169,6 +177,7 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     {
         _ = LoadContextAsync();
         DispatchBatterySwapCommand.NotifyCanExecuteChanged();
+        ResumePauseCommand.NotifyCanExecuteChanged();
     }
 
     private async Task LoadContextAsync()
@@ -202,8 +211,57 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         OperatingMode = s.OperatingMode;
         ActiveErrorTypes = ExtractErrorTypes(s.ErrorDescriptions);
         RefreshBatteryLevel();
+        RefreshCommLoss(s.ErrorDescriptions);
         DispatchBatterySwapCommand.NotifyCanExecuteChanged();
     }
+
+    /// <summary>communicationLostPause 활성 여부·배너 문구 갱신. resumeRejected가 함께 있으면 거부 사유를 덧붙인다.</summary>
+    private void RefreshCommLoss(string[]? descriptions)
+    {
+        static string? Find(string[]? ds, string type) => ds?.FirstOrDefault(d =>
+            d.StartsWith(type + ":", StringComparison.OrdinalIgnoreCase) || d.Equals(type, StringComparison.OrdinalIgnoreCase));
+        static string Tail(string d) { int c = d.IndexOf(':'); return c > 0 ? d[(c + 1)..].Trim() : ""; }
+
+        var pause = Find(descriptions, "communicationLostPause");
+        CommLossPaused = pause is not null;
+        if (pause is null) { CommLossLabel = ""; }
+        else
+        {
+            var label = "통신 복구 — 재개 확인 필요";
+            if (Tail(pause) is { Length: > 0 } d) label += $"\n{d}";
+            if (Find(descriptions, "resumeRejected") is { } rej)
+                label += $"\n재개 거부: {(Tail(rej) is { Length: > 0 } r ? r : "사유 미보고")}";
+            CommLossLabel = label;
+        }
+        ResumePauseCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>운영자 재개 → stopPause. 재개 가능 여부(비상정지·배터리·측위·모드)는 AMR이 판정한다(§4.2).</summary>
+    [RelayCommand(CanExecute = nameof(CanResumePause))]
+    public async Task ResumePauseAsync()
+    {
+        if (SelectedRobot is not { } robot) return;
+        if (_dialog is not null)
+        {
+            var ok = await _dialog.ConfirmAsync(
+                $"로봇 {robot.RobotId}의 작업을 재개합니다.\n" +
+                "로봇 주변에 작업자·장애물이 없는지 현장에서 확인했습니까?\n" +
+                "(검사 중이었다면 정지 직전 웨이포인트부터 다시 촬영합니다.)",
+                "통신 단절 일시정지 재개");
+            if (!ok) return;
+        }
+        try
+        {
+            await _api.ResumePauseAsync(robot.RobotId, "operator");
+            StatusMessage = "작업 재개(stopPause) 요청 — AMR 재개 확인 대기.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"작업 재개 실패: {ex.Message}";
+        }
+    }
+
+    public bool CanResumePause() => SelectedRobot is not null && CommLossPaused;
 
     /// <summary>errorDescriptions 요소는 "errorType" 또는 "errorType: description" — 앞 부분만 추출(소문자화).</summary>
     private static IReadOnlyList<string> ExtractErrorTypes(string[]? descriptions)
@@ -289,6 +347,7 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     {
         Interlocked.Increment(ref _positionUpdateVersion);
         BatteryPct = null; ConnectionState = "-"; Position = "-"; Heading = "-"; MapId = "-"; Driving = false; Errors = 0;
+        RefreshCommLoss(null);
         _lastDrawing = null;
         EvaluateStation();
     }

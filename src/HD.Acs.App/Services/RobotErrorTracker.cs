@@ -32,4 +32,11 @@ public sealed class RobotErrorTracker
         if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
         lock (active) return active.Count > 0;
     }
+
+    /// <summary>로봇이 마지막 state에서 해당 errorType을 보고 중인가 (예: communicationLostPause — run 중단 시 cancelOrder 판정).</summary>
+    public bool HasActiveError(string robotId, string errorType)
+    {
+        if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
+        lock (active) return active.Contains(errorType);
+    }
 }

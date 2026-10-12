@@ -67,6 +67,7 @@ public sealed class MissionService
     /// <summary>
     /// run 중단 — 상태만 ABORTED로 전환하고 후속 배차를 멈춘다. 진행 중 Order는 회수하지 않음
     /// (cancelOrder 미사용 [VDA5050_INTERFACE_SPEC §4.5.3] — 로봇은 현재 정차를 완주). 즉시 정지는 비상정지 사용.
+    /// 예외: 통신 단절 PAUSE 중 운영자 중단은 CommLossService.AbortRunAsync가 이 메서드 뒤에 cancelOrder를 덧붙인다.
     /// </summary>
     public async Task AbortRunAsync(Guid runId, CancellationToken ct = default)
     {

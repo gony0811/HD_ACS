@@ -211,6 +211,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (t.Equals("batteryCritical", StringComparison.OrdinalIgnoreCase)) return "fail";
         if (t.Equals("batteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
         if (t.Equals("orderRejectedBatteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
+        if (t.Equals("communicationLostPause", StringComparison.OrdinalIgnoreCase)) return "warn";   // 실패 아님 [Fail-Safe §6]
+        if (t.Equals("resumeRejected", StringComparison.OrdinalIgnoreCase)) return "warn";
         return "warn";   // 기존 거동 유지(알 수 없는 오류는 경고)
     }
 
@@ -278,6 +280,16 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (robot is not null && HasErrorType(robot, "batteryCritical"))
             return new("fail", "배터리 위험 — AMR 그 자리 안전정지",
                 "로봇 위치에서 배터리를 교체(핫스왑)하세요. 교체 완료 후 자동 복귀, '이어하기'로 남은 작업 재개.");
+        // 통신 단절 일시정지 — 배터리 CRITICAL 다음, 정상 운전 앞 [통신단절 Fail-Safe §7]. 실패 아님, 자동 재개 없음.
+        if (robot is not null && HasErrorType(robot, "communicationLostPause"))
+        {
+            var rejected = robot.ErrorDescriptions!.FirstOrDefault(e =>
+                e.StartsWith("resumeRejected", StringComparison.OrdinalIgnoreCase));
+            return new("warn", "통신 복구 — 재개 확인 필요",
+                rejected is not null
+                    ? $"재개가 거부되었습니다({rejected}). 원인을 해소한 뒤 다시 '작업 재개'를 누르세요."
+                    : "통신 단절로 로봇이 일시정지했습니다(실패 아님). 현장 안전 확인 후 로봇 상태 카드의 '작업 재개'를, 그만두려면 '중단'을 누르세요.");
+        }
         if (robot is not null && HasErrorType(robot, "batteryLow"))
             return new("warn", "배터리 저전력",
                 "로봇을 현재 층 배터리 교체 장소로 보내려면 '배터리 교체 이동' 버튼을 누르세요. 교체 완료 후 '이어하기'로 재개.");
