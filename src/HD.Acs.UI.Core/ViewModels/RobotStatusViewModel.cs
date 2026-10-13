@@ -51,6 +51,12 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     /// <summary>배너 문구 — "통신 복구 — 재개 확인 필요" + AMR 설명(HOLD 단계·단절 시각 등).</summary>
     [ObservableProperty] private string _commLossLabel = "";
 
+    /// <summary>장치 HEAVY 알람 보고 중(errors[] *LinkLost) [HD_AMR 장치통신 HEAVY알람 §5] — 해제는 현장 RESET뿐(ACS 명령 없음),
+    /// 그 전까지 서버가 배차를 보류한다.</summary>
+    [ObservableProperty] private bool _deviceFault;
+    /// <summary>배너 문구 — "장치 통신 두절 — 현장 RESET 필요" + 장치별 AMR 설명(끊김 / 복구됨, RESET 대기).</summary>
+    [ObservableProperty] private string _deviceFaultLabel = "";
+
     // ── 계획 정차점까지 거리 (정차점 사전 평가) ──
     /// <summary>비교 대상 정차점 또는 비교 불가 사유(예: "F-01 (현재 작업) · 면 F", "이 층에 계획 정차점 없음").</summary>
     [ObservableProperty] private string _stationTarget = "-";
@@ -212,7 +218,20 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         ActiveErrorTypes = ExtractErrorTypes(s.ErrorDescriptions);
         RefreshBatteryLevel();
         RefreshCommLoss(s.ErrorDescriptions);
+        RefreshDeviceFault(s.ErrorDescriptions);
         DispatchBatterySwapCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RefreshDeviceFault(string[]? descriptions)
+    {
+        var entries = AlarmsViewModel.DeviceFaultEntries(descriptions);
+        DeviceFault = entries.Count > 0;
+        DeviceFaultLabel = entries.Count == 0 ? ""
+            : "장치 통신 두절 — 현장 RESET 필요 (RESET 전까지 배차 보류)\n" + string.Join("\n", entries.Select(e =>
+            {
+                int c = e.IndexOf(':');
+                return c > 0 && e[(c + 1)..].Trim() is { Length: > 0 } d ? d : AlarmsViewModel.DeviceLinkLostTypes[e.Trim()];
+            }));
     }
 
     /// <summary>communicationLostPause 활성 여부·배너 문구 갱신. resumeRejected가 함께 있으면 거부 사유를 덧붙인다.</summary>
@@ -348,6 +367,7 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         Interlocked.Increment(ref _positionUpdateVersion);
         BatteryPct = null; ConnectionState = "-"; Position = "-"; Heading = "-"; MapId = "-"; Driving = false; Errors = 0;
         RefreshCommLoss(null);
+        RefreshDeviceFault(null);
         _lastDrawing = null;
         EvaluateStation();
     }

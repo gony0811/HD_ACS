@@ -32,4 +32,5 @@
     <SolidColorBrush x:Key="AppWarnBgBrush"     Color="#3A3320" />
     <SolidColorBrush x:Key="AppWarnBorderBrush" Color="#B7950B" />
     <SolidColorBrush x:Key="AppWarnFgBrush"     Color="#E6C34A" />
+    <SolidColorBrush x:Key="AppErrorBgBrush"    Color="#3A1F1C" />
 </ResourceDictionary>

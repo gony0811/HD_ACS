@@ -202,6 +202,22 @@ public sealed partial class AlarmsViewModel : ObservableObject
 
     /// <summary>errorDescriptions 항목(예: "batteryCritical: SoC 8%")의 kind 분류.
     /// 사양서 §8: orderRejectedBatteryLow는 WARNING(실패 아님). batteryCritical는 FATAL.</summary>
+    /// <summary>장치 HEAVY 알람 errorType 6종 [HD_AMR 장치통신 HEAVY알람 §4.1] — errorType → 한글 장치명.</summary>
+    public static readonly IReadOnlyDictionary<string, string> DeviceLinkLostTypes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["visionLinkLost"] = "검사 비전카메라", ["depthCameraLinkLost"] = "Depth 카메라",
+            ["laserSensorLinkLost"] = "3점 레이저", ["ioModuleLinkLost"] = "I/O 모듈",
+            ["cobotLinkLost"] = "코봇", ["amrLinkLost"] = "AMR",
+        };
+
+    public static bool IsDeviceLinkLost(string errorType) => DeviceLinkLostTypes.ContainsKey(errorType.Trim());
+
+    /// <summary>ErrorDescriptions("type: desc") 중 장치 HEAVY 알람 항목만.</summary>
+    public static IReadOnlyList<string> DeviceFaultEntries(string[]? descriptions) =>
+        descriptions?.Where(d => IsDeviceLinkLost(d.IndexOf(':') is > 0 and var c ? d[..c] : d)).ToList()
+        ?? (IReadOnlyList<string>)Array.Empty<string>();
+
     public static string ClassifyErrorKind(string errorText)
     {
         var head = errorText;
@@ -213,6 +229,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (t.Equals("orderRejectedBatteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
         if (t.Equals("communicationLostPause", StringComparison.OrdinalIgnoreCase)) return "warn";   // 실패 아님 [Fail-Safe §6]
         if (t.Equals("resumeRejected", StringComparison.OrdinalIgnoreCase)) return "warn";
+        if (IsDeviceLinkLost(t)) return "fail";   // 장치 HEAVY(FATAL) [장치통신 HEAVY알람 §4.1]
+        if (t.Equals("orderRejectedDeviceFault", StringComparison.OrdinalIgnoreCase)) return "warn";   // FATAL 해석 금지 §5.3
         return "warn";   // 기존 거동 유지(알 수 없는 오류는 경고)
     }
 
@@ -280,7 +298,12 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (robot is not null && HasErrorType(robot, "batteryCritical"))
             return new("fail", "배터리 위험 — AMR 그 자리 안전정지",
                 "로봇 위치에서 배터리를 교체(핫스왑)하세요. 교체 완료 후 자동 복귀, '이어하기'로 남은 작업 재개.");
-        // 통신 단절 일시정지 — 배터리 CRITICAL 다음, 정상 운전 앞 [통신단절 Fail-Safe §7]. 실패 아님, 자동 재개 없음.
+        // 장치 HEAVY 알람 — 배터리 CRITICAL 다음, 통신 단절 PAUSE 앞 [장치통신 HEAVY알람 §6]. 해제는 현장 RESET뿐.
+        if (robot is not null && DeviceFaultEntries(robot.ErrorDescriptions) is { Count: > 0 } devices)
+            return new("fail", "장치 통신 두절 — 현장 RESET 필요",
+                $"{string.Join(" / ", devices.Select(d => d.IndexOf(':') is > 0 and var c ? d[(c + 1)..].Trim() : d))}. " +
+                "로봇이 작업을 중단했습니다. 현장에서 장치를 복구하고 조작반 RESET을 누르세요 — RESET 전까지 배차를 보류하고, 해제되면 자동으로 이어갑니다.");
+        // 통신 단절 일시정지 — 장치 HEAVY 다음, 정상 운전 앞 [통신단절 Fail-Safe §7]. 실패 아님, 자동 재개 없음.
         if (robot is not null && HasErrorType(robot, "communicationLostPause"))
         {
             var rejected = robot.ErrorDescriptions!.FirstOrDefault(e =>

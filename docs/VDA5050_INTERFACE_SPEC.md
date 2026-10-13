@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.9** |
-| 작성일 | 2026-08-27 (최종 개정 2026-10-12) |
+| 문서 버전 | **1.10** |
+| 작성일 | 2026-08-27 (최종 개정 2026-10-13) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상 |
@@ -17,6 +17,7 @@
 | 개정 1.6 | 2026-09-21 — **검사 작업 식별자 `params.taskId`·`params.attempt` 추가**(§8.1·§8.2·§8.4·신설 §8.6, §9.5, §10 N14~N16, 부록 C). 배경: SAIGE 연동 사양서 v2.6(§2.5·§8.1) + 로봇↔비전 인터페이스 v3.2(CAPTURE_REQ 34B)가 **ACS 발급 taskId·attempt**를 전제로 확정됨 — AMR은 두 값을 모든 CAPTURE_REQ에 실어 비전→SAIGE `productId`(=taskId)까지 관통시킨다. 두 필드 모두 **선택(optional)** 이라 구버전 AMR과 호환(미탑재 시 AMR 폴백 = taskId 미지정·attempt 1). **양측 구현 완료(2026-09-21)**: ACS 발행 + HD_AMR 파서(`WeldInspectionActionParser`)→`WeldInspectionOrchestrator`→`SequenceContext.AcsTaskId/AcsAttempt` 주입(HD_AMR `52b6e19`) → 그 액션의 모든 CAPTURE_REQ [15-30]·[31]에 실린다. 미탑재·JSON null=폴백, 형식 오류=액션 `FAILED`+`orderValidationError`. 남은 것은 실기 관통 확인(N16 겸용). 아울러 1.4·1.5 병합(위 행) |
 | 개정 1.8 | 2026-10-10 — **배터리 교체 유도 액션 `batterySwapMove` 신설(§8.8) + 배터리 errors 분기 명문화 `[N20]`**: HD_AMR 배터리관리 사양(rev.1, 2026-10-09) ACS 측 반응. ① §8.8 신규 NODE 커스텀 액션(`targetNodeId`·`mapId`·`reason` LOW/CRITICAL/MANUAL) — `ref.node`에 `BATTERY_SWAP` 타입 추가, mapId당 1곳. ② `errors[]`에 `batteryCritical`(FATAL, 그 자리 안전정지) · `orderRejectedBatteryLow`(WARNING, **FATAL 실패 집계 금지**) 분기(사양서 §8). ③ 디스패치 = 운영자 수동 트리거(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run abort + 교체 Order 1건 발행, 교체 완료 후 '이어하기'로 재배차(사양서 §5 "잔여 회수"를 abort/resume으로 매핑). ④ 알람 코드 `BATTERY_CRITICAL`·`ORDER_REJECTED_BATTERY_LOW`·`BATTERY_SWAP_DISPATCHED` 추가. ACS 상태머신 복제·cancelOrder instantAction 발행·자동 디스패치는 **범위 외**(사양서 §1·§6·§9.6). HD_AMR 핸들러 구현 대기(N20) |
 | 개정 1.9 | 2026-10-12 — **통신 단절 Fail-Safe 반영 `[N21]`**: HD_AMR 통신단절 Fail-Safe 사양(rev.0, 2026-10-10) ACS 측 반응. ① §2.1 MQTT keep-alive **5 s 명시**(로봇·관제 동일 — 단절 감지 최대 7.5 s). ② §5.3 instantAction `stopPause`(운영자 재개)·§5.4 `cancelOrder`(**통신 단절 PAUSE 중 run 중단 시에 한해 사용** — §4.5.3 "미사용" 개정)·`startPause` 수용 요건. ③ §6.4 errorType `communicationLostPause`(WARNING, **실패 집계 금지**)·`resumeRejected`(WARNING, 사유 포함) 추가, 진행 액션 `PAUSED`·`state.paused`. ④ §9.3 두절 시퀀스에 GRACE/PAUSE/HOLD·자동 재개 금지 반영. ⑤ 알람 `COMM_LOSS_PAUSED`·`RESUME_REJECTED`, REST `POST /api/robots/{id}/resume-pause`. 판정·타이머·재개 전 확인·램프/부저는 **AMR 로컬**(ACS 복제 없음) |
+| 개정 1.10 | 2026-10-13 — **장치 통신 HEAVY 알람 반영 `[N22]`**: HD_AMR 장치통신 HEAVY알람 사양(rev.0, 2026-10-12) ACS 측 반응. ① §6.4 errorType 신규 7종 — 장치 6종 `visionLinkLost`·`depthCameraLinkLost`·`laserSensorLinkLost`·`ioModuleLinkLost`·`cobotLinkLost`·`amrLinkLost`(**FATAL**, RESET 전까지 래치) + `orderRejectedDeviceFault`(WARNING, 기존 orderId 유지). ② **`errorReferences` 발행·소비**(`device`·`orderId`·`actionId`) — 참조 없는 구 errors 파싱 유지. ③ §4.5.2 장치 알람 거부 — ACS는 거부 정차를 **PENDING으로 되돌림**(실행 없음, 실패 아님). ④ §9.6 신설 — 알람 중 **ACS 배차 보류**(order 미전송·명령 409), errors에서 사라지면 배차 자동 재개. ⑤ 알람 `DEVICE_LINK_LOST`(HEAVY→ACS CRITICAL)·`ORDER_REJECTED_DEVICE_FAULT`. 판정·래치·RESET·타워램프는 **AMR 로컬**(ACS 원격 RESET 없음) |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -266,6 +267,12 @@ AMR이 수신한 Order를 실행할 수 없는 경우(모르는 `mapId`, 필수 
 > **거부된 정차를 자동으로 실패 집계**(재시도→스킵 정책 + ORDER_REJECTED 알람)한다 — DISPATCHED 정체 없음.
 > N11 계약대로 **description에 거부된 orderId를 반드시 명시**할 것(대조 키).
 
+**장치 HEAVY 알람 중 거부 — `orderRejectedDeviceFault` (개정 1.10)** `[N22]`
+
+- AMR은 장치 알람(§9.6) 중 수신한 Order를 폐기하고 **기존 orderId를 유지**한다(`orderRejectedBatteryLow`와 같은 계약). 판정 순서: Order 검증 → 장치 알람 게이트 → 배터리 게이트 → 수락.
+- `errors[]`: `errorType: "orderRejectedDeviceFault"`, `errorLevel: "WARNING"`, `errorReferences`에 `orderId` 1건·`actionId` 1건(첫 액션, 없으면 생략)·알람 장치마다 `device` 1건. 다음 Order가 수락되면 지운다.
+- ACS: FATAL로 해석하지 않는다. `errorReferences.orderId`(없으면 description)로 현재 배차와 대조해 **그 정차를 PENDING으로 되돌린다**(실행된 적 없으므로 실패·재시도로 세지 않음, 사용자 결정 2026-10-13). 알람 중에는 배차 자체를 보류하므로 이 거부는 "알람 직전 발행"과의 경합에서만 생기며, 같은 Order를 반복 재전송하지 않는다.
+
 **4.5.3 취소(cancelOrder) — 통신 단절 PAUSE 중에 한해 사용 (개정 1.9)**
 
 일반 운전에서 VDA 5050 표준의 `cancelOrder` instantAction은 **사용하지 않는다**.
@@ -433,6 +440,8 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 | `emergencyStopActive` | emergencyStop 수신에 의한 기능 정지 중 | WARNING |
 | `batteryLow` | 배터리 부족 (선택 보고) | WARNING/FATAL |
 | `communicationLostPause` | **통신 단절 일시정지**(PAUSE/HOLD) — description에 단절 시각·경과·조건(A 브로커 두절/B ACS connection). 진행 액션 `PAUSED`·`state.paused=true` 병행. 재개·Order 취소 시 클리어 (1.9, §9.3.1) | WARNING |
+| `visionLinkLost` · `depthCameraLinkLost` · `laserSensorLinkLost` · `ioModuleLinkLost` · `cobotLinkLost` · `amrLinkLost` | **장치 통신 HEAVY 알람**(검사 비전·Depth 카메라·3점 레이저·I/O 모듈·코봇·AMR 플랫폼) — 3 s 이상 지속된 통신 두절. 장치마다 1건, `errorReferences` `device`=`vision`/`depthCamera`/`laserSensor`/`ioModule`/`cobot`/`amr`. description `"{장치} 통신 두절 t0=HH:mm:ss — {사유}"`, 복구 후 `"… — 복구됨, RESET 대기"`. **현장 RESET 전까지 유지**(래치) (1.10, §9.6) | **FATAL** |
+| `orderRejectedDeviceFault` | 장치 알람 중 Order 거부 — 기존 orderId 유지, `errorReferences` orderId·actionId·device (1.10, §4.5.2) | WARNING |
 | `resumeRejected` | `stopPause` 재개 거부 — description에 사유(비상정지·배터리·측위/mapId·모드) (1.9, §5.3) | WARNING |
 
 - ACS 정책: 액션 FAILED·errors 기준 **재시도 N회 → 스킵 → 알람** (§9.5).
@@ -444,6 +453,10 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 > **본 절의 계약(7종·errorLevel·최신 1건 유지)은 확정 그대로**이며 변경 없다.
 > 회신 전까지 온보드는 확실히 판별 가능한 것만 보고한다 — `emergencyStopActive`(자기가 정지시켰으므로 자명),
 > `orderValidationError`(온보드 자체 검증), `inspectionFailed`(검사 S/W 결과). 주행·측위 계열은 회신 후 채운다.
+
+- **`errorReferences` (개정 1.10)**: `[{ "referenceKey": "...", "referenceValue": "..." }]`. AMR은 모든 errors의 errorReferences를 그대로 발행한다(종전 누락 정정 — `orderRejectedBatteryLow`의 orderId·actionId 참조도 이제 전달). ACS는 선택 필드로 파싱하며 참조 없는 errors도 종전대로 처리한다.
+
+> ※구현(2026-10-13, 1.10): `*LinkLost`→`DEVICE_LINK_LOST` 알람(edge 1회, Latched 설명 변경은 중복 없음 — 사라지면 그 장치 알람에 해제 시각 기록), 알람 중 배차 보류·order 명령 409, `orderRejectedDeviceFault`→정차 PENDING 복귀 + `ORDER_REJECTED_DEVICE_FAULT` 알람. 운영 UI 로봇 상태 카드에 적색 배너 "장치 통신 두절 — 현장 RESET 필요".
 
 > ※구현(2026-10-12, 1.9): `communicationLostPause`→`COMM_LOSS_PAUSED` 알람만(**실패 집계·재시도·재배차 금지** — `PAUSED` 액션은 정차 종결 판정에 걸리지 않아 work_item DISPATCHED 유지), `resumeRejected`→`RESUME_REJECTED` 알람(사유). 운영 UI 로봇 상태 카드에 "통신 복구 — 재개 확인 필요" 배너 + '작업 재개'.
 
@@ -899,7 +912,7 @@ sequenceDiagram
 - 단절 판정: (A) 브로커 연결 두절 또는 (B) ACS connection(§7.2) = `CONNECTIONBROKEN`/`OFFLINE`. 복구 = 브로커 정상 **AND** ACS `ONLINE`.
 - **복구돼도 자동 재개하지 않는다.** 재개 = ACS `stopPause`(§5.3) 또는 차체 START 버튼. 중단 = ACS run 중단 + `cancelOrder`(§5.4).
 - ACS: `COMM_LOSS_PAUSED` 알람, **실패로 집계하지 않음**, 재시도·재배차 없음. 끊긴 동안 미션 상태는 기존 `Disconnected` 유지.
-- 우선순위: 비상정지 > 배터리 CRITICAL > 통신 단절 PAUSE > 정상 운전.
+- 우선순위: 비상정지 > 배터리 CRITICAL > 장치 HEAVY 알람(§9.6, 1.10) > 통신 단절 PAUSE > 정상 운전.
 
 ### 9.4 비상정지
 
@@ -912,6 +925,18 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 - 액션 `FAILED` 보고 → ACS: 검사 실패 기록 → **재시도 N회(신규 orderId 재발행) → 스킵 → 알람** 정책.
 - **재시도 단위는 정차(영역)** — 재발행 Order는 그 정차의 TASK 전부를 다시 싣고, 각 액션의 `params.attempt`는 taskId별로 1씩 증가한다(§8.6.2). `actionId`는 매번 새로 발급되지만 `params.taskId`는 같다 — AMR은 재시도 여부를 판단할 필요 없이 받은 값을 CAPTURE_REQ에 그대로 싣는다.
 - AMR 요건: 실패 시 `actionStatus: "FAILED"` + `resultDescription`, 가능하면 `errors[]`에 유형 코드 병기. 같은 정차의 잔여 액션 계속 여부는 AMR 판단이되 각 액션 상태를 개별 보고할 것.
+
+### 9.6 장치 통신 HEAVY 알람 `(1.10)` `[N22]`
+
+상세 정본은 `docs/HD_AMR_장치통신_HEAVY알람_사양.md`(AMR 로컬 기능 — 판정·래치·RESET·타워램프).
+
+1. AMR 탑재 장치(비전·Depth·레이저·I/O·코봇·AMR 플랫폼) 통신 두절 3 s 지속(비전은 수신 15 s) → AMR이 HEAVY 알람 래치. 기동 후 30 s는 유예.
+2. AMR은 진행 임무를 **즉시 중단**(감속 정지·코봇 시퀀스 중단·남은 액션 `FAILED` `"aborted: {장치} 통신 두절({사유}) (HEAVY)"`, 일시정지 해소)하고 `*LinkLost`(FATAL)를 보고한다. `emergencyStopActive`는 세팅하지 않는다.
+3. ACS: `DEVICE_LINK_LOST` 알람 기록, 중단된 정차는 액션 FAILED 종결 경로로 **실패 집계**(§9.5 — 자동 재시도 없음). 그 로봇은 **배차 불가** — 다음 정차를 보내지 않고(run은 RUNNING·큐는 PENDING 유지), 운영자 order 명령(미션 시작·이어하기·수동 이동·배터리 교체 이동·코봇 이동 시험)은 409. instantActions(`emergencyStop`·`stopPause`·`cancelOrder`)는 계속 보낼 수 있다.
+4. 복구 → AMR은 같은 errorType을 `"복구됨, RESET 대기"`로 유지(래치). 현장 RESET(조작반 IN01 또는 AMR 화면) → errors에서 제거.
+5. ACS: errors에서 사라진 장치의 알람에 해제 시각 기록, **장치 알람이 하나도 남지 않으면 배차를 자동 재개**한다. ACS에는 원격 RESET 명령이 없다.
+
+- 우선순위: 비상정지 > 배터리 CRITICAL > **장치 HEAVY 알람** > 통신 단절 PAUSE > 정상 운전. 비상정지와 동시면 두 오류를 모두 보고(해제도 각각 — RESET 버튼 1회로 둘 다 처리).
 
 ---
 
@@ -941,6 +966,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N20 | **배터리 교체 이동 액션** `batterySwapMove` (§8.8) + 배터리 errors 분기 | 신규 NODE 커스텀 액션 — 로봇 보고 층(mapId)의 `ref.node`(nodeType=BATTERY_SWAP) 1곳으로 단일 노드 이동. `errors[]`에서 **`orderRejectedBatteryLow`는 WARNING**이며 ACS는 **FATAL 실패로 집계하지 않는다**(사양서 §8). `batteryCritical`은 FATAL(그 자리 안전정지 보고). 교체 Order 디스패치는 **운영자 수동 트리거**(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run 있으면 함께 abort, 교체 완료 후 '이어하기'로 재배차(§5 "잔여 회수" 패턴을 abort/resume으로 매핑). ACS 구현 완료(2026-10-10) | ⏳ **HD_AMR 핸들러 구현 대기** — `batterySwapMove` 파라미터 파서(`targetNodeId`·`mapId`·`reason`) → 교체 장소 주행 → 구동 인터락 → 교체 완료 감지 → `actionState` FINISHED 보고. §4·§7의 로컬 PowerMode 상태머신(핫스왑·BMS 자동 인식·브릿지 전원)은 AMR 측 구현 |
 
 | N21 | **통신 단절 Fail-Safe** (§9.3.1·§5.3·§5.4) | AMR 로컬 GRACE 30 s→PAUSE→HOLD 60 s, 자동 재개 금지. `communicationLostPause`/`resumeRejected` errors, 액션 `PAUSED`·`state.paused`, `stopPause`(재개 전 확인 후)·`cancelOrder`(PAUSE 중 취소) 수용, keep-alive 5 s. ACS 구현 완료(2026-10-12) — 알람·실패 집계 제외·재개 버튼·PAUSE 중 abort 시 cancelOrder | ⏳ **HD_AMR 구현 대기** — 단절 감시 서비스·Order 실행기 PAUSE/RESUME 훅·`startPause`/`stopPause`/`cancelOrder` 핸들러·START 버튼·램프/부저. 미결: 주행 중 T1 단축, 브로커 배치 위치(통신단절 사양 §10) |
+| N22 | **장치 통신 HEAVY 알람** (§9.6·§6.4·§4.5.2) | 장치 6종 `*LinkLost`(FATAL, 래치, `errorReferences` device) 보고, 알람 중 임무 즉시 중단(남은 액션 FAILED)·신규 Order `orderRejectedDeviceFault`(기존 orderId 유지), **모든 errors에 `errorReferences` 발행**, 알람 발생·복구·해제 시 state 즉시 발행. ACS 구현 완료(2026-10-13) — 알람·해제 기록·배차 보류/재개·명령 409·거부 정차 PENDING 복귀 | ⏳ HD_AMR 측 구현은 장치통신 HEAVY알람 사양 §10(2026-10-12 배포) — **실기 연동 확인 대기**. 미결: 알람 코드·등급 표기(ACS는 HEAVY→CRITICAL 매핑), 비전 HEARTBEAT 실주기, LIGHT 알람 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
@@ -1043,6 +1069,8 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 - [ ] ⏸ 보류: errorType 7종 매핑 / `initPosition` 구현 / 층 전환 게이트 — 로봇측 회신 후 (부록 D 하단)
 - [ ] **MQTT keep-alive 5 s 명시** (§2.1, N21)
 - [ ] 통신 단절 Fail-Safe: GRACE/PAUSE/HOLD, 액션 `PAUSED`·`state.paused`, `communicationLostPause` 보고, 자동 재개 금지 (§9.3.1, N21)
+- [ ] 장치 HEAVY 알람: `*LinkLost`(FATAL) 6종·임무 즉시 중단·`orderRejectedDeviceFault`(기존 orderId 유지)·RESET 전 래치 (§9.6, N22)
+- [ ] 모든 errors에 `errorReferences` 발행 (§6.4, N22)
 - [ ] `stopPause`: 재개 전 확인 후 재개, 불충족 시 `resumeRejected` / `cancelOrder`: PAUSE 중 Order 종료·에러 클리어 (§5.3·§5.4, N21)
 - [ ] §10 협의 항목 N1~N11 회신 (+ 1.6 신규 N14~N16)
 

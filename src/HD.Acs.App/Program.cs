@@ -614,6 +614,7 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 
 // run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
@@ -637,6 +638,7 @@ app.MapPost("/api/runs/{runId:guid}/resume", async (Guid runId, MissionService m
     catch (RunStateException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
     { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -781,15 +783,19 @@ app.MapPost("/api/robots/{robotId}/battery-swap/dispatch",
     try { return Results.Ok(await svc.DispatchSwapAsync(robotId, req, ct)); }
     catch (BatterySwapException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode); }
     catch (RobotNotConnectedException ex) { return Results.Json(new { error = ex.Message }, statusCode: 409); }
+    catch (RobotDeviceFaultException ex) { return Results.Json(new { error = ex.Message }, statusCode: 409); }
 });
 
 // 수동 이동(goto) — 이동 테스트용. 도면 좌표를 T_W_D로 맵 좌표로 변환해 **액션 없는 단일 노드 Order** 발행.
 // 진행 중 run이 있으면 409(신규 orderId가 진행 중 정차를 폐기시키므로), 로봇 보고 층과 다르면 409.
 app.MapPost("/api/robots/{robotId}/goto",
-    async (string robotId, GotoRequest req, AcsDbContext db, Vda5050MasterClient vda, IConfiguration config) =>
+    async (string robotId, GotoRequest req, AcsDbContext db, Vda5050MasterClient vda, IConfiguration config, RobotErrorTracker tracker) =>
 {
     var robot = await db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId);
     if (robot is null) return Results.NotFound(new { error = $"robot '{robotId}' 없음" });
+    // 장치 HEAVY 알람 중이면 AMR이 Order를 거부하므로 보내지 않는다 [HD_AMR 장치통신 HEAVY알람 §5]
+    if (tracker.HasDeviceFault(robotId))
+        return Results.Conflict(new { error = $"AMR {robotId} 장치 HEAVY 알람({string.Join(", ", tracker.ActiveDeviceFaults(robotId).Select(DeviceFaults.NameOf))}) — 현장 복구·RESET 후 다시 시도하세요." });
 
     var activeRun = await db.ScenarioRuns.AsNoTracking()
         .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
@@ -840,6 +846,7 @@ app.MapPost("/api/robots/{robotId}/test/seam-start",
     try { return Results.Ok(await dispatcher.MoveToSeamStartAsync(robotId, req.TaskId, req.UserId)); }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 

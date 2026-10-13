@@ -43,6 +43,11 @@ public sealed class RobotStateService
         ctx.BatteryPct = state.BatteryState?.BatteryCharge;
         ctx.ReportedAt = DateTimeOffset.UtcNow;
 
+        // errorType 에지 갱신을 **액션 대조보다 먼저** — 장치 HEAVY 알람(*LinkLost)이 처음 실린 state에서
+        // AMR이 중단한 정차(액션 FAILED)가 종결되면 곧바로 DispatchNext가 불리는데, 그 배차 게이트가
+        // 이번 state의 알람을 알아야 거부→재배차 연쇄가 생기지 않는다 [HD_AMR 장치통신 HEAVY알람 §5].
+        var edges = _errorTracker.UpdateEdges(robot.RobotId, state.Errors.Select(e => e.ErrorType));
+
         // ── 2. 활성 미션 대조 (orderId 기준)
         var mission = await _db.Missions
             .FirstOrDefaultAsync(m => m.OrderId == state.OrderId && m.RobotId == robot.RobotId, ct);
@@ -116,7 +121,7 @@ public sealed class RobotStateService
         await _db.SaveChangesAsync(ct);
 
         // ── errors[] 유형별 소비 [VDA 사양서 §6.4 확정 7종, N6/N11] ──
-        await HandleRobotErrorsAsync(robot, state, ct);
+        await HandleRobotErrorsAsync(robot, state, edges.Appeared, edges.Disappeared, ct);
 
         await _hub.Clients.All.SendAsync("RobotState", new
         {
@@ -196,12 +201,24 @@ public sealed class RobotStateService
     ///   AMR이 진행 액션을 PAUSED로 두므로 정차 종결 판정(FINISHED/FAILED만 종결)에 걸리지 않아 work_item은 DISPATCHED 유지.
     ///   PAUSE→HOLD는 같은 errorType(설명만 변경)이라 edge 1회만 알람.
     /// - resumeRejected → RESUME_REJECTED 알람(사유=설명). 재개는 운영자가 원인 해소 후 다시 요청
+    /// - *LinkLost(장치 6종, FATAL) → DEVICE_LINK_LOST 알람(edge), 사라지면 해제 기록 + 배차 재개. 배차 보류는 디스패처 게이트
+    ///   [HD_AMR 장치통신 HEAVY알람 §5]. orderRejectedDeviceFault → 거부 정차 PENDING 복귀(실패 아님) + 알람
     /// - drivingFailed / inspectionFailed → 별도 처리 없음(액션 FAILED 종결 경로가 정책 수행)
     /// </summary>
-    private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state, CancellationToken ct)
+    private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state,
+        IReadOnlyList<string> appeared, IReadOnlyList<string> disappeared, CancellationToken ct)
     {
-        var appeared = _errorTracker.Update(robot.RobotId, state.Errors.Select(e => e.ErrorType));
+        // 장치 HEAVY 알람 해제(RESET) — errors에서 사라진 *LinkLost마다 해제 기록, 마지막 알람이 풀리면 배차 재개.
+        var clearedDevices = disappeared.Where(DeviceFaults.IsLinkLost).ToList();
+        if (clearedDevices.Count > 0)
+            await ClearDeviceAlarmsAsync(robot.RobotId, clearedDevices, ct);
+
         if (state.Errors.Count == 0) return;
+
+        // orderRejectedDeviceFault: 알람 직전 발행 Order가 경합으로 거부된 경우 — 실패 아님, 정차를 PENDING 복귀(멱등).
+        foreach (var e in state.Errors.Where(e =>
+                     string.Equals(e.ErrorType, DeviceFaults.OrderRejectedType, StringComparison.OrdinalIgnoreCase)))
+            await _dispatcher.HandleDeviceFaultRejectedAsync(robot.RobotId, e, ct);
 
         // orderValidationError는 실패 집계로 간다. orderRejectedBatteryLow는 **같은 범주처럼 보이지만**
         // 사양서(HD_AMR 배터리관리 §8)가 "FATAL(실패)로 오해 금지"를 명시하므로 여기서 분리한다.
@@ -256,10 +273,74 @@ public sealed class RobotStateService
                     AddErrorAlarm("RESUME_REJECTED", robot.RobotId,
                         "AMR이 재개 요청을 거부 — 사유 해소 후 다시 재개", err);
                     break;
+                case "orderrejecteddevicefault":
+                    // 장치통신 HEAVY알람 §5.3: WARNING, FATAL로 해석 금지(기존 orderId 유지) — 정차 복귀는 위 루프.
+                    AddErrorAlarm("ORDER_REJECTED_DEVICE_FAULT", robot.RobotId,
+                        "AMR이 장치 HEAVY 알람으로 Order 거부 — 현장 복구·RESET 후 배차 재개(같은 Order 재전송 안 함)", err);
+                    break;
+                case var t when DeviceFaults.IsLinkLost(t):
+                    // 장치통신 HEAVY알람 §5.2: AMR이 이미 임무 중단(남은 액션 FAILED → 액션 종결 경로가 실패 집계).
+                    // ACS는 알람만 — 배차 보류는 InspectionDispatcher 게이트가 tracker로 판단(errors에서 사라지면 재개).
+                    AddDeviceAlarm(robot.RobotId, err);
+                    break;
                 // drivingFailed/inspectionFailed/orderValidationError: 위 또는 액션 종결 경로에서 처리
             }
         }
         await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>DEVICE_LINK_LOST 알람(HEAVY → ACS 등급 CRITICAL) 1건 — 장치는 errorReferences.device, 없으면 errorType에서 유도.</summary>
+    private void AddDeviceAlarm(string robotId, VdaError err)
+    {
+        var device = err.Ref("device") ?? DeviceFaults.DeviceOf(err.ErrorType);
+        var name = DeviceFaults.NameOf(err.ErrorType);
+        var title = $"장치 통신 두절(HEAVY) — {name}: 현장 RESET 필요, 해제 전까지 배차 보류";
+        _db.Alarms.Add(new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = "DEVICE_LINK_LOST", RobotId = robotId,
+            Detail = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                severity = "CRITICAL", grade = "HEAVY", title, device, deviceName = name,
+                err.ErrorType, err.ErrorLevel, err.ErrorDescription, action = "현장에서 장치 복구 후 조작반/화면 RESET",
+            }),
+            RaisedAt = DateTimeOffset.UtcNow,
+        });
+        _log.LogWarning("알람 DEVICE_LINK_LOST — robot={Robot} device={Device} {Desc}", robotId, device, err.ErrorDescription);
+    }
+
+    /// <summary>
+    /// 장치 알람 해제 기록 — errors에서 사라진 장치의 활성 DEVICE_LINK_LOST에 cleared_at. 남은 장치 알람이 없으면
+    /// 보류했던 배차를 재개한다(사양 §5.2 "errors에서 사라지면 배차를 재개").
+    /// </summary>
+    private async Task ClearDeviceAlarmsAsync(string robotId, IReadOnlyList<string> clearedTypes, CancellationToken ct)
+    {
+        var devices = clearedTypes.Select(DeviceFaults.DeviceOf).Where(d => d is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var active = await _db.Alarms
+            .Where(a => a.RobotId == robotId && a.AlarmCode == "DEVICE_LINK_LOST" && a.ClearedAt == null)
+            .ToListAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var a in active.Where(a => devices.Contains(DeviceOfDetail(a.Detail) ?? "")))
+        {
+            a.ClearedAt = now;
+            a.ClearedBy = "AMR RESET";
+        }
+        await _db.SaveChangesAsync(ct);
+        _log.LogInformation("장치 알람 해제(RESET) — robot={Robot} devices={Devices}", robotId, string.Join(",", devices));
+
+        if (!_errorTracker.HasDeviceFault(robotId))
+            await _dispatcher.ResumeAfterDeviceFaultAsync(robotId, ct);
+    }
+
+    private static string? DeviceOfDetail(string? detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(detail);
+            return doc.RootElement.TryGetProperty("device", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String
+                ? d.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     private void AddErrorAlarm(string code, string robotId, string title, VdaError err)

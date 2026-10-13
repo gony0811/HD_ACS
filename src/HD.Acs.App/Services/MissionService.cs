@@ -44,6 +44,7 @@ public sealed class MissionService
 
         // AMR 미연결이면 run을 만들지 않고 알람 — 받을 로봇 없이 Order가 나가 "무반응"이 되는 것을 막는다
         await _dispatcher.EnsureRobotConnectedAsync(robotId, "미션 시작", ct);
+        _dispatcher.EnsureNoDeviceFault(robotId, "미션 시작");   // 장치 HEAVY 알람 중 Order 금지 [장치통신 HEAVY알람 §5]
 
         var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
 
@@ -117,6 +118,7 @@ public sealed class MissionService
                 $"로봇 {run.RobotId}에 다른 진행 중 run({otherActive})이 있습니다 — 먼저 중단하세요.");
 
         await _dispatcher.EnsureRobotConnectedAsync(run.RobotId, "이어하기", ct);
+        _dispatcher.EnsureNoDeviceFault(run.RobotId, "이어하기");   // 장치 HEAVY 알람 중 Order 금지 [장치통신 HEAVY알람 §5]
 
         // 배차만 되고 종결 못 한 정차 복구 — attempts는 유지(실패 정책 연속성)
         var open = await _db.WorkItems
