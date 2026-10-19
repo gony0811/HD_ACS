@@ -204,16 +204,20 @@ dotnet run --project HD.Acs.Simulator
 > 전용 배포 스크립트는 아직 없다(후속 과제 Q4). 아래는 수동 절차.
 
 ```powershell
-# 1) 자체 포함 게시
-dotnet publish src\HD.Acs.App -c Release -o C:\HDACS\app
+# 1) 자체 포함 게시 (서버 PC에 .NET 설치 불필요)
+dotnet publish src\HD.Acs.App -c Release -r win-x64 --self-contained true -p:DebugType=none -o C:\HDACS\app
 
-# 2) Windows 서비스 등록 (관리자 PowerShell)
-sc.exe create HDACS-App binPath= "C:\HDACS\app\HD.Acs.App.exe" start= auto
+# 2) Windows 서비스 등록 (관리자 PowerShell) — PostgreSQL 서비스 의존 + 실패 시 5초 후 재시작
+sc.exe create HDACS-App binPath= "C:\HDACS\app\HD.Acs.App.exe" start= delayed-auto depend= postgresql-x64-16
+sc.exe failure HDACS-App reset= 86400 actions= restart/5000/restart/5000/restart/5000
 sc.exe start HDACS-App
 ```
 
+- App은 `UseWindowsService()`로 SCM 시작/정지 신호에 응답한다(없으면 시작이 1053 시간 초과로 실패). 콘솔·Rider 실행에는 영향 없음.
 - App은 content root가 exe 위치로 고정돼 있어 서비스(cwd=System32)에서도 appsettings를 정상 로드한다.
-- Mosquitto·PostgreSQL도 각자 서비스 자동 시작으로 두고, 기동 순서 의존은 없음(App이 브로커 연결을 5초 간격 재시도).
+- 서비스에는 콘솔이 없으므로 로그는 appsettings `Serilog:WriteTo`에 File 싱크를 지정한다(예: `C:\HDACS\logs\app-.log`, 일 단위).
+- Mosquitto·PostgreSQL도 각자 서비스 자동 시작으로 둔다. DB가 늦게 뜨면 App이 내려갈 수 있어 `depend=`와 `failure` 재시작으로 보완한다.
+- 다른 PC의 UI·로봇이 접속하면 방화벽 인바운드 TCP 5199(App)·1883(MQTT)를 허용한다.
 
 ---
 

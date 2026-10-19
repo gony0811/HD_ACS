@@ -31,6 +31,10 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 
+// Windows 서비스(sc.exe 등록)로 실행될 때 SCM 시작/정지 신호에 응답 — 없으면 시작이 1053 시간 초과로 실패한다.
+// 콘솔·Rider 실행에서는 아무 동작도 하지 않는다 [ADR-011, INSTALL_MANUAL 9단계].
+builder.Host.UseWindowsService(o => o.ServiceName = "HDACS-App");
+
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
 builder.Services.AddDbContext<AcsDbContext>(o =>
