@@ -218,6 +218,10 @@ sc.exe start HDACS-App
 - 서비스에는 콘솔이 없으므로 로그는 appsettings `Serilog:WriteTo`에 File 싱크를 지정한다(예: `C:\HDACS\logs\app-.log`, 일 단위).
 - Mosquitto·PostgreSQL도 각자 서비스 자동 시작으로 둔다. DB가 늦게 뜨면 App이 내려갈 수 있어 `depend=`와 `failure` 재시작으로 보완한다.
 - 다른 PC의 UI·로봇이 접속하면 방화벽 인바운드 TCP 5199(App)·1883(MQTT)를 허용한다.
+- **재배포**(개발 PC → 현장 서버, SSH 키 접속 전제): `tools\deploy_server.ps1` — publish → 전송 → App 정지·서버 UI 종료 →
+  `C:\HDACS\backup\<시각>` 백업(최근 5개) → 교체 → App 기동 확인. 서버의 `appsettings.json`은 덮어쓰지 않는다.
+  진행 중 run이 있으면 중단(`-Force`로 무시), `-Only app|ui`, DB 변경은 `-Sql db\migrations\<파일>.sql`.
+  배포 버전은 서버 `C:\HDACS\VERSION.txt`.
 
 ---
 
