@@ -151,6 +151,27 @@ public sealed class VdaError
     [JsonPropertyName("errorType")] public string ErrorType { get; set; } = "";
     [JsonPropertyName("errorLevel")] public string ErrorLevel { get; set; } = "WARNING";
     [JsonPropertyName("errorDescription")] public string? ErrorDescription { get; set; }
+
+    /// <summary>VDA 5050 errorReferences — 예: orderId·actionId·device(장치 HEAVY 알람) [VDA 사양서 §6.4, 개정 1.10].
+    /// 구버전 AMR은 생략했으므로 null 허용, 발행 시 null이면 필드 생략.</summary>
+    [JsonPropertyName("errorReferences")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ErrorReference>? ErrorReferences { get; set; }
+
+    /// <summary>referenceKey에 해당하는 첫 referenceValue (대소문자 무시) — 없으면 null.</summary>
+    public string? Ref(string key) => ErrorReferences?
+        .FirstOrDefault(r => string.Equals(r.ReferenceKey, key, StringComparison.OrdinalIgnoreCase))?.ReferenceValue;
+
+    /// <summary>referenceKey에 해당하는 모든 referenceValue (예: 알람 장치 여러 개).</summary>
+    public IEnumerable<string> Refs(string key) => ErrorReferences?
+        .Where(r => string.Equals(r.ReferenceKey, key, StringComparison.OrdinalIgnoreCase))
+        .Select(r => r.ReferenceValue) ?? Enumerable.Empty<string>();
+}
+
+public sealed class ErrorReference
+{
+    [JsonPropertyName("referenceKey")] public string ReferenceKey { get; set; } = "";
+    [JsonPropertyName("referenceValue")] public string ReferenceValue { get; set; } = "";
 }
 
 // ── connection ───────────────────────────────────────────

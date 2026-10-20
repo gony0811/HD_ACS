@@ -505,6 +505,8 @@ INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('BATTERY_SWAP_DISPATCHED', 'INFO', '배터리 교체 이동 발행', '운영자가 배터리 교체 장소로 이동 Order를 수동 발행 — 활성 run이 있으면 함께 중단됨, 교체 완료 후 이어하기로 재배차'),
   ('COMM_LOSS_PAUSED',   'WARNING', '통신 단절 일시정지 — 재개 확인 필요', 'Order 수행 중 통신 단절로 AMR이 로컬 일시정지(PAUSE/HOLD) — 실패 아님, 자동 재개 없음. 현장 확인 후 재개(stopPause) 또는 run 중단 [HD_AMR 통신단절 Fail-Safe §6]'),
   ('RESUME_REJECTED',    'WARNING', '재개 거부', 'AMR이 재개 요청을 거부(비상정지·배터리·측위/mapId·운전 모드 중 불충족) — 사유 해소 후 다시 재개 [HD_AMR 통신단절 Fail-Safe §4.2]'),
+  ('DEVICE_LINK_LOST',   'CRITICAL','장치 통신 두절(HEAVY) — 현장 RESET 필요', '장치 6종(비전·Depth·레이저·I/O·코봇·AMR) 중 통신 두절 — AMR이 HEAVY 래치·임무 중단. errors[]에서 사라질 때(현장 RESET)까지 배차 보류, 해제 시 자동 재개 [HD_AMR 장치통신 HEAVY알람 §5]'),
+  ('ORDER_REJECTED_DEVICE_FAULT', 'WARNING', '장치 알람 — Order 거부', 'AMR이 장치 HEAVY 알람 중 Order 거부(WARNING, 기존 orderId 유지) — 실행 없음, ACS는 정차를 PENDING 복귀 후 RESET 뒤 재배차 [HD_AMR 장치통신 HEAVY알람 §4.2]'),
   ('EMERGENCY_STOP',     'WARNING', '비상정지 중', 'AMR측 기능 정지(emergencyStopActive) 보고 — 활성 run 자동 중단됨 [§6.4]'),
   ('SAIGE_UNREACHABLE',  'WARNING', 'SAIGE 전송 불가', '로봇 상태(robot-health-check) 전송이 임계 횟수 이상 연속 실패 — SAIGE 기동/네트워크 확인 [SAIGE §9.5]'),
   ('SAIGE_BAD_REQUEST',  'WARNING', 'SAIGE 형식 오류', 'SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]')

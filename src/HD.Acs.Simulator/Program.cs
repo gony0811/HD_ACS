@@ -20,6 +20,10 @@ using MQTTnet.Protocol;
 //     RUNNING 직후 PAUSED + state.paused=true + errors communicationLostPause 로 멈추고 stopPause/cancelOrder 대기.
 //     (실제 MQTT 단절 판정은 시뮬레이터 범위 밖 — "복구 직후 PAUSE 보고" 시점부터 재현.)
 //     SIM_RESUME_REJECT=1 이면 첫 stopPause를 resumeRejected로 거부.
+//  5. 장치 HEAVY 알람 주입 [HD_AMR 장치통신 HEAVY알람 §3/§4]: SIM_DEVICE_FAULT_ORDERS=N 이면 처음 N개 Order에서
+//     첫 액션 RUNNING 직후 cobotLinkLost(FATAL, errorReferences device=cobot) 발생 → 남은 액션 FAILED("aborted: … (HEAVY)").
+//     알람 중 수신 Order는 폐기 + orderRejectedDeviceFault(orderId·actionId·device 참조, 기존 orderId 유지).
+//     SIM_DEVICE_FAULT_RESET_SEC=S(기본 20): S초 후 "복구됨, RESET 대기"(Latched), 다시 S초 후 RESET(에러 제거).
 //  3. 실패 주입: 환경변수 SIM_FAIL_ACTION_IDS(콤마 구분 actionId)에 해당하면
 //     FAILED, resultDescription="FAIL;reason=INJECTED".
 //
@@ -57,6 +61,12 @@ var commLossMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_COMM_LOSS
 var commLossCount = 0;
 var resumeRejectPending = Environment.GetEnvironmentVariable("SIM_RESUME_REJECT") == "1";
 TaskCompletionSource<string>? pauseWait = null;   // "resume" | "cancel"
+
+// 장치 HEAVY 알람 주입 [장치통신 HEAVY알람] — 처음 N개 Order를 코봇 통신 두절로 중단, S초 후 복구·S초 후 RESET
+var deviceFaultMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_DEVICE_FAULT_ORDERS"), out var dfo) ? dfo : 0;
+var deviceFaultCount = 0;
+var deviceFaultResetSec = int.TryParse(Environment.GetEnvironmentVariable("SIM_DEVICE_FAULT_RESET_SEC"), out var dfr) ? dfr : 20;
+const string DeviceFaultType = "cobotLinkLost";
 
 // 상시 오류 주입 — 모든 state에 해당 errorType 포함 (예: localizationLost, emergencyStopActive — §6.4 분기 검증용)
 var raiseErrorType = Environment.GetEnvironmentVariable("SIM_RAISE_ERROR");
@@ -103,6 +113,24 @@ client.ApplicationMessageReceivedAsync += async e =>
     if (e.ApplicationMessage.Topic.EndsWith("/order"))
     {
         var incoming = JsonSerializer.Deserialize<Vda5050Order>(payload)!;
+
+        // 장치 HEAVY 알람 중 Order 거부 [장치통신 HEAVY알람 §4.2] — 폐기, 기존 orderId 유지, orderRejectedDeviceFault
+        if (state.Errors.Any(er => er.ErrorType == DeviceFaultType))
+        {
+            var refs = new List<ErrorReference> { new() { ReferenceKey = "orderId", ReferenceValue = incoming.OrderId } };
+            if (incoming.Nodes.SelectMany(n => n.Actions).FirstOrDefault() is { } firstAction)
+                refs.Add(new() { ReferenceKey = "actionId", ReferenceValue = firstAction.ActionId });
+            refs.Add(new() { ReferenceKey = "device", ReferenceValue = "cobot" });
+            state.Errors.RemoveAll(er => er.ErrorType == "orderRejectedDeviceFault");
+            state.Errors.Add(new VdaError
+            {
+                ErrorType = "orderRejectedDeviceFault", ErrorLevel = "WARNING", ErrorReferences = refs,
+                ErrorDescription = "장치 HEAVY 알람 — 코봇(끊김|복구됨·RESET 대기), 복구 후 RESET 필요",
+            });
+            Console.WriteLine($"[SIM] Order 거부(장치 HEAVY 알람): {incoming.OrderId} — 폐기, 기존 orderId 유지");
+            _ = PublishStateAsync();
+            return;
+        }
 
         // Order 거부 주입 [§4.5.2]: 폐기(이전 orderId·actionStates 유지 보고) + orderValidationError(description에 orderId)
         if (rejectCount < rejectMax)
@@ -245,14 +273,14 @@ async Task ExecuteOrderAsync(Vda5050Order order)
             foreach (var action in node.Actions)
                 if (!await ExecuteActionAsync(action)) { cancelled = true; break; }
             await PublishStateAsync();
-            if (cancelled) { Console.WriteLine($"[SIM] Order 취소됨: {order.OrderId}"); return; }
+            if (cancelled) { Console.WriteLine($"[SIM] Order 중단됨: {order.OrderId}"); return; }
         }
         Console.WriteLine($"[SIM] Order 완료: {order.OrderId}");
     }
     finally { gate.Release(); }
 }
 
-/// <returns>false = cancelOrder로 Order 취소됨(이후 액션 실행 중단)</returns>
+/// <returns>false = cancelOrder 또는 장치 HEAVY 알람으로 Order 중단(이후 액션 실행 중단)</returns>
 async Task<bool> ExecuteActionAsync(VdaAction action)
 {
     var actionState = state.ActionStates.First(s => s.ActionId == action.ActionId);
@@ -290,6 +318,39 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         actionState.ActionStatus = "RUNNING";
         Console.WriteLine($"[SIM]   stopPause 수신 — 재개(정지 직전 웨이포인트부터 재촬영), 정지 {(DateTimeOffset.UtcNow - t0).TotalSeconds:F0}s");
         await PublishStateAsync();
+    }
+
+    // ── 0b. 장치 HEAVY 알람 주입 [장치통신 HEAVY알람 §3.2] — 임무 즉시 중단, 남은 액션 FAILED ──
+    if (deviceFaultCount < deviceFaultMax)
+    {
+        deviceFaultCount++;
+        var t0 = DateTimeOffset.Now;
+        const string reason = "상태 소켓(20004) 끊김";
+        state.Errors.Add(new VdaError
+        {
+            ErrorType = DeviceFaultType, ErrorLevel = "FATAL",
+            ErrorDescription = $"코봇 통신 두절 t0={t0:HH:mm:ss} — {reason}",
+            ErrorReferences = new() { new() { ReferenceKey = "device", ReferenceValue = "cobot" } },
+        });
+        foreach (var a in state.ActionStates.Where(a => a.ActionStatus is not ("FINISHED" or "FAILED")))
+        { a.ActionStatus = "FAILED"; a.ResultDescription = $"aborted: 코봇 통신 두절({reason}) (HEAVY)"; }
+        currentAnchorGroup = null;
+        Console.WriteLine($"[SIM]   장치 HEAVY 알람(주입 {deviceFaultCount}/{deviceFaultMax}): cobotLinkLost — 임무 중단, {deviceFaultResetSec}s 후 복구");
+        await PublishStateAsync();
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(deviceFaultResetSec));
+            if (state.Errors.FirstOrDefault(er => er.ErrorType == DeviceFaultType) is { } latched)
+                latched.ErrorDescription = $"코봇 통신 두절 t0={t0:HH:mm:ss} — 복구됨, RESET 대기";
+            Console.WriteLine("[SIM]   코봇 통신 복구 — RESET 대기(Latched)");
+            await PublishStateAsync();
+            await Task.Delay(TimeSpan.FromSeconds(deviceFaultResetSec));
+            state.Errors.RemoveAll(er => er.ErrorType == DeviceFaultType);
+            Console.WriteLine("[SIM]   알람 RESET — cobotLinkLost 해제, Order 수락 재개");
+            await PublishStateAsync();
+        });
+        return false;
     }
 
     // ── 1. 실패 주입 [WP-4 §5.3] ──

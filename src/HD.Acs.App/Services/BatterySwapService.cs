@@ -134,6 +134,8 @@ public sealed class BatterySwapService
 
         // 연결 확인 — EnsureRobotConnectedAsync는 미연결 시 RobotNotConnectedException + ROBOT_NOT_CONNECTED 알람.
         await _dispatcher.EnsureRobotConnectedAsync(robotId, "배터리 교체 이동", ct);
+        // 장치 HEAVY 알람 중이면 AMR이 거부 — run abort보다 앞에서 막는다 [장치통신 HEAVY알람 §5]
+        _dispatcher.EnsureNoDeviceFault(robotId, "배터리 교체 이동");
 
         var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
         if (ctx?.ReportedMapId is not { } mapId || string.IsNullOrWhiteSpace(mapId))
