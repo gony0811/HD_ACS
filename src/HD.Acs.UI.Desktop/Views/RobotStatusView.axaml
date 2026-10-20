@@ -35,6 +35,13 @@
                     Command="{Binding DispatchBatterySwapCommand}"
                     ToolTip.Tip="현재 층의 배터리 교체 장소로 이동 Order 발행. 활성 run은 함께 중단, 교체 후 '이어하기'로 재개." />
 
+            <!-- 장치 HEAVY 알람 — 해제는 현장 RESET(조작반/AMR 화면)뿐, ACS 명령 없음. 그 전까지 서버가 배차 보류 [HD_AMR 장치통신 HEAVY알람 §5] -->
+            <Border IsVisible="{Binding DeviceFault}" BorderBrush="{DynamicResource AppErrorBrush}" Background="{DynamicResource AppErrorBgBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+                <TextBlock Text="{Binding DeviceFaultLabel}" TextWrapping="Wrap" FontWeight="SemiBold"
+                           Foreground="{DynamicResource AppErrorBrush}" />
+            </Border>
+
             <!-- 통신 단절 일시정지 — AMR은 통신 복구 후에도 자동 재개하지 않는다 [HD_AMR 통신단절 Fail-Safe §6] -->
             <Border IsVisible="{Binding CommLossPaused}" BorderBrush="{DynamicResource AppWarnBorderBrush}" Background="{DynamicResource AppWarnBgBrush}"
                     BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">

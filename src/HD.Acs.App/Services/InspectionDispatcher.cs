@@ -26,14 +26,16 @@ public sealed class InspectionDispatcher
     private readonly IInspectionOrderingPolicy _policy;
     private readonly IHubContext<MonitoringHub> _hub;
     private readonly ILogger<InspectionDispatcher> _log;
+    private readonly RobotErrorTracker _tracker;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
-        IConfiguration config, ILogger<InspectionDispatcher> log)
+        IConfiguration config, ILogger<InspectionDispatcher> log, RobotErrorTracker? tracker = null)
     {
         _db = db; _vda = vda; _policy = policy; _hub = hub; _log = log;
+        _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
@@ -71,6 +73,21 @@ public sealed class InspectionDispatcher
         }, ct);
         _log.LogWarning("{Command} 차단 — AMR {Robot} 미연결: {Reason}", command, robotId, reason);
         throw new RobotNotConnectedException($"AMR {robotId}이(가) 연결되어 있지 않습니다({reason}) — {command}을(를) 보내지 않았습니다. HD_AMR 연결을 확인하세요.");
+    }
+
+    /// <summary>
+    /// Order 발행 전 장치 HEAVY 알람 확인 [HD_AMR 장치통신 HEAVY알람 §5] — 알람 중이면 AMR이 어차피
+    /// orderRejectedDeviceFault로 거부하므로 보내지 않고 RobotDeviceFaultException(API 409).
+    /// 알람은 새로 만들지 않는다(DEVICE_LINK_LOST가 이미 기록됨). instantAction(비상정지·stopPause·cancelOrder)은 대상 아님.
+    /// </summary>
+    public void EnsureNoDeviceFault(string robotId, string command)
+    {
+        var faults = _tracker.ActiveDeviceFaults(robotId);
+        if (faults.Count == 0) return;
+        var names = string.Join(", ", faults.Select(DeviceFaults.NameOf));
+        _log.LogWarning("{Command} 차단 — AMR {Robot} 장치 HEAVY 알람({Devices})", command, robotId, names);
+        throw new RobotDeviceFaultException(
+            $"AMR {robotId} 장치 HEAVY 알람({names}) — {command}을(를) 보내지 않았습니다. 현장에서 장치 복구 후 RESET하고 다시 시도하세요.");
     }
 
     /// <summary>알람 기록(alarm.alarm) + 실시간 푸시. code는 alarm.spec에 있어야 한다(AlarmSpecSeed).</summary>
@@ -418,6 +435,14 @@ public sealed class InspectionDispatcher
             _log.LogInformation("Run {Run}: 상태 {State} — 배차하지 않음.", runId, run.State);
             return;
         }
+        // 장치 HEAVY 알람 중 배차 보류 [HD_AMR 장치통신 HEAVY알람 §5] — 보내면 AMR이 거부하고, 거부→다음 배차가
+        // 연쇄해 큐가 소진된다. run은 RUNNING·큐는 PENDING 그대로, 알람 해제(errors에서 사라짐) 시 RobotStateService가 재개.
+        if (_tracker.HasDeviceFault(run.RobotId))
+        {
+            _log.LogWarning("Run {Run}: 로봇 {Robot} 장치 HEAVY 알람({Devices}) — RESET 전까지 배차 보류.",
+                runId, run.RobotId, string.Join(", ", _tracker.ActiveDeviceFaults(run.RobotId)));
+            return;
+        }
         var ctx = await _db.RobotContexts.FindAsync(new object[] { run.RobotId }, ct);
         var floor = ctx?.ReportedMapId;
         if (floor is null) { _log.LogInformation("Run {Run}: 로봇 보고 층 미확인 — 배차 보류.", runId); return; }
@@ -557,6 +582,7 @@ public sealed class InspectionDispatcher
 
         if (await _db.ScenarioRuns.AsNoTracking().AnyAsync(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"), ct))
             throw new RunConflictException("진행 중인 run이 있습니다 — 시험은 중단(abort) 후 사용하세요.");
+        EnsureNoDeviceFault(robotId, "코봇 이동 시험(moveToSeamStart)");
 
         var mapId = $"{area.TankId}-L{area.Level}";
         var ctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId, ct);
@@ -753,6 +779,53 @@ public sealed class InspectionDispatcher
         return true;
     }
 
+    // ── 장치 HEAVY 알람으로 Order 거부(orderRejectedDeviceFault) [HD_AMR 장치통신 HEAVY알람 §4.2/§5.3] ──
+    /// <summary>
+    /// 알람 직전에 발행돼 경합으로 거부된 정차를 **PENDING으로 되돌린다**(사용자 결정 — 실행된 적 없으므로 실패 아님,
+    /// attempts 불변). 다음 배차는 하지 않는다 — 장치 알람 해제 시 RobotStateService가 DispatchNext로 재개.
+    /// orderId 대조: errorReferences.orderId 우선, 없으면 errorDescription에 포함 여부. 일치 없으면 false(반복 수신에 멱등).
+    /// </summary>
+    public async Task<bool> HandleDeviceFaultRejectedAsync(string robotId, VdaError err, CancellationToken ct)
+    {
+        var run = await _db.ScenarioRuns
+            .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
+            .Select(r => (Guid?)r.RunId).FirstOrDefaultAsync(ct);
+        if (run is not Guid runId) return false;
+
+        var wi = await _db.WorkItems.FirstOrDefaultAsync(w => w.RunId == runId && w.Status == "DISPATCHED", ct);
+        if (wi?.OrderId is not { } orderId) return false;
+        var refOrder = err.Ref("orderId");
+        bool match = refOrder is not null
+            ? string.Equals(refOrder, orderId, StringComparison.OrdinalIgnoreCase)
+            : err.ErrorDescription?.Contains(orderId, StringComparison.OrdinalIgnoreCase) == true;
+        if (!match) return false;
+
+        // 거부=폐기(실행 없음) — 이번 발행의 미종결 액션 행을 지우고 정차를 큐로 복귀. 재발행 시 새 orderId·액션이 만들어진다.
+        var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId && a.Status != "FINISHED" && a.Status != "FAILED")
+            .ToListAsync(ct);
+        _db.OrderActions.RemoveRange(acts);
+        wi.Status = "PENDING";
+        wi.OrderId = null;
+        wi.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await PushWorkItemAsync(runId, wi, ct, "장치 HEAVY 알람으로 AMR이 Order 거부 — RESET 후 다시 배차");
+        _log.LogWarning("Run {Run}: Order {Order} 장치 HEAVY 알람으로 거부(orderRejectedDeviceFault) — 정차 wi={Wi} PENDING 복귀. desc={Desc}",
+            runId, orderId, wi.WorkItemId, err.ErrorDescription);
+        return true;
+    }
+
+    /// <summary>장치 알람 해제 후 배차 재개 — 로봇의 활성 run(RUNNING)이 있으면 DispatchNext. 정차 진행 중이면 하지 않는다.</summary>
+    public async Task ResumeAfterDeviceFaultAsync(string robotId, CancellationToken ct)
+    {
+        var runId = await _db.ScenarioRuns.AsNoTracking()
+            .Where(r => r.RobotId == robotId && r.State == "RUNNING")
+            .Select(r => (Guid?)r.RunId).FirstOrDefaultAsync(ct);
+        if (runId is not Guid id) return;
+        if (await _db.WorkItems.AnyAsync(w => w.RunId == id && w.Status == "DISPATCHED", ct)) return;
+        _log.LogInformation("Run {Run}: 로봇 {Robot} 장치 알람 해제(RESET) — 배차 재개.", id, robotId);
+        await DispatchNextAsync(id, ct);
+    }
+
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
 
     private static string? ResultDescription(string? resultJson)
@@ -779,3 +852,6 @@ public sealed record PlannedStation(Guid AreaId, string AreaName, string WallCod
 
 /// <summary>AMR 미연결로 명령을 보내지 않음 — API는 409.</summary>
 public sealed class RobotNotConnectedException(string message) : Exception(message);
+
+/// <summary>AMR 장치 HEAVY 알람 중이라 Order를 보내지 않음 — API는 409 [HD_AMR 장치통신 HEAVY알람 §5].</summary>
+public sealed class RobotDeviceFaultException(string message) : Exception(message);
