@@ -71,6 +71,14 @@ public sealed partial class ShellViewModel : ObservableObject
         Tank = tank;
         History = history;
 
+        // 재캘리브레이션(계산) 직후 표시 캐시를 즉시 버린다 — TTL(10초)을 기다리면
+        // 운영자가 "고쳤는데 화면이 그대로"로 오해한다.
+        Calibration.TransformChanged += (_, _) =>
+        {
+            Tank.InvalidateCalibrationCache();      // 3D·전개도 마커를 새 T_W_D로 즉시 재계산
+            RobotStatus.InvalidateCalibrations();   // 위치 카드도 함께
+        };
+
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
         // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산

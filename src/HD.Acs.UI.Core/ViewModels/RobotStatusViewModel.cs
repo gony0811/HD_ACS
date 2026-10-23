@@ -96,6 +96,13 @@ public sealed partial class RobotStatusViewModel : ObservableObject
         }
     }
 
+    /// <summary>T_W_D 캐시를 즉시 버린다 — 재캘리브레이션 직후 10초 TTL을 기다리지 않도록.</summary>
+    public void InvalidateCalibrations()
+    {
+        _calibrations.Clear();
+        _ = LoadContextAsync();   // 현재 선택 로봇 위치를 새 변환으로 다시 계산
+    }
+
     /// <summary>계획(영역·작업)이 바뀌었음을 알림 — 다음 평가에서 정차점을 다시 조회한다.</summary>
     public void InvalidatePlannedStations()
     {

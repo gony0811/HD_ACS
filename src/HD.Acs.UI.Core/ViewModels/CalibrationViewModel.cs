@@ -43,6 +43,9 @@ public sealed partial class CalibrationViewModel : ObservableObject
     [ObservableProperty] private int _stableSamples;
     [ObservableProperty] private string _geometryLabel = "+X 선수 / +Y 좌현";
 
+    /// <summary>T_W_D가 방금 바뀜(계산 성공) — 3D·전개도·상태 카드의 캘리브레이션 캐시를 버려야 한다.</summary>
+    public event EventHandler? TransformChanged;
+
     public CalibrationViewModel(IAcsApiClient api, IMonitoringClient monitoring, IOptions<AcsOptions> options)
     {
         _api = api;
@@ -238,6 +241,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
                 ? $"계산 완료. {(worst is null ? "" : $"최대 잔차 {worst.Name} {worst.ResidualM:F3}m.")}"
                 : $"계산 경고. {worst?.Name} 재측정을 우선 권장합니다.";
             RaiseDerived();
+            TransformChanged?.Invoke(this, EventArgs.Empty);   // 표시 캐시 즉시 무효화(Shell이 구독)
         }
         catch (Exception ex) { StatusMessage = $"계산 실패: {ex.Message}"; }
     }

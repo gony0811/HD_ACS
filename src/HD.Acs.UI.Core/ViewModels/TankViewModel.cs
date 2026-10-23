@@ -336,8 +336,15 @@ public sealed partial class TankViewModel : ObservableObject
 
     // ── 로봇 마커 좌표 변환: 맵 → 도면 (T_W_D 역변환) ────────────────────────
     // 로봇 보고는 맵 좌표, 3D 씬은 도면 좌표 — 역변환 없이 찍으면 T_W_D(tx,ty,yaw)만큼 어긋나 보인다.
-    private readonly Dictionary<string, (double Tx, double Ty, double Yaw)> _calByMapId = new();
-    private readonly HashSet<string> _calMissing = new();   // 미보정 층 — 재조회 폭주 방지
+    private readonly Dictionary<string, (double Tx, double Ty, double Yaw, DateTimeOffset LoadedAt)> _calByMapId = new();
+    private readonly Dictionary<string, DateTimeOffset> _calMissing = new();   // 미보정 층 — 재조회 폭주 방지(TTL)
+
+    /// <summary>
+    /// T_W_D 캐시 수명. 서버에서 캘리브레이션을 고쳐도(재캘리브레이션·교정 도구) 이 시간 안에 화면이 따라오게 한다.
+    /// 종전에는 프로세스 수명 내내 캐시해 UI를 재시작하기 전까지 3D·전개도 마커가 옛 변환으로 계속 그려졌다.
+    /// 로봇 상태 카드(RobotStatusViewModel)와 같은 10초.
+    /// </summary>
+    public TimeSpan CalibrationTtl { get; set; } = TimeSpan.FromSeconds(10);
     private bool _robotPoseCalibrated;   // 현재 마커 좌표가 유효 T_W_D로 변환된 값인지(원시좌표 폴백이면 false → 마커 숨김)
 
     /// <summary>마커용 도면 좌표. 캘리브레이션 미보정 층은 원시(맵) 좌표 폴백.</summary>
@@ -389,7 +396,11 @@ public sealed partial class TankViewModel : ObservableObject
         }
     }
 
-    private void UpdateRobotDrawingPose()
+    /// <param name="triggerRefresh">
+    /// 만료된 T_W_D를 다시 조회할지. 조회 완료 후의 갱신에서는 false — 그러지 않으면 TTL이 아주 짧을 때
+    /// 조회 → 갱신 → 조회로 되돌아 돈다.
+    /// </param>
+    private void UpdateRobotDrawingPose(bool triggerRefresh = true)
     {
         double mx = RobotX ?? 0, my = RobotY ?? 0;
         double dx = mx, dy = my;   // 폴백: 미보정 → 원시 좌표(마커는 RobotMarkerVisible=false로 숨김)
@@ -397,7 +408,8 @@ public sealed partial class TankViewModel : ObservableObject
         bool calibrated = false;
         if (RobotMapId is { } mapId)
         {
-            if (_calByMapId.TryGetValue(mapId, out var c))
+            bool have = _calByMapId.TryGetValue(mapId, out var c);
+            if (have)
             {
                 // drawing = R(−yaw) · (map − t)
                 double px = mx - c.Tx, py = my - c.Ty;
@@ -407,11 +419,6 @@ public sealed partial class TankViewModel : ObservableObject
                 if (RobotTheta is double th) dTheta = MapThetaToDrawing(th, c.Yaw);
                 calibrated = true;
             }
-            else if (!_calMissing.Contains(mapId))
-            {
-                _ = LoadCalibrationAsync(mapId);   // 최초 1회 비동기 로드 — 도착 시 재계산
-            }
-
             // 층 z: mapId "{tank}-L{n}" → level_z[n-1]
             var idx = mapId.LastIndexOf("-L", StringComparison.OrdinalIgnoreCase);
             if (idx >= 0 && int.TryParse(mapId[(idx + 2)..], out int lv)
@@ -428,18 +435,55 @@ public sealed partial class TankViewModel : ObservableObject
         OnPropertyChanged(nameof(RobotDrawingY));
         OnPropertyChanged(nameof(RobotDrawingTheta));
         OnPropertyChanged(nameof(RobotMarkerVisible));
+
+        // 만료되면 재조회한다. 값이 있는 동안에는 그 값을 계속 쓰므로 갱신 중 마커가 튀지 않는다.
+        // 조회는 반드시 위 대입이 끝난 뒤에 건다 — 조회가 즉시 끝나면(캐시된 HTTP 응답·테스트 대역)
+        // 재귀로 들어온 갱신이 먼저 좋은 값을 쓰고, 이 호출이 옛 폴백 값으로 덮어쓰게 된다.
+        if (triggerRefresh && RobotMapId is { } id && IsCalibrationStale(id) && !_calLoading.Contains(id))
+            _ = LoadCalibrationAsync(id);
+    }
+
+    private readonly HashSet<string> _calLoading = new();   // 진행 중 조회 — 2초 주기 state마다 중복 요청 방지
+
+    /// <summary>그 맵의 T_W_D 캐시가 비었거나 TTL이 지났는가.</summary>
+    private bool IsCalibrationStale(string mapId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_calByMapId.TryGetValue(mapId, out var hit)) return now - hit.LoadedAt >= CalibrationTtl;
+        if (_calMissing.TryGetValue(mapId, out var miss)) return now - miss >= CalibrationTtl;
+        return true;
+    }
+
+    /// <summary>
+    /// T_W_D 캐시를 즉시 버린다 — 앱 안에서 재캘리브레이션(계산)한 직후처럼 TTL을 기다릴 이유가 없을 때.
+    /// </summary>
+    public void InvalidateCalibrationCache()
+    {
+        _calByMapId.Clear(); _calMissing.Clear();
+        UpdateRobotDrawingPose();
     }
 
     private async Task LoadCalibrationAsync(string mapId)
     {
+        if (!_calLoading.Add(mapId)) return;
         try
         {
             var cal = await _api.GetCalibrationAsync(mapId);
-            if (cal is not null) _calByMapId[mapId] = (cal.Tx, cal.Ty, cal.YawRad);
-            else _calMissing.Add(mapId);   // 미보정 층 — 원시 좌표 폴백 유지
+            if (cal is not null)
+            {
+                _calByMapId[mapId] = (cal.Tx, cal.Ty, cal.YawRad, DateTimeOffset.UtcNow);
+                _calMissing.Remove(mapId);
+            }
+            else
+            {
+                // 미보정 층 — 원시 좌표 폴백 유지(마커는 숨김). TTL 뒤 재확인한다.
+                _calMissing[mapId] = DateTimeOffset.UtcNow;
+                _calByMapId.Remove(mapId);
+            }
         }
-        catch { _calMissing.Add(mapId); }
-        UpdateRobotDrawingPose();
+        catch { _calMissing[mapId] = DateTimeOffset.UtcNow; }
+        finally { _calLoading.Remove(mapId); }
+        UpdateRobotDrawingPose(triggerRefresh: false);
     }
 
     partial void OnSelectedViewModeChanged(string value)
