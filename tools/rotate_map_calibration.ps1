@@ -1,4 +1,4 @@
-# 저장된 T_W_D(map_calibration)의 회전만 보정 — [도면 좌표 입력 프레임 오류 복구]
+﻿# 저장된 T_W_D(map_calibration)의 회전만 보정 — [도면 좌표 입력 프레임 오류 복구]
 # tools/rotate_map_calibration.sh 의 PowerShell 판(현장 서버는 Windows — bash 없음).
 #
 #   증상 → 원인 대조표 (실제 로봇 위치/방향 대비 화면 표시)
@@ -36,6 +36,8 @@
 #   DB 접속은 매개변수 또는 PG* 환경변수(psql 표준). 비밀번호를 안 주면 물어본다.
 #   bash 의 `export PG...=` 는 PowerShell 에서 동작하지 않는다($env:PGPASSWORD='...').
 #
+# 실행 정책 때문에 막히면: powershell -ExecutionPolicy Bypass -File .\tools\rotate_map_calibration.ps1 CT1-L4
+# Windows PowerShell 5.1 에서도 동작한다(이 파일은 5.1 이 한글을 바르게 읽도록 BOM 포함 UTF-8 로 저장한다 — 편집 후에도 유지할 것).
 # 필요: psql(PostgreSQL 설치 시 포함 — PATH 에 없으면 C:\Program Files\PostgreSQL\*\bin 자동 탐색)
 #       HD_ACS App 기동(solve 재계산 호출)
 param(
@@ -52,7 +54,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── psql 찾기 ──────────────────────────────────────────────────────────────
-$psqlExe = (Get-Command psql -ErrorAction SilentlyContinue)?.Source
+$psqlCmd = Get-Command psql -ErrorAction SilentlyContinue
+$psqlExe = if ($psqlCmd) { $psqlCmd.Source } else { $null }
 if (-not $psqlExe) {
     $psqlExe = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName

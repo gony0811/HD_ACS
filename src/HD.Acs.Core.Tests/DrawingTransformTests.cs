@@ -85,4 +85,43 @@ public class DrawingTransformTests
         // 방향 회전과 좌표 회전 일관성: 도면 단위 X축(yaw=0)이 맵에서 변환 yaw 방향
         Assert.Equal(t.YawRad, t.DrawingYawToMap(0.0), 9);
     }
+
+    // ── 도면 좌표 프레임 회전 (입력 프레임 오류 교정) ──
+
+    [Theory]
+    [InlineData(0, 1, 0)]
+    [InlineData(90, 0, 1)]
+    [InlineData(180, -1, 0)]
+    [InlineData(270, 0, -1)]
+    [InlineData(-90, 0, -1)]
+    [InlineData(-180, -1, 0)]
+    [InlineData(540, -1, 0)]
+    public void RotationCosSin_IsExactForQuarterTurns(double deg, double cos, double sin)
+    {
+        var (c, s) = DrawingTransform.RotationCosSin(deg);
+        Assert.Equal(cos, c);   // 정확히 ±1/0 — 기준점 좌표에 부동소수 먼지를 남기지 않는다
+        Assert.Equal(sin, s);
+    }
+
+    [Fact]
+    public void RotateDrawing_180_NegatesBothAxes_AndIsReversible()
+    {
+        var (x, y) = DrawingTransform.RotateDrawing(-11.258, -4.568, 180);
+        Assert.Equal(11.258, x, 9);
+        Assert.Equal(4.568, y, 9);
+
+        var (bx, by) = DrawingTransform.RotateDrawing(x, y, -180);
+        Assert.Equal(-11.258, bx, 9);
+        Assert.Equal(-4.568, by, 9);
+    }
+
+    [Fact]
+    public void RotateDrawing_90_TurnsCounterClockwise_AndKeepsLength()
+    {
+        var (x, y) = DrawingTransform.RotateDrawing(3, 0, 90);
+        Assert.Equal(0, x, 9);
+        Assert.Equal(3, y, 9);
+        var (ax, ay) = DrawingTransform.RotateDrawing(2, 1, 37);
+        Assert.Equal(Math.Sqrt(5), Math.Sqrt(ax * ax + ay * ay), 9);
+    }
 }

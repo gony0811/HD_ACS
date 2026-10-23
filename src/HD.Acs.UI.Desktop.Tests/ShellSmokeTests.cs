@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using HD.Acs.UI.Desktop.Views;
 using HD.Acs.UI.Rendering;
+using HD.Acs.UI.Models;
 using HD.Acs.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -161,6 +162,35 @@ public class ShellSmokeTests
         // 존재하지 않는 속성/명령 경로(오타)는 반드시 0건. (null 중간 경로 경고는 데이터 없음 상태에서 정상)
         var pathErrors = log.Messages.Where(m => m.Contains("Could not find", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.True(pathErrors.Count == 0, "바인딩 경로 오류:\n" + string.Join("\n", pathErrors));
+    }
+
+    [AvaloniaFact]
+    public void CalibrationTab_ExposesPointEditingAndRotation()
+    {
+        var (host, window, shell) = CreateShell();
+        using (host)
+        {
+            shell.CurrentMode = AppMode.Planning; Dispatcher.UIThread.RunJobs();
+            Find<TabControl>(window, "Tabs").SelectedIndex = 2;   // 캘리브레이션 (T_W_D)
+            Dispatcher.UIThread.RunJobs();
+
+            // 그리드 선택이 편집 대상과 묶여 있어야 "행을 클릭해 수정"이 성립한다
+            var grid = Find<DataGrid>(window, "PointGrid");
+            Assert.Same(shell.Calibration.Points, grid.ItemsSource);
+            var pt = new CalibrationPointDto(Guid.NewGuid(), "CT1-L4", 1, -2.012, -0.013, 14.125, 10.288,
+                DateTimeOffset.UtcNow, "t");
+            shell.Calibration.Points.Add(pt);
+            Dispatcher.UIThread.RunJobs();
+            grid.SelectedItem = pt;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(pt, shell.Calibration.SelectedPoint);
+            Assert.True(shell.Calibration.IsEditingPoint);
+            Assert.Equal(-2.012, shell.Calibration.DrawingX, 9);   // 값이 입력칸으로 들어온다
+
+            // 회전 버튼은 기준점이 있을 때만 활성 (명령 파라미터 = 각도)
+            Assert.True(shell.Calibration.RotateDrawingCommand.CanExecute("180"));
+            window.Close();
+        }
     }
 
     [AvaloniaFact]

@@ -115,30 +115,64 @@
                         <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}" />
                     </Border>
 
-                    <Expander Header="수동 입력 / 저장된 대응쌍" IsExpanded="True">
+                    <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}"
+                            BorderThickness="1" CornerRadius="3" Padding="7">
+                        <TextBlock Text="{Binding RobotPoseText}" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" />
+                    </Border>
+
+                    <Expander Header="기준점 수정 / 수동 입력" IsExpanded="True">
                         <StackPanel Margin="0,6,0,0">
+                            <TextBlock Text="{Binding SaveHintText}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,5" />
                             <Grid ColumnDefinitions="*,*,80,Auto" ColumnSpacing="5">
                                 <NumericUpDown Value="{Binding DrawingX}" FormatString="0.###" Watermark="도면 X" />
                                 <NumericUpDown Grid.Column="1" Value="{Binding DrawingY}" FormatString="0.###" Watermark="도면 Y" />
                                 <ComboBox Grid.Column="2" ItemsSource="{Binding Units}" SelectedItem="{Binding Unit}" />
                                 <Button Grid.Column="3" Content="위치 캡처" Command="{Binding CaptureRobotPositionCommand}" />
                             </Grid>
-                            <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="5" Margin="0,5,0,0">
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="5" Margin="0,5,0,0">
                                 <NumericUpDown Value="{Binding MapX}" Watermark="맵 X (m)" />
                                 <NumericUpDown Grid.Column="1" Value="{Binding MapY}" Watermark="맵 Y (m)" />
-                                <Button Grid.Column="2" Content="기준점 저장" Command="{Binding CapturePointCommand}" />
                             </Grid>
-                            <DataGrid x:Name="PointGrid" ItemsSource="{Binding Points}" AutoGenerateColumns="False" IsReadOnly="True" Height="180" Margin="0,6,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,5,0,0">
+                                <Button Content="선택 점 수정" Command="{Binding UpdatePointCommand}"
+                                        IsVisible="{Binding IsEditingPoint}" />
+                                <Button Content="편집 해제" Command="{Binding CancelPointEditCommand}"
+                                        IsVisible="{Binding IsEditingPoint}" />
+                                <Button Content="새 기준점 저장" Command="{Binding CapturePointCommand}" />
+                            </StackPanel>
+
+                            <DataGrid x:Name="PointGrid" ItemsSource="{Binding Points}" SelectedItem="{Binding SelectedPoint}"
+                                      AutoGenerateColumns="False" IsReadOnly="True" Height="180" Margin="0,6,0,0">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="도면X" Binding="{Binding DrawingXM, StringFormat='{}{0:N3}'}" Width="70" />
                                     <DataGridTextColumn Header="도면Y" Binding="{Binding DrawingYM, StringFormat='{}{0:N3}'}" Width="70" />
                                     <DataGridTextColumn Header="맵X" Binding="{Binding MapX, StringFormat='{}{0:N3}'}" Width="70" />
                                     <DataGridTextColumn Header="맵Y" Binding="{Binding MapY, StringFormat='{}{0:N3}'}" Width="70" />
                                     <DataGridTemplateColumn Width="Auto"><DataGridTemplateColumn.CellTemplate><DataTemplate>
-                                        <Button Content="삭제" Padding="6,1" Command="{Binding $parent[DataGrid].DataContext.DeletePointCommand}" CommandParameter="{Binding}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button Content="편집" Padding="6,1"
+                                                    Command="{Binding $parent[DataGrid].DataContext.SelectPointForEditCommand}" CommandParameter="{Binding}" />
+                                            <Button Content="삭제" Padding="6,1"
+                                                    Command="{Binding $parent[DataGrid].DataContext.DeletePointCommand}" CommandParameter="{Binding}" />
+                                        </StackPanel>
                                     </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander Header="도면 좌표 프레임 교정 (회전)" IsExpanded="True">
+                        <StackPanel Margin="0,6,0,0" Spacing="5">
+                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource AppMutedTextBrush}"
+                                       Text="로봇이 실제와 정반대(선수↔선미·좌현↔우현)로, 뱃머리 방향까지 반대로 표시되면 도면 좌표를 180° 돌아간 프레임으로 입력한 것입니다. 아래 버튼은 기준점의 도면 좌표만 돌리고(맵 좌표=현장 측정값은 그대로) 다시 계산합니다. 같은 각도의 반대 부호로 되돌릴 수 있습니다." />
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <Button Content="180° 회전" Command="{Binding RotateDrawingCommand}" CommandParameter="180" />
+                                <Button Content="+90°" Command="{Binding RotateDrawingCommand}" CommandParameter="90" />
+                                <Button Content="−90°" Command="{Binding RotateDrawingCommand}" CommandParameter="-90" />
+                            </StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource AppWarnFgBrush}"
+                                       Text="적용 후 위의 '로봇 표시'가 실제 위치·방향과 맞는지 확인하고, 맞으면 파일 ▸ 저장으로 프로젝트 파일에도 반영하세요(저장하지 않으면 다음에 프로젝트를 열 때 옛 기준점으로 되돌아갑니다)." />
                         </StackPanel>
                     </Expander>
                 </StackPanel>

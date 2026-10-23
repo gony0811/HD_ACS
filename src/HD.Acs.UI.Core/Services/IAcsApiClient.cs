@@ -38,6 +38,13 @@ public interface IAcsApiClient
         double? mapX = null, double? mapY = null);
     Task<IReadOnlyList<CalibrationPointDto>> GetCalibrationPointsAsync(string mapId, CancellationToken ct = default);
     Task DeleteCalibrationPointAsync(string mapId, Guid pointId, CancellationToken ct = default);
+    /// <summary>기준점 수정 — pointId 유지(삭제→재등록과 달리 대응쌍이 끊기지 않는다).</summary>
+    Task<CalibrationPointDto> UpdateCalibrationPointAsync(string mapId, Guid pointId,
+        double drawingX, double drawingY, string unit, double mapX, double mapY, string userId,
+        CancellationToken ct = default) => throw new NotSupportedException();
+    /// <summary>도면 좌표만 원점 기준 deg 회전(맵 좌표 불변) — 입력 프레임 오류 교정. 반환=회전된 점 수.</summary>
+    Task<int> RotateCalibrationDrawingAsync(string mapId, double deg, string userId,
+        CancellationToken ct = default) => throw new NotSupportedException();
     Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default);
     Task<MapCalibrationDto?> GetCalibrationAsync(string mapId, CancellationToken ct = default);
 

@@ -196,6 +196,28 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task<CalibrationPointDto> UpdateCalibrationPointAsync(string mapId, Guid pointId,
+        double drawingX, double drawingY, string unit, double mapX, double mapY, string userId,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/maps/{mapId}/calibration/points/{pointId}",
+            new { DrawingX = drawingX, DrawingY = drawingY, MapX = mapX, MapY = mapY, Unit = unit, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return (await resp.Content.ReadFromJsonAsync<CalibrationPointDto>(ct))!;
+    }
+
+    public async Task<int> RotateCalibrationDrawingAsync(string mapId, double deg, string userId,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/maps/{mapId}/calibration/points/rotate",
+            new { Deg = deg, UserId = userId }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<RotateResult>(ct);
+        return body?.Rotated ?? 0;
+    }
+
+    private sealed record RotateResult(string MapId, double Deg, int Rotated);
+
     public async Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsync($"/api/maps/{mapId}/calibration/solve", content: null, ct);

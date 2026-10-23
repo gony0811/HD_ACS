@@ -19,6 +19,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
     private readonly List<(double X, double Y)> _samples = new();
     private bool _measurementCompleting;
     private double _minX = -15.5, _maxX = 15.5, _minY = -8.65, _maxY = 8.65;
+    private double _originOx, _originOy;   // 사분면(선수/선미·좌현/우현) 판정 기준 = 탱크 중심
 
     public ObservableCollection<TankFloor> Floors { get; } = new(TankLayout.Floors);
     public ObservableCollection<CalibrationPointDto> Points { get; } = new();
@@ -36,6 +37,8 @@ public sealed partial class CalibrationViewModel : ObservableObject
     [ObservableProperty] private string? _robotReportedMapId;
     [ObservableProperty] private double? _robotReportedX;
     [ObservableProperty] private double? _robotReportedY;
+    [ObservableProperty] private double? _robotReportedTheta;
+    [ObservableProperty] private CalibrationPointDto? _selectedPoint;   // 그리드에서 고를 기준점(편집 대상)
     [ObservableProperty] private bool _robotDriving;
     [ObservableProperty] private string? _statusMessage;
     [ObservableProperty] private CalibrationCandidate? _selectedCandidate;
@@ -51,7 +54,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
         _api = api;
         _operatorId = options.Value.OperatorId;
         monitoring.RobotStateReceived += OnRobotState;
-        Points.CollectionChanged += (_, _) => SolveCommand.NotifyCanExecuteChanged();
+        Points.CollectionChanged += (_, _) => { SolveCommand.NotifyCanExecuteChanged(); RotateDrawingCommand.NotifyCanExecuteChanged(); };
         Candidates.CollectionChanged += (_, _) => RaisePlanningDerived();
     }
 
@@ -74,6 +77,27 @@ public sealed partial class CalibrationViewModel : ObservableObject
         : $"기준점 {Candidates.Count}/4 · 측정 {Candidates.Count(c => c.IsMeasured)}개";
     public string LayoutQualityText => EvaluateLayout();
     public bool LayoutReady => Candidates.Count >= 3 && IsLayoutWellSpread();
+    public bool IsEditingPoint => SelectedPoint is not null;
+    public string SaveHintText => IsEditingPoint
+        ? "선택한 기준점을 수정합니다. 맵 좌표는 현장 측정값이니 보통 그대로 두고 도면 X/Y만 고칩니다."
+        : "새 기준점을 추가합니다. 목록에서 행을 고르면 그 점을 수정할 수 있습니다.";
+
+    /// <summary>
+    /// 지금 저장된 T_W_D로 로봇이 도면 어디에 그려지는지 — 교정의 정답 판정은 이 한 줄로 한다.
+    /// 180° 오차는 탱크가 중심 대칭이라 마커가 탱크 안에 그대로 남으므로 방향(뱃머리)까지 같이 본다.
+    /// </summary>
+    public string RobotPoseText
+    {
+        get
+        {
+            if (Calibration is not { } c) return "저장된 T_W_D 없음 — 계산 후 확인할 수 있습니다.";
+            if (RobotReportedX is not double mx || RobotReportedY is not double my)
+                return "이 층을 보고 중인 로봇이 없어 확인할 수 없습니다.";
+            var (x, y, head) = CalibrationPreview.ToDrawing(mx, my, RobotReportedTheta, c.Tx, c.Ty, c.YawRad);
+            return "로봇 표시: " + CalibrationPreview.Describe(x, y, head, _originOx, _originOy);
+        }
+    }
+
     public string CalibrationSummary => SolveResult is { } s
         ? $"tx={s.Tx:F4} m, ty={s.Ty:F4} m, yaw={s.YawRad:F5} rad, RMS={s.RmsM:F4} m (최대 {s.MaxResidualM:F4}), 점 {s.PointCount}"
         : Calibration is { } c
@@ -94,6 +118,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
         {
             var g = await _api.GetTankGeometryAsync(TankLayout.DefaultTankId);
             if (g is null) return;
+            _originOx = g.OriginOx; _originOy = g.OriginOy;
             _minX = g.OriginOx - g.LengthL / 2; _maxX = g.OriginOx + g.LengthL / 2;
             _minY = g.OriginOy - g.WFloor / 2; _maxY = g.OriginOy + g.WFloor / 2;
             GeometryLabel = $"+X 선수 / +Y 좌현 · {g.LengthL:F2} × {g.WFloor:F2} m";
@@ -212,6 +237,63 @@ public sealed partial class CalibrationViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"저장 실패: {ex.Message}"; }
     }
 
+    /// <summary>목록의 '편집' 버튼 — 그리드 행 선택과 같은 동작(값을 입력칸으로 가져온다).</summary>
+    [RelayCommand]
+    private void SelectPointForEdit(CalibrationPointDto? point) => SelectedPoint = point;
+
+    private bool CanUpdatePoint() => SelectedPoint is not null && CanSavePoint();
+    /// <summary>선택한 기준점을 그 자리에서 수정(id 유지) 후 다시 계산한다.</summary>
+    [RelayCommand(CanExecute = nameof(CanUpdatePoint))]
+    private async Task UpdatePointAsync()
+    {
+        if (SelectedMapId is null || SelectedPoint is not { } target || MapX is null || MapY is null) return;
+        try
+        {
+            var mapId = SelectedMapId;
+            var updated = await _api.UpdateCalibrationPointAsync(mapId, target.Id,
+                DrawingX, DrawingY, Unit, MapX.Value, MapY.Value, _operatorId);
+            if (SelectedMapId != mapId) return;
+            int i = Points.IndexOf(target);
+            if (i >= 0) Points[i] = updated;
+            SelectedPoint = updated;
+            StatusMessage = $"수정 완료: 도면({updated.DrawingXM:F3},{updated.DrawingYM:F3}) ↔ 맵({updated.MapX:F3},{updated.MapY:F3})";
+            if (Points.Count >= 2) await SolveAsync();
+        }
+        catch (Exception ex) { StatusMessage = $"수정 실패: {ex.Message}"; }
+    }
+
+    /// <summary>편집 모드 해제 — 이후 저장은 새 기준점 추가로 돌아간다.</summary>
+    [RelayCommand]
+    private void CancelPointEdit()
+    {
+        SelectedPoint = null;
+        StatusMessage = "편집을 해제했습니다. 저장을 누르면 새 기준점이 추가됩니다.";
+    }
+
+    private bool CanRotateDrawing() => Points.Count > 0;
+    /// <summary>
+    /// 기준점 도면 좌표를 통째로 회전(맵 좌표 불변) 후 재계산 — 도면 좌표를 돌아간 프레임으로
+    /// 입력해 저장된 캘리브레이션을 현장 재측정 없이 고치는 경로. 되돌리기는 반대 부호로 한 번 더.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRotateDrawing))]
+    private async Task RotateDrawingAsync(string? degText)
+    {
+        if (SelectedMapId is null) return;
+        if (!double.TryParse(degText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double deg))
+        { StatusMessage = $"회전 각도를 해석할 수 없습니다: {degText}"; return; }
+        try
+        {
+            int n = await _api.RotateCalibrationDrawingAsync(SelectedMapId, deg, _operatorId);
+            SelectedPoint = null;
+            await RefreshAsync();
+            if (Points.Count >= 2) await SolveAsync();
+            StatusMessage = $"도면 좌표 {deg:0.#}° 회전 적용({n}점). 아래 '로봇 표시'가 실제와 맞는지 확인하세요 — "
+                + $"아니면 {-deg:0.#}° 로 되돌릴 수 있습니다. 확인 후 파일 ▸ 저장으로 프로젝트에도 반영하세요.";
+        }
+        catch (Exception ex) { StatusMessage = $"회전 실패: {ex.Message}"; }
+    }
+
     [RelayCommand]
     private async Task DeletePointAsync(CalibrationPointDto? point)
     {
@@ -219,6 +301,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
         try
         {
             await _api.DeleteCalibrationPointAsync(SelectedMapId, point.Id); Points.Remove(point);
+            if (SelectedPoint?.Id == point.Id) SelectedPoint = null;
             var c = Candidates.FirstOrDefault(x => x.SavedPointId == point.Id);
             if (c is not null) { c.SavedPointId = null; c.MapX = null; c.MapY = null; c.IsMeasured = false; c.ResidualM = null; }
             SolveResult = null; StatusMessage = "대응쌍 삭제됨."; RaisePlanningDerived();
@@ -260,7 +343,8 @@ public sealed partial class CalibrationViewModel : ObservableObject
     private void OnRobotState(object? sender, RobotStateDto s)
     {
         if (SelectedMapId is null || !string.Equals(s.ReportedMapId, SelectedMapId, StringComparison.OrdinalIgnoreCase)) return;
-        RobotReportedMapId = s.ReportedMapId; RobotReportedX = s.ReportedX; RobotReportedY = s.ReportedY; RobotDriving = s.Driving;
+        RobotReportedMapId = s.ReportedMapId; RobotReportedX = s.ReportedX; RobotReportedY = s.ReportedY;
+        RobotReportedTheta = s.ReportedTheta; RobotDriving = s.Driving;
         if (IsMeasuring) CollectSample(s);
         RaiseDerived();
     }
@@ -324,18 +408,32 @@ public sealed partial class CalibrationViewModel : ObservableObject
     {
         RobotReportedMapId = null; RobotReportedX = null; RobotReportedY = null; MapX = null; MapY = null;
         IsMeasuring = false; _samples.Clear(); Candidates.Clear(); SelectedCandidate = null;
+        RobotReportedTheta = null; SelectedPoint = null;
         CaptureRobotPositionCommand.NotifyCanExecuteChanged(); CapturePointCommand.NotifyCanExecuteChanged();
         _ = RefreshAsync();
     }
+    partial void OnSelectedPointChanged(CalibrationPointDto? value)
+    {
+        if (value is not null)
+        {
+            // 행을 고르면 그 값이 입력칸으로 들어온다 — 고쳐서 '선택 점 수정'을 누르면 그 자리에서 갱신된다.
+            DrawingX = value.DrawingXM; DrawingY = value.DrawingYM; Unit = "m";
+            MapX = value.MapX; MapY = value.MapY;
+            StatusMessage = $"기준점 편집 중 — 도면({value.DrawingXM:F3},{value.DrawingYM:F3}). 값을 고치고 '선택 점 수정'을 누르세요.";
+        }
+        OnPropertyChanged(nameof(IsEditingPoint)); OnPropertyChanged(nameof(SaveHintText));
+        UpdatePointCommand.NotifyCanExecuteChanged(); CapturePointCommand.NotifyCanExecuteChanged();
+    }
+    partial void OnRobotReportedThetaChanged(double? value) => OnPropertyChanged(nameof(RobotPoseText));
     partial void OnSelectedCandidateChanged(CalibrationCandidate? value) => StartMeasurementCommand.NotifyCanExecuteChanged();
     partial void OnIsMeasuringChanged(bool value) { OnPropertyChanged(nameof(MeasurementProgress)); RaisePlanningDerived(); }
     partial void OnStableSamplesChanged(int value) => OnPropertyChanged(nameof(MeasurementProgress));
     partial void OnRobotDrivingChanged(bool value) { OnPropertyChanged(nameof(ReadinessText)); StartMeasurementCommand.NotifyCanExecuteChanged(); }
     partial void OnCalibrationChanged(MapCalibrationDto? value) => RaiseDerived();
-    partial void OnMapXChanged(double? value) => CapturePointCommand.NotifyCanExecuteChanged();
-    partial void OnMapYChanged(double? value) => CapturePointCommand.NotifyCanExecuteChanged();
-    partial void OnDrawingXChanged(double value) => CapturePointCommand.NotifyCanExecuteChanged();
-    partial void OnDrawingYChanged(double value) => CapturePointCommand.NotifyCanExecuteChanged();
+    partial void OnMapXChanged(double? value) { CapturePointCommand.NotifyCanExecuteChanged(); UpdatePointCommand.NotifyCanExecuteChanged(); }
+    partial void OnMapYChanged(double? value) { CapturePointCommand.NotifyCanExecuteChanged(); UpdatePointCommand.NotifyCanExecuteChanged(); }
+    partial void OnDrawingXChanged(double value) { CapturePointCommand.NotifyCanExecuteChanged(); UpdatePointCommand.NotifyCanExecuteChanged(); }
+    partial void OnDrawingYChanged(double value) { CapturePointCommand.NotifyCanExecuteChanged(); UpdatePointCommand.NotifyCanExecuteChanged(); }
     partial void OnSolveResultChanged(CalibrationSolveResultDto? value) => RaiseDerived();
 
     private void RaisePlanningDerived()
@@ -349,6 +447,46 @@ public sealed partial class CalibrationViewModel : ObservableObject
         CaptureRobotPositionCommand.NotifyCanExecuteChanged(); CapturePointCommand.NotifyCanExecuteChanged(); StartMeasurementCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(RobotReady)); OnPropertyChanged(nameof(ReadinessText)); OnPropertyChanged(nameof(HasWarning));
         OnPropertyChanged(nameof(WarningText)); OnPropertyChanged(nameof(CalibrationSummary)); OnPropertyChanged(nameof(MeasurementProgress));
+        OnPropertyChanged(nameof(RobotPoseText));
+    }
+}
+
+/// <summary>
+/// 저장된 T_W_D가 맞는지 운영자가 눈으로 판정하도록, 로봇 보고(맵) 좌표를 도면 좌표·선박 방향어로 바꾼다.
+/// 표시 규칙은 3D 뷰와 같다: drawing = R(−yaw)·(map − t), 방향 = theta − yaw.
+/// </summary>
+public static class CalibrationPreview
+{
+    public static (double X, double Y, double? HeadingDeg) ToDrawing(
+        double mapX, double mapY, double? thetaMap, double tx, double ty, double yaw)
+    {
+        double ux = mapX - tx, uy = mapY - ty;
+        double cos = Math.Cos(yaw), sin = Math.Sin(yaw);
+        double x = cos * ux + sin * uy;
+        double y = -sin * ux + cos * uy;
+        double? head = null;
+        if (thetaMap is double th)
+        {
+            double a = (th - yaw) * 180 / Math.PI;
+            while (a <= -180) a += 360;
+            while (a > 180) a -= 360;
+            head = a;
+        }
+        return (x, y, head);
+    }
+
+    /// <summary>예: "선수/좌현 (11.64, 2.68) · 방향 좌현(88.0°)". 사분면 판정 기준은 탱크 중심.</summary>
+    public static string Describe(double x, double y, double? headingDeg, double originOx = 0, double originOy = 0)
+    {
+        const double eps = 0.2;
+        string fx = x > originOx + eps ? "선수" : x < originOx - eps ? "선미" : "중앙";
+        string fy = y > originOy + eps ? "좌현" : y < originOy - eps ? "우현" : "중앙";
+        string s = $"{fx}/{fy} ({x:F2}, {y:F2})";
+        if (headingDeg is not double a) return s + " · 방향 미보고";
+        string d = a > -45 && a <= 45 ? "선수"
+            : a > 45 && a <= 135 ? "좌현"
+            : a > -135 && a <= -45 ? "우현" : "선미";
+        return s + $" · 방향 {d}({a:F1}°)";
     }
 }
 

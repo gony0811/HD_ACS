@@ -59,6 +59,7 @@ builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
+builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
 builder.Services.AddHostedService<VdaBridgeService>();
 
 // SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
@@ -914,6 +915,33 @@ app.MapDelete("/api/maps/{mapId}/calibration/points/{id:guid}", async (string ma
     return Results.Ok();
 });
 
+// 기준점 수정 — id 유지(삭제→재등록과 달리 대응쌍이 끊기지 않는다). 계산은 별도 호출.
+app.MapPut("/api/maps/{mapId}/calibration/points/{id:guid}",
+    async (string mapId, Guid id, UpdateCalibrationPointRequest req, CalibrationPointService svc) =>
+{
+    try
+    {
+        var p = await svc.UpdateAsync(mapId, id, req.DrawingX, req.DrawingY, req.Unit,
+            req.MapX, req.MapY, req.UserId ?? "ui");
+        return Results.Ok(new { p.Id, p.MapVersion, p.DrawingXM, p.DrawingYM, p.MapX, p.MapY });
+    }
+    catch (CalibrationPointService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (CalibrationPointService.ValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+// 도면 좌표 일괄 회전 — 입력 프레임이 통째로 돌아간 캘리브레이션을 재측정 없이 교정(맵 좌표 불변).
+app.MapPost("/api/maps/{mapId}/calibration/points/rotate",
+    async (string mapId, RotateCalibrationRequest req, CalibrationPointService svc) =>
+{
+    try
+    {
+        int n = await svc.RotateDrawingAsync(mapId, req.Deg, req.UserId ?? "ui");
+        return Results.Ok(new { mapId, deg = req.Deg, rotated = n });
+    }
+    catch (CalibrationPointService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (CalibrationPointService.ValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 // 최소자승 계산·저장 — RMS가 임계값 초과여도 저장하되 warning 반환
 app.MapPost("/api/maps/{mapId}/calibration/solve",
     async (string mapId, AcsDbContext db, IConfiguration config) =>
@@ -976,6 +1004,11 @@ public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, do
 public sealed record SeamStartTestRequest(Guid TaskId, string? UserId);
 public sealed record CalibrationPointRequest(double DrawingX, double DrawingY, string Unit, string UserId,
     double? MapX = null, double? MapY = null);
+// 기준점 수정 — 맵 좌표도 함께 전달(측정값 유지가 기본, 오입력 정정도 가능)
+public sealed record UpdateCalibrationPointRequest(double DrawingX, double DrawingY, double MapX, double MapY,
+    string? Unit = "m", string? UserId = null);
+// 도면 좌표 일괄 회전(도 단위) — 180 = 사분면·방향 모두 반전된 경우
+public sealed record RotateCalibrationRequest(double Deg, string? UserId = null);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);

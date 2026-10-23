@@ -307,6 +307,8 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `POST /api/maps/{mapId}/calibration/points` | 기준점 캡처 — `{ drawingX, drawingY, unit: "mm"\|"m", userId }`. 로봇 보고 층 ≠ mapId면 409 |
 | `GET /api/maps/{mapId}/calibration/points` | 현재 맵버전의 대응쌍 목록 |
 | `DELETE /api/maps/{mapId}/calibration/points/{id}` | 대응쌍 삭제 |
+| `PUT /api/maps/{mapId}/calibration/points/{id}` | 대응쌍 수정(id 유지) — `{ drawingX, drawingY, mapX, mapY, unit?, userId? }`. 없음 404 · 비유한 값 400 |
+| `POST /api/maps/{mapId}/calibration/points/rotate` | 도면 좌표만 원점 기준 회전(맵 좌표 불변) — `{ deg, userId? }`. 입력 프레임 180°/±90° 오류 교정, 기준점 0개면 400 |
 | `POST /api/maps/{mapId}/calibration/solve` | 최소자승 계산·저장 → `{ tx, ty, yawRad, rmsM, maxResidualM, pointCount, warning? }` |
 | `GET /api/maps/{mapId}/calibration` | 현재 유효 T_W_D (맵버전 불일치 시 404) |
 

@@ -37,6 +37,29 @@ public sealed record DrawingTransform(double Tx, double Ty, double YawRad)
     }
 
     /// <summary>
+    /// 도면 좌표 프레임 회전 성분. 기준점의 도면 좌표를 원점 기준으로 deg 만큼 돌릴 때 쓴다 —
+    /// 도면 좌표를 돌아간 프레임으로 입력해 저장된 캘리브레이션(흔한 사례: 180° 반전)을
+    /// 현장 재측정 없이 교정하는 경로. 90° 배수는 부동소수 먼지가 남지 않도록 정확한 정수로 고정한다.
+    /// </summary>
+    public static (double Cos, double Sin) RotationCosSin(double deg)
+    {
+        double m = ((deg % 360) + 360) % 360;
+        if (m == 0) return (1, 0);
+        if (m == 90) return (0, 1);
+        if (m == 180) return (-1, 0);
+        if (m == 270) return (0, -1);
+        double r = deg * Math.PI / 180;
+        return (Math.Cos(r), Math.Sin(r));
+    }
+
+    /// <summary>도면 좌표를 원점 기준으로 deg 회전. 맵 좌표는 측정값이므로 건드리지 않는다.</summary>
+    public static (double X, double Y) RotateDrawing(double x, double y, double deg)
+    {
+        var (c, s) = RotationCosSin(deg);
+        return (c * x - s * y, s * x + c * y);
+    }
+
+    /// <summary>
     /// 대응쌍 최소자승 (2D 강체, 스케일 없음) [§2.3]. 2쌍 미만이면 예외.
     /// 반환: 변환 T + 잔차 RMS + 최대 잔차.
     /// </summary>
