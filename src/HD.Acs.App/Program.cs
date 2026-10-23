@@ -853,6 +853,7 @@ app.MapPost("/api/robots/{robotId}/test/seam-start",
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }   // level_z 없음 [N17]
 });
 
 // ── 도면→맵 캘리브레이션 (T_W_D) [PHASE2 WP-1] ──────────────────────────

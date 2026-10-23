@@ -50,7 +50,7 @@ HD_AMR의 `startWeldInspection`은 현재 **스텁**이다.
 { "key": "position", "value": {
     "seamStartW": [12.510, 5.980, 1.420],
     "seamEndW":   [13.310, 5.980, 1.420],
-    "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "SM", "u": 3.12, "v": 1.42, "x": 3.12, "y": 0.0, "z": 1.42 } } },
+    "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "SM", "u": 3.12, "v": 1.42, "x": 3.12, "y": 0.0, "z": 4.62 } } },
 { "key": "params", "value": {
     "seamType": "LINE", "sectionDxfId": "DXF-CORR-T12", "inspectionProfileId": "INSPECT-STD-01",
     "standoffMm": 400, "workingDistanceMm": 400, "anchorGroupId": "CT1-L2-SM-ST04", "seqInGroup": 2 } }

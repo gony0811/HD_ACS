@@ -25,6 +25,7 @@ public class PlannedStationTests
     private static async Task<(Guid Scenario, InspectionAreaEntity F, InspectionAreaEntity Pm)> Seed(AcsDbContext db, bool link)
     {
         var geom = new TankGeometry(45, 8.2, Math.PI / 4, 1.9, 5.4, Math.PI / 4, 1.9, new[] { 0.0, 2.4, 4.8, 7.2 });
+        db.TankGeometries.Add(new TankGeometryEntity { TankId = "CT1", LevelZ = "[0,2.4,4.8,7.2]" });   // seam z 층 바닥 기준 [N17]
         foreach (var w in geom.GenerateWalls())
             db.Walls.Add(new WallEntity
             {

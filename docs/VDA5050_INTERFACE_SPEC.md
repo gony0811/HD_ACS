@@ -2,11 +2,11 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.10** |
-| 작성일 | 2026-08-27 (최종 개정 2026-10-13) |
+| 문서 버전 | **1.11** |
+| 작성일 | 2026-08-27 (최종 개정 2026-10-23) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
-| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상 |
+| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
 | 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·승인 완료** `[N12]` |
 | 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)** |
@@ -18,6 +18,7 @@
 | 개정 1.8 | 2026-10-10 — **배터리 교체 유도 액션 `batterySwapMove` 신설(§8.8) + 배터리 errors 분기 명문화 `[N20]`**: HD_AMR 배터리관리 사양(rev.1, 2026-10-09) ACS 측 반응. ① §8.8 신규 NODE 커스텀 액션(`targetNodeId`·`mapId`·`reason` LOW/CRITICAL/MANUAL) — `ref.node`에 `BATTERY_SWAP` 타입 추가, mapId당 1곳. ② `errors[]`에 `batteryCritical`(FATAL, 그 자리 안전정지) · `orderRejectedBatteryLow`(WARNING, **FATAL 실패 집계 금지**) 분기(사양서 §8). ③ 디스패치 = 운영자 수동 트리거(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run abort + 교체 Order 1건 발행, 교체 완료 후 '이어하기'로 재배차(사양서 §5 "잔여 회수"를 abort/resume으로 매핑). ④ 알람 코드 `BATTERY_CRITICAL`·`ORDER_REJECTED_BATTERY_LOW`·`BATTERY_SWAP_DISPATCHED` 추가. ACS 상태머신 복제·cancelOrder instantAction 발행·자동 디스패치는 **범위 외**(사양서 §1·§6·§9.6). HD_AMR 핸들러 구현 대기(N20) |
 | 개정 1.9 | 2026-10-12 — **통신 단절 Fail-Safe 반영 `[N21]`**: HD_AMR 통신단절 Fail-Safe 사양(rev.0, 2026-10-10) ACS 측 반응. ① §2.1 MQTT keep-alive **5 s 명시**(로봇·관제 동일 — 단절 감지 최대 7.5 s). ② §5.3 instantAction `stopPause`(운영자 재개)·§5.4 `cancelOrder`(**통신 단절 PAUSE 중 run 중단 시에 한해 사용** — §4.5.3 "미사용" 개정)·`startPause` 수용 요건. ③ §6.4 errorType `communicationLostPause`(WARNING, **실패 집계 금지**)·`resumeRejected`(WARNING, 사유 포함) 추가, 진행 액션 `PAUSED`·`state.paused`. ④ §9.3 두절 시퀀스에 GRACE/PAUSE/HOLD·자동 재개 금지 반영. ⑤ 알람 `COMM_LOSS_PAUSED`·`RESUME_REJECTED`, REST `POST /api/robots/{id}/resume-pause`. 판정·타이머·재개 전 확인·램프/부저는 **AMR 로컬**(ACS 복제 없음) |
 | 개정 1.10 | 2026-10-13 — **장치 통신 HEAVY 알람 반영 `[N22]`**: HD_AMR 장치통신 HEAVY알람 사양(rev.0, 2026-10-12) ACS 측 반응. ① §6.4 errorType 신규 7종 — 장치 6종 `visionLinkLost`·`depthCameraLinkLost`·`laserSensorLinkLost`·`ioModuleLinkLost`·`cobotLinkLost`·`amrLinkLost`(**FATAL**, RESET 전까지 래치) + `orderRejectedDeviceFault`(WARNING, 기존 orderId 유지). ② **`errorReferences` 발행·소비**(`device`·`orderId`·`actionId`) — 참조 없는 구 errors 파싱 유지. ③ §4.5.2 장치 알람 거부 — ACS는 거부 정차를 **PENDING으로 되돌림**(실행 없음, 실패 아님). ④ §9.6 신설 — 알람 중 **ACS 배차 보류**(order 미전송·명령 409), errors에서 사라지면 배차 자동 재개. ⑤ 알람 `DEVICE_LINK_LOST`(HEAVY→ACS CRITICAL)·`ORDER_REJECTED_DEVICE_FAULT`. 판정·래치·RESET·타워램프는 **AMR 로컬**(ACS 원격 RESET 없음) |
+| 개정 1.11 | 2026-10-23 — **seam 좌표 z 기준면 확정 `[N17]`**: `position.seamStartW`/`seamEndW` 의 z 를 **해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`)으로 발행한다(§8.1·§8.4 골든·§10 N17·부록 B). 종전엔 T_W_D 가 2D(x,y,yaw) 라 z 가 **도면 전역(선창 바닥=0) 그대로** 실려, L2 이상에서 층 바닥 높이만큼 어긋났다(L1 은 0 이라 단층 E2E 에서 드러나지 않음). 실기(2026-10-23) `moveToSeamStart` 접근점 z ≈ 9.7 m → IK 5회 연속 실패로 확인. `drawingPos.z` 는 도면 echo 라 **전역 z 유지**. x·y·Δz(방향 유도)는 무변경. ACS 는 층 정의(`level_z`) 가 없으면 0 폴백 없이 발행을 거부한다. HD_AMR 보유본의 N17 제기(AMR 개정 1.7)·확정(AMR 개정 1.10)을 ACS 정본에 병합한 것이며, 보유본의 다른 개정(N18 거리 파라미터·§4.4.1 정차 이격 산출식·LINE/CROSS4 레시피 통합)은 **미병합** |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -546,7 +547,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | 필드 | 의미 |
 |---|---|
 | `jobRef` | 작업 역추적 키 (사람이 읽는 ID — AMR은 로깅 외 해석 불요) |
-| `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, z는 통과 |
+| `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — x,y 는 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, **z 는 해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`, L1 은 동일) `[N17]`. AMR 은 수신 z 를 그대로 자기 바닥 기준 높이로 쓴다 |
 | `position.drawingPos` | 도면 좌표 echo — tank/level/wall_code + **u,v(벽면-로컬)** + x,y,z(도면). `wall_code`가 **티칭 자세 선택 키** — 값은 **`TankGeometry`가 자동 생성한 10개 면 코드 중 하나**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`, §8.5.1(2) 표). 자유 문자열이 아니라 검사 영역의 소속 면 코드(`ref.inspection_area.wall_code`, FK→`ref.wall`)를 그대로 echo하며, DB FK로 이 집합에 강제된다. `WALL 01`·`W03` 같은 임의 표기는 발행되지 않는다 |
 | `params.seamType` | 용접라인 형태 — **`LINE`·`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`·`CROSS4`·`CORNER2`·`CORNER3`** (canonical 8값, 카탈로그 1:1, §8.5.1; CROSS3 회전 4종은 2026-10-07 개정). `LINE`=직선 구간, `CROSS3_R{0/90/180/270}`=T자 3갈래 교차의 **회전 4종(면 자세 무관)**, `CROSS4`=4갈래 十자 교차, `CORNER2`=2면 코너, `CORNER3`=3면 코너. ACS는 canonical 값으로 발행하며, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 등록/수정 시점에 `AreaTaskRules.Normalize`가 canonical 로 정규화한다(AMR 파서도 전환 유예로 수용). HD_AMR 실행 게이트는 `LINE-*`만 활성 — 나머지는 캡처 교시·실기 검증 후 온보드에서 활성화(§8.5.1 (5)). **CROSS3 회전 기준 확정(2026-10-07, N13 ACS 사인오프)**: `R0`=줄기(stem)가 **면-로컬 +u**(통과선 아님), 회전은 면 외향 법선 둘레 **CCW(+)**·AMR 작업물 좌표 기준. 좌표 프레임은 **면-로컬** `u=(−sinθ,cosθ)`·`v=n×u`(전개도 아님 — 전개도는 일부 면 거울 반전). ACS는 각 면 법선에서 이 프레임을 재구성해 회전을 유도한다(§8.5.1 (2)). `POLYLINE`은 여전히 거부(2026-08-29 AMR 회신 §5.1 — 2점 계약으로 세그먼트 방향 불명이라 AMR이 FAILED). 꺾인 직선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `wall_code` 조합 레시피 매핑은 §8.5.1 |
 | `params.sectionDxfId` | 단면 프로파일 참조 ID |
@@ -631,7 +632,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
         "seamEndW":   [13.310, 5.980, 1.420],
         "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "PM",
                         "u": 3.120, "v": 1.420,
-                        "x": 3.120, "y": 0.0, "z": 1.420 } } },
+                        "x": 3.120, "y": 0.0, "z": 4.620 } } },
     { "key": "params", "value": {
         "seamType": "LINE",
         "sectionDxfId": "DXF-CORR-T12",
@@ -647,6 +648,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 ```
 
 노드측 `nodePosition`: `{ "x": 12.482, "y": 5.117, "theta": 1.571, "mapId": "CT1-L2", "allowedDeviationXY": 0.08, "allowedDeviationTheta": 0.07 }`
+
+> 골든의 z: L2 바닥 `level_z[1]` = 3.2 m 가정 — 도면 전역 z 4.620 − 3.2 = `seamStartW` z 1.420 `[N17]`. `drawingPos.z` 는 도면 echo 라 4.620.
 
 ### 8.5 검사 타입 카탈로그 및 레시피 계약 (제안) `[협의 N13]`
 
@@ -962,6 +965,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N14 | 검사 작업 식별자 관통 | `params.taskId`(GUID 문자열, 영구) + `params.attempt`(1~255, taskId별 누적·ACS 발급) — 둘 다 선택 필드(§8.1·§8.6) | ✅ **양측 구현 완료(2026-09-21)** — ACS 발행 / HD_AMR 파서→`SequenceContext.AcsTaskId/AcsAttempt` 주입(`52b6e19`)→CAPTURE_REQ v3.2. 키 위치(`params.*`)·attempt 누적 규칙은 구현으로 합의된 것으로 본다. **실기 관통 확인 잔여**(N16과 함께 1회) |
 | N15 | 촬영 좌표 면-로컬 원점 정합 | CAPTURE_REQ `PosX/PosY` = 면 (0,0) 모서리 기준 (u,v). 필요 시 `drawingPos.u/v`를 기준점 오프셋으로 사용(§8.6.4) | ⏳ 연동 시험 확인 — wobj 티칭 원점 규약 회신 요청 (VDA 계약 무변경) |
 | N16 | `taskId` 바이트 순서 | RFC 4122 빅엔디안 16B ↔ 문자열 표기 일치 (§8.6.4) | ⏳ 비전 S/W와 문자열 대조 1회 확인 |
+| N17 | `seamStartW`/`seamEndW` 의 **z 기준면** | ACS 의 T_W_D 는 2D(x,y,yaw) 라 z 가 변환되지 않아 종전엔 **도면 전역 z**(선창 바닥=0)가 그대로 전송됐다 → L2 이상에서 층 바닥 높이(`level_z`)만큼 어긋남. **ACS 가 발행 시 `z − level_z[level−1]` 적용(층 바닥 기준)** — AMR 은 `level_z` 를 몰라도 된다. 대안(`level_z` 계약 추가)은 미채택 | ✅ **확정·ACS 반영(2026-10-23)** — AMR 입장 확정(층별 수동 보정 운용 불가). 근거: 실기 `moveToSeamStart` 접근점 z ≈ 9742 mm → IK "config 0–7 모두 도달 불가" 5회. **ACS**: `WeldInspectionPayload.BuildPosition` 이 층 바닥을 빼서 발행(큐 전개·재개·`moveToSeamStart` 공통), 층 정의 없으면 발행 거부. **AMR**: 접근점이 코봇 BASE 에서 3 m 초과 시 IK 전 `FAILED`("좌표 기준 오류 … N17", `SeamBaseTransform.CheckCoordinateDatum`), 수동 z 보정(`Sequence.Inspection.ZDatumOffsetMm`)은 시험·임시 우회용(운영값 0). **ACS 재배포 후 L2 이상 실기 재확인 필요** |
 | N19 | **코봇 seam 시작점 이동 시험 액션** `moveToSeamStart` (§8.7) | 신규 NODE 커스텀 액션 — 정차 노드 도달 후 코봇툴을 `position.seamStartW`(맵 좌표)까지만 이동·정지(촬영 없음). `wall_code` 티칭 자세. 본검사 전 reach 확인용·N10(정차 이격) 실측 근거. ACS 발행 경로(`POST /api/robots/{id}/test/seam-start`)·시뮬레이터 처리 구현 완료(2026-10-08) | ⏳ **HD_AMR 핸들러 구현 대기** — actionParameters 파서(`position.seamStartW`·`wall_code`) → 코봇툴 이동(촬영 없음) → `actionState` FINISHED/FAILED(reach 불가=errors) 보고. ※ 번호: AMR 보유본의 out-of-tree N17(seam z)·N18(거리 파라미터)와 겹치지 않게 **N19** 사용 — 양측 사양서 통합 시 번호 정리 |
 | N20 | **배터리 교체 이동 액션** `batterySwapMove` (§8.8) + 배터리 errors 분기 | 신규 NODE 커스텀 액션 — 로봇 보고 층(mapId)의 `ref.node`(nodeType=BATTERY_SWAP) 1곳으로 단일 노드 이동. `errors[]`에서 **`orderRejectedBatteryLow`는 WARNING**이며 ACS는 **FATAL 실패로 집계하지 않는다**(사양서 §8). `batteryCritical`은 FATAL(그 자리 안전정지 보고). 교체 Order 디스패치는 **운영자 수동 트리거**(POST /api/robots/{id}/battery-swap/dispatch) — 활성 run 있으면 함께 abort, 교체 완료 후 '이어하기'로 재배차(§5 "잔여 회수" 패턴을 abort/resume으로 매핑). ACS 구현 완료(2026-10-10) | ⏳ **HD_AMR 핸들러 구현 대기** — `batterySwapMove` 파라미터 파서(`targetNodeId`·`mapId`·`reason`) → 교체 장소 주행 → 구동 인터락 → 교체 완료 감지 → `actionState` FINISHED 보고. §4·§7의 로컬 PowerMode 상태머신(핫스왑·BMS 자동 인식·브릿지 전원)은 AMR 측 구현 |
 
@@ -1045,6 +1049,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | 맵 좌표(월드) | 층별 SLAM 맵 프레임 — `mapId`로 층 식별 (`{tank}-L{n}`) |
 | 도면 좌표 | ACS 내부 프레임 — 층별 강체변환 T_W_D(기준점 캡처로 산출)로 맵 좌표 변환 후 전송. AMR은 도면 좌표를 해석할 필요 없음 (`drawingPos`는 기록·티칭 키용 echo) |
 | u,v | 벽면-로컬 2D 좌표 (u=수평, v=수직, 원점=벽면 좌하단) — echo 정보 |
+| seam 좌표의 z | **해당 층 바닥 = 0 기준 `[N17]`** — T_W_D 가 2D(x,y,yaw) 라 z 는 변환되지 않으므로 ACS 가 발행 시 `z − level_z[level−1]` 를 적용한다(L1 은 0). AMR 은 수신 z 를 그대로 자기 바닥 기준 높이로 쓴다. `drawingPos.z` 는 도면 전역 z(echo). §10 N17 |
 | m↔mm 환산 | 로봇 온보드 한 곳으로 통일 (standoffMm 등 `*Mm` 필드만 mm) |
 
 ## 부록 C. AMR 구현 체크리스트

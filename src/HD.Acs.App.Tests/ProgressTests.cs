@@ -184,6 +184,7 @@ public class ProgressTests
     {
         var db = NewDb();
         var geom = new TankGeometry(45, 8.2, Math.PI / 4, 1.9, 5.4, Math.PI / 4, 1.9, new[] { 0.0, 2.4, 4.8, 7.2 });
+        db.TankGeometries.Add(new TankGeometryEntity { TankId = "CT1", LevelZ = "[0,2.4,4.8,7.2]" });   // seam z 층 바닥 기준 [N17]
         foreach (var w in geom.GenerateWalls())
             db.Walls.Add(new WallEntity
             {
@@ -223,5 +224,53 @@ public class ProgressTests
         Assert.Equal(l1.Tasks.Select(t => t.TaskId.ToString()).OrderBy(x => x),
             actions.Select(a => a.GetProperty("params").GetProperty("taskId").GetString()!).OrderBy(x => x));
         Assert.All(actions, a => Assert.False(a.GetProperty("params").TryGetProperty("attempt", out _)));   // attempt는 발행 시점 발급
+    }
+
+    /// <summary>
+    /// 큐 전개 payload의 seam z = 도면 전역 z − 그 층 바닥(level_z) [VDA §10 N17]. PM 면 원점 z=1.9, v=+z라
+    /// v=1.2 → 도면 z 3.1, L2 바닥 2.4 → 발행 z 0.7. drawingPos.z는 도면 echo(3.1) 유지.
+    /// 층 정의(지오메트리)가 없으면 0 폴백 없이 run 시작을 거부한다.
+    /// </summary>
+    [Fact]
+    public async Task BuildQueue_SeamZ_IsFloorRelative_OnUpperLevel()
+    {
+        var db = NewDb();
+        var geom = new TankGeometry(45, 8.2, Math.PI / 4, 1.9, 5.4, Math.PI / 4, 1.9, new[] { 0.0, 2.4, 4.8, 7.2 });
+        foreach (var w in geom.GenerateWalls())
+            db.Walls.Add(new WallEntity
+            {
+                TankId = "CT1", WallCode = w.WallCode, Origin = JsonSerializer.Serialize(w.Pose.Origin),
+                UAxis = JsonSerializer.Serialize(w.Pose.U), VAxis = JsonSerializer.Serialize(w.Pose.V),
+                Normal = JsonSerializer.Serialize(w.Normal), ULen = w.ULen, VLen = w.VLen, FacingYaw = w.FacingYaw,
+            });
+        db.Maps.Add(new MapEntity { MapId = "CT1-L2", TankId = "CT1", Level = 2, Version = 1 });
+        db.MapCalibrations.Add(new MapCalibrationEntity { MapId = "CT1-L2", MapVersion = 1, Tx = 1, Ty = 2, YawRad = 0 });
+        db.InspectionAreas.Add(new InspectionAreaEntity
+        {
+            AreaId = Guid.NewGuid(), TankId = "CT1", WallCode = "PM", Level = 2, Name = "PM-L2-01",
+            Corners = "[[3,0.6],[6,0.6],[6,2.0],[3,2.0]]",
+            Tasks = { new AreaTaskEntity { TaskId = Guid.NewGuid(), Seq = 1, StartU = 3.2, StartV = 1.2, EndU = 5.8, EndV = 1.5,
+                SectionDxfId = "DXF-1", ProfileId = "PROF-1" } },
+        });
+        await db.SaveChangesAsync();
+        var dispatcher = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
+            hub: null!, new ConfigurationBuilder().Build(), NullLogger<InspectionDispatcher>.Instance);
+
+        // 층 정의 없음 → 거부(조용한 z 오차 금지)
+        var noGeomRun = new ScenarioRunEntity { RunId = Guid.NewGuid(), ScenarioId = Guid.NewGuid(), RobotId = "AMR01" };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.BuildQueueAsync(noGeomRun, "CT1", default));
+
+        db.TankGeometries.Add(new TankGeometryEntity { TankId = "CT1", LevelZ = "[0,2.4,4.8,7.2]" });
+        await db.SaveChangesAsync();
+        var run = new ScenarioRunEntity { RunId = Guid.NewGuid(), ScenarioId = Guid.NewGuid(), RobotId = "AMR01" };
+        db.ScenarioRuns.Add(run);
+        await dispatcher.BuildQueueAsync(run, "CT1", default);
+        await db.SaveChangesAsync();
+
+        var wi = Assert.Single(await db.WorkItems.AsNoTracking().ToListAsync());
+        var pos = JsonDocument.Parse(wi.Actions!).RootElement[0].GetProperty("position");
+        Assert.Equal(0.7, pos.GetProperty("seamStartW")[2].GetDouble(), 6);
+        Assert.Equal(1.0, pos.GetProperty("seamEndW")[2].GetDouble(), 6);
+        Assert.Equal(3.1, pos.GetProperty("drawingPos").GetProperty("z").GetDouble(), 6);
     }
 }

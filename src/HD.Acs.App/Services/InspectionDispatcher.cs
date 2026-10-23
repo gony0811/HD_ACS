@@ -205,6 +205,7 @@ public sealed class InspectionDispatcher
 
         // 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
         var weldSchema = await WeldSchemaAsync(ct);
+        var levelZ = await LevelZAsync(tankId, ct);
 
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
 
@@ -221,7 +222,7 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, weldSchema);
+            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema);
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -252,8 +253,10 @@ public sealed class InspectionDispatcher
     /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
-        Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd, string? weldSchema)
+        Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
+        IReadOnlyList<double>? levelZ, string? weldSchema)
     {
+        var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
         // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
@@ -273,7 +276,7 @@ public sealed class InspectionDispatcher
             var startD = pose.LocalToDrawing(t.StartU, t.StartV);
             var endD = pose.LocalToDrawing(t.EndU, t.EndV);
             var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
-            var worldPos = WeldInspectionPayload.BuildPosition(tWd, d);
+            var worldPos = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
             var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
             var taskParams = new JsonObject
             {
@@ -347,6 +350,7 @@ public sealed class InspectionDispatcher
             .ToDictionaryAsync(w => w.WallCode, ct);
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
         var weldSchema = await WeldSchemaAsync(ct);
+        var levelZ = await LevelZAsync(tankId, ct);
 
         int refreshed = 0, skipped = 0;
         foreach (var wi in items)
@@ -372,7 +376,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, weldSchema);
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema);
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
@@ -419,6 +423,14 @@ public sealed class InspectionDispatcher
     private async Task<string?> WeldSchemaAsync(CancellationToken ct) =>
         (await _db.ActionCatalog.AsNoTracking()
             .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
+
+    /// <summary>선창 층 바닥 높이 목록 level_z (m) — seam z를 층 바닥 기준으로 보내는 데 쓴다 [VDA §10 N17]. 지오메트리 없으면 null.</summary>
+    private async Task<double[]?> LevelZAsync(string tankId, CancellationToken ct)
+    {
+        var json = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == tankId)
+            .Select(g => g.LevelZ).FirstOrDefaultAsync(ct);
+        return json is null ? null : Json<double[]>(json);
+    }
 
     // ── Phase 2: greedy 최근접 1건 배차 (유휴 시 호출) ────────────────────────────
     /// <summary>
@@ -603,12 +615,13 @@ public sealed class InspectionDispatcher
         var (mx, my) = tWd.DrawingToMap(sdx, sdy);
         double? mTheta = syaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 
-        // seam 시작점 position (BuildStop와 동일 — seamStartW는 맵 좌표)
+        // seam 시작점 position (BuildStop와 동일 — seamStartW는 맵 x,y + 층 바닥 기준 z [N17])
+        var floorZ = WeldInspectionPayload.FloorZ(await LevelZAsync(area.TankId, ct), area.Level);
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         var startD = pose.LocalToDrawing(task.StartU, task.StartV);
         var endD = pose.LocalToDrawing(task.EndU, task.EndV);
         var d = new WeldDrawingData(area.TankId, area.Level, area.WallCode, startD, endD, task.StartU, task.StartV);
-        var position = WeldInspectionPayload.BuildPosition(tWd, d);
+        var position = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
         var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
 
         var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta);

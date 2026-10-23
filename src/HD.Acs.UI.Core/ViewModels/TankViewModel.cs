@@ -225,6 +225,10 @@ public sealed partial class TankViewModel : ObservableObject
         try
         {
             Geometry = await _api.GetTankGeometryAsync(TankId);   // 마구리 팔각 윤곽용 치수
+            // 마커 z(=로봇 층 level_z)는 지오메트리가 있어야 정해진다 — 먼저 도착한 state로 z=0(선창 바닥)에
+            // 그려진 마커를 다음 state까지 기다리지 않고 그 층 바닥으로 올린다. ACS 화면은 항상 도면 전역 z다
+            // (층 바닥=0 환산은 AMR 전송 시에만 — VDA §10 N17).
+            if (RobotMapId is not null) UpdateRobotDrawingPose(triggerRefresh: false);
             var walls = await _api.GetWallsAsync(TankId);
             ShellWalls.Clear();
             foreach (var w in walls) ShellWalls.Add(w);
@@ -433,6 +437,7 @@ public sealed partial class TankViewModel : ObservableObject
         _robotPoseCalibrated = calibrated;
         OnPropertyChanged(nameof(RobotDrawingX));
         OnPropertyChanged(nameof(RobotDrawingY));
+        OnPropertyChanged(nameof(RobotDrawingZ));
         OnPropertyChanged(nameof(RobotDrawingTheta));
         OnPropertyChanged(nameof(RobotMarkerVisible));
 

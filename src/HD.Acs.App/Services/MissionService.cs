@@ -226,6 +226,7 @@ public sealed class MissionService
         // 릴리즈 거부 [WP-3 §4.2/§2.5]. param_schema 는 발행 직전 검증용으로 1회 로드.
         DrawingTransform? weldTransform = null;
         string? weldSchema = null;
+        double[]? weldLevelZ = null;
         if (points.Any(p => p.Tasks.Any(t => t.ActionType == "startWeldInspection")))
         {
             var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mission.MapId, ct)
@@ -237,6 +238,12 @@ public sealed class MissionService
                 map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
             weldSchema = (await _db.ActionCatalog.AsNoTracking()
                 .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
+            // seam z를 층 바닥 기준으로 보내기 위한 level_z [VDA §10 N17]
+            var tankId = await _db.Scenarios.AsNoTracking().Where(s => s.ScenarioId == run.ScenarioId)
+                .Select(s => s.TankId).FirstOrDefaultAsync(ct);
+            var levelZJson = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == tankId)
+                .Select(g => g.LevelZ).FirstOrDefaultAsync(ct);
+            weldLevelZ = levelZJson is null ? null : JsonSerializer.Deserialize<double[]>(levelZJson);
         }
 
         // PlannedPoint 변환 — actionId를 여기서 발급·보존 (state 대조 키)
@@ -255,7 +262,8 @@ public sealed class MissionService
                 {
                     // 도면 좌표 → 유효 T_W_D 적용한 월드 position + 발행 직전 스키마 검증 [WP-3 §4.2]
                     var d = ParseWeldDrawing(t.Position);
-                    var worldPos = WeldInspectionPayload.BuildPosition(weldTransform!, d);
+                    var worldPos = WeldInspectionPayload.BuildPosition(weldTransform!, d,
+                        WeldInspectionPayload.FloorZ(weldLevelZ, d.Level));
                     var paramsNode = t.Params is null ? null : JsonNode.Parse(t.Params);
                     var actionParams = WeldInspectionPayload.BuildActionParameters(t.JobRef ?? "", worldPos, paramsNode);
 

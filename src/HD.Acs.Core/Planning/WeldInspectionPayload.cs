@@ -45,16 +45,21 @@ public static class WeldInspectionPayload
         return new DrawingTransform(tx, ty, yawRad);
     }
 
-    /// <summary>도면 좌표 → 월드 position(JsonObject, §4.1 키명). x,y는 T_W_D 적용·z 통과. [SPEC v2: 법선 제거]</summary>
-    public static JsonObject BuildPosition(DrawingTransform t, WeldDrawingData d)
+    /// <summary>
+    /// 도면 좌표 → 월드 position(JsonObject, §4.1 키명). x,y는 T_W_D 적용, z는 **층 바닥 기준**
+    /// (도면 전역 z − <paramref name="floorZ"/>) [VDA §10 N17]. T_W_D가 2D라 z를 변환하지 않으므로
+    /// 도면 전역 z를 그대로 보내면 L2 이상에서 층 바닥 높이만큼 어긋난다(AMR은 자기 바닥=0).
+    /// drawingPos.z는 도면 echo라 전역 z 그대로 둔다.
+    /// </summary>
+    public static JsonObject BuildPosition(DrawingTransform t, WeldDrawingData d, double floorZ)
     {
         var (sx, sy) = t.DrawingToMap(d.SeamStart[0], d.SeamStart[1]);
         var (ex, ey) = t.DrawingToMap(d.SeamEnd[0], d.SeamEnd[1]);
 
         return new JsonObject
         {
-            ["seamStartW"] = Vec(sx, sy, d.SeamStart[2]),
-            ["seamEndW"] = Vec(ex, ey, d.SeamEnd[2]),
+            ["seamStartW"] = Vec(sx, sy, d.SeamStart[2] - floorZ),
+            ["seamEndW"] = Vec(ex, ey, d.SeamEnd[2] - floorZ),
             ["drawingPos"] = new JsonObject
             {
                 ["tank"] = d.Tank,
@@ -67,6 +72,18 @@ public static class WeldInspectionPayload
                 ["z"] = d.SeamStart[2],
             }
         };
+    }
+
+    /// <summary>
+    /// 층 바닥 높이 level_z[level−1] (m) [VDA §10 N17]. 층 정의가 없거나 범위 밖이면 예외 —
+    /// 0으로 폴백하면 L2 이상에서 z가 조용히 층 높이만큼 틀어진다(실기 IK 실패 원인).
+    /// </summary>
+    public static double FloorZ(IReadOnlyList<double>? levelZ, int level)
+    {
+        if (levelZ is null || level < 1 || level > levelZ.Count)
+            throw new InvalidOperationException(
+                $"층 L{level} 바닥 높이(level_z) 없음 — 선창 지오메트리 level_z({levelZ?.Count ?? 0}개)를 확인하세요. seam z를 층 바닥 기준으로 환산할 수 없습니다.");
+        return levelZ[level - 1];
     }
 
     /// <summary>actionParameters 객체 {jobRef, position, params} 조립(스키마 검증·발행 공용).</summary>
