@@ -110,7 +110,7 @@
 | **캡처가 안 됨(경고)** | 로봇 보고 층 ≠ 선택한 층 | 로봇 층 확인 또는 **수동 층 변경** 먼저 |
 | 앱에서 계산했는데 3D가 **안 바뀜** | — | 계산 성공 시 즉시 반영된다. 그래도 그대로면 아래 행 |
 | **DB에서 직접** 고쳤는데(교정 도구·SQL) 화면이 그대로 | 화면이 T_W_D를 **10초 캐시** | 10초 뒤 로봇 state가 들어오면 자동 반영. 더 빨리 보려면 프로젝트 다시 열기 |
-| 10초 넘게 기다려도 그대로 | ① `--apply` 를 안 했다(미리보기만) ② **다른 층**만 고쳤다(로봇이 보고하는 mapId 확인) ③ 회전 오차가 아니다(거울·축척) | `tools/rotate_map_calibration.sh <mapId>` 미리보기의 after 와 실제 위치를 대조. 층은 로봇 상태 카드의 보고 층으로 확인 |
+| 10초 넘게 기다려도 그대로 | ① `--apply` 를 안 했다(미리보기만) ② **다른 층**만 고쳤다(로봇이 보고하는 mapId 확인) ③ 회전 오차가 아니다(거울·축척) | `tools\rotate_map_calibration.ps1 <mapId>`(서버=Windows) 미리보기의 after 와 실제 위치를 대조. 층은 로봇 상태 카드의 보고 층으로 확인 |
 
 ---
 
@@ -119,15 +119,32 @@
 기준점 측정값은 맞는데 **도면 좌표를 돌아간 프레임으로 입력**해서 저장된 경우(위 표의 1·2행),
 현장에서 다시 측정하지 않고 회전만 교정할 수 있습니다.
 
-```bash
-# 서버에서 (폐쇄망). 미리보기 — 아무것도 바꾸지 않습니다
-export PGHOST=localhost PGPORT=5432 PGDATABASE=hdacs PGUSER=hdacs PGPASSWORD=***
-tools/rotate_map_calibration.sh CT1-L1
+현장 서버는 **Windows**이므로 PowerShell 판을 쓰십시오(같은 동작·같은 출력).
+`export PGHOST=...` 는 bash 문법이라 PowerShell 에서 `'export' 용어가 ... 인식되지 않습니다` 오류가 납니다.
+
+```powershell
+# 서버에서 (폐쇄망, PowerShell). 미리보기 — 아무것도 바꾸지 않습니다
+cd C:\HDACS\src      # 저장소를 둔 곳. 없으면 개발 PC에서 실행하고 -PgHost 로 서버 지정
+.\tools\rotate_map_calibration.ps1 CT1-L1 -PgUser hdacs      # 비밀번호는 물어봅니다
 
 # 미리보기의 "after" 가 실제 로봇 위치·방향과 맞으면 적용
+.\tools\rotate_map_calibration.ps1 CT1-L1 -Apply
+.\tools\rotate_map_calibration.ps1 CT1-L1,CT1-L2,CT1-L3,CT1-L4 -Apply   # 전 층 같은 실수였다면
+.\tools\rotate_map_calibration.ps1 CT1-L4 -Deg -90 -Apply               # 90° 오차면
+```
+
+접속 정보는 매개변수(`-PgHost -PgPort -PgDatabase -PgUser -PgPassword`)나 환경변수
+(`$env:PGPASSWORD='...'`)로 줍니다. `psql` 이 PATH 에 없어도
+`C:\Program Files\PostgreSQL\16\bin` 을 자동으로 찾습니다.
+
+Linux/macOS 또는 Git Bash 에서는 같은 기능의 bash 판을 씁니다.
+
+```bash
+export PGHOST=localhost PGPORT=5432 PGDATABASE=hdacs PGUSER=hdacs PGPASSWORD=***
+tools/rotate_map_calibration.sh CT1-L1                                # 미리보기
 tools/rotate_map_calibration.sh --apply CT1-L1
-tools/rotate_map_calibration.sh --apply CT1-L1 CT1-L2 CT1-L3 CT1-L4   # 전 층 같은 실수였다면
-tools/rotate_map_calibration.sh --deg -90 --apply CT1-L4              # 90° 오차면
+tools/rotate_map_calibration.sh --apply CT1-L1 CT1-L2 CT1-L3 CT1-L4
+tools/rotate_map_calibration.sh --deg -90 --apply CT1-L4
 ```
 
 미리보기는 **그 맵을 보고 중인 로봇의 현재 좌표**를 before/after 로 환산해
