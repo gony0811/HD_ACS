@@ -2,7 +2,7 @@
 project: HD_ACS
 type: procedure
 status: ready-for-field-validation
-updated: 2026-09-08
+updated: 2026-10-23
 tags:
   - hd-acs
   - llm-wiki
@@ -139,5 +139,6 @@ X=Ox+(CAD_Y−15.48), Y=Oy−(CAD_X−8.64).
 - src/HD.Acs.UI.Core/ViewModels/CalibrationViewModel.cs: 캡처·편집·저장.
 - src/HD.Acs.UI.Core/ViewModels/TankViewModel.cs: 표시 역변환, LoadAsync 캐시 초기화.
 - tools/recalibrate_map.sh 및 커밋 246b233: 9/8 CAD↔ACS 90° 프레임 오류 진단 기록. 스크립트의 현장 상수는 범용 기준이 아닙니다.
+- tools/rotate_map_calibration.sh: 저장된 T_W_D의 **회전만** 보정(기본 180°, `--deg`로 ±90° 등). 기준점 도면좌표를 같은 각도로 회전한 뒤 solve를 다시 호출하므로 재계산에도 보존됩니다. 미리보기에서 로봇 현재 좌표를 before/after로 환산해 보여줍니다. 평행이동·RMS는 건드리지 않으므로 측정 자체가 틀린 경우에는 쓰지 않습니다.
 
 [[HD_ACS - 좌표계와 10개 면]] · [[HD_ACS - Desktop UI]] · [[HD_ACS - L2 도면 SLAM 캘리브레이션]] · [[HD_ACS - 2026-09-08 개발일지]]
