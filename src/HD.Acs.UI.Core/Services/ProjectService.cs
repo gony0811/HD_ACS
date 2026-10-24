@@ -29,8 +29,9 @@ public sealed class ProjectService : IProjectService
 
     public string? CurrentPath { get; private set; }
 
-    public async Task SaveAsync(string tankId, string path, CancellationToken ct = default)
+    public async Task SaveAsync(string tankId, string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null)
     {
+        progress?.Report(new ProjectProgress("선창 조회", 0, 0));
         var geom = await _api.GetTankGeometryAsync(tankId, ct)
             ?? throw new InvalidOperationException($"저장할 선창이 없습니다: {tankId} (먼저 선창을 등록하세요).");
 
@@ -38,6 +39,7 @@ public sealed class ProjectService : IProjectService
         var areaDocs = new List<AreaDoc>(areas.Count);
         foreach (var a in areas)
         {
+            progress?.Report(new ProjectProgress("영역·작업 조회", areaDocs.Count, areas.Count));
             var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
@@ -47,6 +49,7 @@ public sealed class ProjectService : IProjectService
                 a.StationStandoffM, a.AreaId));
         }
 
+        progress?.Report(new ProjectProgress("캘리브레이션·시나리오 조회", 0, 0));
         var calibrations = new List<CalibrationDoc>();
         for (var level = 1; level <= (geom.LevelZ?.Length ?? 0); level++)
         {
@@ -72,6 +75,7 @@ public sealed class ProjectService : IProjectService
                 geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
             areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray());
 
+        progress?.Report(new ProjectProgress("파일 기록", 0, 0));
         await using (var fs = File.Create(path))
         {
             await fs.WriteAsync(Magic, ct);
@@ -82,8 +86,9 @@ public sealed class ProjectService : IProjectService
         CurrentPath = path;
     }
 
-    public async Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default)
+    public async Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null)
     {
+        progress?.Report(new ProjectProgress("파일 읽기", 0, 0));
         ProjectDoc doc;
         await using (var fs = File.OpenRead(path))
         {
@@ -105,13 +110,17 @@ public sealed class ProjectService : IProjectService
 
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
         var g = doc.Geometry;
+        progress?.Report(new ProjectProgress("선창 등록", 0, 0));
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
             g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
             g.ReachZMin, g.ReachZMax, ct);
 
+        // 진행 단위 = REST 등록 건수(영역 + 작업). 대형 선창은 수천 건이라 이 단계가 열기 시간 대부분이다.
+        int itemTotal = doc.Areas.Sum(a => 1 + a.Tasks.Length), itemDone = 0;
         var restoredAreaIds = new Dictionary<Guid, Guid>();
         foreach (var a in doc.Areas)
         {
+            progress?.Report(new ProjectProgress("영역·작업 등록", itemDone, itemTotal));
             // v3.1: level은 서버가 영역 z범위로 유도(저장된 a.Level은 무시). AreaId만 사용.
             // corners 없으면(구파일) bbox 사각형으로 폴백.
             var corners = a.Corners ?? new[]
@@ -122,12 +131,18 @@ public sealed class ProjectService : IProjectService
                 corners, a.StationX, a.StationY, a.StationTheta, _operatorId,
                 stationStandoffM: a.StationStandoffM, areaId: a.SourceId, ct: ct);
             if (a.SourceId is Guid sourceId) restoredAreaIds[sourceId] = areaId;
+            itemDone++;
             foreach (var t in a.Tasks)
+            {
                 await _api.CreateAreaTaskAsync(areaId, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SeamType, t.SectionDxfId, t.ProfileId, _operatorId,
                     seq: t.Seq, name: t.Name, taskId: t.SourceId, points: t.Points, ct: ct);
+                itemDone++;
+            }
         }
+        progress?.Report(new ProjectProgress("영역·작업 등록", itemDone, itemTotal));
 
+        progress?.Report(new ProjectProgress("캘리브레이션·시나리오 복원", 0, 0));
         // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.
         foreach (var cal in doc.Calibrations ?? Array.Empty<CalibrationDoc>())
         {

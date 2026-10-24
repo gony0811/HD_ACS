@@ -49,6 +49,35 @@ public class ProjectIdentityTests : IDisposable
         Assert.Equal("CROSS4", tasks[1].GetProperty("seamType").GetString());
     }
 
+    /// <summary>
+    /// 진행 보고 — 열기는 "영역·작업 등록"을 REST 건수(영역 1 + 작업 2 = 3) 기준으로 단조 증가시키며 3/3으로 끝나고,
+    /// 저장은 영역 조회와 파일 기록 단계를 보고한다. 화면은 이것으로 "아직 적재 중"을 보인다.
+    /// </summary>
+    [Fact]
+    public async Task SaveAndOpen_ReportProgress()
+    {
+        var (svc, _) = Build();
+        var saved = new List<ProjectProgress>();
+        await svc.SaveAsync("CT1", _path, progress: new ListProgress(saved));
+        Assert.Contains(new ProjectProgress("영역·작업 조회", 0, 1), saved);
+        Assert.Equal("파일 기록", saved[^1].Phase);
+
+        var opened = new List<ProjectProgress>();
+        await svc.OpenAsync(_path, progress: new ListProgress(opened));
+        var items = opened.Where(p => p.Phase == "영역·작업 등록").ToList();
+        Assert.All(items, p => Assert.Equal(3, p.Total));
+        Assert.Equal(items.Select(p => p.Done).OrderBy(d => d), items.Select(p => p.Done));   // 단조 증가
+        Assert.Equal(3, items[^1].Done);
+        Assert.Equal(100, items[^1].Percent);
+        Assert.Equal("영역·작업 등록 3/3", items[^1].ToString());
+        Assert.Null(opened[0].Percent);   // 파일 읽기 = 건수 없음(불확정)
+    }
+
+    private sealed class ListProgress(List<ProjectProgress> sink) : IProgress<ProjectProgress>
+    {
+        public void Report(ProjectProgress value) => sink.Add(value);
+    }
+
     /// <summary>구파일(v2) — 식별자 없음 → 필드를 null로 보내 서버가 새로 발급(열기 자체는 성공).</summary>
     [Fact]
     public async Task LegacyV2File_OpensWithServerIssuedIds()

@@ -53,6 +53,18 @@
 
                 <!-- 우측 클러스터: 연결 상태칩 + 비상정지 -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- 프로젝트 열기/저장 진행 — 끝날 때까지 파일 메뉴는 비활성(반쯤 적재된 DB 저장 방지) -->
+                    <Border x:Name="ProjectProgressChip" IsVisible="{Binding IsProjectBusy}"
+                            CornerRadius="20" Padding="10,4" Margin="0,0,10,0"
+                            Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1"
+                            ToolTip.Tip="프로젝트 작업이 끝날 때까지 열기·저장을 할 수 없습니다.">
+                        <StackPanel Orientation="Horizontal">
+                            <ProgressBar Width="120" MinWidth="120" Height="6" VerticalAlignment="Center" Margin="0,0,8,0"
+                                         Minimum="0" Maximum="100" Value="{Binding ProjectProgressPercent}"
+                                         IsIndeterminate="{Binding ProjectProgressIndeterminate}" />
+                            <TextBlock x:Name="ProjectProgressLabel" Text="{Binding ProjectProgressText}" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
                     <Border CornerRadius="20" Padding="10,4" Margin="0,0,10,0"
                             Background="{DynamicResource AppWindowBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal">

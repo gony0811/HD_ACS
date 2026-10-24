@@ -35,6 +35,22 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
 
+    /// <summary>
+    /// 프로젝트 열기/저장/새 프로젝트 진행 중. 이 동안 파일 메뉴 4개 명령을 모두 막는다 —
+    /// 열기는 DB를 지우고 수천 건을 다시 등록하므로, 그 사이 저장하면 반쯤 적재된 상태가 파일(심지어 열어 둔 원본)에 덮어써진다.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(NewProjectCommand), nameof(OpenProjectCommand),
+        nameof(SaveProjectCommand), nameof(SaveProjectAsCommand))]
+    private bool _isProjectBusy;
+
+    /// <summary>진행 표시 문구(예: "열기 중 · 영역·작업 등록 1,234/8,789 (14%)"). 바쁘지 않으면 빈 문자열.</summary>
+    [ObservableProperty] private string _projectProgressText = "";
+    /// <summary>진행률 0~100.</summary>
+    [ObservableProperty] private double _projectProgressPercent;
+    /// <summary>건수가 없는 단계(선창 등록·파일 기록 등) — 진행바를 불확정으로 표시.</summary>
+    [ObservableProperty] private bool _projectProgressIndeterminate = true;
+
     /// <summary>현재 작업 모드(운영/계획/이력). 상단 모드 탭이 양방향 바인딩한다. 기본=운영.</summary>
     [ObservableProperty] private AppMode _currentMode = AppMode.Operation;
 
@@ -127,9 +143,10 @@ public sealed partial class ShellViewModel : ObservableObject
     // 파일 = 현재 선창의 지오메트리·영역·작업 스냅샷. DB가 런타임 truth이며 파일은 내보내기/가져오기.
 
     /// <summary>새 프로젝트 — 팝업으로 선창/면 등록 → 저장 위치 선택 → 프로젝트 파일 생성.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunProjectCommand))]
     private async Task NewProjectAsync()
     {
+        if (IsProjectBusy) return;   // CanExecute를 거치지 않는 직접 호출 방어
         if (!await _projectDialog.ShowNewProjectAsync()) return;   // 취소/실패 시 파일 미생성
         Mission.TankId = AreaPlanning.TankId;            // 시나리오 생성 대상 선창 동기화
         await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
@@ -139,33 +156,76 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>열기 — 프로젝트 파일을 읽어 DB에 재적재하고 화면을 갱신.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunProjectCommand))]
     private async Task OpenProjectAsync()
     {
+        if (IsProjectBusy) return;
         var path = await _projectDialog.PickOpenPathAsync();
         if (path is null) return;
         try
         {
-            var doc = await _project.OpenAsync(path);
-            AreaPlanning.TankId = doc.TankId;
-            Tank.TankId = doc.TankId;
-            Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
-            // 프로젝트 재적재 결과를 모두 다시 조회한다. 특히 Calibration을 갱신하지 않으면
-            // 앱 시작 때 로컬 DB에서 읽은 포인트가 파일에서 복원된 것처럼 화면에 남는다.
-            await Task.WhenAll(
-                AreaPlanning.LoadAsync(),
-                Tank.LoadAsync(),          // 열린 지오메트리로 3D 셸 갱신
-                Calibration.LoadAsync(),
-                Mission.LoadAsync());
-            UpdateTitle();
-            var calibrationCount = doc.Calibrations?.Length ?? 0;
-            var pointCount = doc.Calibrations?.Sum(c => c.Points.Length) ?? 0;
-            ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)} · 캘리브레이션 {calibrationCount}개/{pointCount}점 복원";
+            await RunProjectBusyAsync("열기", async progress =>
+            {
+                var doc = await _project.OpenAsync(path, progress: progress);
+                AreaPlanning.TankId = doc.TankId;
+                Tank.TankId = doc.TankId;
+                Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
+                // 프로젝트 재적재 결과를 모두 다시 조회한다. 특히 Calibration을 갱신하지 않으면
+                // 앱 시작 때 로컬 DB에서 읽은 포인트가 파일에서 복원된 것처럼 화면에 남는다.
+                progress.Report(new ProjectProgress("화면 갱신", 0, 0));
+                await Task.WhenAll(
+                    AreaPlanning.LoadAsync(),
+                    Tank.LoadAsync(),          // 열린 지오메트리로 3D 셸 갱신
+                    Calibration.LoadAsync(),
+                    Mission.LoadAsync());
+                UpdateTitle();
+                var calibrationCount = doc.Calibrations?.Length ?? 0;
+                var pointCount = doc.Calibrations?.Sum(c => c.Points.Length) ?? 0;
+                ConnectionText = $"프로젝트 열기: {System.IO.Path.GetFileName(path)} · 캘리브레이션 {calibrationCount}개/{pointCount}점 복원";
+            });
         }
         catch (Exception ex)
         {
             await _dialog.ShowErrorAsync(DescribeProjectFailure("열기", ex), "오류");
         }
+    }
+
+    private bool CanRunProjectCommand() => !IsProjectBusy;
+
+    /// <summary>
+    /// 프로젝트 작업을 "바쁨" 상태로 감싸 실행 — 파일 메뉴를 막고 진행 문구·진행률을 갱신한다.
+    /// 예외는 그대로 올리되(호출자가 오류 대화상자 표시) 바쁨 상태는 먼저 해제한다.
+    /// </summary>
+    private async Task RunProjectBusyAsync(string verb, Func<IProgress<ProjectProgress>, Task> work)
+    {
+        // ProjectService가 UI 스레드 컨텍스트에서 이어지므로 동기 보고로 충분하다
+        // (Progress<T>는 비동기 Post라 완료 후에 늦은 보고가 도착해 문구가 되살아날 수 있다).
+        var progress = new SyncProgress(p => ShowProjectProgress(verb, p));
+        IsProjectBusy = true;
+        progress.Report(new ProjectProgress("준비", 0, 0));
+        try
+        {
+            await work(progress);
+        }
+        finally
+        {
+            IsProjectBusy = false;
+            ProjectProgressText = "";
+            ProjectProgressPercent = 0;
+            ProjectProgressIndeterminate = true;
+        }
+    }
+
+    private void ShowProjectProgress(string verb, ProjectProgress p)
+    {
+        ProjectProgressIndeterminate = p.Percent is null;
+        ProjectProgressPercent = p.Percent ?? 0;
+        ProjectProgressText = p.Percent is double pct ? $"{verb} 중 · {p} ({pct:F0}%)" : $"{verb} 중 · {p}";
+    }
+
+    private sealed class SyncProgress(Action<ProjectProgress> report) : IProgress<ProjectProgress>
+    {
+        public void Report(ProjectProgress value) => report(value);
     }
 
     /// <summary>
@@ -190,18 +250,20 @@ public sealed partial class ShellViewModel : ObservableObject
     };
 
     /// <summary>저장 — 현재 파일에 덮어쓰기(없으면 다른 이름으로 저장).</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunProjectCommand))]
     private async Task SaveProjectAsync()
     {
+        if (IsProjectBusy) return;
         var path = _project.CurrentPath ?? await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) return;
         await SaveToAsync(path);
     }
 
     /// <summary>다른 이름으로 저장.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunProjectCommand))]
     private async Task SaveProjectAsAsync()
     {
+        if (IsProjectBusy) return;
         var path = await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) return;
         await SaveToAsync(path);
@@ -211,7 +273,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         try
         {
-            await _project.SaveAsync(AreaPlanning.TankId, path);
+            await RunProjectBusyAsync("저장", progress => _project.SaveAsync(AreaPlanning.TankId, path, progress: progress));
             UpdateTitle();
             ConnectionText = $"프로젝트 저장: {System.IO.Path.GetFileName(path)}";
         }

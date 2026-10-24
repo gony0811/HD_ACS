@@ -12,9 +12,11 @@ public interface IProjectService
     /// <summary>마지막으로 저장/열기한 파일 경로 (없으면 null — 미저장 프로젝트).</summary>
     string? CurrentPath { get; }
 
-    /// <summary>현재 선창(tankId)의 전체 상태를 조회해 지정 경로에 프로젝트 파일로 기록. CurrentPath 갱신.</summary>
-    Task SaveAsync(string tankId, string path, CancellationToken ct = default);
+    /// <summary>현재 선창(tankId)의 전체 상태를 조회해 지정 경로에 프로젝트 파일로 기록. CurrentPath 갱신.
+    /// <paramref name="progress"/>는 호출 스레드에서 동기로 불린다(null = 보고 안 함).</summary>
+    Task SaveAsync(string tankId, string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null);
 
-    /// <summary>프로젝트 파일을 읽어 DB에 재적재(선창 등록 → 면 재생성 → 영역 → 작업). CurrentPath 갱신. 로드된 문서 반환.</summary>
-    Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default);
+    /// <summary>프로젝트 파일을 읽어 DB에 재적재(선창 등록 → 면 재생성 → 영역 → 작업). CurrentPath 갱신. 로드된 문서 반환.
+    /// <paramref name="progress"/>는 호출 스레드에서 동기로 불린다(null = 보고 안 함).</summary>
+    Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null);
 }
