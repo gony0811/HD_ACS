@@ -67,21 +67,28 @@
                             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C4U}" Margin="0,0,6,0" />
                             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C4V}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6"
-                                    ToolTip.Tip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(0.8m). 바닥/천장(B/T) 면은 적용 불가 — 수동 지정 사용.">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2" IsEnabled="{Binding StandoffApplicable}"
+                                    ToolTip.Tip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(0.8m). 바닥/천장(B/T) 면은 적용되지 않음.">
                             <TextBlock Text="정차 이격[m]" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Value="{Binding StationStandoffM}" />
                         </StackPanel>
-                        <CheckBox Content="정차 수동 지정 (전역 x,y,θ) — 바닥/천장(B/T) 면은 필수" IsChecked="{Binding StationOverride}" Margin="0,0,0,4" />
+                        <TextBlock Text="{Binding StandoffHint}" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding AutoStationText}" FontSize="12" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <CheckBox Content="정차 위치 조정 (자동 정차점 기준 오프셋)" IsChecked="{Binding StationOverride}" Margin="0,0,0,4"
+                                  ToolTip.Tip="자동 정차점에서 도면 축으로 얼마나 옮길지 입력합니다. +x=선수 방향, +y=좌현 방향(m). 영역 코너를 고치면 정차점도 같은 오프셋으로 따라 움직입니다." />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
-                            <TextBlock Text="x,y" Classes="lbl" />
-                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationX}" Margin="0,0,6,0" />
-                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationY}" Margin="0,0,6,0" />
+                            <TextBlock Text="dx,dy[m]" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Increment="0.1" Value="{Binding StationDx}" Margin="0,0,6,0"
+                                           ToolTip.Tip="+ 선수 / − 선미 (m)" />
+                            <NumericUpDown Classes="field" MinWidth="150" Increment="0.1" Value="{Binding StationDy}" Margin="0,0,6,0"
+                                           ToolTip.Tip="+ 좌현 / − 우현 (m)" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
-                            <TextBlock Text="θ" Classes="lbl" />
-                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationTheta}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4" IsEnabled="{Binding StationOverride}">
+                            <TextBlock Text="θ[rad]" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Value="{Binding StationTheta}"
+                                           ToolTip.Tip="정차 방향(도면 기준 rad, 0=선수 방향). 바닥/천장은 자동 방향이 없으니 필요하면 지정하세요." />
                         </StackPanel>
+                        <TextBlock Text="{Binding StationEffectiveText}" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal">
                             <Button Classes="form" Content="영역 등록" MinWidth="110" Command="{Binding RegisterAreaCommand}" />
                             <Button Classes="form" Content="선택 영역 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateAreaCommand}"

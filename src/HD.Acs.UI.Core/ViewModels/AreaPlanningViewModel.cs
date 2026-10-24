@@ -102,12 +102,80 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanvasPickActive))]
     private bool _pickMode;     // 도면에서 4점 선택(픽) 모드 — 켜면 캔버스 커서=크로스헤어
+    // 수동 정차 — 운영자는 **자동 정차점 기준 오프셋**(도면 축 dx·dy, m)을 입력하고, 서버에는 종전대로 절대 도면 좌표를 보낸다.
+    // 절대 좌표는 화면에 없는 값이라 직접 입력하면 엉뚱한 곳으로 정차했다(2026-10-24 T면 (0.5,0.5) 사례).
     [ObservableProperty] private bool _stationOverride;
-    [ObservableProperty] private double _stationX;
-    [ObservableProperty] private double _stationY;
+    [ObservableProperty] private double _stationDx;
+    [ObservableProperty] private double _stationDy;
     [ObservableProperty] private double _stationTheta;
     // 정차 이격 [m] — 정차점 = 영역 중심 + 내부향 법선 수평성분 × 이격. null(빈값)=서버 설정 기본(0.8m)
     [ObservableProperty] private double? _stationStandoffM;
+
+    /// <summary>서버 <c>Acs:Area:StationStandoffM</c> 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
+    public const double DefaultStandoffM = 0.8;
+
+    /// <summary>
+    /// 자동 정차점(도면 x,y) — 서버 <c>AreaGeometry.StationDrawing</c>과 같은 식: 코너 4점 평균(면-로컬)을 면 프레임으로 올리고
+    /// 내부향 법선의 수평 성분 × 이격만큼 민다. 바닥/천장(B/T)은 수평 성분이 없어 중심 바로 아래(이격 미적용).
+    /// </summary>
+    public (double X, double Y)? AutoStation
+    {
+        get
+        {
+            if (SelectedWall is not { Origin: { Length: >= 2 } o, UAxis: { Length: >= 2 } u, VAxis: { Length: >= 2 } v } w) return null;
+            var c = InputCorners();
+            double uc = c.Average(p => p[0]), vc = c.Average(p => p[1]) + VOff;   // 층-로컬 → 면-전체 v
+            double x = o[0] + uc * u[0] + vc * v[0], y = o[1] + uc * u[1] + vc * v[1];
+            double standoff = StationStandoffM ?? DefaultStandoffM;
+            if (StandoffApplicable && standoff > 0 && w.Normal is { } n)
+            {
+                double h = Math.Sqrt(n[0] * n[0] + n[1] * n[1]);
+                x += n[0] / h * standoff; y += n[1] / h * standoff;
+            }
+            return (x, y);
+        }
+    }
+
+    /// <summary>정차 이격이 적용되는 면인지 — 법선에 수평 성분이 있어야 한다(B/T는 false).</summary>
+    public bool StandoffApplicable => SelectedWall?.Normal is { Length: >= 2 } n && Math.Sqrt(n[0] * n[0] + n[1] * n[1]) > 1e-9;
+
+    /// <summary>서버로 보내는 수동 정차 절대 좌표 = 자동 정차점 + 오프셋.</summary>
+    public double StationX => (AutoStation?.X ?? 0) + StationDx;
+    public double StationY => (AutoStation?.Y ?? 0) + StationDy;
+
+    public string AutoStationText => AutoStation is { } a
+        ? $"자동 정차점 (도면) x {a.X:0.###}, y {a.Y:0.###} m" + (StandoffApplicable ? "" : " — 영역 중심 바로 아래")
+        : "자동 정차점: 면 선택 필요";
+
+    public string StationEffectiveText => !StationOverride
+        ? "적용 정차점 = 자동 정차점"
+        : $"적용 정차점 x {StationX:0.###}, y {StationY:0.###} m ({DescribeOffset(StationDx, StationDy)})";
+
+    public string StandoffHint => StandoffApplicable
+        ? "벽 안쪽으로 이 거리만큼 떨어져 정차. 빈값=서버 기본(0.8m)."
+        : "바닥·천장 면은 이격이 적용되지 않습니다 — 위치를 옮기려면 아래 '정차 위치 조정'의 오프셋을 쓰세요.";
+
+    /// <summary>도면 축 오프셋을 선박 방향어로(+x=선수, +y=좌현).</summary>
+    private static string DescribeOffset(double dx, double dy)
+    {
+        var parts = new List<string>();
+        if (Math.Abs(dx) > 1e-9) parts.Add($"{(dx > 0 ? "선수" : "선미")} {Math.Abs(dx):0.###}");
+        if (Math.Abs(dy) > 1e-9) parts.Add($"{(dy > 0 ? "좌현" : "우현")} {Math.Abs(dy):0.###}");
+        return parts.Count == 0 ? "자동 정차점 그대로" : "자동 정차점에서 " + string.Join(" · ", parts) + " m";
+    }
+
+    private void NotifyStation()
+    {
+        OnPropertyChanged(nameof(AutoStation)); OnPropertyChanged(nameof(StandoffApplicable));
+        OnPropertyChanged(nameof(StationX)); OnPropertyChanged(nameof(StationY));
+        OnPropertyChanged(nameof(AutoStationText)); OnPropertyChanged(nameof(StationEffectiveText));
+        OnPropertyChanged(nameof(StandoffHint));
+    }
+
+    partial void OnStationDxChanged(double value) => NotifyStation();
+    partial void OnStationDyChanged(double value) => NotifyStation();
+    partial void OnStationOverrideChanged(bool value) => NotifyStation();
+    partial void OnStationStandoffMChanged(double? value) => NotifyStation();
 
     // ── 작업 등록 입력 (면 로컬 u,v) ──
     [ObservableProperty] private double _startU;
@@ -148,7 +216,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
 
     public string SelectedWallInfo => SelectedWall is { } w
         ? $"면 {w.WallCode}{(SelectedLevel is { } l ? $" · {l.Label} 로컬" : "")} — u∈[0,{w.ULen:0.###}], v∈[0,{SliceH:0.###}] (좌하단 0,0)"
-          + (w.FacingYaw is null ? " (바닥/천장: 정차 수동지정 필요)" : "")
+          + (w.FacingYaw is null ? " (바닥/천장: 정차 = 영역 중심 아래, 이격 미적용)" : "")
         : "면 선택";
 
     [RelayCommand]
@@ -408,6 +476,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         RegisterAreaCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SelectedWallInfo));
+        NotifyStation();
         _ = RefreshAreasAsync();
     }
 
@@ -428,9 +497,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         var c = a.Corners is { Length: 4 } ? a.Corners : RectCorners(a.UMin, a.VMin, a.UMax, a.VMax);   // 구데이터 폴백
         AreaName = a.Name;
         for (int i = 0; i < 4; i++) SetCorner(i, c[i][0], c[i][1]);
+        StationStandoffM = a.StationStandoffM;   // 이격이 자동 정차점을 바꾸므로 오프셋 환산보다 먼저
         StationOverride = a.StationX is not null && a.StationY is not null;
-        StationX = a.StationX ?? 0; StationY = a.StationY ?? 0; StationTheta = a.StationTheta ?? 0;
-        StationStandoffM = a.StationStandoffM;
+        // 저장된 절대 좌표 → 자동 정차점 기준 오프셋(0.1mm 반올림 — 부동소수 먼지 제거)
+        var auto = AutoStation ?? (0, 0);
+        StationDx = StationOverride ? Math.Round(a.StationX!.Value - auto.X, 4) : 0;
+        StationDy = StationOverride ? Math.Round(a.StationY!.Value - auto.Y, 4) : 0;
+        StationTheta = a.StationTheta ?? 0;
     }
 
     /// <summary>
@@ -685,14 +758,15 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         return (b2 - hw, b2 + hw);
     }
 
-    partial void OnC1UChanged(double value) => Project();
-    partial void OnC1VChanged(double value) => Project();
-    partial void OnC2UChanged(double value) => Project();
-    partial void OnC2VChanged(double value) => Project();
-    partial void OnC3UChanged(double value) => Project();
-    partial void OnC3VChanged(double value) => Project();
-    partial void OnC4UChanged(double value) => Project();
-    partial void OnC4VChanged(double value) => Project();
+    // 코너가 바뀌면 자동 정차점도 따라 움직인다(오프셋은 유지 → 수동 정차점도 영역과 함께 이동)
+    partial void OnC1UChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC1VChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC2UChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC2VChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC3UChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC3VChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC4UChanged(double value) { Project(); NotifyStation(); }
+    partial void OnC4VChanged(double value) { Project(); NotifyStation(); }
     partial void OnAreaNameChanged(string value) => Project();
     partial void OnStartUChanged(double value) => Project();
     partial void OnStartVChanged(double value) => Project();
