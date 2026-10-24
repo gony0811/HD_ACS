@@ -91,6 +91,13 @@ public interface IAcsApiClient
         string seamType, string sectionDxfId, string profileId, string userId,
         int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default);
+    /// <summary>선창 전 작업 일괄 조회(프로젝트 저장용). null = 서버 미지원(구빌드) — 호출자는 영역별 조회로 폴백.</summary>
+    Task<IReadOnlyList<TankAreaTaskDto>?> GetTankAreaTasksAsync(string tankId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TankAreaTaskDto>?>(null);
+    /// <summary>프로젝트 일괄 가져오기(선창 재등록+영역·작업, 전부 또는 전무). null = 서버 미지원(구빌드) — 호출자는 단건 등록으로 폴백.
+    /// 검증 거부는 <see cref="ProjectRejectedException"/>(DB 무변경).</summary>
+    Task<ProjectImportResultDto?> ImportProjectAsync(string tankId, ProjectImportRequestDto request, CancellationToken ct = default) =>
+        Task.FromResult<ProjectImportResultDto?>(null);
     /// <summary>검사 작업 수정 — taskId 유지(영구 식별자). 좌표 필수, seq/name/seamType은 null=기존값 유지. points: null=기존 유지, []=지움(CROSS 가지).</summary>
     Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
         string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default);

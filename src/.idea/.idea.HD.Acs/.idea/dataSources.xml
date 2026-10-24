@@ -4,9 +4,8 @@
     <data-source source="LOCAL" name="hdacs@localhost" uuid="92bebf3c-a578-4f74-8aa7-696ce723ad6f">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
-      <configured-by-url>true</configured-by-url>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
-      <jdbc-url>jdbc:postgresql://localhost:5432/hdacs?password=postgres&amp;user=postgres</jdbc-url>
+      <jdbc-url>jdbc:postgresql://localhost:5432/hdacs</jdbc-url>
       <jdbc-additional-properties>
         <property name="com.intellij.clouds.kubernetes.db.host.port" />
         <property name="com.intellij.clouds.kubernetes.db.enabled" value="false" />

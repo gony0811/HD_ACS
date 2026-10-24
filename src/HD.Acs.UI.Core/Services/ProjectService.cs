@@ -36,11 +36,20 @@ public sealed class ProjectService : IProjectService
             ?? throw new InvalidOperationException($"저장할 선창이 없습니다: {tankId} (먼저 선창을 등록하세요).");
 
         var areas = await _api.GetAreasAsync(tankId, ct: ct);
+        // 작업은 선창 전체를 1회로 조회(대형 선창은 영역별 조회가 1천 회 이상). null = 구빌드 서버 → 영역별 조회 폴백.
+        progress?.Report(new ProjectProgress("작업 일괄 조회", 0, 0));
+        var tasksByArea = (await _api.GetTankAreaTasksAsync(tankId, ct))?
+            .GroupBy(t => t.AreaId).ToDictionary(g => g.Key, g => g.Select(t => t.ToAreaTask()).OrderBy(t => t.Seq).ToList());
         var areaDocs = new List<AreaDoc>(areas.Count);
         foreach (var a in areas)
         {
-            progress?.Report(new ProjectProgress("영역·작업 조회", areaDocs.Count, areas.Count));
-            var tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
+            IReadOnlyList<AreaTaskDto> tasks;
+            if (tasksByArea is null)
+            {
+                progress?.Report(new ProjectProgress("영역·작업 조회", areaDocs.Count, areas.Count));
+                tasks = await _api.GetAreaTasksAsync(a.AreaId, ct);
+            }
+            else tasks = tasksByArea.TryGetValue(a.AreaId, out var list) ? list : Array.Empty<AreaTaskDto>();
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
                 t.SectionDxfId, t.ProfileId, t.TaskId, t.Points)).ToArray();
@@ -108,7 +117,44 @@ public sealed class ProjectService : IProjectService
         ValidateIdentities(doc);
         ValidateAreaShapes(doc);   // 서버 규칙 위반을 DB를 건드리기 전에 거부(열기는 선창 재등록=기존 영역 삭제부터 시작)
 
-        // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업
+        // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업.
+        // 일괄 가져오기 1건(서버가 전수 검증 후 커밋 1회 — 거부 시 DB 무변경). 구빌드 서버면 단건 등록으로 폴백.
+        int taskTotal = doc.Areas.Sum(a => a.Tasks.Length);
+        progress?.Report(new ProjectProgress($"서버에 일괄 등록 · 영역 {doc.Areas.Length:N0}·작업 {taskTotal:N0}", 0, 0));
+        var restoredAreaIds = await ImportBulkAsync(doc, ct) ?? await ImportOneByOneAsync(doc, progress, ct);
+
+        progress?.Report(new ProjectProgress("캘리브레이션·시나리오 복원", 0, 0));
+        await RestoreCalibrationsAndScenariosAsync(doc, restoredAreaIds, ct);
+
+        CurrentPath = path;
+        return doc;
+    }
+
+    /// <summary>일괄 가져오기. 반환 = 파일 areaId → 서버 areaId(시나리오 재연결용). null = 서버 미지원.</summary>
+    private async Task<Dictionary<Guid, Guid>?> ImportBulkAsync(ProjectDoc doc, CancellationToken ct)
+    {
+        var g = doc.Geometry;
+        var request = new ProjectImportRequestDto(
+            new ProjectImportGeometryDto(g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow, g.HWall, g.ThetaUpDeg, g.HUp,
+                g.LevelZ, g.OriginOx, g.OriginOy, null, null, null, _operatorId, g.ReachZMin, g.ReachZMax),
+            doc.Areas.Select(a => new ProjectImportAreaDto(a.WallCode, a.Name, a.Corners,
+                a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM,
+                null, a.SourceId,
+                a.Tasks.Select(t => new ProjectImportTaskDto(t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
+                    t.SectionDxfId, t.ProfileId, _operatorId, t.SourceId, t.Points)).ToArray())).ToArray(),
+            _operatorId);
+        var result = await _api.ImportProjectAsync(doc.TankId, request, ct);
+        if (result is null) return null;
+
+        var map = new Dictionary<Guid, Guid>();
+        for (int i = 0; i < doc.Areas.Length && i < result.AreaIds.Length; i++)
+            if (doc.Areas[i].SourceId is Guid sourceId) map[sourceId] = result.AreaIds[i];
+        return map;
+    }
+
+    /// <summary>구빌드 서버 폴백 — 선창 등록 후 영역·작업을 건마다 POST(대형 선창은 수 분, 중간 실패 시 반쯤 적재).</summary>
+    private async Task<Dictionary<Guid, Guid>> ImportOneByOneAsync(ProjectDoc doc, IProgress<ProjectProgress>? progress, CancellationToken ct)
+    {
         var g = doc.Geometry;
         progress?.Report(new ProjectProgress("선창 등록", 0, 0));
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
@@ -141,8 +187,11 @@ public sealed class ProjectService : IProjectService
             }
         }
         progress?.Report(new ProjectProgress("영역·작업 등록", itemDone, itemTotal));
+        return restoredAreaIds;
+    }
 
-        progress?.Report(new ProjectProgress("캘리브레이션·시나리오 복원", 0, 0));
+    private async Task RestoreCalibrationsAndScenariosAsync(ProjectDoc doc, Dictionary<Guid, Guid> restoredAreaIds, CancellationToken ct)
+    {
         // 대응점 원본을 복원한 뒤 다시 solve하여 현재 map version에 유효한 T_W_D를 만든다.
         foreach (var cal in doc.Calibrations ?? Array.Empty<CalibrationDoc>())
         {
@@ -174,9 +223,6 @@ public sealed class ProjectService : IProjectService
             var areaIds = scenario.AreaIds.Where(restoredAreaIds.ContainsKey).Select(id => restoredAreaIds[id]).ToArray();
             await _api.SetScenarioAreasAsync(scenarioId, areaIds, ct);
         }
-
-        CurrentPath = path;
-        return doc;
     }
 
     /// <summary>AREA 최대 크기 [SPEC v3 §4] — 서버 AreaRules 와 같은 값. 구버전에서 만든 파일이 지금 규칙을 넘는 경우를 열기 전에 잡는다.</summary>

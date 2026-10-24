@@ -59,6 +59,7 @@ builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
+builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
 builder.Services.AddHostedService<VdaBridgeService>();
 
@@ -459,6 +460,32 @@ app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbC
         t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
         Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
     }));
+});
+
+// 선창 전 작업 일괄 조회 — 프로젝트 저장용(종전엔 영역마다 위 단건 GET이라 대형 선창에서 1천 회 이상).
+// 필드는 단건 응답 + areaId. SAIGE용 GET /api/tasks 는 mm 정수 반올림이라 저장 정밀도에 쓰지 않는다.
+app.MapGet("/api/internal/area-tasks", async (string? tankId, AcsDbContext db) =>
+{
+    var tid = tankId ?? "CT1";
+    var tasks = await (from t in db.AreaTasks.AsNoTracking()
+                       join a in db.InspectionAreas.AsNoTracking() on t.AreaId equals a.AreaId
+                       where a.TankId == tid
+                       orderby t.AreaId, t.Seq
+                       select t).ToListAsync();
+    return Results.Ok(tasks.Select(t => new
+    {
+        t.AreaId, t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
+        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
+    }));
+});
+
+// 프로젝트(.hdacs) 일괄 가져오기 — 선창 재등록 + 영역·작업 전부를 요청 1건으로. 메모리에서 전수 검증 후 위반이 있으면
+// 400 + 사유 목록이며 DB는 그대로다(종전 단건 루프는 중간 실패 시 지워진 DB가 반쯤 적재된 채 남았다).
+app.MapPost("/api/internal/tanks/{tankId}/project-import", async (string tankId, ProjectImportRequest req, ProjectImportService svc) =>
+{
+    try { return Results.Ok(await svc.ImportAsync(tankId, req)); }
+    catch (ProjectImportService.ImportRejectedException ex)
+    { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
 });
 
 // 검사 작업 수정 — **taskId를 유지한 채** 용접선 좌표·형태를 고친다 [SAIGE v2.6 §2.5/§10.2].

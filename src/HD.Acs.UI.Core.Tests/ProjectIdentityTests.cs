@@ -23,9 +23,9 @@ public class ProjectIdentityTests : IDisposable
     private static readonly Guid Task1 = Guid.Parse("3a9f2c14-8e51-4d7a-b2c9-1f6e0a5d3b47");
     private static readonly Guid Task2 = Guid.Parse("3a9f2c14-8e51-4d7a-b2c9-1f6e0a5d3b48");
 
-    private static (ProjectService Svc, FakeAcs Server) Build()
+    private static (ProjectService Svc, FakeAcs Server) Build(bool bulk = false, bool rejectImport = false)
     {
-        var server = new FakeAcs();
+        var server = new FakeAcs { Bulk = bulk, RejectImport = rejectImport };
         var http = new HttpClient(server) { BaseAddress = new Uri("http://acs.test") };
         return (new ProjectService(new AcsApiClient(http), Options.Create(new AcsOptions { OperatorId = "tester" })), server);
     }
@@ -71,6 +71,47 @@ public class ProjectIdentityTests : IDisposable
         Assert.Equal(100, items[^1].Percent);
         Assert.Equal("영역·작업 등록 3/3", items[^1].ToString());
         Assert.Null(opened[0].Percent);   // 파일 읽기 = 건수 없음(불확정)
+    }
+
+    /// <summary>
+    /// 일괄 API 서버 — 저장은 작업 조회 1회(영역별 조회 0회), 열기는 project-import 1건만 보내고(단건 POST 0건)
+    /// 식별자·seq·이름·seamType이 그대로 실린다. 구빌드 서버(404)면 위 테스트들이 단건 폴백 경로를 검증한다.
+    /// </summary>
+    [Fact]
+    public async Task BulkServer_SaveUsesOneTaskQuery_OpenSendsOneImport()
+    {
+        var (svc, server) = Build(bulk: true);
+
+        await svc.SaveAsync("CT1", _path);
+        Assert.Single(server.Gets, p => p == "/api/internal/area-tasks");
+        Assert.DoesNotContain(server.Gets, p => p.EndsWith("/tasks"));
+
+        server.Posts.Clear();
+        await svc.OpenAsync(_path);
+
+        var (importPath, body) = Assert.Single(server.Posts);   // 단건 /api/areas·/tasks POST 없음
+        Assert.Equal("/api/internal/tanks/CT1/project-import", importPath);
+        var area = Assert.Single(body.GetProperty("areas").EnumerateArray());
+        Assert.Equal(AreaA, area.GetProperty("areaId").GetGuid());
+        var tasks = area.GetProperty("tasks").EnumerateArray().ToList();
+        Assert.Equal(new[] { Task1, Task2 }, tasks.Select(t => t.GetProperty("taskId").GetGuid()));   // 저장 시 seq 순 정렬
+        Assert.Equal(new[] { 1, 5 }, tasks.Select(t => t.GetProperty("seq").GetInt32()));
+        Assert.Equal(new[] { "W1", "W5-cross" }, tasks.Select(t => t.GetProperty("name").GetString()));
+        Assert.Equal("CROSS4", tasks[1].GetProperty("seamType").GetString());
+        Assert.Equal(45.0, body.GetProperty("geometry").GetProperty("thetaLowDeg").GetDouble());   // 각도 deg 그대로
+    }
+
+    [Fact]
+    public async Task BulkServer_Rejection_SurfacesReasons()
+    {
+        var (svc, _) = Build(bulk: true);
+        await svc.SaveAsync("CT1", _path);
+        var (rejecting, server) = Build(bulk: true, rejectImport: true);
+
+        var ex = await Assert.ThrowsAsync<ProjectRejectedException>(() => rejecting.OpenAsync(_path));
+
+        Assert.Contains("seq 5", Assert.Single(ex.Reasons));
+        Assert.DoesNotContain(server.Posts, p => p.Path.Contains("calibration") || p.Path.StartsWith("/api/scenarios"));   // 거부 후 후속 복원 없음
     }
 
     private sealed class ListProgress(List<ProjectProgress> sink) : IProgress<ProjectProgress>
@@ -164,10 +205,38 @@ public class ProjectIdentityTests : IDisposable
     private sealed class FakeAcs : HttpMessageHandler
     {
         public List<(string Path, JsonElement Body)> Posts { get; } = new();
+        public List<string> Gets { get; } = new();
+        /// <summary>일괄 API(project-import·area-tasks) 지원 서버. false = 구빌드 서버(404 → 클라이언트 폴백).</summary>
+        public bool Bulk { get; init; }
+        /// <summary>일괄 가져오기를 400(검증 거부)으로 응답.</summary>
+        public bool RejectImport { get; init; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
         {
             var path = req.RequestUri!.AbsolutePath;
+            if (req.Method == HttpMethod.Get) Gets.Add(path);
+            if (path == "/api/internal/area-tasks")
+                return !Bulk ? new HttpResponseMessage(HttpStatusCode.NotFound) : Json(new object[]
+                {
+                    new { areaId = AreaA, taskId = Task2, seq = 5, name = "W5-cross", seamType = "CROSS4", startU = 4.0, startV = 1.2, endU = 4.4, endV = 1.2, sectionDxfId = "DXF-1", profileId = "PROF-1" },
+                    new { areaId = AreaA, taskId = Task1, seq = 1, name = "W1", seamType = "LINE", startU = 3.2, startV = 0.9, endU = 4.2, endV = 0.9, sectionDxfId = "DXF-1", profileId = "PROF-1" },
+                });
+            if (req.Method == HttpMethod.Post && path.EndsWith("/project-import"))
+            {
+                if (!Bulk) return new HttpResponseMessage(HttpStatusCode.NotFound);
+                Assert.NotNull(req.Content!.Headers.ContentLength);   // chunked 아님
+                var importBody = JsonDocument.Parse(await req.Content!.ReadAsStringAsync(ct)).RootElement.Clone();
+                Posts.Add((path, importBody));
+                if (RejectImport)
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent("""{"error":"프로젝트 가져오기 거부","reasons":["영역 'PM-L2-01' (면 PM) 작업 seq 5: 용접선 시작/끝점이 영역(사각형) 내부가 아닙니다."]}""",
+                            Encoding.UTF8, "application/json"),
+                    };
+                var ids = importBody.GetProperty("areas").EnumerateArray()
+                    .Select(a => a.GetProperty("areaId").ValueKind == JsonValueKind.String ? a.GetProperty("areaId").GetGuid() : Guid.NewGuid()).ToArray();
+                return Json(new { tankId = "CT1", areas = ids.Length, tasks = 0, areaIds = ids });
+            }
             if (req.Method == HttpMethod.Post)
             {
                 var body = JsonDocument.Parse(await req.Content!.ReadAsStringAsync(ct)).RootElement.Clone();

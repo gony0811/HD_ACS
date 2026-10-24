@@ -416,6 +416,39 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/internal/areas/{areaId}/tasks", ct) ?? new();
 
+    public async Task<IReadOnlyList<TankAreaTaskDto>?> GetTankAreaTasksAsync(string tankId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/internal/area-tasks?tankId={Uri.EscapeDataString(tankId)}", ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버 — 영역별 조회로 폴백
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<TankAreaTaskDto>>(ct) ?? new();
+    }
+
+    public async Task<ProjectImportResultDto?> ImportProjectAsync(string tankId, ProjectImportRequestDto request, CancellationToken ct = default)
+    {
+        // 수천 건 본문 — chunked 대신 Content-Length 명시(수신기 호환, 09-21 SAIGE 결함과 같은 계열 예방)
+        var body = new ByteArrayContent(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, JsonWeb));
+        body.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        var resp = await _http.PostAsync($"/api/internal/tanks/{Uri.EscapeDataString(tankId)}/project-import", body, ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버 — 단건 등록으로 폴백
+        if (resp.StatusCode == HttpStatusCode.BadRequest)
+        {
+            RejectBody? err = null;
+            try { err = await resp.Content.ReadFromJsonAsync<RejectBody>(ct); } catch (Exception) { /* 본문 형식 불명 */ }
+            throw new ProjectRejectedException(err?.Error ?? "서버가 프로젝트 내용을 거부했습니다.",
+                (IReadOnlyList<string>?)err?.Reasons ?? Array.Empty<string>());
+        }
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ProjectImportResultDto>(ct);
+    }
+
+    /// <summary>엔드포인트 자체가 없음(구빌드 서버) — 라우트 미일치 404/405. 일괄 API는 자원 없음 404를 내지 않는다.</summary>
+    private static bool IsUnsupportedRoute(HttpResponseMessage resp) =>
+        resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
+
+    private static readonly System.Text.Json.JsonSerializerOptions JsonWeb = new(System.Text.Json.JsonSerializerDefaults.Web);
+    private sealed record RejectBody(string? Error, string[]? Reasons);
+
     public async Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default)
     {
         var resp = await _http.DeleteAsync($"/api/area-tasks/{taskId}", ct);

@@ -237,6 +237,12 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         // 파일 파싱 단계(매직/버전/GZip/JSON) — ProjectService가 InvalidDataException을 던짐
         InvalidDataException => $"프로젝트 {verb} 실패: 이 프로그램의 프로젝트 파일이 아니거나 손상되었습니다.\n\n{ex.Message}",
+        // 일괄 가져오기 검증 거부 — 서버가 DB를 건드리기 전에 막았다(전부 또는 전무)
+        ProjectRejectedException rej => $"프로젝트 {verb} 실패: 관제 서버가 파일 내용을 거부했습니다.\n" +
+            "DB는 변경되지 않았습니다 — 기존 영역·작업이 그대로 남아 있습니다.\n\n" +
+            (rej.Reasons.Count > 0
+                ? string.Join("\n", rej.Reasons.Take(10).Select(r => "· " + r)) + (rej.Reasons.Count > 10 ? $"\n… 외 {rej.Reasons.Count - 10}건" : "")
+                : rej.Message),
         // DB 재적재 단계 — 서버가 응답했지만 내용을 거부(4xx/5xx). 연결 문제가 아니다.
         HttpRequestException { StatusCode: { } code } => $"프로젝트 {verb} 실패: 관제 서버가 파일 내용을 거부했습니다 (HTTP {(int)code}).\n" +
             "서버 연결은 정상입니다. 아래 사유를 고친 파일로 다시 여세요.\n\n" +

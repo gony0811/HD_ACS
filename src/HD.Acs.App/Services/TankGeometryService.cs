@@ -35,31 +35,40 @@ public sealed class TankGeometryService
 
         var g = await _db.TankGeometries.FirstOrDefaultAsync(x => x.TankId == tankId, ct);
         if (g is null) { g = new TankGeometryEntity { TankId = tankId }; _db.TankGeometries.Add(g); }
-        g.LengthL = geom.L; g.WFloor = geom.WFloor; g.ThetaLow = geom.ThetaLow; g.HLow = geom.HLow;
-        g.HWall = geom.HWall; g.ThetaUp = geom.ThetaUp; g.HUp = geom.HUp;
-        g.LevelZ = JsonSerializer.Serialize(geom.LevelZ);
-        g.ReachZMin = geom.ReachZMin; g.ReachZMax = geom.ReachZMax;
-        g.OriginOx = geom.Ox; g.OriginOy = geom.Oy; g.CreatedBy = userId;
+        ApplyTo(g, geom, userId);
 
         var existing = await _db.Walls.Where(w => w.TankId == tankId).ToListAsync(ct);
         if (existing.Count > 0) _db.Walls.RemoveRange(existing);
         await _db.SaveChangesAsync(ct);   // geometry(FK 대상) 선확정 + 기존 면 삭제
 
         foreach (var w in walls)
-            _db.Walls.Add(new WallEntity
-            {
-                TankId = tankId, WallCode = w.WallCode,
-                Origin = JsonSerializer.Serialize(w.Pose.Origin),
-                UAxis = JsonSerializer.Serialize(w.Pose.U),
-                VAxis = JsonSerializer.Serialize(w.Pose.V),
-                Normal = JsonSerializer.Serialize(w.Normal),
-                ULen = w.ULen, VLen = w.VLen, FacingYaw = w.FacingYaw, Generated = true
-            });
+            _db.Walls.Add(ToWallEntity(tankId, w));
         await _db.SaveChangesAsync(ct);
 
         _log.LogInformation("tank geometry 등록: {Tank} → {N}면 생성", tankId, walls.Count);
         return walls.Count;
     }
+
+    /// <summary>파라미터 → 지오메트리 엔티티 필드. 등록과 프로젝트 일괄 가져오기(DB 전 메모리 검증)가 공유한다.</summary>
+    public static void ApplyTo(TankGeometryEntity g, TankGeometry geom, string? userId)
+    {
+        g.LengthL = geom.L; g.WFloor = geom.WFloor; g.ThetaLow = geom.ThetaLow; g.HLow = geom.HLow;
+        g.HWall = geom.HWall; g.ThetaUp = geom.ThetaUp; g.HUp = geom.HUp;
+        g.LevelZ = JsonSerializer.Serialize(geom.LevelZ);
+        g.ReachZMin = geom.ReachZMin; g.ReachZMax = geom.ReachZMax;
+        g.OriginOx = geom.Ox; g.OriginOy = geom.Oy; g.CreatedBy = userId;
+    }
+
+    /// <summary>자동 생성 면 → ref.wall 엔티티.</summary>
+    public static WallEntity ToWallEntity(string tankId, GeneratedWall w) => new()
+    {
+        TankId = tankId, WallCode = w.WallCode,
+        Origin = JsonSerializer.Serialize(w.Pose.Origin),
+        UAxis = JsonSerializer.Serialize(w.Pose.U),
+        VAxis = JsonSerializer.Serialize(w.Pose.V),
+        Normal = JsonSerializer.Serialize(w.Normal),
+        ULen = w.ULen, VLen = w.VLen, FacingYaw = w.FacingYaw, Generated = true
+    };
 
     /// <summary>
     /// 선창 층 정의(level_z) → ref.map 멱등 동기화.
