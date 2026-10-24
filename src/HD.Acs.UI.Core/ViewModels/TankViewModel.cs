@@ -246,22 +246,60 @@ public sealed partial class TankViewModel : ObservableObject
         }
     }
 
-    /// <summary>등록된 영역·작업을 불러와 3D 오버레이를 재구성한다. 2D 탭 변경 시 외부에서 재호출.</summary>
-    public async Task LoadOverlaysAsync()
+    private Task? _overlayLoad;
+    private volatile bool _overlayReloadPending;
+
+    /// <summary>
+    /// 등록된 영역·작업을 불러와 3D 오버레이를 재구성한다. 2D 탭 변경 시 외부에서 재호출.
+    /// 프로젝트 열기 한 번에 이 요청이 여러 번 겹쳐 온다(Tank.LoadAsync + 계획 화면의 PlanningChanged 2회) —
+    /// 겹친 로드가 같은 Overlays를 번갈아 Clear/Add 하면 영역이 빠지거나 중복됐다.
+    /// 그래서 진행 중이면 그 로드를 돌려주고 "끝나면 한 번 더"만 표시한다(실제 로드 최대 2번, 결과는 최신).
+    /// </summary>
+    public Task LoadOverlaysAsync()
     {
-        Overlays.Clear();
+        if (_overlayLoad is { IsCompleted: false })
+        {
+            _overlayReloadPending = true;
+            return _overlayLoad;
+        }
+        return _overlayLoad = RunOverlayLoadsAsync();
+    }
+
+    private async Task RunOverlayLoadsAsync()
+    {
+        while (true)
+        {
+            _overlayReloadPending = false;
+            var loaded = await FetchOverlaysAsync();
+            if (_overlayReloadPending) continue;   // 조회 중 다시 요청됨 — 낡은 결과는 그리지 않고 다시 조회
+            Overlays.Clear();
+            foreach (var o in loaded) Overlays.Add(o);
+            BuildFacePlots();   // 전개도(면별 2D 도면) 갱신
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+    }
+
+    /// <summary>영역 1회 + 작업 일괄 1회 조회(대형 선창은 영역별 조회가 1천 회 이상). 구빌드 서버면 영역별 조회로 폴백.</summary>
+    private async Task<List<AreaOverlay>> FetchOverlaysAsync()
+    {
+        var result = new List<AreaOverlay>();
         try
         {
             var areas = await _api.GetAreasAsync(TankId);
+            var byArea = (await _api.GetTankAreaTasksAsync(TankId))?
+                .GroupBy(t => t.AreaId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<AreaTaskDto>)g.Select(t => t.ToAreaTask()).OrderBy(t => t.Seq).ToList());
             foreach (var a in areas)
             {
-                var tasks = await _api.GetAreaTasksAsync(a.AreaId);
-                Overlays.Add(new AreaOverlay(a, tasks));
+                var tasks = byArea is null
+                    ? await _api.GetAreaTasksAsync(a.AreaId)
+                    : byArea.TryGetValue(a.AreaId, out var list) ? list : Array.Empty<AreaTaskDto>();
+                result.Add(new AreaOverlay(a, tasks));
             }
         }
-        catch { /* 조회 실패는 무해 — 오버레이 없이 셸만 */ }
-        BuildFacePlots();   // 전개도(면별 2D 도면) 갱신
-        ViewChanged?.Invoke(this, EventArgs.Empty);
+        catch { result.Clear(); /* 조회 실패는 무해 — 오버레이 없이 셸만 */ }
+        return result;
     }
 
     /// <summary>전개도: 각 면(ShellWalls)을 실제 비율 2D 도형(사각형/마구리 팔각)으로, 영역·작업 오버레이 포함해 셀에 투영.</summary>

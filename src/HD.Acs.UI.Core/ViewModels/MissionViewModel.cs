@@ -324,13 +324,28 @@ public sealed partial class MissionViewModel : ObservableObject
             WorkItems.Clear();
             if (run is not null)
             {
-                foreach (var w in await _api.GetWorkItemsAsync(runId))
+                var items = await _api.GetWorkItemsAsync(runId);
+                // 소속 용접라인은 선창 전체를 1회로 조회(영역별 조회는 대형 선창에서 1천 회 이상). 없거나 구빌드 서버면 영역별 폴백.
+                Dictionary<Guid, List<AreaTaskDto>>? byArea = null;
+                if (items.Count > 0)
+                {
+                    try
+                    {
+                        byArea = (await _api.GetTankAreaTasksAsync(TankId))?
+                            .GroupBy(t => t.AreaId).ToDictionary(g => g.Key, g => g.Select(t => t.ToAreaTask()).OrderBy(t => t.Seq).ToList());
+                    }
+                    catch { /* 일괄 조회 실패 — 영역별 조회로 */ }
+                }
+                foreach (var w in items)
                 {
                     var row = new WorkItemRow(w);
                     // 소속 용접라인 = 계획(area_task) 기준 — 배차 전에는 PLANNED
                     try
                     {
-                        foreach (var t in await _api.GetAreaTasksAsync(w.AreaId))
+                        // 다른 선창의 run이면 일괄 결과에 없다 — 그 영역만 개별 조회
+                        IEnumerable<AreaTaskDto> areaTasks = byArea is not null && byArea.TryGetValue(w.AreaId, out var list)
+                            ? list : await _api.GetAreaTasksAsync(w.AreaId);
+                        foreach (var t in areaTasks)
                             row.Tasks.Add(new TaskRow(t.TaskId, t.Seq, t.Name ?? $"라인 {t.Seq}"));
                     }
                     catch { /* 영역 삭제 등 — 라인 없이 표시 */ }
