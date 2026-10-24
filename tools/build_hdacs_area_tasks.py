@@ -32,11 +32,16 @@ from collections import Counter, defaultdict
 from analyze_dxf_regions import ROOT, entities, first, points
 from build_dxf_area_preview import segment_records, merge_segments
 
-# ── 선창 형상 (m) — 도면 Steel Wall 외곽선 실측, WALL A 팔각·B/T/SM/SL/SU 치수 ──
+# ── 선창 형상 (m) — **멤브레인 면** 치수 (2026-10-24 현장 확정) ──
+# 도면 Steel Wall 외곽선은 최외곽(선체) 치수(L 31.785·폭 18.105·H 13.785)이고, 실제 멤브레인 면은 모든 면에서
+# 법선 방향으로 412.5mm 안쪽이다(팔각 단면의 균일 평행 이동 — 길이·폭·높이 −2t, 모서리 변 −t(2−√2),
+# 그 밖의 면 폭 −2t(√2−1)). 종전엔 선체 치수를 써서 ACS 벽 평면이 실제보다 412.5mm 바깥에 잡혔다
+# (코봇이 벽에 붙음 — L4 F벽 실측으로 확인). 층 발판 높이 level_z 는 멤브레인 바닥 기준이다.
 TANK_ID = 'CT1'
-GEOMETRY = dict(lengthL=31.785, wFloor=10.1497, thetaLowDeg=45, hLow=3.9776, hWall=6.9097,
-                thetaUpDeg=45, hUp=2.8976, levelZ=[0, 3.63, 6.63, 10.53],   # 층 발판 높이
+GEOMETRY = dict(lengthL=30.960, wFloor=9.808, thetaLowDeg=45, hLow=3.736, hWall=6.568,
+                thetaUpDeg=45, hUp=2.656, levelZ=[0, 3.2175, 6.2175, 10.1175],   # 층 발판 높이(멤브레인 바닥 기준, 2026-10-24 현장 확정 — 종전 [0,3.63,6.63,10.53]은 L2~L4가 선체 바닥 기준이라 412.5mm 높았음)
                 originOx=0, originOy=0, reachZMin=None, reachZMax=None)   # 높이 도달 제한 없음(리프트)
+MEMBRANE_INSET_M = 0.4125   # 선체선 → 멤브레인 면 법선 거리 (검증용 — 면별 원점 이동량은 도면 외곽선과 위 치수에서 계산)
 
 WIN = 1440.0            # AREA 최대 크기 (mm)
 PAD = 30.0              # AREA = 작업 범위 + 여유(창 안으로 클리핑)
@@ -71,6 +76,15 @@ WALLS = {
 }
 
 
+def face_size(w):
+    """멤브레인 면 크기 (u 길이, v 길이) m — TankGeometry.GenerateWalls 와 같은 정의."""
+    L, Wf = g['lengthL'], g['wFloor']
+    B = Wf + 2 * hLow
+    Wc = B - 2 * hUp
+    return {'B': (L, Wf), 'SL': (L, hLow / SL45), 'PL': (L, hLow / SL45), 'SM': (L, hWall), 'PM': (L, hWall),
+            'SU': (L, hUp / SU45), 'PU': (L, hUp / SU45), 'T': (L, Wc), 'F': (B, H), 'A': (B, H)}[w]
+
+
 def pitch_ok(d):
     return any(abs(d - p) <= PITCH_TOL for p in PITCH_OK)
 
@@ -92,8 +106,20 @@ def load_wall(path, stats):
     seams = merge_segments(segment_records(es, layers))
     tops = merge_segments(segment_records([e for e in steel if first(e, 6).startswith('CENTER')], {'KC-2B Steel Wall'}))
 
-    def U(x): return round(((sx1 - x) if cfg['mu'] else (x - sx0)) / 1000.0, 4)
-    def V(y): return round(((sy1 - y) if cfg['mv'] else (y - sy0)) / 1000.0, 4)
+    # 면 원점 = 멤브레인 면 모서리. 도면 외곽선(선체선)과 멤브레인 면의 차이는 양 끝이 같으므로
+    # (팔각 단면의 균일 평행 이동) 한쪽 이동량 = (외곽선 길이 − 멤브레인 면 길이)/2.
+    ul, vl = face_size(w)
+    du = ((sx1 - sx0) / 1000.0 - ul) / 2
+    dv = ((sy1 - sy0) / 1000.0 - vl) / 2
+    t = MEMBRANE_INSET_M
+    expect_u = t
+    expect_v = t if w in ('F', 'A') else t * math.tan(math.radians(22.5))   # 직각 모서리 t · 135° 모서리 t·tan22.5°
+    if abs(du - expect_u) > 0.002 or abs(dv - expect_v) > 0.002:
+        raise SystemExit(f'{w}: 도면 외곽선→멤브레인 이동량 이상 du={du:.4f}(기대 {expect_u:.4f}) dv={dv:.4f}(기대 {expect_v:.4f})')
+    stats[w]['멤브레인 원점 이동 mm'] = f'u {du * 1000:.1f} · v {dv * 1000:.1f}'
+
+    def U(x): return round(((sx1 - x) if cfg['mu'] else (x - sx0)) / 1000.0 - du, 4)
+    def V(y): return round(((sy1 - y) if cfg['mv'] else (y - sy0)) / 1000.0 - dv, 4)
 
     # 1) TASK = seam 위에서 인접한 두 top 사이 1칸
     tasks = []
@@ -153,10 +179,10 @@ def load_wall(path, stats):
     tasks = [t for t in kept if not (id(t) in drop_ids and id(t) not in keep_ids)]
     st['제거: CROSS4 중복(세로 등)'] = len(drop_ids - keep_ids)
 
-    tu = sorted({U(t['fixed']) for t in tops if t['axis'] == 'V'})
-    tv = sorted({V(t['fixed']) for t in tops if t['axis'] == 'H'})
-    return w, dict(cfg=cfg, tasks=tasks, tu=tu, tv=tv,
-                   ulen=round((sx1 - sx0) / 1000.0, 4), vlen=round((sy1 - sy0) / 1000.0, 4))
+    # 멤브레인 면 밖(선체선~멤브레인 사이)의 top 은 AREA 창 경계로 쓰지 않는다
+    tu = sorted({u for u in (U(t['fixed']) for t in tops if t['axis'] == 'V') if 0 <= u <= ul})
+    tv = sorted({v for v in (V(t['fixed']) for t in tops if t['axis'] == 'H') if 0 <= v <= vl})
+    return w, dict(cfg=cfg, tasks=tasks, tu=tu, tv=tv, ulen=round(ul, 4), vlen=round(vl, 4))
 
 
 def windows(breaks, win_m):
@@ -169,6 +195,25 @@ def windows(breaks, win_m):
         out.append((lo, breaks[j]))
         i = j
     return out
+
+
+def bulkhead_half(v):
+    """격벽(F/A) 팔각의 높이 v 에서 반폭 m (validate 의 half 와 같은 식)."""
+    Wf = g['wFloor']
+    B = Wf + 2 * hLow
+    Wc = B - 2 * hUp
+    if v <= hLow: return Wf / 2 + v / hLow * (B / 2 - Wf / 2)
+    if v <= hLow + hWall: return B / 2
+    return B / 2 - (v - hLow - hWall) / hUp * (B / 2 - Wc / 2)
+
+
+def clamp_bulkhead_u(u, v):
+    """격벽 면 좌표 u 를 높이 v 의 팔각 안으로 당긴다(이미 안이면 그대로). 4자리 반올림이 밖으로 밀지 않게 안쪽으로 올림."""
+    c = (g['wFloor'] + 2 * hLow) / 2
+    hw = bulkhead_half(v)
+    if u < c - hw: return math.ceil((c - hw) * 1e4) / 1e4
+    if u > c + hw: return math.floor((c + hw) * 1e4) / 1e4
+    return u
 
 
 def z_range(cfg, v1, v2):
@@ -215,6 +260,11 @@ def build():
                 vmax = round(min(vb, max(max(t['p1'][1], t['p2'][1]) for t in ct) + PAD / 1000), 4)
                 ct.sort(key=lambda t: (t['dir'], t['p1'][1], t['p1'][0]))
                 name = f"L{li + 1}-R{cj + 1:02d}C{ci + 1:02d}"
+                corners = [[umin, vmax], [umax, vmax], [umax, vmin], [umin, vmin]]
+                if w in ('F', 'A'):
+                    # 격벽은 팔각 — 여유(PAD)로 잡은 사각형 모서리가 모서리 쐐기 밖으로 나가면 그 높이의
+                    # 팔각 경계까지 u 방향으로만 당긴다(작업은 그대로 영역 안 — validate 가 재확인).
+                    corners = [[clamp_bulkhead_u(u, v), v] for u, v in corners]
                 areas.append(dict(
                     wallCode=w, level=li + 1, name=name,
                     uMin=umin, vMin=vmin, uMax=umax, vMax=vmax,
@@ -222,11 +272,11 @@ def build():
                     tasks=[dict(seq=k + 1, name=f"{t['dir']}{k + 1:02d}", seamType=t['seamType'],
                                 startU=t['p1'][0], startV=t['p1'][1], endU=t['p2'][0], endV=t['p2'][1],
                                 sectionDxfId=f"WALL {w}", profileId='PROF-1',   # profileId 임시값
-                                taskId=str(uuid.uuid5(NS, f"{TANK_ID}/{w}/{t['p1']}/{t['p2']}")))
+                                sourceId=str(uuid.uuid5(NS, f"{TANK_ID}/{w}/{t['p1']}/{t['p2']}")))
                            for k, t in enumerate(ct)],
-                    corners=[[umin, vmax], [umax, vmax], [umax, vmin], [umin, vmin]],
+                    corners=corners,
                     stationStandoffM=None,
-                    areaId=str(uuid.uuid5(NS, f"{TANK_ID}/{w}/{name}"))))
+                    sourceId=str(uuid.uuid5(NS, f"{TANK_ID}/{w}/{name}"))))
     return areas, excluded, stats
 
 
@@ -274,10 +324,10 @@ def validate(areas):
         if hits != [a['level']]: err['층 유도 불일치'] += 1
         if a['wallCode'] in ('A', 'F') and any(abs(p[0] - B / 2) > half(p[1]) + 1e-6 for p in c): err['격벽 팔각 밖'] += 1
         names[(a['wallCode'], a['name'])] += 1
-        ids[a['areaId']] += 1
+        ids[a['sourceId']] += 1
         if len({t['seq'] for t in a['tasks']}) != len(a['tasks']): err['seq 중복'] += 1
         for t in a['tasks']:
-            ids[t['taskId']] += 1
+            ids[t['sourceId']] += 1
             if not (pip(t['startU'], t['startV'], c) and pip(t['endU'], t['endV'], c)): err['작업이 영역 밖'] += 1
     err['영역 이름 중복'] = sum(n > 1 for n in names.values())
     err['ID 중복'] = sum(n > 1 for n in ids.values())
