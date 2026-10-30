@@ -258,7 +258,10 @@ def build():
                 umax = round(min(ub, max(max(t['p1'][0], t['p2'][0]) for t in ct) + PAD / 1000), 4)
                 vmin = round(max(va, min(min(t['p1'][1], t['p2'][1]) for t in ct) - PAD / 1000), 4)
                 vmax = round(min(vb, max(max(t['p1'][1], t['p2'][1]) for t in ct) + PAD / 1000), 4)
-                ct.sort(key=lambda t: (t['dir'], t['p1'][1], t['p1'][0]))
+                # 순번 = 라인 순: 같은 용접선(가로=v, 세로=u)의 칸을 연속 번호로 묶고, 라인 안에서는 진행 방향 순.
+                # 종전 (방향, v, u) 정렬은 세로 작업이 높이 우선이라 이웃한 두 세로 라인을 칸마다 번갈아 갔다.
+                ct.sort(key=lambda t: (t['dir'], t['p1'][1], t['p1'][0]) if t['dir'] == 'H'
+                        else (t['dir'], t['p1'][0], t['p1'][1]))
                 name = f"L{li + 1}-R{cj + 1:02d}C{ci + 1:02d}"
                 corners = [[umin, vmax], [umax, vmax], [umax, vmin], [umin, vmin]]
                 if w in ('F', 'A'):
