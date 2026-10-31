@@ -29,6 +29,18 @@ public class AreaGeometryTests
         Assert.Equal(1.5, st[2], 6);    // z = v (참고값)
     }
 
+    /// <summary>기본 이격 — 수직벽(법선 수직 성분 0)은 수직벽 값, 45° 경사면·법선 미상은 경사면 값.</summary>
+    [Theory]
+    [InlineData(new[] { 1.0, 0, 0 }, 1.2)]                               // A·F
+    [InlineData(new[] { 0.0, -1, 0 }, 1.2)]                              // PM·SM
+    [InlineData(new[] { 0.0, 0.7071067811865475, 0.7071067811865476 }, 0.8)]   // SL
+    [InlineData(new[] { 0.0, 0.7071067811865475, -0.7071067811865476 }, 0.8)]  // SU
+    public void DefaultStandoff_ByWallKind(double[] normal, double expected)
+        => Assert.Equal(expected, AreaGeometry.DefaultStandoffM(normal, 1.2, 0.8));
+
+    [Fact]
+    public void DefaultStandoff_UnknownNormal_IsInclined() => Assert.Equal(0.8, AreaGeometry.DefaultStandoffM(null, 1.2, 0.8));
+
     /// <summary>기울어진 챔퍼면 법선은 수평 성분만 정규화해 사용 — 이격 거리는 바닥 평면에서 standoff. [standoff 정차]</summary>
     [Fact]
     public void StationDrawing_NormalizesTiltedNormalHorizontally()

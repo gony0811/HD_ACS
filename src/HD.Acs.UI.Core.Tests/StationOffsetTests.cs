@@ -112,8 +112,9 @@ public class StationOffsetTests
         Assert.Equal(-1.0, vm.StationDx, 6);
         Assert.Equal(0.2, vm.StationDy, 6);
 
-        vm.StationStandoffM = null;                                   // 빈값 = 서버 기본 0.8
-        Assert.Equal(6.0 - AreaPlanningViewModel.DefaultStandoffM, vm.AutoStation!.Value.Y, 6);
+        vm.StationStandoffM = null;                                   // 빈값 = 서버 기본(PM 은 수직벽 1.2)
+        Assert.Equal(AreaPlanningViewModel.DefaultVerticalStandoffM, vm.DefaultStandoffForWall);
+        Assert.Equal(6.0 - AreaPlanningViewModel.DefaultVerticalStandoffM, vm.AutoStation!.Value.Y, 6);
     }
 
     private static async Task WaitAsync(Func<bool> cond)

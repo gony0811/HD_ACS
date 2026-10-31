@@ -93,7 +93,7 @@ public class PlannedStationTests
         Assert.Equal(2, plan!.Stations.Count);   // 연결 0건 = 선창 전체
         var fs = plan.Stations.Single(s => s.AreaId == f.AreaId);
         Assert.Equal((1.0, -2.0, 0.5, true), (fs.X, fs.Y, fs.Yaw!.Value, fs.Manual));
-        Assert.Equal(0.8, plan.Stations.Single(s => s.AreaId == pm.AreaId).StandoffM);   // 기본 이격
+        Assert.Equal(1.2, plan.Stations.Single(s => s.AreaId == pm.AreaId).StandoffM);   // 수직벽 기본 이격
 
         Assert.Null(await d.GetPlannedStationsAsync(Guid.NewGuid(), default));
     }

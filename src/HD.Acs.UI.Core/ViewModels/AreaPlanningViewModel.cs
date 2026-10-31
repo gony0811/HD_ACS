@@ -108,14 +108,21 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private double _stationDx;
     [ObservableProperty] private double _stationDy;
     [ObservableProperty] private double _stationTheta;
-    // 정차 이격 [m] — 정차점 = 영역 중심 + 내부향 법선 수평성분 × 이격. null(빈값)=서버 설정 기본(0.8m)
+    // 정차 이격 [m] — 정차점 = 영역 중심 + 내부향 법선 수평성분 × 이격. null(빈값)=서버 설정 기본(수직벽 1.2m · 경사면 0.8m)
     [ObservableProperty] private double? _stationStandoffM;
     // 정차 보정 후진 상한 [mm] — AMR 이 리치 부족 시 물러나도 되는 최대 거리 [VDA §4.4.2 N23]. null(빈값)=서버 설정 기본(400),
     // 0=이 영역은 후진 금지. 정차점 뒤 공간(맞은편 구조물·층 경계)이 좁은 영역만 줄인다 — 뒤 범퍼는 중심 뒤 365 + 이 값까지 간다.
     [ObservableProperty] private double? _stationMaxBackwardMm;
 
-    /// <summary>서버 <c>Acs:Area:StationStandoffM</c> 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
+    /// <summary>서버 <c>Acs:Area:StationStandoffM</c>(경사면) 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
     public const double DefaultStandoffM = 0.8;
+
+    /// <summary>서버 <c>Acs:Area:VerticalStationStandoffM</c>(수직벽 A·F·SM·PM) 기본값 — 서버 설정을 바꾸면 함께 맞출 것.</summary>
+    public const double DefaultVerticalStandoffM = 1.2;
+
+    /// <summary>선택한 면의 기본 이격 — 서버 <c>AreaGeometry.DefaultStandoffM</c> 과 같은 판정(법선 수직 성분 ≈ 0 이면 수직벽).</summary>
+    public double DefaultStandoffForWall
+        => SelectedWall?.Normal is { Length: >= 3 } n && Math.Abs(n[2]) < 0.1 ? DefaultVerticalStandoffM : DefaultStandoffM;
 
     /// <summary>
     /// 자동 정차점(도면 x,y) — 서버 <c>AreaGeometry.StationDrawing</c>과 같은 식: 코너 4점 평균(면-로컬)을 면 프레임으로 올리고
@@ -129,7 +136,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var c = InputCorners();
             double uc = c.Average(p => p[0]), vc = c.Average(p => p[1]) + VOff;   // 층-로컬 → 면-전체 v
             double x = o[0] + uc * u[0] + vc * v[0], y = o[1] + uc * u[1] + vc * v[1];
-            double standoff = StationStandoffM ?? DefaultStandoffM;
+            double standoff = StationStandoffM ?? DefaultStandoffForWall;
             if (StandoffApplicable && standoff > 0 && w.Normal is { } n)
             {
                 double h = Math.Sqrt(n[0] * n[0] + n[1] * n[1]);

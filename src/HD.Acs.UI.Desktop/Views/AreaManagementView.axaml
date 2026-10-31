@@ -68,7 +68,7 @@
                             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding C4V}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,2" IsEnabled="{Binding StandoffApplicable}"
-                                    ToolTip.Tip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(0.8m). 바닥/천장(B/T) 면은 적용되지 않음.">
+                                    ToolTip.Tip="정차점 = 영역 중심에서 벽 내부향 법선(수평) 방향으로 이 거리만큼 이격. 빈값=서버 기본(수직벽 A·F·SM·PM 1.2m · 경사면 0.8m). 바닥/천장(B/T) 면은 적용되지 않음.">
                             <TextBlock Text="정차 이격[m]" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Value="{Binding StationStandoffM}" />
                         </StackPanel>

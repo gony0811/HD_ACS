@@ -27,6 +27,15 @@ public static class AreaGeometry
         return Vec3.Add(center, Vec3.Scale(h, standoffM));
     }
 
+    /// <summary>
+    /// 면 종류별 기본 정차 이격 [m] — 수직벽(법선의 수직 성분 ≈ 0: A·F·SM·PM)은 <paramref name="verticalM"/>,
+    /// 경사면(SL·PL·SU·PU)은 <paramref name="inclinedM"/>. 바닥·천장은 이격이 적용되지 않으므로 무엇을 돌려도 같다.
+    /// 수직벽을 따로 두는 이유: FR5-WML 오프라인 리치 분석(2026-10-31)에서 0.8m 는 수직벽 용접선이 하나도 닿지 않았고
+    /// 1.2m 에서 전부 닿았다(플랜지 뻗음 부족·팔 과접힘). 경사면은 필요한 이동이 0~700mm 로 흩어져 기존값을 유지한다.
+    /// </summary>
+    public static double DefaultStandoffM(double[]? wallNormal, double verticalM, double inclinedM)
+        => wallNormal is { Length: >= 3 } && Math.Abs(wallNormal[2]) < 0.1 ? verticalM : inclinedM;
+
     /// <summary>영역 중앙 (디폴트 정차 위치). [정차각 자동화]</summary>
     public static (double X, double Y) AreaCenter(double minX, double minY, double maxX, double maxY) =>
         ((minX + maxX) / 2.0, (minY + maxY) / 2.0);

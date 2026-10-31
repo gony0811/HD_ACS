@@ -39,6 +39,7 @@ public sealed class InspectionDispatcher
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
+        _verticalStationStandoffM = config.GetValue("Acs:Area:VerticalStationStandoffM", 1.2);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
         _allowedDevTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07);
         _robotStaleAfter = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:RobotStateStaleSec", 10.0));
@@ -114,7 +115,12 @@ public sealed class InspectionDispatcher
     }
 
 
-    private readonly double _stationStandoffM;
+    private readonly double _stationStandoffM;            // 경사면 기본 이격 [m]
+    private readonly double _verticalStationStandoffM;    // 수직벽 기본 이격 [m]
+
+    /// <summary>이 면의 기본 정차 이격 — 영역 덮어쓰기(station_standoff_m)가 없을 때 쓴다.</summary>
+    private double DefaultStandoffM(WallEntity wall)
+        => AreaGeometry.DefaultStandoffM(Json<double[]>(wall.Normal), _verticalStationStandoffM, _stationStandoffM);
     private readonly double _allowedDevXy;
     private readonly double _allowedDevTheta;
 
@@ -171,11 +177,11 @@ public sealed class InspectionDispatcher
         foreach (var a in areas)
         {
             if (!walls.TryGetValue(a.WallCode, out var wall)) continue;
-            var (x, y, yaw) = StationDrawingOf(a, wall, _stationStandoffM);
+            var (x, y, yaw) = StationDrawingOf(a, wall, DefaultStandoffM(wall));
             var u = Json<double[]>(wall.UAxis);
             var n = Json<double[]>(wall.Normal);
             list.Add(new PlannedStation(a.AreaId, a.Name, a.WallCode, a.Level, $"{sc.TankId}-L{a.Level}",
-                x, y, yaw, a.StationStandoffM ?? _stationStandoffM,
+                x, y, yaw, a.StationStandoffM ?? DefaultStandoffM(wall),
                 a.StationX is not null || a.StationY is not null,
                 Horizontal(u), Horizontal(n)));
         }
@@ -269,7 +275,7 @@ public sealed class InspectionDispatcher
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
         // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
-        var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, _stationStandoffM);
+        var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
         var (mx, my) = tWd.DrawingToMap(stationDx, stationDy);
         double? mTheta = stationYaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 
@@ -628,7 +634,7 @@ public sealed class InspectionDispatcher
         var tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
 
         // 정차점(standoff) 도면 → 맵 (배차와 동일식 StationDrawingOf)
-        var (sdx, sdy, syaw) = StationDrawingOf(area, wall, _stationStandoffM);
+        var (sdx, sdy, syaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
         var (mx, my) = tWd.DrawingToMap(sdx, sdy);
         double? mTheta = syaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 

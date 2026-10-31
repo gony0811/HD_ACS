@@ -191,14 +191,14 @@ CREATE TABLE ref.area_task (
 1. `C = To3D(wall, uc, vc)` (면 위 3D 점)
 2. `n_h` = 면 법선(`ref.wall.normal`, 내부향)의 수평 성분 정규화 (n.x, n.y)/‖·‖
 3. **정차 위치(도면) = (C.x, C.y) + n_h × station_standoff** — 면에서 선창 내부로 standoff만큼 물러난 바닥 점.
-   standoff = 영역별 `station_standoff_m`(등록 시 입력) ?? 설정 `Acs:Area:StationStandoffM`(기본 0.8 m)
+   standoff = 영역별 `station_standoff_m`(등록 시 입력) ?? 면 종류별 설정 — 수직벽(A·F·SM·PM) `Acs:Area:VerticalStationStandoffM`(기본 1.2 m), 경사면 `Acs:Area:StationStandoffM`(기본 0.8 m)
 4. **정차 방향 = facing_yaw** (= −n_h 방향, 면을 바라봄)
 5. 수동 오버라이드(`station_x/y/theta`)가 있으면 그것을 사용 (최우선)
 6. **예외 — `B`(바닥)·`T`(천장) 영역은 n_h가 없으므로 이격 없이 중심 투영 폴백** — `station_x/y/theta` 수동 지정 권장
 7. 검증: 정차점의 소속 층은 `area.level`과 일치해야 하며(level_z로 판단은 z=층 바닥 고정이므로
    자동 성립), 해당 층 활성 맵 + 유효 T_W_D 필수 — 하나라도 없으면 전체 생성 실패(400 + reasons)
 
-설정: 정차 이격 `Acs:Area:StationStandoffM`(기본 0.8 m) · 툴 이격 `Acs:Area:StandoffMm`(기본 400 mm, payload) ·
+설정: 정차 이격 수직벽 `Acs:Area:VerticalStationStandoffM`(기본 1.2 m)·경사면 `Acs:Area:StationStandoffM`(기본 0.8 m) · 툴 이격 `Acs:Area:StandoffMm`(기본 400 mm, payload) ·
 `Acs:Area:WorkingDistanceMm`(기본 = StandoffMm). 정차 이격(로봇 위치)과 툴 이격(코봇-표면 거리)은 별개 파라미터다.
 정차 보정 후진 상한: 영역별 `station_max_backward_mm`(계획 화면 '후진 상한[mm]') ?? 설정 `Acs:Dispatch:StationAdjust:MaxBackwardMm`(기본 400 mm).
 정차 위치가 아니라 AMR 이 리치 부족 시 물러나도 되는 **한도**다 [VDA §4.4.2 N23]. 정차점 뒤가 좁은 영역만 줄이고(0 = 후진 금지), 비워 두면 전역값.

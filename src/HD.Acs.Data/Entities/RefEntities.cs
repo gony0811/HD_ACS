@@ -190,7 +190,7 @@ public class InspectionAreaEntity
     public double? StationX { get; set; }               // 정차 수동 오버라이드 (도면 프레임 x,y + theta; 발행 시 T_W_D 적용). FL/CL 필수(§5)
     public double? StationY { get; set; }
     public double? StationTheta { get; set; }
-    public double? StationStandoffM { get; set; }       // 정차 이격 [m] — NULL=설정 기본(Acs:Area:StationStandoffM)
+    public double? StationStandoffM { get; set; }       // 정차 이격 [m] — NULL=설정 기본(수직벽 Acs:Area:VerticalStationStandoffM, 경사면 Acs:Area:StationStandoffM)
     public double? StationMaxBackwardMm { get; set; }   // 정차 보정 후진 상한 [mm] — NULL=설정 기본(Acs:Dispatch:StationAdjust:MaxBackwardMm) [VDA §4.4.2 N23]
     public int SortOrder { get; set; }
     public string? CreatedBy { get; set; }
