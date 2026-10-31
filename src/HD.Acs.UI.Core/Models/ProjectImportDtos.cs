@@ -20,7 +20,8 @@ public sealed record ProjectImportTaskDto(int? Seq, string? Name, string? SeamTy
 public sealed record ProjectImportAreaDto(string WallCode, string Name, double[][]? Corners,
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
-    int? SortOrder, Guid? AreaId, ProjectImportTaskDto[] Tasks);
+    int? SortOrder, Guid? AreaId, ProjectImportTaskDto[] Tasks,
+    double? StationMaxBackwardMm = null);
 
 public sealed record ProjectImportRequestDto(ProjectImportGeometryDto Geometry, ProjectImportAreaDto[] Areas, string? UserId);
 

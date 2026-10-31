@@ -309,6 +309,7 @@ CREATE TABLE ref.inspection_area (
   station_y     double precision,
   station_theta double precision,
   station_standoff_m double precision,     -- 정차 이격 [m] — 영역 중심에서 내부향 법선 수평성분 방향. NULL=설정 기본
+  station_max_backward_mm double precision, -- 정차 보정 후진 상한 [mm] (VDA §4.4.2 N23). NULL=설정 기본, 0=후진 금지
 
   sort_order    int  NOT NULL DEFAULT 0,
   created_by    text,

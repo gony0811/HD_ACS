@@ -200,6 +200,8 @@ CREATE TABLE ref.area_task (
 
 설정: 정차 이격 `Acs:Area:StationStandoffM`(기본 0.8 m) · 툴 이격 `Acs:Area:StandoffMm`(기본 400 mm, payload) ·
 `Acs:Area:WorkingDistanceMm`(기본 = StandoffMm). 정차 이격(로봇 위치)과 툴 이격(코봇-표면 거리)은 별개 파라미터다.
+정차 보정 후진 상한: 영역별 `station_max_backward_mm`(계획 화면 '후진 상한[mm]') ?? 설정 `Acs:Dispatch:StationAdjust:MaxBackwardMm`(기본 400 mm).
+정차 위치가 아니라 AMR 이 리치 부족 시 물러나도 되는 **한도**다 [VDA §4.4.2 N23]. 정차점 뒤가 좁은 영역만 줄이고(0 = 후진 금지), 비워 두면 전역값.
 
 ## 6. payload 계약 (v2 확정안 유지 — wallNormalW 없음)
 

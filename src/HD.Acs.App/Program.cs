@@ -303,6 +303,8 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
 
     if (req.StationStandoffM is < 0)
         return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
+    if (req.StationMaxBackwardMm is < 0)
+        return Results.BadRequest(new { error = "정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다." });
     bool dup = await db.InspectionAreas.AsNoTracking()
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
@@ -318,7 +320,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         Corners = System.Text.Json.JsonSerializer.Serialize(corners),
         UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
-        StationStandoffM = req.StationStandoffM,
+        StationStandoffM = req.StationStandoffM, StationMaxBackwardMm = req.StationMaxBackwardMm,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
     db.InspectionAreas.Add(area);
@@ -350,6 +352,8 @@ app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req
         return Results.BadRequest(new { error = $"층 유도 실패 (면 {area.WallCode}): {reason}", reason });
     if (req.StationStandoffM is < 0)
         return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
+    if (req.StationMaxBackwardMm is < 0)
+        return Results.BadRequest(new { error = "정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다." });
     var outside = AreaRules.TasksOutside(corners, area.Tasks);
     if (outside.Count > 0)
         return Results.BadRequest(new { error = $"기존 작업이 새 영역 밖으로 나갑니다 (seq {string.Join(", ", outside)}) — 작업을 먼저 옮기거나 영역을 넓히세요." });
@@ -364,12 +368,13 @@ app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req
     area.Level = derivedLevel.Value;
     area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
     area.StationStandoffM = req.StationStandoffM;
+    area.StationMaxBackwardMm = req.StationMaxBackwardMm;
     if (req.SortOrder is int so) area.SortOrder = so;
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {
         UserId = req.UserId ?? "", Action = "AREA_UPDATE", Target = areaId.ToString(),
         Detail = System.Text.Json.JsonSerializer.Serialize(new
-        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM }),
+        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM, area.StationMaxBackwardMm }),
     });
     await db.SaveChangesAsync();
     return Results.Ok(new { areaId, level = area.Level });
@@ -385,7 +390,7 @@ app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? 
     {
         a.AreaId, a.TankId, a.WallCode, a.Level, a.Name,
         corners = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners),
-        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM, a.SortOrder,
+        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM, a.StationMaxBackwardMm, a.SortOrder,
         TaskCount = a.Tasks.Count
     }));
 });
@@ -1055,11 +1060,13 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
     double[][]? Corners = null, double? StationStandoffM = null,
-    Guid? AreaId = null);   // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
+    Guid? AreaId = null,    // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
+    double? StationMaxBackwardMm = null);   // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
 // 영역 수정(PUT) — 이름·코너·정차 전체 교체(정차 null=수동 지정 해제, 이격 null=서버 기본). SortOrder null=유지. 면·areaId 불변.
 public sealed record UpdateAreaRequest(string Name, double[][] Corners,
     double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
-    int? SortOrder = null, string? UserId = null);
+    int? SortOrder = null, string? UserId = null,
+    double? StationMaxBackwardMm = null);   // 전체 교체 — null=서버 기본(덮어쓰기 해제)
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
     Guid? TaskId = null,    // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급

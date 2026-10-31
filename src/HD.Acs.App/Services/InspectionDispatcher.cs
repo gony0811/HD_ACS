@@ -519,6 +519,12 @@ public sealed class InspectionDispatcher
 
         var actionsJson = wi.Actions is null ? new JsonArray() : JsonNode.Parse(wi.Actions)!.AsArray();
 
+        // 정차 보정 허용 범위 — 전역 설정에 영역별 후진 상한 덮어쓰기를 얹는다 [VDA §4.4.2 / N23].
+        // 발행 시점에 읽으므로 run 도중 영역 값을 고쳐도 다음 정차부터 반영된다.
+        var stationAdjust = _stationAdjust is null ? null
+            : _stationAdjust.ForArea(await _db.InspectionAreas.AsNoTracking()
+                .Where(a => a.AreaId == wi.AreaId).Select(a => a.StationMaxBackwardMm).FirstOrDefaultAsync(ct));
+
         // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
         // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
         var stopTaskIds = actionsJson
@@ -540,7 +546,7 @@ public sealed class InspectionDispatcher
                     run.RunId, taskId, TaskAttempt.Max);
             var prm = o["params"]?.DeepClone() as JsonObject ?? new JsonObject();
             prm["attempt"] = attempt;
-            if (StationAdjustLimits.ToParam(_stationAdjust, wi.Theta) is { } adjust)
+            if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction
             {

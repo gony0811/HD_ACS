@@ -46,6 +46,18 @@ public class AreaUpdateTests
         Assert.True(vm.UpdateAreaCommand.CanExecute(null));
     }
 
+    /// <summary>후진 상한 빈값 = 덮어쓰기 해제(null 전송 → 서버 기본).</summary>
+    [Fact]
+    public async Task UpdateArea_ClearedMaxBackward_SendsNull()
+    {
+        var (vm, server) = await BuildAsync();
+        Assert.Equal(150, vm.StationMaxBackwardMm);   // 폼 채우기
+        vm.StationMaxBackwardMm = null;
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        var (_, _, body) = Assert.Single(server.Writes);
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("stationMaxBackwardMm").ValueKind);
+    }
+
     [Fact]
     public async Task NoSelection_UpdateDisabled()
     {
@@ -72,6 +84,7 @@ public class AreaUpdateTests
         Assert.Equal(4.2, c[2][0].GetDouble(), 9);
         Assert.Equal(JsonValueKind.Null, body.GetProperty("stationX").ValueKind); // 수동 정차 해제 = null 전송
         Assert.Equal(1.2, body.GetProperty("stationStandoffM").GetDouble());
+        Assert.Equal(150, body.GetProperty("stationMaxBackwardMm").GetDouble());   // 영역 후진 상한(N23) 유지 — 전체 교체라 빠지면 해제된다
 
         Assert.Equal(Area, vm.SelectedArea?.AreaId);                            // 새로고침 후에도 선택 유지
         Assert.Contains("areaId·작업 유지", vm.StatusMessage);
@@ -130,7 +143,7 @@ public class AreaUpdateTests
                         areaId = Area, tankId = "CT1", wallCode = "PM", level = 2, name = "PM-L2-01",
                         corners = new[] { new[] { 3.0, 3.0 }, new[] { 4.0, 3.0 }, new[] { 4.0, 4.2 }, new[] { 3.0, 4.2 } },
                         uMin = 3.0, vMin = 3.0, uMax = 4.0, vMax = 4.2, stationX = -20.0, stationY = 5.0, stationTheta = 1.57,
-                        stationStandoffM = 1.2, sortOrder = 0, taskCount = 0,
+                        stationStandoffM = 1.2, stationMaxBackwardMm = 150.0, sortOrder = 0, taskCount = 0,
                     },
                 });
             if (path == $"/api/internal/areas/{Area}/tasks")

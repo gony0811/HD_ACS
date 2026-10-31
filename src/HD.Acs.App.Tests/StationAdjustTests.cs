@@ -26,6 +26,19 @@ public class StationAdjustTests
     public void NegativeOrNaN_Rejected(double f, double b, double l, double t)
         => Assert.Throws<ArgumentOutOfRangeException>(() => StationAdjustLimits.Normalize(true, f, b, l, t));
 
+    /// <summary>영역별 후진 상한 덮어쓰기 — null=전역값 유지, 값=후진만 교체(다른 한계 유지), 0=그 영역 후진 금지.</summary>
+    [Theory]
+    [InlineData(null, 400)]
+    [InlineData(150.0, 150)]
+    [InlineData(0.0, 0)]
+    public void ForArea_OverridesBackwardOnly(double? area, double expected)
+    {
+        var l = Limits.ForArea(area);
+        Assert.Equal(expected, l.MaxBackwardMm);
+        Assert.Equal((Limits.MaxForwardMm, Limits.MaxLateralMm, Limits.MaxThetaDeg), (l.MaxForwardMm, l.MaxLateralMm, l.MaxThetaDeg));
+        Assert.Equal(expected, StationAdjustLimits.ToParam(l, 1.0)!["maxBackwardMm"]!.GetValue<double>());   // 0 이어도 필드는 실림
+    }
+
     /// <summary>바닥·천장처럼 정차각이 없는 정차는 정면 프레임이 없어 보정 범위를 싣지 않는다.</summary>
     [Fact]
     public void NoStationTheta_OmitsField()

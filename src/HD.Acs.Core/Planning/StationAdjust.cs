@@ -32,6 +32,14 @@ public sealed record StationAdjustLimits(double MaxForwardMm, double MaxBackward
         };
     }
 
+    /// <summary>
+    /// 영역별 후진 상한 덮어쓰기(<c>ref.inspection_area.station_max_backward_mm</c>) 적용. null 이면 전역값 그대로,
+    /// 0 이면 그 영역은 후진 보정 금지(다른 한계는 유지 — 필드는 계속 실어 AMR 이 "후진 허락 0"으로 기록).
+    /// 정차점 뒤 공간이 좁은 영역만 줄이는 용도다 — AMR 뒤 범퍼는 원래 정차점 중심 뒤로 365 + 후진량까지 간다.
+    /// </summary>
+    public StationAdjustLimits ForArea(double? areaMaxBackwardMm)
+        => areaMaxBackwardMm is { } b ? this with { MaxBackwardMm = b } : this;
+
     /// <summary>음수·NaN 거부. 전부 0이면 보정 금지와 같으므로 꺼짐(null)으로 정규화.</summary>
     public static StationAdjustLimits? Normalize(bool enabled,
         double maxForwardMm, double maxBackwardMm, double maxLateralMm, double maxThetaDeg)

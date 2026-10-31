@@ -341,14 +341,15 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
-        double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default)
+        double? stationStandoffM = null, Guid? areaId = null, double? stationMaxBackwardMm = null,
+        CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
             TankId = tankId, WallCode = wallCode, Name = name,
             Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
-            StationStandoffM = stationStandoffM,
+            StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm,
             AreaId = areaId   // null=서버 발급. 지정=식별자 보존 등록(.hdacs 재적재)
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
@@ -358,13 +359,13 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
-        CancellationToken ct = default)
+        double? stationMaxBackwardMm = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/areas/{areaId}", new
         {
             Name = name, Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta,
-            StationStandoffM = stationStandoffM, UserId = userId
+            StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm, UserId = userId
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);

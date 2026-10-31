@@ -80,11 +80,12 @@ public interface IAcsApiClient
     Task<(Guid AreaId, int Level)> CreateAreaAsync(string tankId, string wallCode, string name,
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
-        double? stationStandoffM = null, Guid? areaId = null, CancellationToken ct = default);
+        double? stationStandoffM = null, Guid? areaId = null, double? stationMaxBackwardMm = null,
+        CancellationToken ct = default);
     /// <summary>영역 수정(PUT) — areaId·면 유지, 이름·코너(면-전체 v)·정차 전체 교체. 반환=재유도된 층.</summary>
     Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
-        CancellationToken ct = default);
+        double? stationMaxBackwardMm = null, CancellationToken ct = default);
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,

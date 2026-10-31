@@ -19,7 +19,7 @@
 | | ref.inspection_point | 검사 지점 → 노드 참조 (층 자동 결정) | |
 | | ref.inspection_task | 검사 작업 참조 (job_ref + position + opaque params) | ADR-001/004 |
 | **ref 벽면** | ref.wall | 벽면 레지스트리 + HD_AMR 티칭 키 (tank_id, level, wall_code, description). 정차각 미저장(seam 기하에서 자동 산출) [TANK_WALL_LAYOUT §6.3] | 정차각 자동화 |
-| **ref 영역** | ref.inspection_area | 검사 영역 = STATION 1개 = anchorGroup 1개 (면-로컬 **임의 4점 사각형** `corners` jsonb, u/v_min·max=서버 유도 bbox, ref.wall FK). **level = 서버 유도값**(영역 z범위→층 도달 밴드, [SPEC v3.1 §5-A]). `station_standoff_m` = 정차 이격[m](NULL=설정 기본 0.8 — 정차점=중심+내부향 법선 수평성분×이격, [SPEC_AREA §5]). 작업 경계검증=point-in-polygon. 입력 규약은 [TANK_WALL_LAYOUT §6](TANK_WALL_LAYOUT.md) | v3.1 + quad + standoff |
+| **ref 영역** | ref.inspection_area | 검사 영역 = STATION 1개 = anchorGroup 1개 (면-로컬 **임의 4점 사각형** `corners` jsonb, u/v_min·max=서버 유도 bbox, ref.wall FK). **level = 서버 유도값**(영역 z범위→층 도달 밴드, [SPEC v3.1 §5-A]). `station_standoff_m` = 정차 이격[m](NULL=설정 기본 0.8 — 정차점=중심+내부향 법선 수평성분×이격, [SPEC_AREA §5]). `station_max_backward_mm` = 정차 보정 후진 상한[mm](NULL=설정 `Acs:Dispatch:StationAdjust:MaxBackwardMm` 기본 400, 0=후진 금지 — [VDA §4.4.2 N23], 2026-10-31). 작업 경계검증=point-in-polygon. 입력 규약은 [TANK_WALL_LAYOUT §6](TANK_WALL_LAYOUT.md) | v3.1 + quad + standoff |
 | | ref.area_task | 영역 내 검사 작업 (seam 시작/끝 도면 좌표, 영역 내 순서 seq) | PHASE2 개정 |
 | | ref.scenario_area | 시나리오 검사 대상 영역 연결 [부분 검사 계획] — 연결 0건=선창 전체(하위호환), sort_order는 표시용(배차는 greedy) | 부분 검사 |
 | | ref.weld_seam | 도면 seam 자동 슬라이싱 원천 (WP-2, **dormant** — 운영 워크플로우 제외) | PHASE2 |

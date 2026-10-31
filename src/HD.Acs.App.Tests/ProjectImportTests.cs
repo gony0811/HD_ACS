@@ -66,6 +66,21 @@ public class ProjectImportTests
         Assert.Single(db.AuditLogs.Where(x => x.Action == "PROJECT_IMPORT"));
     }
 
+    /// <summary>영역별 후진 상한(N23)도 파일에서 그대로 복원 — 구파일(null)은 서버 기본, 음수는 거부.</summary>
+    [Fact]
+    public async Task Import_KeepsStationMaxBackward_RejectsNegative()
+    {
+        var (svc, db) = Build();
+        await svc.ImportAsync("CT1", new ProjectImportRequest(Geometry(),
+            new[] { A("PM-L2-01", AreaA, PmCorners, T(1, Task1)) with { StationMaxBackwardMm = 150 } }, "tester"));
+        Assert.Equal(150, (await db.InspectionAreas.SingleAsync()).StationMaxBackwardMm);
+
+        var bad = new ProjectImportRequest(Geometry(),
+            new[] { A("PM-L2-02", Guid.NewGuid(), PmCorners, T(1, Guid.NewGuid())) with { StationMaxBackwardMm = -1 } }, "tester");
+        var ex = await Assert.ThrowsAsync<ProjectImportService.ImportRejectedException>(() => svc.ImportAsync("CT1", bad));
+        Assert.Contains("stationMaxBackwardMm", ex.Message);
+    }
+
     [Fact]
     public async Task Reject_OneBadTask_LeavesExistingDataUntouched()
     {

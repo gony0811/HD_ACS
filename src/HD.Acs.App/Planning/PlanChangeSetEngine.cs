@@ -217,7 +217,7 @@ public sealed class PlanChangeSetEngine
                 list.Add(new AtomicOp
                 {
                     Kind = "createArea", Source = src, AreaId = newId, WallCode = srcArea.WallCode, Name = op.Name.Trim(),
-                    StandoffM = op.StandoffM ?? srcArea.StationStandoffM,
+                    StandoffM = op.StandoffM ?? srcArea.StationStandoffM, MaxBackwardMm = srcArea.StationMaxBackwardMm,
                     Corners = srcCorners.Select(p => new[] { p[0] + du, p[1] + dv }).ToArray(),
                 });
                 if (op.CopyTasks ?? true)
@@ -509,7 +509,7 @@ public sealed class PlanChangeSetEngine
         {
             AreaId = a.AreaId ?? Guid.NewGuid(), TankId = ws.TankId, WallCode = wall.WallCode, Level = level, Name = a.Name!,
             Corners = JsonSerializer.Serialize(corners), UMin = bb.MinU, VMin = bb.MinV, UMax = bb.MaxU, VMax = bb.MaxV,
-            StationStandoffM = a.StandoffM, CreatedBy = "planning-assistant",
+            StationStandoffM = a.StandoffM, StationMaxBackwardMm = a.MaxBackwardMm, CreatedBy = "planning-assistant",
         };
         _db.InspectionAreas.Add(e);
         ws.Areas.Add(e);

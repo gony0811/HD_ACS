@@ -95,6 +95,8 @@ public sealed record AtomicOp
     public string? Name { get; init; }
     public double[][]? Corners { get; init; }
     public double? StandoffM { get; init; }
+    /// <summary>createArea: 정차 보정 후진 상한 [mm] — copyArea 가 원본 값을 이어받는다(LLM op 에는 노출하지 않음).</summary>
+    public double? MaxBackwardMm { get; init; }
     /// <summary>updateArea: 영역과 함께 소속 작업도 (du,dv) 이동.</summary>
     public double? MoveTasksDu { get; init; }
     public double? MoveTasksDv { get; init; }
