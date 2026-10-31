@@ -211,7 +211,9 @@ theta       = 벽을 정면으로 바라보는 방향
 ```
 
 - **정차 이격(기본 0.8 m, 영역별 설정 가능)이 이미 반영되어 있다** — 목표점이 벽면에 붙어 있지 않다.
-  이격 값은 "벽면 ↔ 로봇 기준점(중심)" 거리이므로, 실제 차체-벽 여유 = 이격 − 로봇 반폭 − allowedDeviationXY.
+  이격 값은 "벽면 ↔ 로봇 기준점(중심)" 거리이므로, 실제 차체-벽 여유 = 이격 − **로봇 중심→앞 길이** − allowedDeviationXY.
+  (검사 정차는 theta 가 벽 정면이라 벽을 향하는 것은 차체 **앞면**이다 — 종전 표기 "반폭"은 정정, 2026-10-31.)
+  AMR 운용 외곽(STEP `E26003-E-A000-000-0(261028)` 파싱, 2026-10-31 — 인양용 호이스트 블록·안테나는 **탈거 운용**): 길이 730 × 폭 700 mm, **중심→앞 395**(전방 카메라 포함, 외피 365)·**중심→뒤 365**·반폭 350, 회전 중심 = 차체 중심, 제자리 회전 반경 ≈ 506 mm. 기본 이격 0.8 m·allowedDeviationXY 0.2 m(ACS 현장 설정)면 벽 여유 ≈ 205 mm.
 - 바닥(B)/천장(T) 영역은 수평 법선이 없어 이격 없이 중심 투영이 오며, 운영자 수동 지정 좌표가 올 수도 있다.
 - **책임 경계**: ACS의 정차점은 "목표"일 뿐이며, 접근 경로 계획·장애물(벽 포함) 충돌 회피는 **AMR 자율 주행 책임**이다.
   목표점이 도달 불가하면 진입을 강행하지 말고 `state.errors`(주행 실패 유형)로 보고할 것 (§6.4, §9.5 실패 정책으로 처리).
@@ -248,8 +250,8 @@ theta       = 벽을 정면으로 바라보는 방향
 1. **기준은 언제나 원래 `nodePosition`** 이다. 도착 판정(`allowedDeviation*`)을 원래 정차점으로 먼저 통과한 뒤 보정한다. 액션 사이에 다시 옮겨도 되지만, 누적이 아니라 원래 정차점 기준으로 범위 안이어야 한다.
 2. **프레임**: 전진축 = 노드 `theta` 방향, 횡축 = 그 좌측(+90°). `theta`가 없는 정차(바닥 B·천장 T)에는 필드가 오지 않는다.
 3. **필드가 없으면 보정하지 않는다**(종전 동작). 필드 일부만 오는 경우는 ACS 스키마가 막는다.
-4. **충돌 회피는 여전히 AMR 책임**(§4.4). 범위는 "허락"이지 "안전 보장"이 아니다. 차체-벽 여유 = 정차 이격 − `maxForwardMm` − 로봇 반폭 − `allowedDeviationXY`. 벽 쪽 보정은 이 여유를 직접 깎으므로 기본 0이다.
-5. **범위 안에서 리치를 만들 수 없으면** 옮기지 않고(또는 원위치) 종전대로 해당 액션을 `FAILED`로 보고한다. 재정차 요청 신호는 N18 (c)와 통합 협의한다.
+4. **충돌 회피는 여전히 AMR 책임**(§4.4). 범위는 "허락"이지 "안전 보장"이 아니다. 차체-벽 여유 = 정차 이격 − `maxForwardMm` − 로봇 중심→앞 길이(395 mm) − `allowedDeviationXY`. 벽 쪽 보정은 이 여유를 직접 깎으므로 기본 0이다. 후진 보정은 원래 정차점 중심에서 **뒤로 365 + `maxBackwardMm` mm**(기본 400 → 765 mm)까지 비어 있어야 한다 — 영역별 뒤 공간(맞은편 구조물·통로 폭) 판단은 선창 지오메트리를 가진 **ACS 몫**이다.
+5. **범위 안에서 리치를 만들 수 없으면** 옮기지 않고(또는 원위치) 해당 액션을 `FAILED`로 보고하고, `errors[]`에 **`stationReachShortfall`**(§6.4)을 싣는다. ACS는 액션별 `STATION_REACH_SHORTFALL` 알람으로 영역과 원래 정차점 기준 필요 총 후진량을 운영자에게 보이고, 운영자가 영역 정차 이격을 고친다. **1단계는 자동 재정차하지 않는다**(뒤 공간 판단이 사람 몫 — 자동화는 2단계 리치 모델 계획에서).
 6. **보고**: 실제 정차 위치는 `state.agvPosition`에 이미 나온다. 그에 더해, 보정한 정차의 **첫 액션** `resultDescription` 앞머리에 다음 토큰을 붙인다(ACS가 계획 개선용으로 수집):
    ```
    stationAdjusted dF=-320 dL=+45 dTh=+1.5;
@@ -258,6 +260,7 @@ theta       = 벽을 정면으로 바라보는 방향
 
 **하위 호환.** 현행 AMR 파서는 `params`의 모르는 키를 무시하므로, ACS가 먼저 켜도 동작이 바뀌지 않는다. 그래도 **사인오프 전에는 켜지 않는다**(설정 `Acs:Dispatch:StationAdjust:Enabled`, 기본 `false`).
 
+> ※구현(2026-10-31, ACS): `stationReachShortfall` → `RobotStateService.AddReachShortfallAlarmAsync` — `StationReachShortfall.TryParse`(Core)로 수치 해석, order_action→work_item→영역 이름 조회, actionId로 중복 제거(jsonb 재포맷에도 JSON으로 대조). 해석 불가 설명도 원문 알람으로 남긴다.
 > ※구현(2026-10-31, ACS): `StationAdjustLimits`(Core) — 발행 시점(`PublishStopAsync`)에 설정값을 실어 재개(resume)에도 바뀐 설정이 반영된다. `param_schema`에 `stationAdjust`(4키 필수·`minimum: 0`) 추가, 시드 upsert로 기존 DB에 반영. `moveToSeamStart`(§8.7)에는 **싣지 않는다** — 그 시험의 FAILED가 N10 실측 근거라 보정이 결과를 가리면 안 된다.
 
 ### 4.5 Order 수명주기
@@ -471,6 +474,7 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 | `orderValidationError` | Order 검증 실패로 폐기 — description에 orderId·사유 (§4.5.2) | WARNING |
 | `drivingFailed` | 목표 도달 불가·이동 미시작·주행 타임아웃 — **해당 Order의 전 액션을 FAILED로 종결 처리**(노드 미도달 상태) | WARNING |
 | `inspectionFailed` | 검사 액션 실패 — description에 actionId·사유 (actionStatus FAILED와 병기) | WARNING |
+| `stationReachShortfall` | **(N23 A안, 2026-10-31)** ② 검사위치 이동이 **리치(면 법선거리) 부족**으로 실패 — `inspectionFailed` 대신 이 유형으로 보고(그 액션은 FAILED). `errorReferences` `actionId`·`orderId`. description: `{actionId}: normalMm=800 requiredMm=1120 extraBackwardMm=340 adjustedBackwardMm=0` — `extraBackwardMm` = **실제 선 자리**에서 더 물러날 거리(여유 20 mm 포함, 10 mm 올림, −1 = 후진으로 해결 불가한 면: 바닥·천장), `adjustedBackwardMm` = 정차 보정(§4.4.2)으로 이미 물러난 양. 원래 정차점 기준 총량 = extra + adjusted. ACS: **액션별** `STATION_REACH_SHORTFALL` 알람(실패 집계는 액션 종결 경로 그대로, **자동 재정차 없음**) | WARNING |
 | `equipmentError` | 코봇/카메라/레이저/비전 등 온보드 장비 이상 | WARNING (지속 불가 시 FATAL) |
 | `localizationLost` | 맵 일치율 저하·재측위 실패·initPosition 거부 | WARNING |
 | `emergencyStopActive` | emergencyStop 수신에 의한 기능 정지 중 | WARNING |
@@ -1007,7 +1011,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 
 | N21 | **통신 단절 Fail-Safe** (§9.3.1·§5.3·§5.4) | AMR 로컬 GRACE 30 s→PAUSE→HOLD 60 s, 자동 재개 금지. `communicationLostPause`/`resumeRejected` errors, 액션 `PAUSED`·`state.paused`, `stopPause`(재개 전 확인 후)·`cancelOrder`(PAUSE 중 취소) 수용, keep-alive 5 s. ACS 구현 완료(2026-10-12) — 알람·실패 집계 제외·재개 버튼·PAUSE 중 abort 시 cancelOrder | ⏳ **HD_AMR 구현 대기** — 단절 감시 서비스·Order 실행기 PAUSE/RESUME 훅·`startPause`/`stopPause`/`cancelOrder` 핸들러·START 버튼·램프/부저. 미결: 주행 중 T1 단축, 브로커 배치 위치(통신단절 사양 §10) |
 | N22 | **장치 통신 HEAVY 알람** (§9.6·§6.4·§4.5.2) | 장치 6종 `*LinkLost`(FATAL, 래치, `errorReferences` device) 보고, 알람 중 임무 즉시 중단(남은 액션 FAILED)·신규 Order `orderRejectedDeviceFault`(기존 orderId 유지), **모든 errors에 `errorReferences` 발행**, 알람 발생·복구·해제 시 state 즉시 발행. ACS 구현 완료(2026-10-13) — 알람·해제 기록·배차 보류/재개·명령 409·거부 정차 PENDING 복귀 | ⏳ HD_AMR 측 구현은 장치통신 HEAVY알람 사양 §10(2026-10-12 배포) — **실기 연동 확인 대기**. 미결: 알람 코드·등급 표기(ACS는 HEAVY→CRITICAL 매핑), 비전 HEARTBEAT 실주기, LIGHT 알람 |
-| N23 | **정차 온보드 보정 허용 범위** `params.stationAdjust` (§4.4.2·§8.1) — **초안(1.12)** | ACS가 정차마다 AMR이 리치(용접선 도달)를 위해 `nodePosition`에서 옮겨 서도 되는 한계(전진·후진·횡·각)를 각 검사 액션 `params.stationAdjust`로 준다. `allowedDeviationXY/Theta`(도착 판정)와 별개. 필드 없음 = 종전 동작(옮기지 않음). 회신 요청: (a) 범위 기준(원래 `nodePosition`)·프레임(노드 theta 전진/좌측 횡) 수용 여부, (b) 보정 결과 보고 형식(§4.4.2 `stationAdjusted` 토큰) 수용 여부, (c) 범위 안에서도 리치 불가일 때의 신호 — AMR 보유본 N18 (c)와 통합 협의, (d) 기본값(전진 0·후진 400 mm·횡 200 mm·5°)의 차체-벽 여유 검증(로봇 반폭 회신) | ⏳ **ACS 제기(2026-10-31)** — ACS 발행 구현 완료(설정 `Acs:Dispatch:StationAdjust`, **기본 꺼짐**). AMR 미구현 상태에서도 필드는 무시되므로 켜도 무해하나, 사인오프 전에는 켜지 않는다 |
+| N23 | **정차 온보드 보정 허용 범위** `params.stationAdjust` (§4.4.2·§8.1) — **초안(1.12)** | ACS가 정차마다 AMR이 리치(용접선 도달)를 위해 `nodePosition`에서 옮겨 서도 되는 한계(전진·후진·횡·각)를 각 검사 액션 `params.stationAdjust`로 준다. `allowedDeviationXY/Theta`(도착 판정)와 별개. 필드 없음 = 종전 동작(옮기지 않음). 회신 요청: (a) 범위 기준(원래 `nodePosition`)·프레임(노드 theta 전진/좌측 횡) 수용 여부, (b) 보정 결과 보고 형식(§4.4.2 `stationAdjusted` 토큰) 수용 여부, (c) 범위 안에서도 리치 불가일 때의 신호 — **확정(2026-10-31, A안)**: 전용 errorType `stationReachShortfall`(§6.4) + ACS 액션별 알람, 자동 재정차 없음(N18 (c) 해소), (d) 기본값(전진 0·후진 400 mm·횡 200 mm·5°)의 차체 여유 검증 — **AMR 치수 확정(2026-10-31)**: 운용 외곽 앞 395·뒤 365·반폭 350 mm(§4.4). 원래 정차점 벽 여유 ≈ 205 mm(이격 0.8·dev 0.2), 후진 400 시 뒤 공간 765 mm 필요 → **잔여: 영역별 후진 상한을 둘지(전역 설정 vs 영역 필드) ACS 결정** | ⏳ **ACS 제기(2026-10-31)** — ACS 발행 구현 완료(설정 `Acs:Dispatch:StationAdjust`, **기본 꺼짐**). AMR 미구현 상태에서도 필드는 무시되므로 켜도 무해하나, 사인오프 전에는 켜지 않는다 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 

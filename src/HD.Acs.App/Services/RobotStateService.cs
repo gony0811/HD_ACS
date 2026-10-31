@@ -1,5 +1,6 @@
 using HD.Acs.App.Hubs;
 using HD.Acs.Core.Domain;
+using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
@@ -204,6 +205,8 @@ public sealed class RobotStateService
     /// - *LinkLost(장치 6종, FATAL) → DEVICE_LINK_LOST 알람(edge), 사라지면 해제 기록 + 배차 재개. 배차 보류는 디스패처 게이트
     ///   [HD_AMR 장치통신 HEAVY알람 §5]. orderRejectedDeviceFault → 거부 정차 PENDING 복귀(실패 아님) + 알람
     /// - drivingFailed / inspectionFailed → 별도 처리 없음(액션 FAILED 종결 경로가 정책 수행)
+    /// - stationReachShortfall → STATION_REACH_SHORTFALL 알람(**액션별** 1회 — 같은 정차의 여러 액션이 같은 errorType 으로
+    ///   차례로 보고하므로 edge 가 아니라 actionId 로 중복 제거). 실패 집계는 액션 FAILED 종결 경로 그대로 [VDA §6.4 / N23 A안]
     /// </summary>
     private async Task HandleRobotErrorsAsync(RobotRef robot, Vda5050State state,
         IReadOnlyList<string> appeared, IReadOnlyList<string> disappeared, CancellationToken ct)
@@ -238,6 +241,10 @@ public sealed class RobotStateService
                 _log.LogWarning("로봇 {Robot} AMR측 비상정지 보고 중 — run {Run} 자동 중단.", robot.RobotId, runId);
             }
         }
+
+        foreach (var e in state.Errors.Where(e =>
+                     string.Equals(e.ErrorType, StationReachShortfall.ErrorType, StringComparison.OrdinalIgnoreCase)))
+            await AddReachShortfallAlarmAsync(robot.RobotId, e, ct);
 
         foreach (var type in appeared)
         {
@@ -339,6 +346,69 @@ public sealed class RobotStateService
             using var doc = System.Text.Json.JsonDocument.Parse(detail);
             return doc.RootElement.TryGetProperty("device", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String
                 ? d.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// STATION_REACH_SHORTFALL 알람 [VDA §6.4 / N23 A안] — 액션(actionId)별 1회. 영역 이름과 원래 정차점 기준 필요 총 후진량을
+    /// 제목에 실어 운영자가 영역 정차 이격을 고칠 수 있게 한다. 자동 재정차는 하지 않는다(1단계 — 뒤 공간 판단이 사람 몫).
+    /// </summary>
+    private async Task AddReachShortfallAlarmAsync(string robotId, VdaError err, CancellationToken ct)
+    {
+        var sf = StationReachShortfall.TryParse(err.ErrorDescription, err.Ref("actionId"));
+        var key = sf?.ActionId ?? err.ErrorDescription ?? "";
+        // 같은 actionId 알람이 이미 있으면 생략 — 보고는 state 마다 반복된다. 대상이 적어(로봇·코드별 최근 건) 메모리에서 대조.
+        var recent = await _db.Alarms.AsNoTracking()
+            .Where(a => a.AlarmCode == "STATION_REACH_SHORTFALL" && a.RobotId == robotId)
+            .OrderByDescending(a => a.RaisedAt).Take(50).Select(a => a.Detail).ToListAsync(ct);
+        var pending = _db.Alarms.Local.Where(a => a.AlarmCode == "STATION_REACH_SHORTFALL" && a.RobotId == robotId).Select(a => a.Detail);
+        // jsonb 는 키 순서·공백을 바꿔 돌려주므로 문자열이 아니라 JSON 으로 읽어 대조한다.
+        if (recent.Concat(pending).Any(d => DetailKey(d) == key))
+            return;
+
+        string? area = null;
+        Guid? missionId = null;
+        if (sf is not null && Guid.TryParse(sf.ActionId, out var aid))
+        {
+            var oa = await _db.OrderActions.AsNoTracking().FirstOrDefaultAsync(a => a.ActionId == aid, ct);
+            missionId = oa?.MissionId;
+            if (oa?.WorkItemId is Guid wid)
+                area = await (from w in _db.WorkItems.AsNoTracking()
+                              join ar in _db.InspectionAreas.AsNoTracking() on w.AreaId equals ar.AreaId
+                              where w.WorkItemId == wid
+                              select ar.Name).FirstOrDefaultAsync(ct);
+        }
+
+        var where = area is null ? "" : $" — 영역 {area}";
+        var title = sf switch
+        {
+            null => $"정차 리치 부족{where} (수치 해석 불가 — 원문 확인)",
+            { TotalBackwardMm: { } total } =>
+                $"정차 리치 부족{where}: 원래 정차점에서 총 {total:0}mm 후진 필요(법선 {sf.NormalMm:0}/{sf.RequiredMm:0}mm" +
+                (sf.AdjustedBackwardMm > 0 ? $", 이미 {sf.AdjustedBackwardMm:0}mm 보정" : "") + ") — 영역 정차 이격 조정",
+            _ => $"정차 리치 부족{where}: 후진으로 해결 불가한 면(법선 {sf.NormalMm:0}/{sf.RequiredMm:0}mm) — 리프트 높이·정차 위치 재검토",
+        };
+        _db.Alarms.Add(new AlarmEntity
+        {
+            AlarmId = Guid.NewGuid(), AlarmCode = "STATION_REACH_SHORTFALL", RobotId = robotId, MissionId = missionId,
+            Detail = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                severity = err.ErrorLevel, title, key, area, err.ErrorType, err.ErrorDescription,
+                totalBackwardMm = sf?.TotalBackwardMm, normalMm = sf?.NormalMm, requiredMm = sf?.RequiredMm,
+            }),
+            RaisedAt = DateTimeOffset.UtcNow,
+        });
+        _log.LogWarning("알람 STATION_REACH_SHORTFALL — robot={Robot} {Title}", robotId, title);
+    }
+
+    private static string? DetailKey(string? detail)
+    {
+        if (string.IsNullOrEmpty(detail)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(detail);
+            return doc.RootElement.TryGetProperty("key", out var k) ? k.GetString() : null;
         }
         catch (System.Text.Json.JsonException) { return null; }
     }
