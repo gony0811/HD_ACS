@@ -42,7 +42,16 @@ public sealed class InspectionDispatcher
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
         _allowedDevTheta = config.GetValue("Acs:Dispatch:AllowedDevTheta", 0.07);
         _robotStaleAfter = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:RobotStateStaleSec", 10.0));
+        _stationAdjust = StationAdjustLimits.Normalize(
+            config.GetValue("Acs:Dispatch:StationAdjust:Enabled", false),
+            config.GetValue("Acs:Dispatch:StationAdjust:MaxForwardMm", 0.0),
+            config.GetValue("Acs:Dispatch:StationAdjust:MaxBackwardMm", 400.0),
+            config.GetValue("Acs:Dispatch:StationAdjust:MaxLateralMm", 200.0),
+            config.GetValue("Acs:Dispatch:StationAdjust:MaxThetaDeg", 5.0));
     }
+
+    /// <summary>정차 온보드 보정 허용 범위 [VDA §4.4.2 / N23]. null = 꺼짐(필드 미발행). 발행 시점에 실어 설정 변경이 재개에도 반영된다.</summary>
+    private readonly StationAdjustLimits? _stationAdjust;
 
     /// <summary>로봇 state 수신이 이 시간 이상 끊기면 연결 안 됨으로 본다(state 주기 ~2 s). 설정 Acs:Dispatch:RobotStateStaleSec.</summary>
     private readonly TimeSpan _robotStaleAfter;
@@ -531,6 +540,8 @@ public sealed class InspectionDispatcher
                     run.RunId, taskId, TaskAttempt.Max);
             var prm = o["params"]?.DeepClone() as JsonObject ?? new JsonObject();
             prm["attempt"] = attempt;
+            if (StationAdjustLimits.ToParam(_stationAdjust, wi.Theta) is { } adjust)
+                prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction
             {
                 ActionType = o["actionType"]!.GetValue<string>(), ActionId = actionId.ToString(), BlockingType = "HARD",

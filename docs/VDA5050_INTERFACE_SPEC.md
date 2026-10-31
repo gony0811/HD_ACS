@@ -19,6 +19,7 @@
 | 개정 1.9 | 2026-10-12 — **통신 단절 Fail-Safe 반영 `[N21]`**: HD_AMR 통신단절 Fail-Safe 사양(rev.0, 2026-10-10) ACS 측 반응. ① §2.1 MQTT keep-alive **5 s 명시**(로봇·관제 동일 — 단절 감지 최대 7.5 s). ② §5.3 instantAction `stopPause`(운영자 재개)·§5.4 `cancelOrder`(**통신 단절 PAUSE 중 run 중단 시에 한해 사용** — §4.5.3 "미사용" 개정)·`startPause` 수용 요건. ③ §6.4 errorType `communicationLostPause`(WARNING, **실패 집계 금지**)·`resumeRejected`(WARNING, 사유 포함) 추가, 진행 액션 `PAUSED`·`state.paused`. ④ §9.3 두절 시퀀스에 GRACE/PAUSE/HOLD·자동 재개 금지 반영. ⑤ 알람 `COMM_LOSS_PAUSED`·`RESUME_REJECTED`, REST `POST /api/robots/{id}/resume-pause`. 판정·타이머·재개 전 확인·램프/부저는 **AMR 로컬**(ACS 복제 없음) |
 | 개정 1.10 | 2026-10-13 — **장치 통신 HEAVY 알람 반영 `[N22]`**: HD_AMR 장치통신 HEAVY알람 사양(rev.0, 2026-10-12) ACS 측 반응. ① §6.4 errorType 신규 7종 — 장치 6종 `visionLinkLost`·`depthCameraLinkLost`·`laserSensorLinkLost`·`ioModuleLinkLost`·`cobotLinkLost`·`amrLinkLost`(**FATAL**, RESET 전까지 래치) + `orderRejectedDeviceFault`(WARNING, 기존 orderId 유지). ② **`errorReferences` 발행·소비**(`device`·`orderId`·`actionId`) — 참조 없는 구 errors 파싱 유지. ③ §4.5.2 장치 알람 거부 — ACS는 거부 정차를 **PENDING으로 되돌림**(실행 없음, 실패 아님). ④ §9.6 신설 — 알람 중 **ACS 배차 보류**(order 미전송·명령 409), errors에서 사라지면 배차 자동 재개. ⑤ 알람 `DEVICE_LINK_LOST`(HEAVY→ACS CRITICAL)·`ORDER_REJECTED_DEVICE_FAULT`. 판정·래치·RESET·타워램프는 **AMR 로컬**(ACS 원격 RESET 없음) |
 | 개정 1.11 | 2026-10-23 — **seam 좌표 z 기준면 확정 `[N17]`**: `position.seamStartW`/`seamEndW` 의 z 를 **해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`)으로 발행한다(§8.1·§8.4 골든·§10 N17·부록 B). 종전엔 T_W_D 가 2D(x,y,yaw) 라 z 가 **도면 전역(선창 바닥=0) 그대로** 실려, L2 이상에서 층 바닥 높이만큼 어긋났다(L1 은 0 이라 단층 E2E 에서 드러나지 않음). 실기(2026-10-23) `moveToSeamStart` 접근점 z ≈ 9.7 m → IK 5회 연속 실패로 확인. `drawingPos.z` 는 도면 echo 라 **전역 z 유지**. x·y·Δz(방향 유도)는 무변경. ACS 는 층 정의(`level_z`) 가 없으면 0 폴백 없이 발행을 거부한다. HD_AMR 보유본의 N17 제기(AMR 개정 1.7)·확정(AMR 개정 1.10)을 ACS 정본에 병합한 것이며, 보유본의 다른 개정(N18 거리 파라미터·§4.4.1 정차 이격 산출식·LINE/CROSS4 레시피 통합)은 **미병합** |
+| 개정 1.12 (초안) | 2026-10-31 — **정차 온보드 보정 허용 범위 `params.stationAdjust` 제안 `[N23]`**(§4.4.2 신설·§8.1·§10). AMR이 도착 후 리치를 위해 `nodePosition`에서 옮겨 설 수 있는 한계(전진·후진·횡·각)를 ACS가 정차마다 준다. `allowedDeviation*`(도착 판정)은 의미 무변경. **선택 필드·기본 꺼짐 → 계약 하위 호환**. ACS 발행 구현 완료, AMR 회신·사인오프 대기 |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -224,6 +225,40 @@ theta       = 벽을 정면으로 바라보는 방향
 > AMR 온보드는 **검사 정차점 주행을 항상 `stopFlag: true` 로 발행해야 한다**(부록 D). 경유점 개념은 현 계약에 없다.
 
 > AMR 요건: 로봇 실물 치수 확정 시 적정 기본 이격을 ACS에 회신 — 코봇 리치(용접선까지 도달)와 차체-벽 안전 여유를 동시에 만족하는 값 `[협의 N10]`.
+
+#### 4.4.2 정차 온보드 보정 허용 범위 `[N23]` — **초안(1.12, 2026-10-31)**
+
+**배경.** 정차점은 영역 중심 + 법선 × 정차 이격(고정값)이라 용접선 위치·코봇 리치를 보지 않는다. 2026-09-28 현장 IK 실패의 원인은
+횡 오프셋이 아니라 **법선 거리 부족**이었다(정차 이격 0.8 m < 필요 거리). 영역마다 이격을 손으로 맞추는 대신, AMR이 도착 후 리치를 계산해
+**ACS가 허락한 범위 안에서** 옮겨 서게 한다(1단계). ACS가 리치 모델로 정차점 자체를 계획하는 것은 2단계로 별도 제기한다.
+
+**`allowedDeviationXY/Theta`를 쓰지 않는 이유.** 그 필드는 **도착 판정 허용 오차**로 합의돼 있다(§4.2 각주, 2026-08-28 AMR 회신).
+보정 범위(수백 mm)로 키우면 주행 도착 판정까지 느슨해진다. 두 의미를 겹치지 않는다.
+
+**필드** — 각 검사 액션 `params.stationAdjust` (§8.1):
+
+| 키 | 단위 | 의미 | ACS 기본값 |
+|---|---|---|---|
+| `maxForwardMm` | mm | 노드 `theta` 방향(**벽 쪽**)으로 더 다가가도 되는 최대 거리 | 0 |
+| `maxBackwardMm` | mm | `theta` 반대(**벽에서 멀어짐**)로 물러나도 되는 최대 거리 | 400 |
+| `maxLateralMm` | mm | `theta` 직각 좌우(대칭)로 옮겨도 되는 최대 거리 | 200 |
+| `maxThetaDeg` | deg | 노드 `theta`에서 돌아서도 되는 최대 각(대칭) | 5 |
+
+**규칙.**
+1. **기준은 언제나 원래 `nodePosition`** 이다. 도착 판정(`allowedDeviation*`)을 원래 정차점으로 먼저 통과한 뒤 보정한다. 액션 사이에 다시 옮겨도 되지만, 누적이 아니라 원래 정차점 기준으로 범위 안이어야 한다.
+2. **프레임**: 전진축 = 노드 `theta` 방향, 횡축 = 그 좌측(+90°). `theta`가 없는 정차(바닥 B·천장 T)에는 필드가 오지 않는다.
+3. **필드가 없으면 보정하지 않는다**(종전 동작). 필드 일부만 오는 경우는 ACS 스키마가 막는다.
+4. **충돌 회피는 여전히 AMR 책임**(§4.4). 범위는 "허락"이지 "안전 보장"이 아니다. 차체-벽 여유 = 정차 이격 − `maxForwardMm` − 로봇 반폭 − `allowedDeviationXY`. 벽 쪽 보정은 이 여유를 직접 깎으므로 기본 0이다.
+5. **범위 안에서 리치를 만들 수 없으면** 옮기지 않고(또는 원위치) 종전대로 해당 액션을 `FAILED`로 보고한다. 재정차 요청 신호는 N18 (c)와 통합 협의한다.
+6. **보고**: 실제 정차 위치는 `state.agvPosition`에 이미 나온다. 그에 더해, 보정한 정차의 **첫 액션** `resultDescription` 앞머리에 다음 토큰을 붙인다(ACS가 계획 개선용으로 수집):
+   ```
+   stationAdjusted dF=-320 dL=+45 dTh=+1.5;
+   ```
+   `dF` = 전진(+)/후진(−) mm, `dL` = 좌(+)/우(−) mm, `dTh` = deg(CCW +). 보정하지 않았으면 토큰을 붙이지 않는다.
+
+**하위 호환.** 현행 AMR 파서는 `params`의 모르는 키를 무시하므로, ACS가 먼저 켜도 동작이 바뀌지 않는다. 그래도 **사인오프 전에는 켜지 않는다**(설정 `Acs:Dispatch:StationAdjust:Enabled`, 기본 `false`).
+
+> ※구현(2026-10-31, ACS): `StationAdjustLimits`(Core) — 발행 시점(`PublishStopAsync`)에 설정값을 실어 재개(resume)에도 바뀐 설정이 반영된다. `param_schema`에 `stationAdjust`(4키 필수·`minimum: 0`) 추가, 시드 upsert로 기존 DB에 반영. `moveToSeamStart`(§8.7)에는 **싣지 않는다** — 그 시험의 FAILED가 N10 실측 근거라 보정이 결과를 가리면 안 된다.
 
 ### 4.5 Order 수명주기
 
@@ -558,6 +593,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `params.seqInGroup` | 그룹 내 순번 (1부터) |
 | `params.taskId` | **(1.6 신설, 선택)** 검사 작업(용접선 1구간)의 **영구 식별자** — GUID 문자열(하이픈 포함 36자, 소문자). ACS가 작업 등록 시 발급하며 **실행(run)이 바뀌어도 같은 용접선이면 같은 값**. AMR은 이 액션 수행 중 발생하는 **모든 CAPTURE_REQ에 같은 값**을 싣는다(비전 v3.2 [15-30], 바이너리 16B). 비전 S/W→SAIGE 메타데이터의 `taskId`·`productId`가 되어 도면·진행률·촬영 이미지를 잇는 유일한 키다(§8.6) |
 | `params.attempt` | **(1.6 신설, 선택)** 그 `taskId`의 **몇 번째 시도인지** — 정수 1~255, **ACS 발급**. AMR은 값을 해석·증감하지 않고 CAPTURE_REQ [31]에 그대로 싣는다. 발급 규칙은 §8.6.2 |
+| `params.stationAdjust` | **(1.12 초안, 선택) `[N23]`** 정차 온보드 보정 허용 범위 객체 `{maxForwardMm, maxBackwardMm, maxLateralMm, maxThetaDeg}`(전부 필수·0 이상). 의미·프레임·보고는 §4.4.2. **같은 정차의 모든 액션에 같은 값**이 실린다(VDA 노드에 커스텀 필드 자리가 없음). ACS 설정에서 꺼져 있거나 정차각(`theta`)이 없는 정차(바닥·천장)에는 **싣지 않는다** — 없으면 AMR은 `nodePosition`에 그대로 선다(종전 동작) |
 
 `wallNormalW`(벽 법선)는 **전송하지 않는다** — 툴 자세는 AMR이 `wall_code` 티칭으로 결정한다.
 
@@ -971,6 +1007,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 
 | N21 | **통신 단절 Fail-Safe** (§9.3.1·§5.3·§5.4) | AMR 로컬 GRACE 30 s→PAUSE→HOLD 60 s, 자동 재개 금지. `communicationLostPause`/`resumeRejected` errors, 액션 `PAUSED`·`state.paused`, `stopPause`(재개 전 확인 후)·`cancelOrder`(PAUSE 중 취소) 수용, keep-alive 5 s. ACS 구현 완료(2026-10-12) — 알람·실패 집계 제외·재개 버튼·PAUSE 중 abort 시 cancelOrder | ⏳ **HD_AMR 구현 대기** — 단절 감시 서비스·Order 실행기 PAUSE/RESUME 훅·`startPause`/`stopPause`/`cancelOrder` 핸들러·START 버튼·램프/부저. 미결: 주행 중 T1 단축, 브로커 배치 위치(통신단절 사양 §10) |
 | N22 | **장치 통신 HEAVY 알람** (§9.6·§6.4·§4.5.2) | 장치 6종 `*LinkLost`(FATAL, 래치, `errorReferences` device) 보고, 알람 중 임무 즉시 중단(남은 액션 FAILED)·신규 Order `orderRejectedDeviceFault`(기존 orderId 유지), **모든 errors에 `errorReferences` 발행**, 알람 발생·복구·해제 시 state 즉시 발행. ACS 구현 완료(2026-10-13) — 알람·해제 기록·배차 보류/재개·명령 409·거부 정차 PENDING 복귀 | ⏳ HD_AMR 측 구현은 장치통신 HEAVY알람 사양 §10(2026-10-12 배포) — **실기 연동 확인 대기**. 미결: 알람 코드·등급 표기(ACS는 HEAVY→CRITICAL 매핑), 비전 HEARTBEAT 실주기, LIGHT 알람 |
+| N23 | **정차 온보드 보정 허용 범위** `params.stationAdjust` (§4.4.2·§8.1) — **초안(1.12)** | ACS가 정차마다 AMR이 리치(용접선 도달)를 위해 `nodePosition`에서 옮겨 서도 되는 한계(전진·후진·횡·각)를 각 검사 액션 `params.stationAdjust`로 준다. `allowedDeviationXY/Theta`(도착 판정)와 별개. 필드 없음 = 종전 동작(옮기지 않음). 회신 요청: (a) 범위 기준(원래 `nodePosition`)·프레임(노드 theta 전진/좌측 횡) 수용 여부, (b) 보정 결과 보고 형식(§4.4.2 `stationAdjusted` 토큰) 수용 여부, (c) 범위 안에서도 리치 불가일 때의 신호 — AMR 보유본 N18 (c)와 통합 협의, (d) 기본값(전진 0·후진 400 mm·횡 200 mm·5°)의 차체-벽 여유 검증(로봇 반폭 회신) | ⏳ **ACS 제기(2026-10-31)** — ACS 발행 구현 완료(설정 `Acs:Dispatch:StationAdjust`, **기본 꺼짐**). AMR 미구현 상태에서도 필드는 무시되므로 켜도 무해하나, 사인오프 전에는 켜지 않는다 |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 

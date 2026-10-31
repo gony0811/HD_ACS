@@ -148,7 +148,17 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "anchorGroupId":       { "type": "string" },
         "seqInGroup":          { "type": "integer", "minimum": 1 },
         "taskId":              { "type": "string", "format": "uuid" },
-        "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 }
+        "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
+        "stationAdjust": {
+          "type": "object",
+          "required": ["maxForwardMm", "maxBackwardMm", "maxLateralMm", "maxThetaDeg"],
+          "properties": {
+            "maxForwardMm":  { "type": "number", "minimum": 0 },
+            "maxBackwardMm": { "type": "number", "minimum": 0 },
+            "maxLateralMm": { "type": "number", "minimum": 0 },
+            "maxThetaDeg":  { "type": "number", "minimum": 0 }
+          }
+        }
       }
     }
   }
