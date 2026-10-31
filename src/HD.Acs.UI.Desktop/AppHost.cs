@@ -54,6 +54,7 @@ public static class AppHost
         builder.Services.AddSingleton<BatterySwapNodesViewModel>();
         builder.Services.AddSingleton<TankViewModel>();
         builder.Services.AddSingleton<HistoryViewModel>();
+        builder.Services.AddSingleton<ReachSimViewModel>();
 
         builder.Services.AddSingleton<MainWindow>();
 

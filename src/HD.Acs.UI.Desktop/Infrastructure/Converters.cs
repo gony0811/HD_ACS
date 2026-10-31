@@ -154,3 +154,24 @@ public static class RgbaExtensions
     public static Color ToColor(this Rgba c) => Color.FromArgb(c.A, c.R, c.G, c.B);
     public static IBrush ToBrush(this Rgba c) => new ImmutableSolidColorBrush(c.ToColor());
 }
+
+/// <summary>리치·간섭 판정 수준(ok | warn | bad | na) → 시맨틱 브러시.</summary>
+public sealed class ReachLevelToBrushConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var key = value?.ToString() switch
+        {
+            "ok" => "AppGoodBrush",
+            "warn" => "AppWarnFgBrush",
+            "bad" => "AppErrorBrush",
+            _ => "AppMutedTextBrush",
+        };
+        return Application.Current is { } app && app.TryFindResource(key, app.ActualThemeVariant, out var res) && res is IBrush b
+            ? b
+            : Brushes.Gray;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        BindingOperations.DoNothing;
+}

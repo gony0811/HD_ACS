@@ -154,6 +154,7 @@ public class ShellSmokeTests
             planningTabs.SelectedIndex = 1; Dispatcher.UIThread.RunJobs();
             planningTabs.SelectedIndex = 2; Dispatcher.UIThread.RunJobs();
             planningTabs.SelectedIndex = 3; Dispatcher.UIThread.RunJobs();   // 배터리 교체 장소 탭 — 바인딩 평가
+            planningTabs.SelectedIndex = 4; Dispatcher.UIThread.RunJobs();   // 리치·간섭 탭 — 바인딩 평가
             shell.CurrentMode = AppMode.History; Dispatcher.UIThread.RunJobs();
             window.Close();
         }

@@ -52,6 +52,7 @@ builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 T
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<TankShapeQueryService>();
+builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
@@ -187,6 +188,20 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/area-stations",
         await dispatcher.GetPlannedStationsAsync(scenarioId, ct) is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"시나리오 '{scenarioId}' 없음" }));
+
+// ── 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세(② 400 → 정렬 준비 300 → 초점 0)로 용접선에 닿는지·탱크 면과 부딪히는지 ──
+app.MapGet("/api/reach-sim/tanks/{tankId}/survey",
+    async (string tankId, int? level, string? wallCode, ReachSimService sim, CancellationToken ct) =>
+        await sim.SurveyAsync(tankId, level, wallCode, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
+
+app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
+    async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw,
+           ReachSimService sim, CancellationToken ct) =>
+        await sim.DetailAsync(areaId, taskId, point ?? 1, stroke, dF ?? 0, dL ?? 0, yaw ?? 0, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = "영역·작업 또는 선창 형상 없음" }));
 
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
 app.MapPut("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, SetScenarioAreasRequest req, AcsDbContext db) =>

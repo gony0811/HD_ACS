@@ -115,5 +115,8 @@
         <TabItem Header="배터리 교체 장소">
             <views:BatterySwapNodesView DataContext="{Binding BatterySwapNodes}" />
         </TabItem>
+        <TabItem Header="리치 · 간섭">
+            <views:ReachSimView DataContext="{Binding ReachSim}" />
+        </TabItem>
     </TabControl>
 </UserControl>

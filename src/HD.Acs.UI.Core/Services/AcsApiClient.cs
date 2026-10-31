@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -253,6 +254,31 @@ public sealed class AcsApiClient : IAcsApiClient
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<PlannedStationsDto>(ct);
+    }
+
+    public async Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
+        CancellationToken ct = default)
+    {
+        var q = new List<string>();
+        if (level is { } lv) q.Add($"level={lv}");
+        if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
+        var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/survey" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<ReachSurveyAreaDto>>(ct);
+    }
+
+    public async Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
+        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        var url = $"/api/reach-sim/areas/{areaId}/tasks/{taskId}?point={point}&dF={offsetForwardMm.ToString(ci)}" +
+                  $"&dL={offsetLeftMm.ToString(ci)}&yaw={yawIndex}" + (strokeMm is { } h ? $"&stroke={h.ToString(ci)}" : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<ReachDetailDto>(ct);
     }
 
     public async Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default)

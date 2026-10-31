@@ -31,6 +31,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public BatterySwapNodesViewModel BatterySwapNodes { get; }
     public TankViewModel Tank { get; }
     public HistoryViewModel History { get; }
+    public ReachSimViewModel ReachSim { get; }
 
     [ObservableProperty] private string _connectionText = "서버 연결 대기…";
     [ObservableProperty] private string _windowTitle = BaseTitle;
@@ -69,7 +70,8 @@ public sealed partial class ShellViewModel : ObservableObject
         AreaPlanningViewModel areaPlanning,
         BatterySwapNodesViewModel batterySwapNodes,
         TankViewModel tank,
-        HistoryViewModel history)
+        HistoryViewModel history,
+        ReachSimViewModel reachSim)
     {
         _monitoring = monitoring;
         _api = api;
@@ -86,6 +88,7 @@ public sealed partial class ShellViewModel : ObservableObject
         BatterySwapNodes = batterySwapNodes;
         Tank = tank;
         History = history;
+        ReachSim = reachSim;
 
         // 재캘리브레이션(계산) 직후 표시 캐시를 즉시 버린다 — TTL(10초)을 기다리면
         // 운영자가 "고쳤는데 화면이 그대로"로 오해한다.

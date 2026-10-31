@@ -58,6 +58,12 @@ public interface IAcsApiClient
     // 계획 정차점(도면 프레임) — 로봇 상태 카드의 "계획 정차점까지 거리". 시나리오 없음(404)=null
     Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         Task.FromResult<PlannedStationsDto?>(null);
+    // 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세로 용접선에 닿는지·탱크 면과 부딪히는지(조회 전용). 선창·영역 없음=null
+    Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
+        CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
+    Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
+        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default) =>
+        Task.FromResult<ReachDetailDto?>(null);
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);

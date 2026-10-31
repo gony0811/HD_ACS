@@ -119,7 +119,7 @@ public sealed class InspectionDispatcher
     private readonly double _verticalStationStandoffM;    // 수직벽 기본 이격 [m]
 
     /// <summary>이 면의 기본 정차 이격 — 영역 덮어쓰기(station_standoff_m)가 없을 때 쓴다.</summary>
-    private double DefaultStandoffM(WallEntity wall)
+    public double DefaultStandoffM(WallEntity wall)
         => AreaGeometry.DefaultStandoffM(Json<double[]>(wall.Normal), _verticalStationStandoffM, _stationStandoffM);
     private readonly double _allowedDevXy;
     private readonly double _allowedDevTheta;
