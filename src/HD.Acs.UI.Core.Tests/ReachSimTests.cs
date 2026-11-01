@@ -227,4 +227,29 @@ public class ReachSimTests
         Assert.Equal("clearance", call.Args[^1]);
         Assert.Empty(vm.Optima);   // 규칙이 바뀌면 최적화 결과는 버린다
     }
+    private static AreaDto AreaOn(int level, string wall) =>
+        new(Guid.NewGuid(), "CT1", wall, level, $"L{level}-{wall}", 0, 0, 1, 1, null, null, null, 0, 1);
+
+    [Fact]
+    public void 면_목록은_그_층에_영역이_있는_면만_보인다()
+    {
+        var vm = Vm();
+        vm.SelectedLevel = 4;
+        vm.SelectedWall = "PU";
+        vm.ApplyAreaWalls(new[] { AreaOn(4, "PU"), AreaOn(4, "SM"), AreaOn(4, "T"), AreaOn(2, "SM"), AreaOn(2, "SL"), AreaOn(2, "A") });
+        Assert.Equal(new[] { "PU", "SM", "T" }, vm.WallCodes);
+        Assert.Equal(0, vm.WallIndex);
+
+        vm.SelectedLevel = 2;   // PU 가 없는 층 — 첫 면으로 옮긴다
+        Assert.Equal(new[] { "SL", "SM", "A" }, vm.WallCodes);
+        Assert.Equal("SL", vm.SelectedWall);
+
+        vm.SelectedWall = "SM";
+        vm.SelectedLevel = 4;   // 두 층에 다 있는 면은 그대로 둔다
+        Assert.Equal("SM", vm.SelectedWall);
+        Assert.Equal(1, vm.WallIndex);
+
+        vm.SelectedLevel = 3;   // 영역이 하나도 없는 층은 모든 면
+        Assert.Equal(ReachSimViewModel.WallOrder, vm.WallCodes);
+    }
 }

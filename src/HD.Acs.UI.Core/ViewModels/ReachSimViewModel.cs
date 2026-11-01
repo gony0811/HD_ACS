@@ -46,6 +46,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
     private readonly IAcsApiClient _api;
     private readonly List<WallDto> _walls = new();
+    /// <summary>층 → 영역이 있는 면. 비어 있으면(영역 목록을 못 읽음) 모든 면을 보인다.</summary>
+    private readonly Dictionary<int, HashSet<string>> _areaWalls = new();
     private CancellationTokenSource? _detailCts;
     private bool _suppress;
     private int _surveyVersion;
@@ -120,6 +122,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 _suppress = false;
                 OnPropertyChanged(nameof(LevelIndex));
             }
+            try { ApplyAreaWalls(await _api.GetAreasAsync(TankId)); }
+            catch { ApplyAreaWalls(Array.Empty<AreaDto>()); }   // 면 필터 없이 계속
             await SurveyAsync();
         }
         catch (Exception ex) { StatusMessage = $"선창 조회 실패: {ex.Message}"; }
@@ -132,13 +136,54 @@ public sealed partial class ReachSimViewModel : ObservableObject
         set { if (value >= 0 && value < Levels.Count) SelectedLevel = Levels[value]; }
     }
 
+    /// <summary>면 콤보 순번(0 기반) — 층을 바꿔 목록이 줄 때 사라진 면이 null 로 들어오지 않게 순번으로 묶는다.</summary>
+    public int WallIndex
+    {
+        get => WallCodes.IndexOf(SelectedWall);
+        set { if (value >= 0 && value < WallCodes.Count) SelectedWall = WallCodes[value]; }
+    }
+
+    /// <summary>영역 목록으로 층별 면을 모은다. 면 목록은 그 층에 영역이 있는 면만 남긴다(PU·SU·T 는 최상층에만 있다).</summary>
+    public void ApplyAreaWalls(IEnumerable<AreaDto> areas)
+    {
+        _areaWalls.Clear();
+        foreach (var a in areas)
+        {
+            if (!_areaWalls.TryGetValue(a.Level, out var set)) _areaWalls[a.Level] = set = new();
+            set.Add(a.WallCode);
+        }
+        SyncWallCodes();
+    }
+
+    private void SyncWallCodes()
+    {
+        var want = _areaWalls.TryGetValue(SelectedLevel, out var set) && set.Count > 0
+            ? WallOrder.Where(set.Contains).Concat(set.Except(WallOrder).Order()).ToList()
+            : WallOrder.ToList();
+        var was = _suppress;
+        _suppress = true;   // 고친 면으로 따로 조사하지 않는다 — 부른 쪽이 조사한다
+        if (!want.Contains(SelectedWall)) SelectedWall = want[0];
+        for (var i = WallCodes.Count - 1; i >= 0; i--)
+            if (!want.Contains(WallCodes[i])) WallCodes.RemoveAt(i);
+        for (var i = 0; i < want.Count; i++)
+            if (i >= WallCodes.Count || WallCodes[i] != want[i]) WallCodes.Insert(i, want[i]);
+        _suppress = was;
+        OnPropertyChanged(nameof(WallIndex));
+    }
+
     partial void OnSelectedLevelChanged(int value)
     {
         OnPropertyChanged(nameof(LevelIndex));
         ClearOptima();
+        SyncWallCodes();
         if (!_suppress) _ = SurveyAsync();
     }
-    partial void OnSelectedWallChanged(string value) { ClearOptima(); if (!_suppress) _ = SurveyAsync(); }
+    partial void OnSelectedWallChanged(string value)
+    {
+        OnPropertyChanged(nameof(WallIndex));
+        ClearOptima();
+        if (!_suppress) _ = SurveyAsync();
+    }
     partial void OnClearanceBranchChanged(bool value) { ClearOptima(); _ = SurveyAsync(); }
 
     private string? Branch => ClearanceBranch ? "clearance" : null;

@@ -21,7 +21,7 @@
                             <TextBlock Text="층" Classes="lbl" />
                             <ComboBox Classes="field" Width="80" ItemsSource="{Binding Levels}" SelectedIndex="{Binding LevelIndex}" />
                             <TextBlock Text="면" Classes="lbl" Margin="10,0,4,0" MinWidth="0" />
-                            <ComboBox Classes="field" Width="90" ItemsSource="{Binding WallCodes}" SelectedItem="{Binding SelectedWall}" />
+                            <ComboBox Classes="field" Width="90" ItemsSource="{Binding WallCodes}" SelectedIndex="{Binding WallIndex}" />
                             <Button Content="다시 조사" Margin="8,0,0,0" Command="{Binding SurveyCommand}" />
                         </StackPanel>
                         <CheckBox Content="IK 가지: 간섭 여유 최대 (끄면 운영 규칙 = 자세 여유 최대)" IsChecked="{Binding ClearanceBranch}" FontSize="11.5" />
