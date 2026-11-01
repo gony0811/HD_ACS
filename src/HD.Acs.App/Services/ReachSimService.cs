@@ -21,7 +21,7 @@ public sealed class ReachSimService
 
     private readonly AcsDbContext _db;
     private readonly InspectionDispatcher _dispatcher;
-    private readonly ReachRobotModel _model = ReachRobotModel.Default;
+    private ReachRobotModel _model = ReachRobotModel.Default;
 
     public ReachSimService(AcsDbContext db, InspectionDispatcher dispatcher)
     {
@@ -35,8 +35,10 @@ public sealed class ReachSimService
     /// <summary>
     /// 선창(층·면 필터)의 용접선마다 정차·리프트를 훑어 간섭 없이 닿는지 판정한다. 선창이 없으면 null.
     /// </summary>
-    public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct)
+    public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct,
+        ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
+        _model = ReachRobotModel.Default with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -67,8 +69,10 @@ public sealed class ReachSimService
     /// strokeMm 이 없으면 조사로 고른 리프트(없으면 0)를 쓴다. 영역·작업이 없으면 null.
     /// </summary>
     public async Task<ReachDetail?> DetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
-        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct)
+        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct,
+        ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
+        _model = ReachRobotModel.Default with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         var task = area?.Tasks.FirstOrDefault(t => t.TaskId == taskId);
         if (area is null || task is null) return null;
@@ -108,8 +112,9 @@ public sealed class ReachSimService
     /// 바닥·천장(정면 방향 없음)과 용접선 없는 영역은 건너뛴다. 선창이 없으면 null.
     /// </summary>
     public async Task<IReadOnlyList<ReachStationOptimum>?> OptimizeAsync(string tankId, int? level, string? wallCode, Guid? areaId,
-        CancellationToken ct)
+        CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
+        _model = ReachRobotModel.Default with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);

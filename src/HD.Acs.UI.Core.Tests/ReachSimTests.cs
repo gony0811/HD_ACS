@@ -212,4 +212,19 @@ public class ReachSimTests
         Assert.Empty(vm.Optima);
         Assert.Equal("", vm.OptimizeSummary);
     }
+
+    [Fact]
+    public async Task 간섭_여유_최대_가지를_켜면_조사에_가지_규칙을_넘긴다()
+    {
+        var api = DispatchProxy.Create<IAcsApiClient, RecordingApi>();
+        var vm = new ReachSimViewModel(api);
+        vm.ApplyOptima(Optima());
+
+        vm.ClearanceBranch = true;
+        await Task.Delay(50);
+
+        var call = ((RecordingApi)(object)api).Calls.Last(c => c.Method == nameof(IAcsApiClient.GetReachSurveyAsync));
+        Assert.Equal("clearance", call.Args[^1]);
+        Assert.Empty(vm.Optima);   // 규칙이 바뀌면 최적화 결과는 버린다
+    }
 }

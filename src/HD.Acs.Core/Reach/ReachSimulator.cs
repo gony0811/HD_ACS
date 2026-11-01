@@ -5,14 +5,22 @@ namespace HD.Acs.Core.Reach;
 /// <summary>
 /// 리치·간섭 시뮬레이션의 로봇 모델 — AMR 차체·리프트·FR5-WML·검사 툴. 길이 mm(간섭 여유만 m).
 /// 링크 굵기는 캡슐 근사이고, BASE 는 차체 중심 위 <see cref="MountZMm"/> + 리프트 스트로크에 있다(STEP 장착, 축 평행).
+/// 차체·신호탑·리프트 기둥은 차체 기준 상자(STEP E26003-E-A000 실측)로, 탱크 면과 팔(자기 간섭) 모두와 잰다.
 /// </summary>
 public sealed record ReachRobotModel
 {
     public Fr5Kinematics Kinematics { get; init; } = Fr5Kinematics.Fr5Wml;
     /// <summary>플랜지 → TCP(검사 툴 초점) [mm]. 광축 = 플랜지 +Z.</summary>
     public double ToolZMm { get; init; } = 375;
-    /// <summary>검사 툴 몸체 길이(플랜지 → 렌즈 앞면) [mm].</summary>
-    public double ToolBodyMm { get; init; } = 180;
+    /// <summary>
+    /// 검사 툴 외곽 — 플랜지 면에서 광축(+Z) 방향 구간별 원통(STEP E26003-E-A200 실측, 2026-11-01).
+    /// 실물은 조명·레이저 막대가 한쪽(툴 −x)에 치우쳐 있지만 운영 J6 각을 모르므로 광축 둘레 회전 대칭으로 감싼다(보수적).
+    /// </summary>
+    public IReadOnlyList<ReachToolSegment> ToolSegments { get; init; } = new[]
+    {
+        new ReachToolSegment("검사 툴(브래킷·D435i)", -71, 56, 245),
+        new ReachToolSegment("검사 툴(몸체·조명)", -15, 369, 234),
+    };
     /// <summary>차체 바닥 → 코봇 BASE 면 높이(리프트 0) [mm].</summary>
     public double MountZMm { get; init; } = 1635;
     public double StrokeMaxMm { get; init; } = 1000;
@@ -26,14 +34,19 @@ public sealed record ReachRobotModel
     public double ShoulderOffsetMm { get; init; } = 185;
     public double ForearmOffsetMm { get; init; } = 45;
 
-    public double ColumnRadiusMm { get; init; } = 80;
+    /// <summary>리프트 기둥(CTD-LF144) 사각 단면 반폭 [mm] — 200×200, 차체 중심, 차체 윗면 → BASE.</summary>
+    public double ColumnHalfMm { get; init; } = 100;
+    /// <summary>차체 윗면 신호탑(SWTEL) — 후방 77~225 · 좌우 ±108 · 높이 933 [mm].</summary>
+    public double TowerRearFromMm { get; init; } = 77;
+    public double TowerRearToMm { get; init; } = 225;
+    public double TowerHalfWidthMm { get; init; } = 108;
+    public double TowerTopMm { get; init; } = 933;
     public double BaseRadiusMm { get; init; } = 80;
     public double ShoulderRadiusMm { get; init; } = 70;
     public double UpperArmRadiusMm { get; init; } = 60;
     public double ElbowRadiusMm { get; init; } = 55;
     public double ForearmRadiusMm { get; init; } = 50;
     public double WristRadiusMm { get; init; } = 45;
-    public double ToolRadiusMm { get; init; } = 50;
 
     /// <summary>관절 허용(J1~J5 대칭) [도] — J6 은 운영이 따로 맞추므로 판정하지 않는다.</summary>
     public double JointLimitDeg { get; init; } = 175;
@@ -45,7 +58,22 @@ public sealed record ReachRobotModel
     /// <summary>접근 세 자세의 TCP 면 후퇴 [mm] — ② 거친 접근 · 정렬 준비(수평 맞춤 등) · 초점 검사(초점을 용접선 위에).</summary>
     public double[] StageStandoffsMm { get; init; } = { 400, 300, 0 };
 
+    /// <summary>② 접근 자세의 IK 가지 고르기 — 운영(HD_AMR)과 같게 자세 여유 최대, 또는 간섭 여유 최대(대안 검토용).</summary>
+    public ReachBranchRule BranchRule { get; init; } = ReachBranchRule.MaxMargin;
+
     public static ReachRobotModel Default { get; } = new();
+}
+
+/// <summary>검사 툴 외곽 원통 한 구간 — 플랜지 면 기준 광축 방향 [mm].</summary>
+public sealed record ReachToolSegment(string Name, double FromMm, double ToMm, double RadiusMm);
+
+/// <summary>② 접근 자세의 IK 가지 규칙. 뒤 자세는 어느 쪽이든 바로 앞 해에 가장 가까운 허용 해.</summary>
+public enum ReachBranchRule
+{
+    /// <summary>자세 여유 최대 — HD_AMR 운영 규칙.</summary>
+    MaxMargin,
+    /// <summary>자세 한계 안에서 간섭 여유(탱크 면·차체·기둥) 최대 — 운영 가지가 간섭일 때 다른 가지로 되는지 본다.</summary>
+    MaxClearance,
 }
 
 /// <summary>탱크 면(또는 데크) 평면 — Normal 은 내부향 단위벡터. 탱크 단면이 볼록이라 모든 평면 앞(+)이 곧 내부다.</summary>
@@ -106,7 +134,8 @@ public sealed record ReachSeamSurvey(ReachVerdict Verdict, double? StrokeMm, dou
 /// (② 400 → 정렬 준비 300 → 초점 0, <see cref="ReachRobotModel.StageStandoffsMm"/>)를 FR5-WML 모델로 풀고,
 /// 차체·리프트·코봇 링크·검사 툴 캡슐이 탱크 면에서 얼마나 떨어져 있는지 잰다.
 ///
-/// 운영 선택 규칙: ② 는 자세 여유 최대 해, 그 뒤 자세는 바로 앞 자세 해에 가장 가까운 허용 해(같은 IK 가지로 연속 이동).
+/// 운영 선택 규칙: ② 는 자세 여유 최대 해(<see cref="ReachRobotModel.BranchRule"/> 로 간섭 여유 최대도 가능),
+/// 그 뒤 자세는 바로 앞 자세 해에 가장 가까운 허용 해(같은 IK 가지로 연속 이동).
 /// TOOL 은 광축(+Z)이 면 법선 반대(면을 바라봄)이고 광축 둘레 회전은 J6 만 바꾸므로 판정에 영향이 없다.
 /// </summary>
 public static class ReachSimulator
@@ -135,11 +164,16 @@ public static class ReachSimulator
             var raw = model.Kinematics.InverseFlange(FlangeTarget(model, frame, tcp, wallNormal));
             var evaluated = raw.Select(j => Normalize(model, j)).Select(j => (J: j, P: Posture(model, j))).ToList();
 
-            var chosen = previous is null ? BestMargin(evaluated) : Nearest(evaluated, previous) ?? BestMargin(evaluated);
-            var sols = evaluated.Select((s, k) => withGeometry || k == chosen
+            var byClearance = previous is null && model.BranchRule == ReachBranchRule.MaxClearance;
+            var solved = withGeometry || byClearance
+                ? evaluated.Select(s => Solve(model, planes, frame, s.J, s.P)).ToList()
+                : null;
+            var chosen = previous is not null ? Nearest(evaluated, previous) ?? BestMargin(evaluated)
+                : byClearance ? BestClearance(solved!) : BestMargin(evaluated);
+            var sols = evaluated.Select((s, k) => solved?[k] ?? (k == chosen
                 ? Solve(model, planes, frame, s.J, s.P)
                 : new ReachSolution(s.J, s.P.Ok, s.P.Margin, s.P.Limiting, Array.Empty<ReachPart>(),
-                    Array.Empty<ReachJointMark>(), tcp, false, double.PositiveInfinity)).ToList();
+                    Array.Empty<ReachJointMark>(), tcp, false, double.PositiveInfinity))).ToList();
             stages.Add(new ReachStageResult(stageKinds[i], standoff, tcp, sols, chosen));
             if (chosen < 0) break;   // 운영도 이 자세에서 멈춘다 — 뒤 자세는 풀지 않는다
             previous = evaluated[chosen].J;
@@ -259,6 +293,18 @@ public static class ReachSimulator
         return best;
     }
 
+    /// <summary>자세 한계 안 해 중 간섭 여유 최대(없으면 자세 여유 최대).</summary>
+    private static int BestClearance(List<ReachSolution> sols)
+    {
+        var best = -1;
+        for (var i = 0; i < sols.Count; i++)
+            if (sols[i].PostureOk && (best < 0 || sols[i].MinClearanceM > sols[best].MinClearanceM)) best = i;
+        if (best >= 0) return best;
+        for (var i = 0; i < sols.Count; i++)
+            if (best < 0 || sols[i].MarginDeg > sols[best].MarginDeg) best = i;
+        return best;
+    }
+
     private static int? Nearest(List<(double[] J, PostureEval P)> sols, double[] seed)
     {
         int? best = null;
@@ -283,22 +329,29 @@ public static class ReachSimulator
         var e1 = Along(O(2), z1, m.ShoulderOffsetMm);
         var e2 = Along(O(2), z1, m.ForearmOffsetMm);
         var w1 = Along(O(3), z1, m.ForearmOffsetMm);
-        var toolEnd = Along(O(6), z6, m.ToolBodyMm);
         double[] B(double[] p) => f.BaseToDrawing(p);
+
+        var self = SelfBoxes(m, f.BaseZMm);
+        ReachPart Arm(string name, double[] a, double[] b, double radiusMm, bool nearColumn = false) =>
+            WithSelf(Part(name, B(a), B(b), radiusMm, planes), a, b, radiusMm, f.BaseZMm, nearColumn ? self[..2] : self);
 
         var parts = new[]
         {
-            Part("리프트 기둥", f.AmrToDrawing(0, 0, m.AmrHeightMm), B(new[] { 0.0, 0, 0 }), m.ColumnRadiusMm, planes, skipFloor: true),
-            Part("BASE·J1", B(O(0)), B(O(1)), m.BaseRadiusMm, planes),
-            Part("어깨(J2)", B(O(1)), B(s1), m.ShoulderRadiusMm, planes),
-            Part("상완", B(s1), B(e1), m.UpperArmRadiusMm, planes),
-            Part("팔꿈치(J3)", B(e1), B(e2), m.ElbowRadiusMm, planes),
-            Part("전완", B(e2), B(w1), m.ForearmRadiusMm, planes),
-            Part("손목1(J4)", B(w1), B(O(4)), m.WristRadiusMm, planes),
-            Part("손목2(J5)", B(O(4)), B(O(5)), m.WristRadiusMm, planes),
-            Part("손목3(J6)", B(O(5)), B(O(6)), m.WristRadiusMm, planes),
-            Part("검사 툴", B(O(6)), B(toolEnd), m.ToolRadiusMm, planes),
-        };
+            Column(m, planes, f),
+            Arm("BASE·J1", O(0), O(1), m.BaseRadiusMm, nearColumn: true),
+            Arm("어깨(J2)", O(1), s1, m.ShoulderRadiusMm, nearColumn: true),
+            Arm("상완", s1, e1, m.UpperArmRadiusMm),
+            Arm("팔꿈치(J3)", e1, e2, m.ElbowRadiusMm),
+            Arm("전완", e2, w1, m.ForearmRadiusMm),
+            Arm("손목1(J4)", w1, O(4), m.WristRadiusMm),
+            Arm("손목2(J5)", O(4), O(5), m.WristRadiusMm),
+            Arm("손목3(J6)", O(5), O(6), m.WristRadiusMm),
+        }.Concat(m.ToolSegments.Select(t =>
+        {
+            var a = Along(O(6), z6, t.FromMm);
+            var b = Along(O(6), z6, t.ToMm);
+            return WithSelf(CylinderPart(t.Name, B(a), B(b), t.RadiusMm, planes), a, b, t.RadiusMm, f.BaseZMm, self);
+        })).ToArray();
         var joints = new[]
         {
             new ReachJointMark("J1", B(O(0))),
@@ -313,6 +366,86 @@ public static class ReachSimulator
         var wristDown = O(5)[2] < O(4)[2];
         return new ReachSolution(j, posture.Ok, posture.Margin, posture.Limiting, parts, joints,
             B(Along(O(6), z6, m.ToolZMm)), wristDown, parts.Min(p => p.ClearanceM));
+    }
+
+    /// <summary>차체 기준 상자(mm, x 전방·y 좌측·z 바닥 위).</summary>
+    private readonly record struct SelfBox(string Name, double[] Min, double[] Max);
+
+    /// <summary>자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).</summary>
+    private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm) => new[]
+    {
+        new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm }),
+        new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
+            new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm }),
+        new SelfBox("리프트 기둥", new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
+            new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
+    };
+
+    /// <summary>리프트 기둥 — 사각 기둥 꼭짓점으로 탱크 면 여유를 잰다(그림은 반폭 반경 캡슐).</summary>
+    private static ReachPart Column(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f)
+    {
+        var h = m.ColumnHalfMm;
+        var corners = new[] { m.AmrHeightMm, f.BaseZMm }
+            .SelectMany(z => new[] { (h, h), (h, -h), (-h, h), (-h, -h) }.Select(c => f.AmrToDrawing(c.Item1, c.Item2, z)))
+            .ToList();
+        var (cl, code) = Clearance(corners, 0, planes, skipFloor: true);
+        return new ReachPart("리프트 기둥", f.AmrToDrawing(0, 0, m.AmrHeightMm), f.AmrToDrawing(0, 0, f.BaseZMm), h / 1000.0, cl, code);
+    }
+
+    /// <summary>팔 부품의 탱크 면 여유와 차체·신호탑·기둥 여유 중 작은 쪽. a·b 는 BASE 기준 mm.</summary>
+    private static ReachPart WithSelf(ReachPart tank, double[] a, double[] b, double radiusMm, double baseZMm, SelfBox[] boxes)
+    {
+        var pa = new[] { a[0], a[1], a[2] + baseZMm };
+        var pb = new[] { b[0], b[1], b[2] + baseZMm };
+        var best = tank;
+        foreach (var box in boxes)
+        {
+            var cl = (SegmentBoxDistanceMm(pa, pb, box.Min, box.Max) - radiusMm) / 1000.0;
+            if (cl < best.ClearanceM) best = best with { ClearanceM = cl, NearestPlane = box.Name };
+        }
+        return best;
+    }
+
+    /// <summary>선분–축정렬 상자 최단거리 [mm]. 선분 위 점에서 상자까지 거리는 볼록이라 삼분 탐색으로 찾는다.</summary>
+    public static double SegmentBoxDistanceMm(double[] a, double[] b, double[] min, double[] max)
+    {
+        double At(double t)
+        {
+            var s = 0.0;
+            for (var i = 0; i < 3; i++)
+            {
+                var p = a[i] + (b[i] - a[i]) * t;
+                var d = p < min[i] ? min[i] - p : p > max[i] ? p - max[i] : 0;
+                s += d * d;
+            }
+            return Math.Sqrt(s);
+        }
+        double lo = 0, hi = 1;
+        for (var k = 0; k < 40 && hi - lo > 1e-4; k++)
+        {
+            double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+            if (At(m1) <= At(m2)) hi = m2; else lo = m1;
+        }
+        return Math.Min(At((lo + hi) / 2), Math.Min(At(0), At(1)));
+    }
+
+    /// <summary>
+    /// 끝이 평평한 원통(검사 툴)의 면 여유 — 테두리 원의 가장 가까운 점 = 중심 거리 − r·sin(축–법선 각).
+    /// 광축이 면 법선과 나란한 대상 면에서는 반경이 여유를 줄이지 않는다(캡슐로 두면 끝이 둥글게 r 만큼 더 나간다).
+    /// </summary>
+    private static ReachPart CylinderPart(string name, double[] a, double[] b, double radiusMm, IReadOnlyList<ReachPlane> planes)
+    {
+        var axis = Vec3.Normalize(Vec3.Sub(b, a)) ?? new[] { 0.0, 0, 1 };
+        var best = double.PositiveInfinity;
+        var code = "";
+        foreach (var pl in planes)
+        {
+            var c = Vec3.Dot(axis, pl.Normal);
+            var rim = radiusMm / 1000.0 * Math.Sqrt(Math.Max(0, 1 - c * c));
+            var d = Math.Min(pl.SignedDistance(a), pl.SignedDistance(b)) - rim;
+            if (d < best) { best = d; code = pl.Code; }
+        }
+        return new ReachPart(name, a, b, radiusMm / 1000.0, best, code);
     }
 
     private static ReachPart Part(string name, double[] a, double[] b, double radiusMm, IReadOnlyList<ReachPlane> planes, bool skipFloor = false)

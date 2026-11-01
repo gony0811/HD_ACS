@@ -257,9 +257,10 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? branch = null)
     {
         var q = new List<string>();
+        if (branch is { Length: > 0 }) q.Add($"branch={Uri.EscapeDataString(branch)}");
         if (level is { } lv) q.Add($"level={lv}");
         if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
         var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/survey" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
@@ -270,11 +271,12 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
-        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default)
+        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default, string? branch = null)
     {
         var ci = CultureInfo.InvariantCulture;
         var url = $"/api/reach-sim/areas/{areaId}/tasks/{taskId}?point={point}&dF={offsetForwardMm.ToString(ci)}" +
-                  $"&dL={offsetLeftMm.ToString(ci)}&yaw={yawIndex}" + (strokeMm is { } h ? $"&stroke={h.ToString(ci)}" : "");
+                  $"&dL={offsetLeftMm.ToString(ci)}&yaw={yawIndex}" + (strokeMm is { } h ? $"&stroke={h.ToString(ci)}" : "") +
+                  (branch is { Length: > 0 } ? $"&branch={Uri.EscapeDataString(branch)}" : "");
         var resp = await _http.GetAsync(url, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
@@ -282,9 +284,10 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode,
-        Guid? areaId, CancellationToken ct = default)
+        Guid? areaId, CancellationToken ct = default, string? branch = null)
     {
         var q = new List<string>();
+        if (branch is { Length: > 0 }) q.Add($"branch={Uri.EscapeDataString(branch)}");
         if (level is { } lv) q.Add($"level={lv}");
         if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
         if (areaId is { } id) q.Add($"areaId={id}");

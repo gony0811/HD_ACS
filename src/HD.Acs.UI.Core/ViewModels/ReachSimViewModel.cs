@@ -73,6 +73,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     [ObservableProperty] private double _offsetLeftMm;
     [ObservableProperty] private int _yawIndex;
     [ObservableProperty] private bool _clipSection = true;
+    /// <summary>IK 가지를 간섭 여유 최대로 고른다(대안 검토). 끄면 운영 규칙(HD_AMR — 자세 여유 최대).</summary>
+    [ObservableProperty] private bool _clearanceBranch;
     /// <summary>그릴 IK 해 순번 — null = 운영 선택.</summary>
     [ObservableProperty] private int? _solutionIndex;
     [ObservableProperty] private ReachSolutionRow? _selectedSolution;
@@ -137,6 +139,9 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (!_suppress) _ = SurveyAsync();
     }
     partial void OnSelectedWallChanged(string value) { ClearOptima(); if (!_suppress) _ = SurveyAsync(); }
+    partial void OnClearanceBranchChanged(bool value) { ClearOptima(); _ = SurveyAsync(); }
+
+    private string? Branch => ClearanceBranch ? "clearance" : null;
 
     private void ClearOptima()
     {
@@ -167,7 +172,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         StatusMessage = $"L{SelectedLevel} {SelectedWall} 조사 중… (리프트 0~1000 mm × 세 자세)";
         try
         {
-            var areas = await _api.GetReachSurveyAsync(TankId, SelectedLevel, SelectedWall);
+            var areas = await _api.GetReachSurveyAsync(TankId, SelectedLevel, SelectedWall, branch: Branch);
             if (version != _surveyVersion) return;   // 그 사이 층·면이 또 바뀜
             Areas.Clear();
             Seams.Clear();
@@ -268,7 +273,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         try
         {
             await Task.Delay(DetailDebounceMs, ct);
-            var d = await _api.GetReachDetailAsync(areaId, taskId, PointIndex, StrokeMm, OffsetForwardMm, OffsetLeftMm, YawIndex, ct);
+            var d = await _api.GetReachDetailAsync(areaId, taskId, PointIndex, StrokeMm, OffsetForwardMm, OffsetLeftMm, YawIndex, ct, Branch);
             if (ct.IsCancellationRequested) return;
             ApplyDetail(d);
         }
@@ -370,7 +375,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         StatusMessage = $"L{SelectedLevel} {SelectedWall} 정차점 최적화 중… (영역마다 후보 정차 수십 곳 × 리프트 × 세 자세)";
         try
         {
-            var list = await _api.GetStationOptimaAsync(TankId, SelectedLevel, SelectedWall, null);
+            var list = await _api.GetStationOptimaAsync(TankId, SelectedLevel, SelectedWall, null, branch: Branch);
             ApplyOptima(list);
             StatusMessage = list is null ? $"선창 '{TankId}' 형상이 없습니다." : $"정차점 최적화 완료 — 영역 {list.Count}개";
         }

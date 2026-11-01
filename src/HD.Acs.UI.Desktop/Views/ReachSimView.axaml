@@ -24,6 +24,7 @@
                             <ComboBox Classes="field" Width="90" ItemsSource="{Binding WallCodes}" SelectedItem="{Binding SelectedWall}" />
                             <Button Content="다시 조사" Margin="8,0,0,0" Command="{Binding SurveyCommand}" />
                         </StackPanel>
+                        <CheckBox Content="IK 가지: 간섭 여유 최대 (끄면 운영 규칙 = 자세 여유 최대)" IsChecked="{Binding ClearanceBranch}" FontSize="11.5" />
                         <TextBlock Text="{Binding SurveySummary}" FontSize="11.5" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="영역" Classes="lbl" />
@@ -115,8 +116,8 @@
                           CanUserSortColumns="False" HeadersVisibility="Column">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="부품" Binding="{Binding Name}" Width="*" />
-                        <DataGridTextColumn Header="높이(m)" Binding="{Binding HeightM}" Width="84" />
-                        <DataGridTextColumn Header="면" Binding="{Binding Plane}" Width="64" />
+                        <DataGridTextColumn Header="높이(m)" Binding="{Binding HeightM}" Width="70" />
+                        <DataGridTextColumn Header="면 · 상대" Binding="{Binding Plane}" Width="100" />
                         <DataGridTemplateColumn Header="여유(mm)" Width="96">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
@@ -158,7 +159,7 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="모델: FR5-WML DH(관절 0점 UR 규약 가정) · TCP 플랜지 +375 · BASE 차체 중심 위 1635 + h · 차체 730×700×887(앞 395) · 링크 캡슐 근사 · 탱크는 ACS 면 정의(평면). 여유 50 mm 미만은 주의."
+                <TextBlock Text="모델: FR5-WML DH(관절 0점 UR 규약 가정) · TCP 플랜지 +375 · BASE 차체 중심 위 1635 + h · 차체 730×700×887(앞 395) · 리프트 기둥 200×200 · 신호탑(후방, 933) · 링크 캡슐 근사 · 탱크는 ACS 면 정의(평면). 팔은 탱크 면과 차체·신호탑·리프트 기둥(자기 간섭) 모두와 잽니다. 여유 50 mm 미만은 주의."
                            Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding StatusMessage}" FontSize="11.5" TextWrapping="Wrap" />
             </StackPanel>

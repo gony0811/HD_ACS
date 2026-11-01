@@ -191,22 +191,27 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/area-stations",
 
 // ── 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세(② 400 → 정렬 준비 300 → 초점 0)로 용접선에 닿는지·탱크 면과 부딪히는지 ──
 app.MapGet("/api/reach-sim/tanks/{tankId}/survey",
-    async (string tankId, int? level, string? wallCode, ReachSimService sim, CancellationToken ct) =>
-        await sim.SurveyAsync(tankId, level, wallCode, ct) is { } r
+    async (string tankId, int? level, string? wallCode, string? branch, ReachSimService sim, CancellationToken ct) =>
+        await sim.SurveyAsync(tankId, level, wallCode, ct, BranchRuleOf(branch)) is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
-    async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw,
+    async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw, string? branch,
            ReachSimService sim, CancellationToken ct) =>
-        await sim.DetailAsync(areaId, taskId, point ?? 1, stroke, dF ?? 0, dL ?? 0, yaw ?? 0, ct) is { } r
+        await sim.DetailAsync(areaId, taskId, point ?? 1, stroke, dF ?? 0, dL ?? 0, yaw ?? 0, ct, BranchRuleOf(branch)) is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = "영역·작업 또는 선창 형상 없음" }));
 
+// IK 가지 규칙 — branch=clearance 면 간섭 여유 최대(대안 검토), 그 밖은 운영(자세 여유 최대).
+static HD.Acs.Core.Reach.ReachBranchRule BranchRuleOf(string? branch) =>
+    string.Equals(branch, "clearance", StringComparison.OrdinalIgnoreCase)
+        ? HD.Acs.Core.Reach.ReachBranchRule.MaxClearance : HD.Acs.Core.Reach.ReachBranchRule.MaxMargin;
+
 // 정차점 최적화 — 조회 전용(계산만). 적용은 아래 POST 로 영역 정차 덮어쓰기에 쓴다.
 app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
-    async (string tankId, int? level, string? wallCode, Guid? areaId, ReachSimService sim, CancellationToken ct) =>
-        await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct) is { } r
+    async (string tankId, int? level, string? wallCode, Guid? areaId, string? branch, ReachSimService sim, CancellationToken ct) =>
+        await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct, BranchRuleOf(branch)) is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 

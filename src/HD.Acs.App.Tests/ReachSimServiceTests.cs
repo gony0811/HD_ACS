@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Planning;
+using HD.Acs.Core.Reach;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
@@ -65,10 +66,13 @@ public class ReachSimServiceTests
     {
         var sim = await SeedAsync();
         var areas = (await sim.SurveyAsync("CT1", null, null, default))!;
+        var alt = (await sim.SurveyAsync("CT1", null, null, default, ReachBranchRule.MaxClearance))!;
 
         var sl = areas.Single(a => a.AreaId == SlArea).Seams.Single();
-        var sm = areas.Single(a => a.AreaId == SmArea).Seams.Single();
         Assert.NotEqual("Clear", sl.Verdict);
+        // 수직벽 한가운데 — 운영 가지는 팔꿈치가 리프트 기둥에 닿고, 간섭 여유 최대 가지는 닿지 않는다.
+        Assert.Equal("Collision", areas.Single(a => a.AreaId == SmArea).Seams.Single().Verdict);
+        var sm = alt.Single(a => a.AreaId == SmArea).Seams.Single();
         Assert.Equal("Clear", sm.Verdict);
         Assert.NotNull(sm.StrokeMm);
         Assert.InRange(sm.ZMin, 1.49, 1.51);   // 층 바닥 기준 높이
@@ -113,7 +117,7 @@ public class ReachSimServiceTests
     public async Task 최적화는_경사면_정차를_옮기고_수직벽은_닿는_수를_줄이지_않는다()
     {
         var sim = await SeedAsync();
-        var list = (await sim.OptimizeAsync("CT1", null, null, null, default))!;
+        var list = (await sim.OptimizeAsync("CT1", null, null, null, default, ReachBranchRule.MaxClearance))!;
 
         var sl = list.Single(o => o.WallCode == "SL");
         Assert.Equal(0, sl.Current.Clear);

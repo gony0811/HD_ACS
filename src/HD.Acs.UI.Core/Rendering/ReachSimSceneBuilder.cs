@@ -86,9 +86,11 @@ public static class ReachSimSceneBuilder
         var warn = d.WarnClearanceM;
         foreach (var p in sol.Parts)
         {
+            // 검사 툴은 끝이 평평한 원통 외곽(판정과 같게)이고, 안의 손목이 보이게 반투명으로 그린다.
+            var tool = p.Name.StartsWith("검사 툴", StringComparison.Ordinal);
             var color = p.ClearanceM < 0 ? Hit : p.ClearanceM < warn ? Warn
-                : p.Name == "리프트 기둥" ? Column : p.Name == "검사 툴" ? Tool : Robot;
-            AddCapsule(scene, Pt3.FromArray(p.A), Pt3.FromArray(p.B), p.RadiusM, color);
+                : p.Name == "리프트 기둥" ? Column : tool ? Tool : Robot;
+            AddCapsule(scene, Pt3.FromArray(p.A), Pt3.FromArray(p.B), p.RadiusM, tool ? color with { A = 0x70 } : color, flat: tool);
             scene.ExtentPoints.Add(Pt3.FromArray(p.A));
             scene.ExtentPoints.Add(Pt3.FromArray(p.B));
         }
@@ -124,8 +126,8 @@ public static class ReachSimSceneBuilder
             scene.Faces.Add(new Face3(f.Select(i => p[i]).ToArray(), fill, Rgba.FromArgb(0xC0, 0x2B, 0x36, 0x40), 1.0));
     }
 
-    /// <summary>캡슐을 다각 기둥으로 근사(옆면만) — 끝은 마커 원으로 둥글게 보인다.</summary>
-    private static void AddCapsule(Scene3 scene, Pt3 a, Pt3 b, double r, Rgba color)
+    /// <summary>캡슐을 다각 기둥으로 근사(옆면만) — 끝은 마커 원으로 둥글게 보인다. flat 이면 끝을 평평한 면으로 닫는다(원통).</summary>
+    private static void AddCapsule(Scene3 scene, Pt3 a, Pt3 b, double r, Rgba color, bool flat = false)
     {
         var axis = b - a;
         if (axis.LengthSquared < 1e-12)
@@ -146,6 +148,12 @@ public static class ReachSimSceneBuilder
         {
             var k = (i + 1) % CapsuleSides;
             scene.Faces.Add(new Face3(new[] { a + ring[i], a + ring[k], b + ring[k], b + ring[i] }, color, null, 0));
+        }
+        if (flat)
+        {
+            scene.Faces.Add(new Face3(ring.Select(v => a + v).ToArray(), color, null, 0));
+            scene.Faces.Add(new Face3(ring.Select(v => b + v).ToArray(), color, null, 0));
+            return;
         }
         scene.Markers.Add(new Marker3(a, color, RadiusWorld: r));
         scene.Markers.Add(new Marker3(b, color, RadiusWorld: r));

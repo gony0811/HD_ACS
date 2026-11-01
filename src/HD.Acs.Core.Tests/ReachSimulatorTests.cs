@@ -127,14 +127,57 @@ public class ReachSimulatorTests
     [Fact]
     public void 조사는_간섭_없이_닿는_리프트를_찾는다()
     {
+        // 수직벽 한가운데 — 운영 가지(자세 여유 최대)는 상완이 기둥 옆으로 늘어진 elbow-down 이라 팔꿈치가 기둥에 닿고,
+        // 간섭 여유 최대 가지(팔꿈치를 든 자세)는 간섭 없이 닿는다.
         var (sm, v, floor) = MidWall();
-        var survey = ReachSimulator.Survey(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+        ReachSeamSurvey Run(ReachRobotModel m) => ReachSimulator.Survey(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
             new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(11.8, v), sm.To3D(12, v), sm.To3D(12.2, v) },
             sm.Normal, new[] { 0.0, 500, 1000 });
 
-        Assert.Equal(ReachVerdict.Clear, survey.Verdict);
-        Assert.NotNull(survey.StrokeMm);
-        Assert.True(survey.MinClearanceM >= 0);
+        Assert.Equal(ReachVerdict.Collision, Run(ReachRobotModel.Default).Verdict);
+        var alt = Run(ReachRobotModel.Default with { BranchRule = ReachBranchRule.MaxClearance });
+        Assert.Equal(ReachVerdict.Clear, alt.Verdict);
+        Assert.NotNull(alt.StrokeMm);
+        Assert.True(alt.MinClearanceM >= 0);
+    }
+
+    [Fact]
+    public void 운영_가지는_팔꿈치가_리프트_기둥에_닿는다()
+    {
+        var (sm, v, floor) = MidWall();
+        var r = ReachSimulator.Evaluate(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300);
+
+        var focus = r.Stages[2].Chosen!;
+        var worst = focus.Parts.MinBy(p => p.ClearanceM)!;
+        Assert.Equal("리프트 기둥", worst.NearestPlane);
+        Assert.True(worst.ClearanceM < 0);
+        Assert.False(focus.Parts.Single(p => p.Name == "리프트 기둥").ClearanceM < 0);   // 기둥 자신은 탱크 면에서 멀다
+    }
+
+    [Fact]
+    public void 초점_자세에서_툴_끝은_대상_면에_6mm_앞이다()
+    {
+        // STEP 실측 툴 끝(조명·레이저) 369 mm, 초점 375 mm — 광축이 면 법선과 나란하므로 원통 반경은 여유를 줄이지 않는다.
+        var (sm, v, floor) = MidWall();
+        var m = ReachRobotModel.Default with { BranchRule = ReachBranchRule.MaxClearance };
+        var r = ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300);
+
+        var tool = r.Stages[2].Chosen!.Parts.Single(p => p.Name == "검사 툴(몸체·조명)");
+        Assert.Equal("SM", tool.NearestPlane);
+        Assert.Equal(0.006, tool.ClearanceM, 3);
+        Assert.Equal(0.234, tool.RadiusM, 3);
+    }
+
+    [Fact]
+    public void 선분_상자_거리는_가장_가까운_점까지다()
+    {
+        double[] min = { -100, -100, 887 }, max = { 100, 100, 1635 };
+        Assert.Equal(0, ReachSimulator.SegmentBoxDistanceMm(new[] { -300.0, 0, 1000 }, new[] { 300.0, 0, 1000 }, min, max), 6);
+        Assert.Equal(50, ReachSimulator.SegmentBoxDistanceMm(new[] { 150.0, -500, 1000 }, new[] { 150.0, 500, 1200 }, min, max), 3);
+        Assert.Equal(Math.Sqrt(50 * 50 + 50 * 50 + 65 * 65),
+            ReachSimulator.SegmentBoxDistanceMm(new[] { 150.0, 150, 700 }, new[] { 150.0, 150, 822 }, min, max), 3);
     }
 
     [Fact]

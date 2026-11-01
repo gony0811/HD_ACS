@@ -59,14 +59,15 @@ public interface IAcsApiClient
     Task<PlannedStationsDto?> GetPlannedStationsAsync(Guid scenarioId, CancellationToken ct = default) =>
         Task.FromResult<PlannedStationsDto?>(null);
     // 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세로 용접선에 닿는지·탱크 면과 부딪히는지(조회 전용). 선창·영역 없음=null
+    /// <remarks>branch = "clearance" 면 IK 가지를 간섭 여유 최대로(대안 검토), null 이면 운영 규칙(자세 여유 최대).</remarks>
     Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
-        CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
+        CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
     Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
-        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default) =>
+        double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default, string? branch = null) =>
         Task.FromResult<ReachDetailDto?>(null);
     /// <summary>정차점 최적화(계산만) — 층·면·영역 필터. 선창이 없으면 null.</summary>
     Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode, Guid? areaId,
-        CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
+        CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
     /// <summary>영역 정차 덮어쓰기(x·y·방향) 설정 — 모두 null 이면 해제.</summary>
     Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, CancellationToken ct = default) =>
         Task.CompletedTask;
