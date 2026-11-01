@@ -127,32 +127,46 @@ public class ReachSimulatorTests
     [Fact]
     public void 조사는_간섭_없이_닿는_리프트를_찾는다()
     {
-        // 수직벽 한가운데 — 운영 가지(자세 여유 최대)는 상완이 기둥 옆으로 늘어진 elbow-down 이라 팔꿈치가 기둥에 닿고,
-        // 간섭 여유 최대 가지(팔꿈치를 든 자세)는 간섭 없이 닿는다.
+        // 수직벽 한가운데 — 실측 관절 한계(J2 ≤ +85)에서는 운영 가지(자세 여유 최대)도 팔꿈치를 든 가지라 간섭 없이 닿는다.
         var (sm, v, floor) = MidWall();
         ReachSeamSurvey Run(ReachRobotModel m) => ReachSimulator.Survey(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
             new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(11.8, v), sm.To3D(12, v), sm.To3D(12.2, v) },
             sm.Normal, new[] { 0.0, 500, 1000 });
 
-        Assert.Equal(ReachVerdict.Collision, Run(ReachRobotModel.Default).Verdict);
-        var alt = Run(ReachRobotModel.Default with { BranchRule = ReachBranchRule.MaxClearance });
-        Assert.Equal(ReachVerdict.Clear, alt.Verdict);
-        Assert.NotNull(alt.StrokeMm);
-        Assert.True(alt.MinClearanceM >= 0);
+        var survey = Run(ReachRobotModel.Default);
+        Assert.Equal(ReachVerdict.Clear, survey.Verdict);
+        Assert.NotNull(survey.StrokeMm);
+        Assert.True(survey.MinClearanceM >= 0);
+        // 대칭 ±175 한계(옛 가정)면 여유 최대가 elbow-down 가지라 팔꿈치가 기둥에 닿는다.
+        Assert.Equal(ReachVerdict.Collision, Run(Symmetric175).Verdict);
+        Assert.Equal(ReachVerdict.Clear, Run(Symmetric175 with { BranchRule = ReachBranchRule.MaxClearance }).Verdict);
+    }
+
+    private static readonly ReachRobotModel Symmetric175 = ReachRobotModel.Default with
+    {
+        JointMinDeg = new[] { -175.0, -175, -175, -175, -175 },
+        JointMaxDeg = new[] { 175.0, 175, 175, 175, 175 },
+    };
+
+    [Fact]
+    public void elbow_down_가지는_팔꿈치가_리프트_기둥에_닿는다()
+    {
+        var (sm, v, floor) = MidWall();
+        ReachPart Worst(ReachRobotModel m) => ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300).Stages[2].Chosen!.Parts.MinBy(p => p.ClearanceM)!;
+
+        var hanging = Worst(Symmetric175);
+        Assert.Equal("리프트 기둥", hanging.NearestPlane);
+        Assert.True(hanging.ClearanceM < 0);
+        Assert.True(Worst(ReachRobotModel.Default).ClearanceM >= 0);
     }
 
     [Fact]
-    public void 운영_가지는_팔꿈치가_리프트_기둥에_닿는다()
+    public void 관절_한계는_FR5_실측_비대칭이다()
     {
-        var (sm, v, floor) = MidWall();
-        var r = ReachSimulator.Evaluate(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
-            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300);
-
-        var focus = r.Stages[2].Chosen!;
-        var worst = focus.Parts.MinBy(p => p.ClearanceM)!;
-        Assert.Equal("리프트 기둥", worst.NearestPlane);
-        Assert.True(worst.ClearanceM < 0);
-        Assert.False(focus.Parts.Single(p => p.Name == "리프트 기둥").ClearanceM < 0);   // 기둥 자신은 탱크 면에서 멀다
+        var m = ReachRobotModel.Default;
+        Assert.Equal(new[] { -175.0, -265, -160, -265, -175 }, m.JointMinDeg);
+        Assert.Equal(new[] { 175.0, 85, 160, 85, 175 }, m.JointMaxDeg);
     }
 
     [Fact]

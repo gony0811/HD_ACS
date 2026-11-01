@@ -159,7 +159,7 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="모델: FR5-WML DH(관절 0점 UR 규약 가정) · TCP 플랜지 +375 · BASE 차체 중심 위 1635 + h · 차체 730×700×887(앞 395) · 리프트 기둥 200×200 · 신호탑(후방, 933) · 링크 캡슐 근사 · 탱크는 ACS 면 정의(평면). 팔은 탱크 면과 차체·신호탑·리프트 기둥(자기 간섭) 모두와 잽니다. 여유 50 mm 미만은 주의."
+                <TextBlock Text="모델: FR5-WML DH(관절 0점 UR 규약 가정) · TCP 플랜지 +375 · BASE 차체 중심 위 1635 + h · 차체 730×700×887(앞 395) · 리프트 기둥 200×200 · 신호탑(후방, 933) · 링크 캡슐 근사 · 검사 툴 STEP 실측 원통(탱크 면은 전체 외곽, 자기 간섭은 몸체 중심부) · 관절 한계 FR5 실측(J2·J4 −265~+85) · 탱크는 ACS 면 정의(평면). 팔은 탱크 면과 차체·신호탑·리프트 기둥(자기 간섭) 모두와 잽니다. 여유 50 mm 미만은 주의."
                            Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding StatusMessage}" FontSize="11.5" TextWrapping="Wrap" />
             </StackPanel>

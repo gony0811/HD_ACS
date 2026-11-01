@@ -70,8 +70,8 @@ public class ReachSimServiceTests
 
         var sl = areas.Single(a => a.AreaId == SlArea).Seams.Single();
         Assert.NotEqual("Clear", sl.Verdict);
-        // 수직벽 한가운데 — 운영 가지는 팔꿈치가 리프트 기둥에 닿고, 간섭 여유 최대 가지는 닿지 않는다.
-        Assert.Equal("Collision", areas.Single(a => a.AreaId == SmArea).Seams.Single().Verdict);
+        // 수직벽 한가운데 — 실측 관절 한계에서는 운영 가지도, 간섭 여유 최대 가지도 간섭 없이 닿는다.
+        Assert.Equal("Clear", areas.Single(a => a.AreaId == SmArea).Seams.Single().Verdict);
         var sm = alt.Single(a => a.AreaId == SmArea).Seams.Single();
         Assert.Equal("Clear", sm.Verdict);
         Assert.NotNull(sm.StrokeMm);

@@ -21,6 +21,12 @@ public sealed record ReachRobotModel
         new ReachToolSegment("검사 툴(브래킷·D435i)", -71, 56, 245),
         new ReachToolSegment("검사 툴(몸체·조명)", -15, 369, 234),
     };
+
+    /// <summary>
+    /// 자기 간섭(차체·기둥)에 쓰는 툴 외곽 — 몸체 브래킷 축 0~293 · 반경 169 만. 한쪽에 치우친 브래킷·조명은 J6 각에 따라
+    /// 위치가 달라 회전 대칭으로 감싸면 실기 홈 자세부터 차체와 간섭으로 잘못 나온다(HD_AMR CobotEnvelope 와 같은 규칙).
+    /// </summary>
+    public ReachToolSegment SelfToolSegment { get; init; } = new("검사 툴(몸체)", 0, 293, 169);
     /// <summary>차체 바닥 → 코봇 BASE 면 높이(리프트 0) [mm].</summary>
     public double MountZMm { get; init; } = 1635;
     public double StrokeMaxMm { get; init; } = 1000;
@@ -49,7 +55,12 @@ public sealed record ReachRobotModel
     public double WristRadiusMm { get; init; } = 45;
 
     /// <summary>관절 허용(J1~J5 대칭) [도] — J6 은 운영이 따로 맞추므로 판정하지 않는다.</summary>
-    public double JointLimitDeg { get; init; } = 175;
+    /// <summary>
+    /// 관절 허용 하한·상한(J1~J5) [도] — FR5 실측(HD_AMR PostureLimits.Default 와 같다): J1 ±175 · J2 −265~+85 ·
+    /// J3 ±160 · J4 −265~+85 · J5 ±175. J6 은 운영이 따로 맞추므로 판정하지 않는다.
+    /// </summary>
+    public double[] JointMinDeg { get; init; } = { -175, -265, -160, -265, -175 };
+    public double[] JointMaxDeg { get; init; } = { 175, 85, 160, 85, 175 };
     public double WristMarginDeg { get; init; } = 15;
     public double ElbowMarginDeg { get; init; } = 8;
     /// <summary>이 여유 미만이면 '주의' [m].</summary>
@@ -261,9 +272,10 @@ public static class ReachSimulator
         return Mat4.FromAxes(x, y, z, Vec3.Sub(tcp, Vec3.Scale(z, m.ToolZMm)));
     }
 
-    private static double[] Normalize(ReachRobotModel m, double[] j) => j.Select(v =>
-        v < -m.JointLimitDeg || v > m.JointLimitDeg
-            ? new[] { v - 360, v + 360 }.FirstOrDefault(c => c >= -m.JointLimitDeg && c <= m.JointLimitDeg, v)
+    /// <summary>범위 밖 관절은 ±360 감아 범위 안이면 그 값(같은 자세) — J2 +120 = −240.</summary>
+    private static double[] Normalize(ReachRobotModel m, double[] j) => j.Select((v, i) =>
+        i < m.JointMinDeg.Length && (v < m.JointMinDeg[i] || v > m.JointMaxDeg[i])
+            ? new[] { v - 360, v + 360 }.FirstOrDefault(c => c >= m.JointMinDeg[i] && c <= m.JointMaxDeg[i], v)
             : v).ToArray();
 
     private readonly record struct PostureEval(bool Ok, double Margin, string Limiting);
@@ -275,7 +287,7 @@ public static class ReachSimulator
         var why = "여유 있음";
         for (var i = 0; i < 5; i++)
         {
-            var s = Math.Min(j[i] + m.JointLimitDeg, m.JointLimitDeg - j[i]);
+            var s = Math.Min(j[i] - m.JointMinDeg[i], m.JointMaxDeg[i] - j[i]);
             if (s < slack) { slack = s; why = $"J{i + 1} 관절한계"; }
         }
         var wrist = Math.Abs(j[4]) - m.WristMarginDeg;
@@ -350,7 +362,9 @@ public static class ReachSimulator
         {
             var a = Along(O(6), z6, t.FromMm);
             var b = Along(O(6), z6, t.ToMm);
-            return WithSelf(CylinderPart(t.Name, B(a), B(b), t.RadiusMm, planes), a, b, t.RadiusMm, f.BaseZMm, self);
+            var core = m.SelfToolSegment;
+            return WithSelf(CylinderPart(t.Name, B(a), B(b), t.RadiusMm, planes),
+                Along(O(6), z6, core.FromMm), Along(O(6), z6, core.ToMm), core.RadiusMm, f.BaseZMm, self);
         })).ToArray();
         var joints = new[]
         {
