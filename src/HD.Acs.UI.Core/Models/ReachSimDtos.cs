@@ -28,3 +28,15 @@ public sealed record ReachDetailDto(
     double StrokeMm, double OffsetForwardMm, double OffsetLeftMm,
     Guid TaskId, int Point, double[] Target, List<ReachSeamLineDto> Seams,
     ReachBodyDto Body, List<ReachStageDto> Stages, double WarnClearanceM);
+
+/// <summary>정차점 최적화 — 영역 하나의 지금 정차와 찾은 정차. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
+public sealed record ReachStationOptimumDto(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
+    ReachStationCandidateDto Current, ReachStationCandidateDto Best, int Evaluated, long ElapsedMs,
+    List<ReachOptimumSeamDto>? Seams = null);
+
+/// <summary>용접선 하나의 지금·찾은 정차 판정(Clear | Collision | Unreachable)과 찾은 정차에서 고른 리프트.</summary>
+public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm);
+
+/// <summary>후보 정차 — 도면 x·y·방향, 영역 중심에서 안쪽 거리·좌측·방향 보정(°), 차체 여유, 판정 개수.</summary>
+public sealed record ReachStationCandidateDto(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
+    double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness);

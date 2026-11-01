@@ -281,6 +281,27 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<ReachDetailDto>(ct);
     }
 
+    public async Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode,
+        Guid? areaId, CancellationToken ct = default)
+    {
+        var q = new List<string>();
+        if (level is { } lv) q.Add($"level={lv}");
+        if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
+        if (areaId is { } id) q.Add($"areaId={id}");
+        var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/station-optimize" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<ReachStationOptimumDto>>(ct);
+    }
+
+    public async Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/reach-sim/areas/{areaId}/station",
+            new { stationX = x, stationY = y, stationTheta = theta, reason, userId = "operator" }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+    }
+
     public async Task<IReadOnlyList<ScenarioAreaDto>> GetScenarioAreasAsync(Guid scenarioId, CancellationToken ct = default)
     {
         var resp = await _http.GetAsync($"/api/scenarios/{scenarioId}/areas", ct);

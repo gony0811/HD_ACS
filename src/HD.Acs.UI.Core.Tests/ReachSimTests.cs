@@ -135,4 +135,81 @@ public class ReachSimTests
         Assert.Equal(5, scene.Faces.Count(f => f.Fill == ReachSimSceneBuilder.Hit with { A = 0xD0 }));
         Assert.NotEmpty(scene.ExtentPoints);
     }
+
+    // ── 정차점 최적화 ──
+
+    /// <summary>호출을 기록하는 API — Task 는 완료, Task&lt;T&gt; 는 default 를 돌려준다.</summary>
+    public class RecordingApi : DispatchProxy
+    {
+        public List<(string Method, object?[] Args)> Calls { get; } = new();
+
+        protected override object? Invoke(MethodInfo? m, object?[]? args)
+        {
+            Calls.Add((m!.Name, args ?? Array.Empty<object?>()));
+            var t = m.ReturnType;
+            if (t == typeof(Task)) return Task.CompletedTask;
+            if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                var r = t.GetGenericArguments()[0];
+                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(r)
+                    .Invoke(null, new[] { r.IsValueType ? Activator.CreateInstance(r) : null });
+            }
+            return t.IsValueType && t != typeof(void) ? Activator.CreateInstance(t) : null;
+        }
+    }
+
+    private static ReachStationCandidateDto Cand(double x, double dist, int clear, int hit, int un, double lateral = 0, double yaw = 0) =>
+        new(x, 0, 0, dist, lateral, yaw, 0.2, true, clear, hit, un, 0.1);
+
+    private static List<ReachStationOptimumDto> Optima() => new()
+    {
+        new(Guid.NewGuid(), "L1-R01", "SL", 1, false, Cand(1, 0.57, 0, 0, 7), Cand(1.8, 1.4, 7, 0, 0), 90, 300),
+        new(Guid.NewGuid(), "L1-R04", "SL", 1, false, Cand(1, 0.57, 0, 0, 4), Cand(1, 0.57, 0, 0, 4), 1, 5),
+    };
+
+    [Fact]
+    public void 최적화_표는_옮길_영역만_적용_대상으로_둔다()
+    {
+        var vm = Vm();
+        vm.ApplyOptima(Optima());
+
+        Assert.Equal(2, vm.Optima.Count);
+        Assert.True(vm.Optima[0].Improved);
+        Assert.Equal("0/0/7", vm.Optima[0].Current);
+        Assert.Equal("7/0/0", vm.Optima[0].Best);
+        Assert.Equal("1.4 m ← 0.6", vm.Optima[0].Move);
+        Assert.Contains("찾은 정차 — 안쪽 1.40 m", vm.OptimumDetail);
+        Assert.False(vm.Optima[1].Improved);
+        Assert.Equal("그대로", vm.Optima[1].Move);
+        Assert.Equal(vm.Optima[0], vm.SelectedOptimum);
+        Assert.StartsWith("간섭 없이 도달 0 → 7 / 11 · 옮길 영역 1개", vm.OptimizeSummary);
+    }
+
+    [Fact]
+    public async Task 모두_적용은_옮길_영역의_찾은_정차만_저장한다()
+    {
+        var api = DispatchProxy.Create<IAcsApiClient, RecordingApi>();
+        var vm = new ReachSimViewModel(api);
+        var optima = Optima();
+        vm.ApplyOptima(optima);
+
+        await vm.ApplyAllOptimaCommand.ExecuteAsync(null);
+
+        var set = Assert.Single(((RecordingApi)(object)api).Calls, c => c.Method == nameof(IAcsApiClient.SetAreaStationAsync));
+        Assert.Equal(optima[0].AreaId, set.Args[0]);
+        Assert.Equal(1.8, set.Args[1]);
+        Assert.True(vm.Optima[0].Applied);
+        Assert.False(vm.Optima[0].Improved);   // 다시 적용하지 않는다
+        Assert.EndsWith("(덮어씀)", vm.Optima[0].Area);
+    }
+
+    [Fact]
+    public void 층이나_면을_바꾸면_최적화_표를_비운다()
+    {
+        var vm = Vm();
+        vm.ApplyOptima(Optima());
+        vm.SelectedWall = "PL";
+        Assert.Empty(vm.Optima);
+        Assert.Equal("", vm.OptimizeSummary);
+    }
 }

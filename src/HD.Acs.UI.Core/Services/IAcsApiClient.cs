@@ -64,6 +64,12 @@ public interface IAcsApiClient
     Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default) =>
         Task.FromResult<ReachDetailDto?>(null);
+    /// <summary>정차점 최적화(계산만) — 층·면·영역 필터. 선창이 없으면 null.</summary>
+    Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode, Guid? areaId,
+        CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
+    /// <summary>영역 정차 덮어쓰기(x·y·방향) 설정 — 모두 null 이면 해제.</summary>
+    Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, CancellationToken ct = default) =>
+        Task.CompletedTask;
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,
         string userId, CancellationToken ct = default);

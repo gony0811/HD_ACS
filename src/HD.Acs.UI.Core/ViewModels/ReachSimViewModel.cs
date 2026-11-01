@@ -27,10 +27,15 @@ public sealed record ReachPartRow(string Name, string HeightM, string Plane, str
 public sealed record ReachSolutionRow(int Index, string Label, string Joints, string Posture, bool PostureOk,
     string WristBody, string MinClearanceMm, string Level, bool IsOperational);
 
+/// <summary>정차점 최적화 표 한 줄. Improved = 닿는 용접선이 늘어 옮길 만함, Applied = 이번에 덮어쓰기를 적용함.</summary>
+public sealed record ReachOptimumRow(ReachStationOptimumDto Optimum, string Area, string Current, string Best, string Move,
+    bool Improved, bool Applied = false);
+
 /// <summary>
 /// 계획 › 리치·간섭 — ACS 정차점(배차와 같은 식)에서 FR5-WML 이 용접선에 세 자세(② 400 → 정렬 준비 300 →
 /// 초점 검사)로 접근할 때 관절 위치와 탱크 면 간섭을 3D 로 본다. 리프트·정차 이동·IK 해를 바꿔 볼 수 있다.
-/// 계산은 서버(<c>/api/reach-sim</c>)가 하고 이 VM 은 선택 상태·표·3D 씬을 관리한다. 조회 전용.
+/// 계산은 서버(<c>/api/reach-sim</c>)가 하고 이 VM 은 선택 상태·표·3D 씬을 관리한다.
+/// 정차점 최적화는 계산만 하고, 사용자가 적용할 때만 영역 정차 덮어쓰기(x·y·방향)를 쓴다.
 /// </summary>
 public sealed partial class ReachSimViewModel : ObservableObject
 {
@@ -52,6 +57,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
     public ObservableCollection<ReachPartRow> Parts { get; } = new();
     public ObservableCollection<ReachSolutionRow> Solutions { get; } = new();
     public ObservableCollection<string> YawOptions { get; } = new();
+    public ObservableCollection<ReachOptimumRow> Optima { get; } = new();
     public IReadOnlyList<string> Stages => StageLabels;
     public IReadOnlyList<string> Points => PointLabels;
 
@@ -79,6 +85,9 @@ public sealed partial class ReachSimViewModel : ObservableObject
     /// <summary>ok | warn | bad | na — 판정 카드 색.</summary>
     [ObservableProperty] private string _verdictLevel = "na";
     [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private ReachOptimumRow? _selectedOptimum;
+    [ObservableProperty] private string _optimizeSummary = "";
+    [ObservableProperty] private string _optimumDetail = "";
 
     /// <summary>현재 3D 씬. 바뀌면 <see cref="SceneChanged"/>.</summary>
     public Scene3 Scene { get; private set; } = new();
@@ -124,9 +133,30 @@ public sealed partial class ReachSimViewModel : ObservableObject
     partial void OnSelectedLevelChanged(int value)
     {
         OnPropertyChanged(nameof(LevelIndex));
+        ClearOptima();
         if (!_suppress) _ = SurveyAsync();
     }
-    partial void OnSelectedWallChanged(string value) { if (!_suppress) _ = SurveyAsync(); }
+    partial void OnSelectedWallChanged(string value) { ClearOptima(); if (!_suppress) _ = SurveyAsync(); }
+
+    private void ClearOptima()
+    {
+        Optima.Clear();
+        OptimizeSummary = "";
+    }
+
+    partial void OnSelectedOptimumChanged(ReachOptimumRow? value)
+    {
+        if (value is null) { OptimumDetail = ""; return; }
+        var (c, b) = (value.Optimum.Current, value.Optimum.Best);
+        static string Cnt(ReachStationCandidateDto x) => $"간섭 없음 {x.Clear} · 간섭 {x.Collision} · 불가 {x.Unreachable}";
+        OptimumDetail = $"{value.Optimum.Name}: 지금 — 중심에서 안쪽 {c.DistM:0.00} m · 좌 {c.LateralM:+0.00;-0.00} m · 방향 {c.YawDeg:+0;-0}° · " +
+                        $"차체 여유 {c.BodyClearanceM * 1000:0} mm · {Cnt(c)}\n" +
+                        (value.Improved || value.Applied
+                            ? $"찾은 정차 — 안쪽 {b.DistM:0.00} m · 좌 {b.LateralM:+0.00;-0.00} m · 방향 {b.YawDeg:+0;-0}° · " +
+                              $"차체 여유 {b.BodyClearanceM * 1000:0} mm · {Cnt(b)} · 도면 ({b.X:0.000}, {b.Y:0.000}, {b.Theta:0.0000} rad)" +
+                              (value.Applied ? " — 적용됨" : "")
+                            : "더 나은 정차 없음 — 옮겨도 닿는 용접선이 늘지 않습니다.");
+    }
 
     /// <summary>선택 층·면의 영역·용접선마다 리프트를 훑어 간섭 없이 닿는지 서버에 묻는다.</summary>
     [RelayCommand]
@@ -328,6 +358,125 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
         Scene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
         SceneChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // ── 정차점 최적화 ────────────────────────────────────────────────
+
+    /// <summary>선택 층·면의 영역마다 간섭 없이 닿는 용접선이 가장 많은 정차를 서버에서 찾는다(계산만 — DB 를 바꾸지 않는다).</summary>
+    [RelayCommand]
+    public async Task OptimizeStationsAsync()
+    {
+        IsBusy = true;
+        StatusMessage = $"L{SelectedLevel} {SelectedWall} 정차점 최적화 중… (영역마다 후보 정차 수십 곳 × 리프트 × 세 자세)";
+        try
+        {
+            var list = await _api.GetStationOptimaAsync(TankId, SelectedLevel, SelectedWall, null);
+            ApplyOptima(list);
+            StatusMessage = list is null ? $"선창 '{TankId}' 형상이 없습니다." : $"정차점 최적화 완료 — 영역 {list.Count}개";
+        }
+        catch (Exception ex) { StatusMessage = $"정차점 최적화 실패: {ex.Message}"; }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>최적화 응답 반영(테스트가 직접 부른다).</summary>
+    public void ApplyOptima(IReadOnlyList<ReachStationOptimumDto>? list)
+    {
+        Optima.Clear();
+        if (list is null) { OptimizeSummary = ""; return; }
+        foreach (var o in list) Optima.Add(Row(o));
+        int cur = list.Sum(o => o.Current.Clear), best = list.Sum(o => o.Best.Clear), n = list.Sum(o => o.Current.Clear + o.Current.Collision + o.Current.Unreachable);
+        OptimizeSummary = $"간섭 없이 도달 {cur} → {best} / {n} · 옮길 영역 {Optima.Count(r => r.Improved)}개 (바닥·천장은 대상 아님)";
+        SelectedOptimum = Optima.FirstOrDefault(r => r.Improved);
+    }
+
+    private static ReachOptimumRow Row(ReachStationOptimumDto o, bool applied = false)
+    {
+        static string Counts(ReachStationCandidateDto c) => $"{c.Clear}/{c.Collision}/{c.Unreachable}";
+        var improved = o.Best.Clear > o.Current.Clear;
+        var move = !improved ? "그대로"
+            : $"{o.Best.DistM:0.0} m ← {o.Current.DistM:0.0}" +
+              (Math.Abs(o.Best.LateralM - o.Current.LateralM) > 1e-6 ? $" · 좌 {o.Best.LateralM:+0.0;-0.0}" : "") +
+              (Math.Abs(o.Best.YawDeg - o.Current.YawDeg) > 1e-6 ? $" · {o.Best.YawDeg:+0;-0}°" : "");
+        return new ReachOptimumRow(o, o.Name + (o.Overridden ? " (덮어씀)" : ""), Counts(o.Current), Counts(o.Best), move, improved, applied);
+    }
+
+    /// <summary>
+    /// 고른 행의 찾은 정차를 3D 로 미리 본다 — 최적화로 새로 닿게 된 용접선(없으면 닿는 첫 용접선)을 그 리프트로,
+    /// 지금 정차에서 전후·좌우 이동으로 옮겨 그린다(방향 보정은 반영하지 못한다).
+    /// </summary>
+    [RelayCommand]
+    private void PreviewOptimum()
+    {
+        if (SelectedOptimum is not { } row) return;
+        var area = Areas.FirstOrDefault(a => a.Area.AreaId == row.Optimum.AreaId);
+        if (area is null) { StatusMessage = "조사 목록에 그 영역이 없습니다 — 다시 조사하세요."; return; }
+        SelectedArea = area;   // 용접선 선택·정차 초기화가 따라온다
+        var seams = row.Optimum.Seams ?? new List<ReachOptimumSeamDto>();
+        var pick = seams.FirstOrDefault(s => s.Best == "Clear" && s.Current != "Clear") ?? seams.FirstOrDefault(s => s.Best == "Clear");
+        if (pick is not null && Seams.FirstOrDefault(s => s.Seam.TaskId == pick.TaskId) is { } seam) SelectedSeam = seam;
+
+        var (c, b) = (row.Optimum.Current, row.Optimum.Best);
+        var (dx, dy) = (b.X - c.X, b.Y - c.Y);
+        _suppress = true;
+        OffsetForwardMm = Math.Round((dx * Math.Cos(c.Theta) + dy * Math.Sin(c.Theta)) * 1000);
+        OffsetLeftMm = Math.Round((-dx * Math.Sin(c.Theta) + dy * Math.Cos(c.Theta)) * 1000);
+        StrokeMm = pick?.BestStrokeMm ?? StrokeMm;
+        SolutionIndex = null;
+        _suppress = false;
+        ViewResetPending = true;
+        RequestDetail();
+        StatusMessage = $"{row.Optimum.Name} 찾은 정차 미리보기 — 전후 {OffsetForwardMm:0} mm · 좌우 {OffsetLeftMm:0} mm"
+                        + (pick is null ? "" : $" · 용접선 {pick.Seq} 리프트 {StrokeMm:0} mm")
+                        + (Math.Abs(b.YawDeg - c.YawDeg) > 1e-6 ? $" (방향 {b.YawDeg - c.YawDeg:+0;-0}° 는 미리보기에 반영 안 됨)" : "") + ".";
+    }
+
+    /// <summary>고른 행의 찾은 정차를 영역 정차 덮어쓰기로 저장한다(배차가 이 정차를 쓴다).</summary>
+    [RelayCommand]
+    private async Task ApplyOptimumAsync()
+    {
+        if (SelectedOptimum is not { Improved: true } row) return;
+        await ApplyRowsAsync(new[] { row });
+    }
+
+    /// <summary>옮길 만한 영역(닿는 용접선이 늘어나는 영역) 모두에 찾은 정차를 저장한다.</summary>
+    [RelayCommand]
+    private async Task ApplyAllOptimaAsync() => await ApplyRowsAsync(Optima.Where(r => r.Improved && !r.Applied).ToList());
+
+    private async Task ApplyRowsAsync(IReadOnlyList<ReachOptimumRow> rows)
+    {
+        if (rows.Count == 0) return;
+        IsBusy = true;
+        var done = 0;
+        try
+        {
+            foreach (var r in rows)
+            {
+                var b = r.Optimum.Best;
+                await _api.SetAreaStationAsync(r.Optimum.AreaId, b.X, b.Y, b.Theta,
+                    $"정차점 최적화: 간섭 없이 도달 {r.Optimum.Current.Clear}→{b.Clear}");
+                var i = Optima.IndexOf(r);
+                if (i >= 0) Optima[i] = Row(r.Optimum with { Overridden = true }, applied: true) with { Improved = false };
+                done++;
+            }
+            StatusMessage = $"정차 덮어쓰기 {done}개 영역 적용 — 다시 조사합니다.";
+        }
+        catch (Exception ex) { StatusMessage = $"정차 적용 실패({done}개 적용 후): {ex.Message}"; }
+        finally { IsBusy = false; }
+        await SurveyAsync();
+    }
+
+    /// <summary>선택 영역의 정차 덮어쓰기를 지워 배차 식 정차로 되돌린다.</summary>
+    [RelayCommand]
+    private async Task ClearStationOverrideAsync()
+    {
+        if (SelectedArea is not { } a) return;
+        try
+        {
+            await _api.SetAreaStationAsync(a.Area.AreaId, null, null, null, "정차 덮어쓰기 해제");
+            StatusMessage = $"{a.Area.Name} 정차 덮어쓰기 해제 — 다시 조사합니다.";
+        }
+        catch (Exception ex) { StatusMessage = $"덮어쓰기 해제 실패: {ex.Message}"; return; }
+        await SurveyAsync();
     }
 
     private static string AreaLabel(ReachSurveyAreaDto a)

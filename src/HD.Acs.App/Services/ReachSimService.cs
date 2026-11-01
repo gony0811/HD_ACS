@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HD.Acs.Core.Geometry;
+using HD.Acs.Core.Planning;
 using HD.Acs.Core.Reach;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
@@ -102,6 +103,70 @@ public sealed class ReachSimService
             _model.WarnClearanceM);
     }
 
+    /// <summary>
+    /// 영역 정차점 최적화(조회 전용) — 지금 정차에서 시작해 거리·좌우·방향을 옮겨 가며 간섭 없이 닿는 용접선이 가장 많은 정차를 찾는다.
+    /// 바닥·천장(정면 방향 없음)과 용접선 없는 영역은 건너뛴다. 선창이 없으면 null.
+    /// </summary>
+    public async Task<IReadOnlyList<ReachStationOptimum>?> OptimizeAsync(string tankId, int? level, string? wallCode, Guid? areaId,
+        CancellationToken ct)
+    {
+        var ctx = await LoadTankAsync(tankId, ct);
+        if (ctx is null) return null;
+        var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
+        if (areaId is { } id) q = q.Where(a => a.AreaId == id);
+        if (level is { } lv) q = q.Where(a => a.Level == lv);
+        if (wallCode is { Length: > 0 }) q = q.Where(a => a.WallCode == wallCode);
+        var areas = await q.OrderBy(a => a.Level).ThenBy(a => a.WallCode).ThenBy(a => a.Name).ToListAsync(ct);
+
+        var list = new List<ReachStationOptimum>();
+        foreach (var a in areas)
+        {
+            if (!ctx.Walls.TryGetValue(a.WallCode, out var wall) || wall.FacingYaw is null || a.Tasks.Count == 0) continue;
+            var setup = Setup(ctx, a, wall);
+            if (SearchSpace(a, wall, setup) is not { } space) continue;
+            var seams = a.Tasks.OrderBy(t => t.Seq).Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct);
+            var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
+            var perSeam = tasks.Select((t, i) => new ReachOptimumSeam(t.TaskId, t.Seq,
+                i < r.Baseline.Seams.Count ? r.Baseline.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
+                i < r.Best.Seams.Count ? r.Best.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
+                i < r.Best.Seams.Count ? r.Best.Seams[i].StrokeMm : null)).ToList();
+            list.Add(new ReachStationOptimum(a.AreaId, a.Name, a.WallCode, a.Level,
+                a.StationX is not null || a.StationY is not null || a.StationTheta is not null,
+                Candidate(r.Baseline), Candidate(r.Best), r.Evaluated, sw.ElapsedMilliseconds, perSeam));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 탐색 좌표계 — 영역 중심(수평)·면 안쪽 수평 방향. 지금 정차(덮어쓰기 포함)를 그 좌표로 바꿔 시작점으로 둔다.
+    /// 법선에 수평 성분이 없으면(바닥·천장) null.
+    /// </summary>
+    private static StationSearchSpace? SearchSpace(InspectionAreaEntity area, WallEntity wall, AreaSetup setup)
+    {
+        var nx = setup.Normal[0];
+        var ny = setup.Normal[1];
+        var len = Math.Sqrt(nx * nx + ny * ny);
+        if (len < 1e-6) return null;
+        nx /= len;
+        ny /= len;
+        var (uc, vc) = AreaGeometry.Centroid(Json<double[][]>(area.Corners));
+        var c = setup.Pose.LocalToDrawing(uc, vc);
+        var st = setup.Stations[0];
+        var dx = st.X - c[0];
+        var dy = st.Y - c[1];
+        var facing = wall.FacingYaw!.Value;
+        var dyaw = Math.Atan2(Math.Sin(st.Yaw - facing), Math.Cos(st.Yaw - facing)) * 180 / Math.PI;
+        return new StationSearchSpace(new[] { c[0], c[1] }, new[] { nx, ny }, facing, setup.FloorZ,
+            dx * nx + dy * ny, -dx * ny + dy * nx, dyaw);
+    }
+
+    private static ReachStationCandidate Candidate(StationCandidate c) => new(
+        Math.Round(c.Station.X, 3), Math.Round(c.Station.Y, 3), Math.Round(c.Station.Yaw, 4),
+        Math.Round(c.DistM, 3), Math.Round(c.LateralM, 3), Math.Round(c.YawDeg, 1),
+        Math.Round(c.BodyClearanceM, 3), c.Feasible, c.Clear, c.Collision, c.Unreachable, Math.Round(c.Robustness, 4));
+
     // ── 내부 ─────────────────────────────────────────────────────────────
 
     private sealed record TankCtx(double[] LevelZ, Dictionary<string, WallEntity> Walls, ReachPlane[] WallPlanes);
@@ -148,6 +213,17 @@ public sealed record ReachSurveyArea(Guid AreaId, string Name, string WallCode, 
 /// <summary>조사 결과 — 용접선 하나. Z 는 층 바닥 위 높이[m], Verdict = Clear | Collision | Unreachable.</summary>
 public sealed record ReachSurveySeam(Guid TaskId, int Seq, double ZMin, double ZMax, string Verdict,
     double? StrokeMm, double? MinClearanceM, int YawIndex);
+
+/// <summary>정차점 최적화 결과 — 영역 하나. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
+public sealed record ReachStationOptimum(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
+    ReachStationCandidate Current, ReachStationCandidate Best, int Evaluated, long ElapsedMs, IReadOnlyList<ReachOptimumSeam> Seams);
+
+/// <summary>용접선 하나의 지금·찾은 정차 판정과 찾은 정차에서 고른 리프트.</summary>
+public sealed record ReachOptimumSeam(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm);
+
+/// <summary>후보 정차 — 도면 x·y·방향, 탐색 좌표(중심에서 안쪽 거리·좌측·방향 보정 °), 차체 여유, 판정 개수.</summary>
+public sealed record ReachStationCandidate(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
+    double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness);
 
 public sealed record ReachSeamLine(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);

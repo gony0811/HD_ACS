@@ -203,6 +203,31 @@ app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
             ? Results.Ok(r)
             : Results.NotFound(new { error = "영역·작업 또는 선창 형상 없음" }));
 
+// 정차점 최적화 — 조회 전용(계산만). 적용은 아래 POST 로 영역 정차 덮어쓰기에 쓴다.
+app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
+    async (string tankId, int? level, string? wallCode, Guid? areaId, ReachSimService sim, CancellationToken ct) =>
+        await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
+
+// 영역 정차 덮어쓰기(x·y·방향) 설정 — 셋 다 null 이면 덮어쓰기 해제(배차 식으로 복귀).
+app.MapPut("/api/reach-sim/areas/{areaId:guid}/station", async (Guid areaId, SetAreaStationRequest req, AcsDbContext db) =>
+{
+    var area = await db.InspectionAreas.FirstOrDefaultAsync(a => a.AreaId == areaId);
+    if (area is null) return Results.NotFound(new { error = $"영역 '{areaId}' 없음" });
+    if ((req.StationX is null) != (req.StationY is null))
+        return Results.BadRequest(new { error = "정차 x·y 는 함께 지정하거나 함께 비워야 합니다." });
+    var old = new { area.StationX, area.StationY, area.StationTheta };
+    area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_STATION_SET", Target = areaId.ToString(),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new { old, area.StationX, area.StationY, area.StationTheta, req.Reason }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { areaId, area.StationX, area.StationY, area.StationTheta });
+});
+
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
 app.MapPut("/api/scenarios/{scenarioId:guid}/areas", async (Guid scenarioId, SetScenarioAreasRequest req, AcsDbContext db) =>
 {
@@ -1059,6 +1084,8 @@ public sealed record UpdateCalibrationPointRequest(double DrawingX, double Drawi
 public sealed record RotateCalibrationRequest(double Deg, string? UserId = null);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
+public sealed record SetAreaStationRequest(double? StationX, double? StationY, double? StationTheta, string? UserId, string? Reason);
+
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);

@@ -108,4 +108,29 @@ public class ReachSimServiceTests
         Assert.All(d.Stages, s => Assert.True(s.ChosenIndex >= 0));
         Assert.Null(await sim.DetailAsync(SmArea, SlTask, 1, null, 0, 0, 0, default));
     }
+
+    [Fact]
+    public async Task 최적화는_경사면_정차를_옮기고_수직벽은_닿는_수를_줄이지_않는다()
+    {
+        var sim = await SeedAsync();
+        var list = (await sim.OptimizeAsync("CT1", null, null, null, default))!;
+
+        var sl = list.Single(o => o.WallCode == "SL");
+        Assert.Equal(0, sl.Current.Clear);
+        Assert.False(sl.Current.Feasible);
+        Assert.Equal(1, sl.Best.Clear);
+        Assert.True(sl.Best.DistM > sl.Current.DistM);
+        Assert.False(sl.Overridden);
+        var seam = Assert.Single(sl.Seams);
+        Assert.Equal(("Collision", "Clear"), (seam.Current, seam.Best));
+        Assert.NotNull(seam.BestStrokeMm);
+
+        var sm = list.Single(o => o.WallCode == "SM");
+        Assert.Equal(1, sm.Current.Clear);
+        Assert.Equal(1, sm.Best.Clear);
+        Assert.InRange(sm.Current.DistM, 1.19, 1.21);   // 수직벽 기본 1.2 m
+
+        Assert.Single((await sim.OptimizeAsync("CT1", 1, "SL", null, default))!);
+        Assert.Null(await sim.OptimizeAsync("NOPE", null, null, null, default));
+    }
 }

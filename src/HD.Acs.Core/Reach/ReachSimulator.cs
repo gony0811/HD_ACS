@@ -147,6 +147,10 @@ public static class ReachSimulator
         return new ReachPointResult(body, columnTop, stages);
     }
 
+    /// <summary>정차 하나에서 AMR 차체(리프트·팔과 무관)의 면 여유만 잰다 — 정차 후보를 빠르게 거를 때 쓴다.</summary>
+    public static ReachBody BodyAt(ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station) =>
+        Body(model, planes, new BaseFrame(model, station, 0, 0, 0));
+
     /// <summary>
     /// 용접선(시작·중간·끝 점)을 정차 후보 방향·리프트 높이마다 평가해 간섭 없이 닿는 조합을 찾는다.
     /// </summary>

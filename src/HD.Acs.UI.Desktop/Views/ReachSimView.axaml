@@ -15,7 +15,7 @@
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel Spacing="5">
                         <TextBlock Text="정차 · 용접선" FontWeight="SemiBold" />
-                        <TextBlock Text="ACS 정차점(배차와 같은 식)에서 FR5-WML 이 ② 접근 400 → 정렬 준비 300 → 초점 검사 세 자세로 용접선에 닿을 때 관절 위치와 탱크 면 간섭을 봅니다. 조회 전용입니다."
+                        <TextBlock Text="ACS 정차점(배차와 같은 식)에서 FR5-WML 이 ② 접근 400 → 정렬 준비 300 → 초점 검사 세 자세로 용접선에 닿을 때 관절 위치와 탱크 면 간섭을 봅니다. 정차점 최적화의 '적용'만 영역 정차를 바꿉니다."
                                    Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="층" Classes="lbl" />
@@ -69,6 +69,37 @@
                         </StackPanel>
                         <TextBlock Text="리프트 기본값은 조사가 고른 높이(간섭 없이 닿으면 여유 최대, 아니면 간섭 최소)입니다."
                                    Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 정차점 최적화 -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="정차점 최적화" FontWeight="SemiBold" />
+                        <TextBlock Text="영역마다 정차를 벽 안쪽 거리·좌우·방향(±15°)으로 옮겨 보며 간섭 없이 닿는 용접선이 가장 많은 곳을 찾습니다. 계산만 하고, 적용하면 영역 정차 덮어쓰기(x·y·방향)로 저장되어 배차가 그 정차를 씁니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="이 층·면 최적화" Command="{Binding OptimizeStationsCommand}" />
+                            <Button Content="찾은 정차 미리보기" Command="{Binding PreviewOptimumCommand}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding OptimizeSummary}" FontSize="11.5" TextWrapping="Wrap" />
+                        <DataGrid ItemsSource="{Binding Optima}" SelectedItem="{Binding SelectedOptimum}" AutoGenerateColumns="False"
+                                  IsReadOnly="True" CanUserSortColumns="False" HeadersVisibility="Column" MaxHeight="260">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="영역" Binding="{Binding Area}" Width="112" />
+                                <DataGridTextColumn Header="지금" Binding="{Binding Current}" Width="76" />
+                                <DataGridTextColumn Header="찾은" Binding="{Binding Best}" Width="76" />
+                                <DataGridTextColumn Header="안쪽 거리 · 보정" Binding="{Binding Move}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="{Binding OptimumDetail}" FontSize="11.5" TextWrapping="Wrap" />
+                        <TextBlock Text="지금·찾은 = 간섭 없음/간섭/도달 불가 용접선 수. 안쪽 거리 = 영역 중심에서 벽 반대쪽(수평)으로 [m], 좌 = 차체 좌측 이동 [m]."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="고른 영역 적용" Command="{Binding ApplyOptimumCommand}" />
+                            <Button Content="옮길 영역 모두 적용" Command="{Binding ApplyAllOptimaCommand}" />
+                            <Button Content="선택 영역 덮어쓰기 해제" Command="{Binding ClearStationOverrideCommand}" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
