@@ -27,7 +27,8 @@ public sealed class ReachSimService
     /// <param name="config">
     /// HD_AMR 실기 값과 맞추는 설정 — <c>Acs:Reach:MountYawDeg</c>(T_A_B rz) · <c>ToolZMm</c>(공구 #1 z) ·
     /// <c>ApproachStandoffMm</c>(inspection.approachStandoffMm) · <c>FocusStandoffMm</c>(초점 자세 TCP 이격 — 공구 #1 365 + 10 = 카메라 초점 375) · <c>PlanarRetreatMm</c>(inspection.planarApproachRetreatMm) ·
-    /// <c>StartJoints:{면 코드}</c>(운영 ② 출발 관절각 J1~J6 — 상부 면 T·SU·PU = 홈 위치_2, 그 외 = 작업 준비 위치).
+    /// <c>StartJoints:{면 코드}</c>(운영 ② 출발 관절각 J1~J6 — 상부 면 T·SU·PU = 홈 위치_2, 그 외 = 작업 준비 위치) ·
+    /// <c>OperationJ6Deg</c>(세 자세 J6 — 기본 180°, "none" 이면 IK 값) · <c>ToolMountRollDeg</c>(툴 상자 광축 둘레 장착 보정).
     /// 없으면 STEP 장착(0°)·모델 기본값·출발 자세 없음(종전 판정).
     /// </param>
     public ReachSimService(AcsDbContext db, InspectionDispatcher dispatcher, IConfiguration? config = null)
@@ -57,8 +58,16 @@ public sealed class ReachSimService
             StageStandoffsMm = stages,
             PlanarRetreatMm = config.GetValue("Acs:Reach:PlanarRetreatMm", d.PlanarRetreatMm),
             StartJointsByWall = starts,
+            ToolMountRollDeg = config.GetValue("Acs:Reach:ToolMountRollDeg", d.ToolMountRollDeg),
+            OperationJ6Deg = OperationJ6From(config["Acs:Reach:OperationJ6Deg"], d.OperationJ6Deg),
         };
     }
+
+    /// <summary>운영 J6 설정 — 없으면 모델 기본값(180°), "none"·빈 값이면 IK 값 그대로(광축 둘레 임의).</summary>
+    private static double? OperationJ6From(string? raw, double? fallback) =>
+        raw is null ? fallback
+        : double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v
+        : null;
 
     private IReadOnlyList<double> Strokes => Enumerable.Range(0, (int)(_model.StrokeMaxMm / StrokeStepMm) + 1)
         .Select(i => i * StrokeStepMm).ToArray();
@@ -133,7 +142,7 @@ public sealed class ReachSimService
             r.Stages.Select(s => new ReachStageDto(s.Stage.ToString(), s.StandoffMm, s.TcpTarget, s.ChosenIndex,
                 s.Solutions.Select(x => new ReachSolutionDto(x.JointsDeg, x.PostureOk, x.MarginDeg, x.Limiting, x.WristDown,
                     x.MinClearanceM, x.Focus,
-                    x.Parts.Select(p => new ReachPartDto(p.Name, p.A, p.B, p.RadiusM, p.ClearanceM, p.NearestPlane)).ToList(),
+                    x.Parts.Select(p => new ReachPartDto(p.Name, p.A, p.B, p.RadiusM, p.ClearanceM, p.NearestPlane, p.Corners)).ToList(),
                     x.Joints.Select(j => new ReachJointDto(j.Name, j.Position)).ToList())).ToList())).ToList(),
             _model.WarnClearanceM,
             r.Entry is { } e ? new ReachEntryDto(e.Ok, e.Summary, e.InPlaneMm, e.Candidates, e.StartTcp, e.Entry, e.Plunge, e.Rejects) : null,
@@ -266,7 +275,9 @@ public sealed record ReachStationCandidate(double X, double Y, double Theta, dou
 
 public sealed record ReachSeamLine(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);
-public sealed record ReachPartDto(string Name, double[] A, double[] B, double RadiusM, double ClearanceM, string NearestPlane);
+/// <summary>부품 — 캡슐(A·B·반경) 또는 상자(Corners 8개, 반경 0). 도면 m.</summary>
+public sealed record ReachPartDto(string Name, double[] A, double[] B, double RadiusM, double ClearanceM, string NearestPlane,
+    double[][]? Corners = null);
 public sealed record ReachJointDto(string Name, double[] Position);
 public sealed record ReachSolutionDto(double[] JointsDeg, bool PostureOk, double MarginDeg, string Limiting, bool WristDown,
     double MinClearanceM, double[] Focus, IReadOnlyList<ReachPartDto> Parts, IReadOnlyList<ReachJointDto> Joints);

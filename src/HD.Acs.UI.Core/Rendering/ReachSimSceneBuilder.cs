@@ -108,10 +108,16 @@ public static class ReachSimSceneBuilder
         var warn = d.WarnClearanceM;
         foreach (var p in sol.Parts)
         {
-            // 검사 툴은 끝이 평평한 원통 외곽(판정과 같게)이고, 안의 손목이 보이게 반투명으로 그린다.
+            // 검사 툴은 안의 손목이 보이게 반투명으로 그린다 — 상자(실측 외곽)면 상자로, 구버전 서버(원통)면 끝이 평평한 원통으로.
             var tool = p.Name.StartsWith("검사 툴", StringComparison.Ordinal);
             var color = p.ClearanceM < 0 ? Hit : p.ClearanceM < warn ? Warn
                 : p.Name == "리프트 기둥" ? Column : tool ? Tool : Robot;
+            if (p.Corners is { Length: 8 } box)
+            {
+                AddBox(scene, box.Select(Pt3.FromArray).ToArray(), tool ? color with { A = 0x90 } : color);
+                foreach (var c in box) scene.ExtentPoints.Add(Pt3.FromArray(c));
+                continue;
+            }
             AddCapsule(scene, Pt3.FromArray(p.A), Pt3.FromArray(p.B), p.RadiusM, tool ? color with { A = 0x70 } : color, flat: tool);
             scene.ExtentPoints.Add(Pt3.FromArray(p.A));
             scene.ExtentPoints.Add(Pt3.FromArray(p.B));
@@ -146,6 +152,18 @@ public static class ReachSimSceneBuilder
         };
         foreach (var f in faces)
             scene.Faces.Add(new Face3(f.Select(i => p[i]).ToArray(), fill, Rgba.FromArgb(0xC0, 0x2B, 0x36, 0x40), 1.0));
+    }
+
+    /// <summary>상자 6면 — 꼭짓점 아래 4 → 위 4(같은 둘레 순서).</summary>
+    private static void AddBox(Scene3 scene, Pt3[] c, Rgba color)
+    {
+        int[][] faces =
+        {
+            new[] { 0, 1, 2, 3 }, new[] { 4, 5, 6, 7 },
+            new[] { 0, 1, 5, 4 }, new[] { 1, 2, 6, 5 }, new[] { 2, 3, 7, 6 }, new[] { 3, 0, 4, 7 },
+        };
+        foreach (var f in faces)
+            scene.Faces.Add(new Face3(f.Select(i => c[i]).ToArray(), color, Rgba.FromArgb(0x90, 0x2B, 0x36, 0x40), 0.6));
     }
 
     /// <summary>캡슐을 다각 기둥으로 근사(옆면만) — 끝은 마커 원으로 둥글게 보인다. flat 이면 끝을 평평한 면으로 닫는다(원통).</summary>

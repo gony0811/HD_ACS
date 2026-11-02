@@ -80,7 +80,8 @@
                         <TextBlock Text="영역마다 정차를 벽 안쪽 거리·좌우·방향(±15°)으로 옮겨 보며 간섭 없이 닿는 용접선이 가장 많은 곳을 찾습니다. 계산만 하고, 적용하면 영역 정차 덮어쓰기(x·y·방향)로 저장되어 배차가 그 정차를 씁니다."
                                    Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Button Content="이 층·면 최적화" Command="{Binding OptimizeStationsCommand}" />
+                            <Button Content="이 층·면 최적화" Command="{Binding OptimizeStationsCommand}" IsEnabled="{Binding !IsOptimizing}" />
+                            <Button Content="중지" Command="{Binding CancelOptimizeCommand}" IsVisible="{Binding IsOptimizing}" />
                             <Button Content="찾은 정차 미리보기" Command="{Binding PreviewOptimumCommand}" />
                         </StackPanel>
                         <TextBlock Text="{Binding OptimizeSummary}" FontSize="11.5" TextWrapping="Wrap" />

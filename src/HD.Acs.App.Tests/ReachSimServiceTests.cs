@@ -161,15 +161,34 @@ public class ReachSimServiceTests
         Assert.Equal(new[] { 1.0, 2, -3, 4, 5, 6 }, ReachSimulator.StartJoints(m, "pu"));
         Assert.Null(ReachSimulator.StartJoints(m, "T"));
         Assert.Equal(0, ReachSimService.ModelFrom(null).MountYawDeg);
+        Assert.Equal(180, m.OperationJ6Deg);   // 없으면 운영 기본 180°
+        Assert.Equal(0, m.ToolMountRollDeg);
+    }
+
+    [Fact]
+    public void 운영_J6_와_툴_장착각을_설정에서_읽고_none_이면_IK_값을_쓴다()
+    {
+        ReachRobotModel From(params (string K, string V)[] kv) => ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddInMemoryCollection(kv.ToDictionary(x => x.K, x => (string?)x.V)).Build());
+
+        var m = From(("Acs:Reach:OperationJ6Deg", "90"), ("Acs:Reach:ToolMountRollDeg", "-45"));
+        Assert.Equal(90, m.OperationJ6Deg);
+        Assert.Equal(-45, m.ToolMountRollDeg);
+        Assert.Null(From(("Acs:Reach:OperationJ6Deg", "none")).OperationJ6Deg);
     }
 
     [Fact]
     public async Task 출발_자세가_있는_면은_상세에_진입_경로를_싣는다()
     {
-        var sim = await SeedAsync(new Dictionary<string, double[]> { ["SM"] = new[] { 0.0, -90, 100, -90, 90, 0 } });
-        var d = (await sim.DetailAsync(SmArea, SmTask, 1, 0, 0, 0, 0, default))!;
+        // 출발 자세 = 출발 자세 없이 푼 이 점의 ② 해(조사로 고른 리프트) — 진입 경로는 세 자세가 닿고 가지 전환이 없을 때만 본다.
+        var plain = (await (await SeedAsync()).DetailAsync(SmArea, SmTask, 0, null, 0, 0, 0, default))!;
+        var approach = plain.Stages[0].Solutions[plain.Stages[0].ChosenIndex].JointsDeg;
+        var sim = await SeedAsync(new Dictionary<string, double[]> { ["SM"] = approach });
+        var d = (await sim.DetailAsync(SmArea, SmTask, 0, plain.StrokeMm, 0, 0, 0, default))!;
 
+        Assert.Null(d.BranchChange);
         Assert.NotNull(d.Entry);
+        Assert.True(d.Entry!.InPlaneMm < 1, "출발 TCP = ② 접근점");
         Assert.NotNull(d.StartJointsDeg);
         Assert.False(string.IsNullOrEmpty(d.Entry!.Summary));
         var other = (await sim.DetailAsync(SlArea, SlTask, 1, 0, 0, 0, 0, default))!;

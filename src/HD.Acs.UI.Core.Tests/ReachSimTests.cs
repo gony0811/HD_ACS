@@ -48,6 +48,25 @@ public class ReachSimTests
             m?.ReturnType is { IsValueType: true } t && t != typeof(void) ? Activator.CreateInstance(t) : null;
     }
 
+    [Fact]
+    public void 툴_상자_부품은_상자_6면으로_그리고_간섭이면_빨강이다()
+    {
+        double[][] box =
+        {
+            new[] { 1.0, -0.1, 1.4 }, new[] { 1.2, -0.1, 1.4 }, new[] { 1.2, 0.1, 1.4 }, new[] { 1.0, 0.1, 1.4 },
+            new[] { 1.0, -0.1, 1.6 }, new[] { 1.2, -0.1, 1.6 }, new[] { 1.2, 0.1, 1.6 }, new[] { 1.0, 0.1, 1.6 },
+        };
+        var tool = new ReachPartDto("검사 툴(카메라 브래킷)", new[] { 1.1, 0, 1.4 }, new[] { 1.1, 0, 1.6 }, 0, -0.01, "SM", box);
+        var d = Detail(0.3, Stage("Focus", 0, Sol(-0.01, true, tool)));
+
+        var scene = ReachSimSceneBuilder.Build(new ReachSceneInput(Walls, d, 0, null, false));
+
+        var hit = scene.Faces.Where(f => f.Fill == ReachSimSceneBuilder.Hit with { A = 0x90 }).ToList();
+        Assert.Equal(6, hit.Count);
+        Assert.All(hit, f => Assert.Equal(4, f.Points.Count));
+        Assert.Contains(scene.ExtentPoints, p => Math.Abs(p.X - 1.2) < 1e-9 && Math.Abs(p.Z - 1.6) < 1e-9);
+    }
+
     private static ReachDetailDto ThreeStages(double bodyClearance) => Detail(bodyClearance,
         Stage("Approach", 0, Sol(0.2, true, Part("상완", 0.2))),
         Stage("Align", 0, Sol(0.1, true, Part("상완", 0.1))),

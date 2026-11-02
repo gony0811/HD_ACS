@@ -423,20 +423,82 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
     // ── 정차점 최적화 ────────────────────────────────────────────────
 
-    /// <summary>선택 층·면의 영역마다 간섭 없이 닿는 용접선이 가장 많은 정차를 서버에서 찾는다(계산만 — DB 를 바꾸지 않는다).</summary>
+    /// <summary>정차점 최적화에서 동시에 보낼 영역 요청 수 — 서버가 영역 안 용접선도 병렬로 풀므로 많이 늘려도 빨라지지 않는다.</summary>
+    public const int OptimizeConcurrency = 4;
+
+    private CancellationTokenSource? _optimizeCts;
+    [ObservableProperty] private bool _isOptimizing;
+
+    /// <summary>
+    /// 선택 층·면의 영역마다 간섭 없이 닿는 용접선이 가장 많은 정차를 서버에서 찾는다(계산만 — DB 를 바꾸지 않는다).
+    /// 면 전체를 요청 1건으로 보내면 수십 초~분이 걸려 HTTP 제한 시간에 걸리고 진행도 보이지 않으므로, 영역마다 나눠
+    /// <see cref="OptimizeConcurrency"/>개씩 보내고 끝나는 대로 표에 채운다. <see cref="CancelOptimizeCommand"/> 로 멈춘다.
+    /// </summary>
     [RelayCommand]
     public async Task OptimizeStationsAsync()
     {
+        if (IsOptimizing) return;
+        using var cts = new CancellationTokenSource();
+        _optimizeCts = cts;
+        IsOptimizing = true;
         IsBusy = true;
-        StatusMessage = $"L{SelectedLevel} {SelectedWall} 정차점 최적화 중… (영역마다 후보 정차 수십 곳 × 리프트 × 세 자세)";
+        var label = $"L{SelectedLevel} {SelectedWall}";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var done = new List<ReachStationOptimumDto>();
+        var areas = new List<AreaDto>();
+        ApplyOptima(null);
         try
         {
-            var list = await _api.GetStationOptimaAsync(TankId, SelectedLevel, SelectedWall, null, branch: Branch);
-            ApplyOptima(list);
-            StatusMessage = list is null ? $"선창 '{TankId}' 형상이 없습니다." : $"정차점 최적화 완료 — 영역 {list.Count}개";
+            areas = (await _api.GetAreasAsync(TankId, SelectedWall, SelectedLevel, cts.Token))
+                .Where(a => a.TaskCount > 0).OrderBy(a => a.Name).ToList();
+            if (areas.Count == 0) { StatusMessage = $"{label} — 용접선이 있는 영역이 없습니다."; return; }
+
+            var finished = 0;
+            using var gate = new SemaphoreSlim(OptimizeConcurrency);
+            StatusMessage = $"{label} 정차점 최적화 중… 영역 0/{areas.Count}";
+            await Task.WhenAll(areas.Select(async a =>
+            {
+                await gate.WaitAsync(cts.Token);
+                try
+                {
+                    var r = await _api.GetStationOptimaAsync(TankId, SelectedLevel, SelectedWall, a.AreaId, cts.Token, Branch);
+                    lock (done)
+                    {
+                        if (r is not null) done.AddRange(r);
+                        finished++;
+                        ShowOptima(done, areas);
+                        StatusMessage = $"{label} 정차점 최적화 중… 영역 {finished}/{areas.Count} ({sw.Elapsed.TotalSeconds:0}초)";
+                    }
+                }
+                finally { gate.Release(); }
+            }));
+            StatusMessage = $"정차점 최적화 완료 — {label} 영역 {areas.Count}개 · {sw.Elapsed.TotalSeconds:0}초";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = $"정차점 최적화 중지 — {label} 영역 {done.Select(o => o.AreaId).Distinct().Count()}/{areas.Count}개까지 계산";
         }
         catch (Exception ex) { StatusMessage = $"정차점 최적화 실패: {ex.Message}"; }
-        finally { IsBusy = false; }
+        finally
+        {
+            lock (done) ShowOptima(done, areas);
+            _optimizeCts = null;
+            IsOptimizing = false;
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>진행 중인 정차점 최적화를 멈춘다 — 이미 받은 영역 결과는 남긴다.</summary>
+    [RelayCommand]
+    private void CancelOptimize() => _optimizeCts?.Cancel();
+
+    /// <summary>받은 결과를 영역 순서대로 표에 반영(선택 행 유지).</summary>
+    private void ShowOptima(List<ReachStationOptimumDto> done, List<AreaDto> areas)
+    {
+        var order = areas.Select((a, i) => (a.AreaId, i)).ToDictionary(t => t.AreaId, t => t.i);
+        var keep = SelectedOptimum?.Optimum.AreaId;
+        ApplyOptima(done.OrderBy(o => order.GetValueOrDefault(o.AreaId, int.MaxValue)).ToList());
+        if (keep is { } k && Optima.FirstOrDefault(r => r.Optimum.AreaId == k) is { } row) SelectedOptimum = row;
     }
 
     /// <summary>최적화 응답 반영(테스트가 직접 부른다).</summary>

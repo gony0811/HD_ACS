@@ -12,7 +12,9 @@ public sealed record ReachSurveySeamDto(Guid TaskId, int Seq, double ZMin, doubl
 
 public sealed record ReachSeamLineDto(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);
-public sealed record ReachPartDto(string Name, double[] A, double[] B, double RadiusM, double ClearanceM, string NearestPlane);
+/// <summary>부품 — 캡슐(A·B·반경) 또는 상자(Corners 8개: 아래 4 → 위 4, 반경 0). 도면 m.</summary>
+public sealed record ReachPartDto(string Name, double[] A, double[] B, double RadiusM, double ClearanceM, string NearestPlane,
+    double[][]? Corners = null);
 public sealed record ReachJointDto(string Name, double[] Position);
 public sealed record ReachSolutionDto(double[] JointsDeg, bool PostureOk, double MarginDeg, string Limiting, bool WristDown,
     double MinClearanceM, double[] Focus, List<ReachPartDto> Parts, List<ReachJointDto> Joints);
