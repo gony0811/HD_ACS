@@ -162,11 +162,11 @@ public class ReachSimulatorTests
     }
 
     [Fact]
-    public void 관절_한계는_FR5_실측_비대칭이다()
+    public void 관절_한계는_FR5_WML_사양_비대칭이다()
     {
         var m = ReachRobotModel.Default;
-        Assert.Equal(new[] { -175.0, -265, -160, -265, -175 }, m.JointMinDeg);
-        Assert.Equal(new[] { 175.0, 85, 160, 85, 175 }, m.JointMaxDeg);
+        Assert.Equal(new[] { -175.0, -265, -170, -265, -175 }, m.JointMinDeg);
+        Assert.Equal(new[] { 175.0, 85, 170, 85, 175 }, m.JointMaxDeg);
     }
 
     [Fact]

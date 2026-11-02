@@ -79,13 +79,13 @@ public sealed record ReachRobotModel
     public double ForearmRadiusMm { get; init; } = 50;
     public double WristRadiusMm { get; init; } = 45;
 
-    /// <summary>관절 허용(J1~J5 대칭) [도] — J6 은 운영이 따로 맞추므로 판정하지 않는다.</summary>
     /// <summary>
-    /// 관절 허용 하한·상한(J1~J5) [도] — FR5 실측(HD_AMR PostureLimits.Default 와 같다): J1 ±175 · J2 −265~+85 ·
-    /// J3 ±160 · J4 −265~+85 · J5 ±175. J6 은 운영이 따로 맞추므로 판정하지 않는다.
+    /// 관절 허용 하한·상한(J1~J5) [도] — FAIRINO FR5-WML 사양(HD_AMR PostureLimits.Default 와 같다): J1 ±175 ·
+    /// J2 −265~+85 · J3 ±170 · J4 −265~+85 · J5 ±175. 실측값이 아니다 — 실기 소프트리밋을 확인하면 그 값으로 맞출 것.
+    /// J3 ±160 은 일반 FR5(리치 922mm) 값이었다. J6 은 운영이 따로 맞추므로 판정하지 않는다.
     /// </summary>
-    public double[] JointMinDeg { get; init; } = { -175, -265, -160, -265, -175 };
-    public double[] JointMaxDeg { get; init; } = { 175, 85, 160, 85, 175 };
+    public double[] JointMinDeg { get; init; } = { -175, -265, -170, -265, -175 };
+    public double[] JointMaxDeg { get; init; } = { 175, 85, 170, 85, 175 };
     public double WristMarginDeg { get; init; } = 15;
     public double ElbowMarginDeg { get; init; } = 8;
     /// <summary>이 여유 미만이면 '주의' [m].</summary>
