@@ -454,8 +454,16 @@ public class ReachSimulatorTests
                 (double H, double Cl)? clear = null, hit = null;
                 foreach (var h in strokes)
                 {
-                    var rs = pts.Select((p, i) => ReachSimulator.Evaluate(m, planes, st, p, sm.Normal, h, withGeometry: false,
-                        wallCode: i == 0 ? "SM" : null)).ToList();
+                    // 기준 구현 — 점마다 진입까지 다 풀되, 중간·끝점은 앞 점 ② 해에서 이어 간다.
+                    var rs = new List<ReachPointResult>();
+                    double[]? seed = null;
+                    foreach (var (p, i) in pts.Select((p, i) => (p, i)))
+                    {
+                        var r = ReachSimulator.Evaluate(m, planes, st, p, sm.Normal, h, withGeometry: false,
+                            wallCode: i == 0 ? "SM" : null, seedJoints: seed);
+                        rs.Add(r);
+                        seed = ReachSimulator.ScanSeed(r);
+                    }
                     if (!rs.All(r => r.Reachable)) continue;
                     var min = rs.Min(r => r.MinClearanceM);
                     if (min >= 0) { if (clear is null || min > clear.Value.Cl) clear = (h, min); }
@@ -473,6 +481,60 @@ public class ReachSimulatorTests
                 verdicts.Add(verdict);
             }
         Assert.True(verdicts.Count >= 2, $"판정이 한 가지뿐이라 비교가 약하다: {string.Join(",", verdicts)}");
+    }
+
+    [Fact]
+    public void 중간_끝점은_앞_점_가지를_따라가고_반전_점프면_도달불가다()
+    {
+        // 2026-11-02 PU L4-R03C04 #2: 끝점을 따로 풀면 다른 가지(J1 −158°)가 골라져 상완이 천장에 −59 mm — 운영은 그 가지로 가지 않는다.
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var pts = new[] { sm.To3D(11.8, v), sm.To3D(12, v), sm.To3D(12.2, v) };
+        var m = Symmetric175 with { BranchRule = ReachBranchRule.MaxClearance };
+
+        ReachPointResult[] Chain(double h)
+        {
+            var rs = new ReachPointResult[3];
+            double[]? seed = null;
+            for (var i = 0; i < 3; i++)
+            {
+                rs[i] = ReachSimulator.Evaluate(m, planes, st, pts[i], sm.Normal, h, checkEntry: false, seedJoints: seed);
+                seed = ReachSimulator.ScanSeed(rs[i]);
+            }
+            return rs;
+        }
+
+        // 리프트 0: 시작점 초점 자세에서 중간·끝점까지 같은 가지로 이어진다. 중간·끝점은 초점 자세로만 판정한다.
+        var h0 = Chain(0);
+        Assert.All(h0, r => Assert.True(r.Reachable, r.Blocker));
+        Assert.False(h0[0].ScanOnly);
+        Assert.True(h0[1].ScanOnly && h0[2].ScanOnly);
+        Assert.Equal(new[] { ReachStage.Focus }, h0[1].JudgedStages.Select(s => s.Stage));
+        for (var i = 1; i < 3; i++)
+        {
+            var a = ReachSimulator.ScanSeed(h0[i - 1])!;
+            var b = ReachSimulator.ScanSeed(h0[i])!;
+            Assert.Equal(Math.Sign(a[2]), Math.Sign(b[2]));   // 팔꿈치
+            Assert.Equal(Math.Sign(a[4]), Math.Sign(b[4]));   // 손목
+        }
+        // 리프트 500: 중간 → 끝점에서 J1 이 한계(±175°) 반대편으로 감겨 139° 돈다 — 0.2 m 스캔으로는 갈 수 없다.
+        var h500 = Chain(500);
+        Assert.True(h500[1].Reachable);
+        Assert.False(h500[2].Reachable);
+        Assert.Matches(@"앞 점에서 J1 \d+° 이동 > 90°", h500[2].Blocker);
+    }
+
+    [Fact]
+    public void 같은_점의_자세_사이_관절이_크게_튀면_도달불가다()
+    {
+        var (sm, v, floor) = MidWall();
+        var r = ReachSimulator.Evaluate(ReachRobotModel.Default with { MaxStageJumpDeg = 1 },
+            ReachSimulator.PlanesForLevel(WallPlanes, floor, 2), StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300);
+        Assert.False(r.Reachable);
+        Assert.StartsWith("자세 사이 가지 전환", r.Blocker);
+        Assert.True(ReachSimulator.Evaluate(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 300).Reachable);
     }
 
     private static ReachSeamSurvey V(ReachVerdict v, double h, double? cl = null) =>

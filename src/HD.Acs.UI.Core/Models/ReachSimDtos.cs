@@ -32,7 +32,8 @@ public sealed record ReachDetailDto(
     double StrokeMm, double OffsetForwardMm, double OffsetLeftMm,
     Guid TaskId, int Point, double[] Target, List<ReachSeamLineDto> Seams,
     ReachBodyDto Body, List<ReachStageDto> Stages, double WarnClearanceM,
-    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0);
+    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0,
+    bool ScanOnly = false);
 
 /// <summary>운영 ② 진입 경로(후퇴 평면 경유) 판정 — 출발 자세(홈 위치_2·ready)가 설정된 면만. 좌표 도면 m.</summary>
 public sealed record ReachEntryDto(bool Ok, string Summary, double InPlaneMm, int Candidates,

@@ -148,7 +148,8 @@ public class ReachSimServiceTests
         Assert.True(sl.Best.DistM > sl.Current.DistM);
         Assert.False(sl.Overridden);
         var seam = Assert.Single(sl.Seams);
-        Assert.Equal(("Collision", "Clear"), (seam.Current, seam.Best));
+        Assert.NotEqual("Clear", seam.Current);   // 차체가 경사면에 묻힌 정차 — 간섭이거나(점마다 가지를 따로 고르던 종전) 이어 갈 가지 없음
+        Assert.Equal("Clear", seam.Best);
         Assert.NotNull(seam.BestStrokeMm);
 
         var sm = list.Single(o => o.WallCode == "SM");

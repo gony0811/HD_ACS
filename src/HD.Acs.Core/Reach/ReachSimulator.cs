@@ -107,6 +107,16 @@ public sealed record ReachRobotModel
     // ── 운영 ② 진입 규칙 — HD_AMR CobotInspectionMoveStep(2026-11-02 c490bb1·6791a6d)과 같은 값. 바뀌면 함께 맞출 것. ──
     /// <summary>출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — MaxEntryJointTravelDeg.</summary>
     public double MaxEntryJointTravelDeg { get; init; } = 140;
+    /// <summary>
+    /// 자세 사이(② → 정렬 준비 → 초점, 시작점 ② → 중간·끝점 ②) 관절별(J1~J5) 최대 변화 [도]. 운영은 이 사이를 광축 방향 직선 이동이나
+    /// 같은 자세의 짧은 이동으로 잇는다(관절 변화 수십 도 이내). 넘으면 다른 IK 가지로 갈아탄 해라 운영이 갈 수 없다 — 도달 불가.
+    /// </summary>
+    public double MaxStageJumpDeg { get; init; } = 60;
+    /// <summary>
+    /// 용접선 앞 점 → 다음 점(시작 → 중간 → 끝, 영역 폭 ≤ 1.44 m 라 한 간격 ≤ 0.72 m) ② 해 사이 관절별 최대 변화 [도].
+    /// 용접선 따라 이동이라 <see cref="MaxStageJumpDeg"/> 보다 넉넉히 두고, 팔꿈치·손목 반전은 크기와 무관하게 막는다.
+    /// </summary>
+    public double MaxSeamStepJumpDeg { get; init; } = 90;
     /// <summary>후퇴 평면 — ② 접근점 면 이격 평면에서 더 물러난 거리 [mm] — inspection.planarApproachRetreatMm 기본값.</summary>
     public double PlanarRetreatMm { get; init; } = 100;
     /// <summary>진입 MoveJ 가 출발 TCP 투영점에서 면을 따라 갈 수 있는 최대 거리 [mm] — MaxEntryInPlaneMm.</summary>
@@ -195,20 +205,24 @@ public sealed record ReachEntry(bool Ok, double[] StartTcp, double[]? Entry, dou
 /// <summary>용접선 점 하나를 한 정차·리프트에서 세 자세로 평가한 결과.</summary>
 /// <param name="BranchChange">출발 자세에서 ② 해로 가려면 팔꿈치·손목을 뒤집거나 관절을 크게 돌려야 하면 그 사유.</param>
 /// <param name="Entry">출발 자세가 있는 면의 진입 경로 판정(없는 면은 null).</param>
+/// <param name="ScanOnly">용접선 중간·끝점 — 판정은 초점 자세만(②·정렬 준비는 시작점에서만 하므로 참고로 실은 자세).</param>
 public sealed record ReachPointResult(ReachBody Body, double[] ColumnTop, IReadOnlyList<ReachStageResult> Stages,
-    string? BranchChange = null, ReachEntry? Entry = null)
+    string? BranchChange = null, ReachEntry? Entry = null, bool ScanOnly = false)
 {
-    /// <summary>세 자세 모두 운영 선택 해가 있고 자세 한계 안이며, (출발 자세가 있으면) 가지 전환 없이 진입 경로가 있는가.</summary>
-    public bool Reachable => Stages.All(s => s.Chosen is { PostureOk: true }) && BranchChange is null && Entry?.Ok != false;
+    /// <summary>판정에 쓰는 자세 — 보통 세 자세, <see cref="ScanOnly"/> 면 초점 자세만.</summary>
+    public IEnumerable<ReachStageResult> JudgedStages => ScanOnly ? Stages.Where(s => s.Stage == ReachStage.Focus) : Stages;
+
+    /// <summary>판정 자세 모두 운영 선택 해가 있고 자세 한계 안이며, 가지 전환 없이 (출발 자세가 있으면) 진입 경로가 있는가.</summary>
+    public bool Reachable => JudgedStages.All(s => s.Chosen is { PostureOk: true }) && BranchChange is null && Entry?.Ok != false;
 
     /// <summary>도달하지 못하는 첫 사유(도달이면 null).</summary>
     public string? Blocker =>
-        Stages.FirstOrDefault(s => s.Chosen is not { PostureOk: true }) is { } bad
+        JudgedStages.FirstOrDefault(s => s.Chosen is not { PostureOk: true }) is { } bad
             ? $"{bad.Stage} {(bad.Chosen is { } c ? c.Limiting : "해 없음")}"
             : BranchChange ?? (Entry is { Ok: false } e ? e.Summary : null);
 
-    /// <summary>차체·운영 선택 해 부품 중 가장 작은 여유 [m]. 도달하지 못하면 차체만.</summary>
-    public double MinClearanceM => Stages.Select(s => s.Chosen?.MinClearanceM ?? double.PositiveInfinity)
+    /// <summary>차체·판정 자세 운영 선택 해 부품 중 가장 작은 여유 [m]. 도달하지 못하면 차체만.</summary>
+    public double MinClearanceM => JudgedStages.Select(s => s.Chosen?.MinClearanceM ?? double.PositiveInfinity)
         .Append(Body.ClearanceM).Min();
 }
 
@@ -241,51 +255,109 @@ public static class ReachSimulator
     /// <param name="wallCode">면 코드 — <see cref="ReachRobotModel.StartJointsByWall"/> 에 출발 자세가 있으면 ② 를 그 자세의
     /// 가지로 고르고 진입 경로를 검사한다. null 이거나 출발 자세가 없으면 종전 규칙.</param>
     /// <param name="checkEntry">false 면 진입 경로를 풀지 않는다(조사가 리프트 후보를 먼저 고른 뒤 상위 후보만 본다).</param>
+    /// <param name="seedJoints">이 점의 ② 해를 고를 기준 관절각 — 용접선 중간·끝점은 바로 앞 점의 ② 해를 넘긴다(운영은 시작점 자세에서
+    /// 용접선을 따라 이어 가므로 같은 가지). 주면 출발 자세 가지·진입 경로는 보지 않고(<paramref name="wallCode"/> 무시), 기준에 가장 가까운
+    /// 해를 고르며 팔꿈치·손목이 반전되면 도달 불가.</param>
     public static ReachPointResult Evaluate(
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station,
         double[] seamPoint, double[] wallNormal, double strokeMm,
         double offsetForwardMm = 0, double offsetLeftMm = 0, bool withGeometry = true, string? wallCode = null,
-        bool checkEntry = true)
+        bool checkEntry = true, double[]? seedJoints = null)
     {
         var frame = new BaseFrame(model, station, strokeMm, offsetForwardMm, offsetLeftMm);
         var body = Body(model, planes, frame);
         var columnTop = frame.AmrToDrawing(0, 0, model.MountZMm + strokeMm);
-        var start = StartJoints(model, wallCode);
+        var start = seedJoints is null ? StartJoints(model, wallCode) : null;
         string? branchChange = null;
         ReachEntry? entry = null;
 
-        var stages = new List<ReachStageResult>(3);
-        double[]? previous = null;
         var stageKinds = new[] { ReachStage.Approach, ReachStage.Align, ReachStage.Focus };
-        for (var i = 0; i < model.StageStandoffsMm.Length && i < stageKinds.Length; i++)
+        var count = Math.Min(model.StageStandoffsMm.Length, stageKinds.Length);
+
+        // 자세 하나를 푼다 — reference 가 있으면 그 해에 가장 가까운 해, 없으면 출발 자세 가지 또는 가지 규칙.
+        (ReachStageResult Stage, double[]? J) SolveStage(int i, double[]? reference)
         {
             var standoff = model.StageStandoffsMm[i];
             var tcp = Vec3.Add(seamPoint, Vec3.Scale(wallNormal, standoff / 1000.0));
             var evaluated = SolveIk(model, frame, tcp, wallNormal).Select(j => (J: j, P: Posture(model, j))).ToList();
-
-            var byClearance = previous is null && start is null && model.BranchRule == ReachBranchRule.MaxClearance;
+            var byClearance = reference is null && start is null && model.BranchRule == ReachBranchRule.MaxClearance;
             var solved = withGeometry || byClearance
                 ? evaluated.Select(s => Solve(model, planes, frame, s.J, s.P)).ToList()
                 : null;
-            var chosen = previous is not null ? Nearest(evaluated, previous) ?? BestMargin(evaluated)
+            var chosen = reference is not null ? Nearest(evaluated, reference) ?? BestMargin(evaluated)
                 : start is not null ? SameBranch(model, evaluated.Select(s => s.J).ToList(), start) ?? BestMargin(evaluated)
                 : byClearance ? BestClearance(solved!) : BestMargin(evaluated);
-            if (previous is null && start is not null && chosen >= 0)
-                branchChange = BranchChangeReason(model, start, evaluated[chosen].J);
             var sols = evaluated.Select((s, k) => solved?[k] ?? (k == chosen
                 ? Solve(model, planes, frame, s.J, s.P)
                 : new ReachSolution(s.J, s.P.Ok, s.P.Margin, s.P.Limiting, Array.Empty<ReachPart>(),
                     Array.Empty<ReachJointMark>(), tcp, false, double.PositiveInfinity))).ToList();
-            stages.Add(new ReachStageResult(stageKinds[i], standoff, tcp, sols, chosen));
-            if (chosen < 0) break;   // 운영도 이 자세에서 멈춘다 — 뒤 자세는 풀지 않는다
-            previous = evaluated[chosen].J;
+            return (new ReachStageResult(stageKinds[i], standoff, tcp, sols, chosen), chosen >= 0 ? evaluated[chosen].J : null);
+        }
+        ReachStageResult Skipped(int i) => new(stageKinds[i], model.StageStandoffsMm[i],
+            Vec3.Add(seamPoint, Vec3.Scale(wallNormal, model.StageStandoffsMm[i] / 1000.0)), Array.Empty<ReachSolution>(), -1);
+
+        var stages = new List<ReachStageResult>(count);
+        if (seedJoints is null)
+        {
+            // 용접선 시작점 — 운영 ② → 정렬 준비 → 초점. 뒤 자세는 앞 자세 해에서 이어 가고, 관절이 크게 튀면 다른 가지다.
+            double[]? previous = null;
+            for (var i = 0; i < count; i++)
+            {
+                var (stage, j) = SolveStage(i, previous);
+                stages.Add(stage);
+                if (j is null) break;   // 운영도 이 자세에서 멈춘다 — 뒤 자세는 풀지 않는다
+                if (previous is null && start is not null)
+                    branchChange = BranchChangeReason(model, start, j);
+                else if (previous is not null && branchChange is null
+                         && StageJump(previous, j) is { Travel: var jump, Joint: var jn } && jump > model.MaxStageJumpDeg)
+                    branchChange = $"자세 사이 가지 전환 — {StageName(stageKinds[i])} J{jn + 1} {jump:0}° 이동 > {model.MaxStageJumpDeg:0}°";
+                previous = j;
+            }
+        }
+        else
+        {
+            // 용접선 중간·끝점 — 운영은 시작점 초점 자세에서 용접선을 따라 스캔한다. 초점 자세만 앞 점 초점 해에서 이어 판정하고,
+            // ②·정렬 준비는 그 해에서 거꾸로 이어 참고로만 싣는다(판정 제외 — ReachPointResult.ScanOnly).
+            var focus = SolveStage(count - 1, seedJoints);
+            if (focus.J is { } fj)
+            {
+                if (ElbowFlip(seedJoints, fj) || WristFlip(seedJoints, fj))
+                    branchChange = $"용접선 따라 가지 전환 — 앞 점에서 {(ElbowFlip(seedJoints, fj) ? $"팔꿈치(J3 {seedJoints[2]:0}° → {fj[2]:0}°)" : $"손목(J5 {seedJoints[4]:0}° → {fj[4]:0}°)")} 반전";
+                else if (StageJump(seedJoints, fj) is { Travel: var sj, Joint: var sn } && sj > model.MaxSeamStepJumpDeg)
+                    branchChange = $"용접선 따라 가지 전환 — 앞 점에서 J{sn + 1} {sj:0}° 이동 > {model.MaxSeamStepJumpDeg:0}°";
+            }
+            var refs = new ReachStageResult[count];
+            refs[count - 1] = focus.Stage;
+            var next = focus.J;
+            for (var i = count - 2; i >= 0; i--)
+            {
+                if (next is null) { refs[i] = Skipped(i); continue; }
+                var (stage, j) = SolveStage(i, next);
+                refs[i] = stage;
+                next = j;
+            }
+            stages.AddRange(refs);
         }
         // 진입 경로는 세 자세가 닿고 가지 전환이 없을 때만 본다 — 앞에서 막히면 운영도 진입하지 않는다(IK 가 가장 많이 드는 단계).
         if (start is not null && checkEntry && branchChange is null && stages.Count > 0
             && stages.All(s => s.Chosen is { PostureOk: true }))
             entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal);
-        return new ReachPointResult(body, columnTop, stages, branchChange, entry);
+        return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null);
     }
+
+    /// <summary>점 평가에서 다음 점으로 넘길 기준 — 초점 자세 해(용접선 스캔은 초점 거리에서 이어 간다). 없으면 null.</summary>
+    public static double[]? ScanSeed(ReachPointResult r) =>
+        r.Stages.LastOrDefault(s => s.Stage == ReachStage.Focus)?.Chosen?.JointsDeg;
+
+    private static (double Travel, int Joint) StageJump(double[] a, double[] b) =>
+        Enumerable.Range(0, 5).Select(k => (Math.Abs(a[k] - b[k]), k)).MaxBy(t => t.Item1);
+
+    private static string StageName(ReachStage s) => s switch
+    {
+        ReachStage.Approach => "② 접근",
+        ReachStage.Align => "정렬 준비",
+        _ => "초점 검사",
+    };
 
     /// <summary>면의 운영 ② 출발 관절각(없으면 null).</summary>
     public static double[]? StartJoints(ReachRobotModel model, string? wallCode) =>
@@ -298,7 +370,9 @@ public static class ReachSimulator
     /// <summary>
     /// 용접선(시작·중간·끝 점)을 정차 후보 방향·리프트 높이마다 평가해 간섭 없이 닿는 조합을 찾는다.
     /// 출발 자세가 있는 면의 운영 진입(가지 전환·진입 경로)은 시작점(<paramref name="seamPoints"/>[0])에만 적용한다 —
-    /// 운영 ② 는 용접선 시작점으로 진입하고, 중간·끝은 그 자세에서 이어 간다.
+    /// 운영 ② 는 용접선 시작점으로 진입하고, 중간·끝은 그 자세에서 이어 간다 — 그래서 중간·끝점은 바로 앞 점의 ② 해를 기준으로
+    /// 가장 가까운 해를 고른다(<see cref="Evaluate"/> seedJoints — 팔꿈치·손목 반전이나 같은 점 자세 사이 관절 점프가
+    /// <see cref="ReachRobotModel.MaxStageJumpDeg"/> 를 넘으면 도달 불가).
     /// 진입 경로는 IK 가 가장 많이 드는 단계라, 세 자세가 닿는 (방향, 리프트) 후보를 먼저 모두 모은 뒤
     /// 좋은 순서(간섭 없음 → 여유 큰 순)로 하나씩 보며 통과하는 첫 후보에서 멈춘다.
     /// </summary>
@@ -313,15 +387,17 @@ public static class ReachSimulator
             {
                 var min = double.PositiveInfinity;
                 var reachable = true;
+                double[]? seed = null;   // 중간·끝점은 시작점 ② 해의 가지를 따라간다(운영과 같게)
                 for (var i = 0; i < seamPoints.Count; i++)
                 {
                     var r = Evaluate(model, planes, stations[yi], seamPoints[i], wallNormal, h, withGeometry: false,
-                        wallCode: i == 0 ? wallCode : null, checkEntry: false);
+                        wallCode: i == 0 ? wallCode : null, checkEntry: false, seedJoints: seed);
+                    seed = ScanSeed(r);   // 다음 점은 이 점의 초점 자세에서 용접선을 따라 이어 간다
                     if (!r.Reachable)
                     {
                         reachable = false;
                         blocker ??= r.Blocker;
-                        if (r.Stages.All(s => s.Chosen is { PostureOk: true })) entryBlocker ??= r.Blocker;
+                        if (r.JudgedStages.All(s => s.Chosen is { PostureOk: true })) entryBlocker ??= r.Blocker;
                         break;
                     }
                     min = Math.Min(min, r.MinClearanceM);

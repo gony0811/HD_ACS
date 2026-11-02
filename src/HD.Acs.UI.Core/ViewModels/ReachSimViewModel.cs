@@ -421,6 +421,12 @@ public sealed partial class ReachSimViewModel : ObservableObject
         else if (d.Entry is { } ok)
             VerdictDetail = ok.Summary + ". " + VerdictDetail;
 
+        // 용접선 중간·끝점 — 운영은 시작점에서만 ②·정렬 준비를 하고 그 뒤는 초점 거리에서 용접선을 따라 스캔한다.
+        if (d.ScanOnly)
+            VerdictDetail = (StageIndex < 2
+                ? "참고 자세 — 중간·끝점은 초점 자세로만 판정합니다(②·정렬 준비는 시작점에서만, 그 뒤는 용접선 따라 스캔). "
+                : "중간·끝점 — 앞 점 초점 자세에서 용접선을 따라 이어 간 해입니다. ") + VerdictDetail;
+
         Scene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
         SceneChanged?.Invoke(this, EventArgs.Empty);
     }

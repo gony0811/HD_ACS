@@ -153,8 +153,18 @@ public sealed class ReachSimService
             ? ReachSimulator.Survey(_model, setup.Planes, new[] { setup.Stations[yawIndex] }, pts, setup.Normal, Strokes, area.WallCode)
             : null;
         var h = Math.Clamp(strokeMm ?? surveyed?.StrokeMm ?? 0, 0, _model.StrokeMaxMm);
-        var r = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[Math.Clamp(point, 0, 2)],
-            setup.Normal, h, offsetForwardMm, offsetLeftMm, wallCode: area.WallCode);
+        // 중간·끝점은 조사와 같게 시작점 초점 자세부터 앞 점 초점 해를 따라간다(운영은 시작점 초점 자세에서 용접선을 따라 스캔한다).
+        point = Math.Clamp(point, 0, 2);
+        double[]? seed = null;
+        for (var i = 0; i < point; i++)
+        {
+            var prev = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[i], setup.Normal, h,
+                offsetForwardMm, offsetLeftMm, withGeometry: false, wallCode: i == 0 ? area.WallCode : null, checkEntry: false,
+                seedJoints: seed);
+            seed = ReachSimulator.ScanSeed(prev);
+        }
+        var r = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[point],
+            setup.Normal, h, offsetForwardMm, offsetLeftMm, wallCode: area.WallCode, seedJoints: seed);
 
         var seams = area.Tasks.OrderBy(t => t.Seq).Select(t =>
         {
@@ -173,7 +183,7 @@ public sealed class ReachSimService
                     x.Joints.Select(j => new ReachJointDto(j.Name, j.Position)).ToList())).ToList())).ToList(),
             _model.WarnClearanceM,
             r.Entry is { } e ? new ReachEntryDto(e.Ok, e.Summary, e.InPlaneMm, e.Candidates, e.StartTcp, e.Entry, e.Plunge, e.Rejects) : null,
-            r.BranchChange, ReachSimulator.StartJoints(_model, area.WallCode), _model.MountYawDeg);
+            r.BranchChange, ReachSimulator.StartJoints(_model, area.WallCode), _model.MountYawDeg, r.ScanOnly);
     }
 
     /// <summary>
@@ -323,7 +333,8 @@ public sealed record ReachDetail(
     double StrokeMm, double OffsetForwardMm, double OffsetLeftMm,
     Guid TaskId, int Point, double[] Target, IReadOnlyList<ReachSeamLine> Seams,
     ReachBodyDto Body, IReadOnlyList<ReachStageDto> Stages, double WarnClearanceM,
-    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0);
+    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0,
+    bool ScanOnly = false);
 
 /// <summary>운영 ② 진입 경로(후퇴 평면 경유) 판정 — 출발 자세가 있는 면만. 좌표 도면 m.</summary>
 public sealed record ReachEntryDto(bool Ok, string Summary, double InPlaneMm, int Candidates,
