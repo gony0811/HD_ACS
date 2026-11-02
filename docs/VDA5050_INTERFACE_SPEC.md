@@ -176,8 +176,8 @@ ACS는 **greedy 최근접 동적 배차**를 사용한다. 층(맵) 안의 미�
       "nodePosition": {
         "x": 12.482, "y": 5.117,            // 맵 좌표 [m]
         "theta": 1.571,                     // [rad], 맵 X축 기준 CCW (부록 B)
-        "allowedDeviationXY": 0.08,         // [m] — 도착 판정 허용 오차 (AMR 확정: 주행 정밀도 제어 아님, 미지정 시 0.1)
-        "allowedDeviationTheta": 0.07,      // [rad] — 동일 (미지정 시 0.1)
+        "allowedDeviationXY": 0.2,          // [m] — 도착 판정 허용 오차 (AMR 확정: 주행 정밀도 제어 아님, 미지정 시 0.1) — 현장 설정
+        "allowedDeviationTheta": 0.10,      // [rad] — 동일 (미지정 시 0.1) — 2026-11-02 HD_AMR 요청으로 0.07→0.10
         "mapId": "CT1-L2"                   // 층 = 맵 (§4.3)
       },
       "actions": [ /* §8 커스텀 액션 */ ]

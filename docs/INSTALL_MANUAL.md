@@ -144,7 +144,7 @@ dotnet run   --project HD.Acs.UI.Desktop
 | `Acs:Api:ListenPort` | **5199** | 유지 권장 (5100 금지 — CS01_P 충돌) |
 | `Acs:Area:StationStandoffM` | 0.8 | 정차 이격 기본값 — 로봇 치수 확정(N10) 시 조정 |
 | `Acs:Dispatch:MaxRetries` | 2 | 실패 재시도 상한 |
-| `Acs:Dispatch:AllowedDevXy` / `Theta` | 0.08 / 0.07 | 도착 판정 허용 오차 |
+| `Acs:Dispatch:AllowedDevXy` / `Theta` | 0.2 / 0.10 | 도착 판정 허용 오차 |
 
 UI 쪽: `src/HD.Acs.UI.Desktop/appsettings.json`의 `Acs:BaseUrl`이 `http://localhost:5199`인지 확인
 (환경변수 `Acs__BaseUrl`로도 덮어쓸 수 있다).
