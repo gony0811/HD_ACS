@@ -20,6 +20,8 @@ public static class SchemaEnsure
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS excluded_tasks int NOT NULL DEFAULT 0",
         // db/migrations/2026-10-07_area_task_points.sql — CROSS3/4 교차 가지 끝점(VDA §8.5.1 N13)
         "ALTER TABLE ref.area_task ADD COLUMN IF NOT EXISTS points jsonb",
+        // db/migrations/2026-10-31_area_station_max_backward.sql — 영역별 정차 보정 후진 상한(VDA §4.4.2 N23)
+        "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_max_backward_mm double precision",
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)
