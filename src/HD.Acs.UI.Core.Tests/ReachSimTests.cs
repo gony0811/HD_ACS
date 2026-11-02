@@ -57,6 +57,22 @@ public class ReachSimTests
             Sol(0.4, false, Part("상완", 0.4))));
 
     [Fact]
+    public void 운영_진입_경로가_없으면_자세가_닿아도_막힘으로_판정한다()
+    {
+        var vm = Vm();
+        var entry = new ReachEntryDto(false, "진입 경로 없음 — 면 방향 584mm, 후보 6개 모두 거부: 후퇴 평면 [-1120, -154, 80]: 자기 간섭",
+            584, 6, new[] { 0.0, 0, 2 }, null, new[] { 0.5, 0, 2 }, new List<string> { "후퇴 평면 [-1120, -154, 80]: 자기 간섭" });
+        vm.ApplyDetail(ThreeStages(0.8) with { Entry = entry });
+
+        Assert.Equal("bad", vm.VerdictLevel);
+        Assert.StartsWith("운영 진입 불가", vm.VerdictTitle);
+        Assert.StartsWith("진입 경로 없음", vm.VerdictDetail);
+
+        vm.ApplyDetail(ThreeStages(0.8) with { BranchChange = "출발 자세에서 가지 전환 — 손목 반전(J5 90.1° → -77.0°)" });
+        Assert.StartsWith("출발 자세에서 가지 전환", vm.VerdictDetail);
+    }
+
+    [Fact]
     public void 운영_선택_해의_간섭으로_판정한다()
     {
         var vm = Vm();

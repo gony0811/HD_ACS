@@ -29,6 +29,11 @@ public sealed record ReachRobotModel
     public ReachToolSegment SelfToolSegment { get; init; } = new("검사 툴(몸체)", 0, 293, 169);
     /// <summary>차체 바닥 → 코봇 BASE 면 높이(리프트 0) [mm].</summary>
     public double MountZMm { get; init; } = 1635;
+    /// <summary>
+    /// 장착 yaw [도] — BASE +X 가 차체 +X 에서 반시계로 돈 각(HD_AMR T_A_B rz). 링크 기하·간섭은 바뀌지 않고 관절각 이름표(J1)만
+    /// 달라지지만, 출발 자세(<see cref="StartJointsByWall"/>)·J1 한계를 실기와 맞추려면 실제 값이어야 한다. 설정 <c>Acs:Reach:MountYawDeg</c>.
+    /// </summary>
+    public double MountYawDeg { get; init; }
     public double StrokeMaxMm { get; init; } = 1000;
 
     public double AmrFrontMm { get; init; } = 395;
@@ -69,8 +74,31 @@ public sealed record ReachRobotModel
     /// <summary>접근 세 자세의 TCP 면 후퇴 [mm] — ② 거친 접근 · 정렬 준비(수평 맞춤 등) · 초점 검사(초점을 용접선 위에).</summary>
     public double[] StageStandoffsMm { get; init; } = { 400, 300, 0 };
 
-    /// <summary>② 접근 자세의 IK 가지 고르기 — 운영(HD_AMR)과 같게 자세 여유 최대, 또는 간섭 여유 최대(대안 검토용).</summary>
+    /// <summary>② 접근 자세의 IK 가지 고르기 — 출발 자세가 없는 면에서만 쓴다(자세 여유 최대, 또는 간섭 여유 최대).</summary>
     public ReachBranchRule BranchRule { get; init; } = ReachBranchRule.MaxMargin;
+
+    /// <summary>
+    /// 면 코드 → 운영 ② 가 출발하는 관절각 J1~J6 [도] — HD_AMR 티칭(상부 면 T·SU·PU = 홈 위치_2, 그 외 = 작업 준비 위치 ready).
+    /// 있는 면은 ② 해를 이 자세에서 같은 가지로 고르고(가지 전환이면 도달 불가) 진입 경로(후퇴 평면)까지 검사한다.
+    /// 없는 면은 종전처럼 <see cref="BranchRule"/> 로 판정한다. 설정 <c>Acs:Reach:StartJoints</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, double[]> StartJointsByWall { get; init; } = new Dictionary<string, double[]>();
+
+    // ── 운영 ② 진입 규칙 — HD_AMR CobotInspectionMoveStep(2026-11-02 c490bb1)과 같은 값. 바뀌면 함께 맞출 것. ──
+    /// <summary>출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — MaxEntryJointTravelDeg.</summary>
+    public double MaxEntryJointTravelDeg { get; init; } = 120;
+    /// <summary>후퇴 평면 — ② 접근점 면 이격 평면에서 더 물러난 거리 [mm] — inspection.planarApproachRetreatMm 기본값.</summary>
+    public double PlanarRetreatMm { get; init; } = 100;
+    /// <summary>진입 MoveJ 가 출발 TCP 투영점에서 면을 따라 갈 수 있는 최대 거리 [mm] — MaxEntryInPlaneMm.</summary>
+    public double MaxEntryInPlaneMm { get; init; } = 500;
+    /// <summary>직선 경로 검증 간격 [mm] — PlanarSampleMm.</summary>
+    public double PlanarSampleMm { get; init; } = 100;
+    /// <summary>면 방향 거리가 이보다 짧으면 들어갈 점으로 바로 진입 [mm] — PlanarSkipMm.</summary>
+    public double PlanarSkipMm { get; init; } = 50;
+    /// <summary>경로 검증 점 사이 관절 최대 변화 [도] — MaxPathJointStepDeg.</summary>
+    public double MaxPathJointStepDeg { get; init; } = 30;
+    /// <summary>경로 손목 특이점 여유 |J5| [도] — PlanarWristMarginDeg.</summary>
+    public double PlanarWristMarginDeg { get; init; } = 5;
 
     public static ReachRobotModel Default { get; } = new();
 }
@@ -122,11 +150,38 @@ public sealed record ReachStageResult(ReachStage Stage, double StandoffMm, doubl
 /// <summary>AMR 차체 상자 — 꼭짓점 8개(아래 4 → 위 4, 도면 m)와 바닥 외 면까지 여유.</summary>
 public sealed record ReachBody(double[][] Corners, double ClearanceM, string NearestPlane);
 
-/// <summary>용접선 점 하나를 한 정차·리프트에서 세 자세로 평가한 결과.</summary>
-public sealed record ReachPointResult(ReachBody Body, double[] ColumnTop, IReadOnlyList<ReachStageResult> Stages)
+/// <summary>
+/// 운영 ② 진입 경로 판정 — 출발 자세 TCP 를 후퇴 평면에 투영한 점에서 진입점 후보를 골라
+/// 진입 MoveJ → 후퇴 평면 MoveL → 법선 MoveL 경로가 이어지는지(HD_AMR 평면 경유 접근과 같은 규칙). 좌표 도면 m.
+/// </summary>
+/// <param name="StartTcp">출발 자세 TCP.</param>
+/// <param name="Entry">고른 진입점(없으면 null).</param>
+/// <param name="Plunge">들어갈 점 — ② 접근점에서 면 바깥으로 후퇴 거리만큼.</param>
+/// <param name="InPlaneMm">투영점 → 들어갈 점 면 방향 거리.</param>
+/// <param name="Rejects">거부된 후보와 사유(순서대로).</param>
+public sealed record ReachEntry(bool Ok, double[] StartTcp, double[]? Entry, double[] Plunge, double InPlaneMm,
+    int Candidates, IReadOnlyList<string> Rejects)
 {
-    /// <summary>세 자세 모두 운영 선택 해가 있고 자세 한계 안인가.</summary>
-    public bool Reachable => Stages.All(s => s.Chosen is { PostureOk: true });
+    public string Summary => Ok
+        ? $"진입 경로 있음 — 면 방향 {InPlaneMm:0}mm" + (Rejects.Count == 0 ? "" : $" (앞 후보 {Rejects.Count}개 거부)")
+        : $"진입 경로 없음 — 면 방향 {InPlaneMm:0}mm, 후보 {Candidates}개 모두 거부: {string.Join(" / ", Rejects.Take(4))}"
+          + (Rejects.Count > 4 ? $" 외 {Rejects.Count - 4}건" : "");
+}
+
+/// <summary>용접선 점 하나를 한 정차·리프트에서 세 자세로 평가한 결과.</summary>
+/// <param name="BranchChange">출발 자세에서 ② 해로 가려면 팔꿈치·손목을 뒤집거나 관절을 크게 돌려야 하면 그 사유.</param>
+/// <param name="Entry">출발 자세가 있는 면의 진입 경로 판정(없는 면은 null).</param>
+public sealed record ReachPointResult(ReachBody Body, double[] ColumnTop, IReadOnlyList<ReachStageResult> Stages,
+    string? BranchChange = null, ReachEntry? Entry = null)
+{
+    /// <summary>세 자세 모두 운영 선택 해가 있고 자세 한계 안이며, (출발 자세가 있으면) 가지 전환 없이 진입 경로가 있는가.</summary>
+    public bool Reachable => Stages.All(s => s.Chosen is { PostureOk: true }) && BranchChange is null && Entry?.Ok != false;
+
+    /// <summary>도달하지 못하는 첫 사유(도달이면 null).</summary>
+    public string? Blocker =>
+        Stages.FirstOrDefault(s => s.Chosen is not { PostureOk: true }) is { } bad
+            ? $"{bad.Stage} {(bad.Chosen is { } c ? c.Limiting : "해 없음")}"
+            : BranchChange ?? (Entry is { Ok: false } e ? e.Summary : null);
 
     /// <summary>차체·운영 선택 해 부품 중 가장 작은 여유 [m]. 도달하지 못하면 차체만.</summary>
     public double MinClearanceM => Stages.Select(s => s.Chosen?.MinClearanceM ?? double.PositiveInfinity)
@@ -138,7 +193,9 @@ public enum ReachVerdict { Clear, Collision, Unreachable }
 /// <summary>용접선 하나의 종합 판정 — 리프트를 훑어 간섭 없이 닿는 높이가 있으면 Clear.</summary>
 /// <param name="StrokeMm">Clear 면 여유가 가장 큰 리프트, Collision 이면 간섭이 가장 덜한 리프트, 아니면 null.</param>
 /// <param name="YawIndex">바닥·천장처럼 차체 방향이 자유일 때 고른 후보 순번.</param>
-public sealed record ReachSeamSurvey(ReachVerdict Verdict, double? StrokeMm, double? MinClearanceM, int YawIndex);
+/// <param name="Blocker">Unreachable 일 때 사유 — 세 자세는 닿는데 출발 자세 가지·진입 경로로 막힌 경우를 먼저 고른다.</param>
+public sealed record ReachSeamSurvey(ReachVerdict Verdict, double? StrokeMm, double? MinClearanceM, int YawIndex,
+    string? Blocker = null);
 
 /// <summary>
 /// 리치·간섭 시뮬레이터. 정차·리프트·정차 이동이 주어지면 용접선 점마다 운영과 같은 세 접근 자세
@@ -156,14 +213,19 @@ public static class ReachSimulator
     /// <param name="offsetForwardMm">정차 이동 — 차체 전방(+ = 벽 쪽) [mm].</param>
     /// <param name="offsetLeftMm">정차 이동 — 차체 좌측 [mm].</param>
     /// <param name="withGeometry">false 면 운영 선택 해만 부품 간섭을 계산한다(전체 판정용 — 빠르다).</param>
+    /// <param name="wallCode">면 코드 — <see cref="ReachRobotModel.StartJointsByWall"/> 에 출발 자세가 있으면 ② 를 그 자세의
+    /// 가지로 고르고 진입 경로를 검사한다. null 이거나 출발 자세가 없으면 종전 규칙.</param>
     public static ReachPointResult Evaluate(
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station,
         double[] seamPoint, double[] wallNormal, double strokeMm,
-        double offsetForwardMm = 0, double offsetLeftMm = 0, bool withGeometry = true)
+        double offsetForwardMm = 0, double offsetLeftMm = 0, bool withGeometry = true, string? wallCode = null)
     {
         var frame = new BaseFrame(model, station, strokeMm, offsetForwardMm, offsetLeftMm);
         var body = Body(model, planes, frame);
         var columnTop = frame.AmrToDrawing(0, 0, model.MountZMm + strokeMm);
+        var start = StartJoints(model, wallCode);
+        string? branchChange = null;
+        ReachEntry? entry = null;
 
         var stages = new List<ReachStageResult>(3);
         double[]? previous = null;
@@ -172,15 +234,20 @@ public static class ReachSimulator
         {
             var standoff = model.StageStandoffsMm[i];
             var tcp = Vec3.Add(seamPoint, Vec3.Scale(wallNormal, standoff / 1000.0));
-            var raw = model.Kinematics.InverseFlange(FlangeTarget(model, frame, tcp, wallNormal));
-            var evaluated = raw.Select(j => Normalize(model, j)).Select(j => (J: j, P: Posture(model, j))).ToList();
+            var evaluated = SolveIk(model, frame, tcp, wallNormal).Select(j => (J: j, P: Posture(model, j))).ToList();
 
-            var byClearance = previous is null && model.BranchRule == ReachBranchRule.MaxClearance;
+            var byClearance = previous is null && start is null && model.BranchRule == ReachBranchRule.MaxClearance;
             var solved = withGeometry || byClearance
                 ? evaluated.Select(s => Solve(model, planes, frame, s.J, s.P)).ToList()
                 : null;
             var chosen = previous is not null ? Nearest(evaluated, previous) ?? BestMargin(evaluated)
+                : start is not null ? SameBranch(model, evaluated.Select(s => s.J).ToList(), start) ?? BestMargin(evaluated)
                 : byClearance ? BestClearance(solved!) : BestMargin(evaluated);
+            if (previous is null && start is not null && chosen >= 0)
+            {
+                branchChange = BranchChangeReason(model, start, evaluated[chosen].J);
+                entry = PlanEntry(model, frame, start, tcp, wallNormal);
+            }
             var sols = evaluated.Select((s, k) => solved?[k] ?? (k == chosen
                 ? Solve(model, planes, frame, s.J, s.P)
                 : new ReachSolution(s.J, s.P.Ok, s.P.Margin, s.P.Limiting, Array.Empty<ReachPart>(),
@@ -189,8 +256,12 @@ public static class ReachSimulator
             if (chosen < 0) break;   // 운영도 이 자세에서 멈춘다 — 뒤 자세는 풀지 않는다
             previous = evaluated[chosen].J;
         }
-        return new ReachPointResult(body, columnTop, stages);
+        return new ReachPointResult(body, columnTop, stages, branchChange, entry);
     }
+
+    /// <summary>면의 운영 ② 출발 관절각(없으면 null).</summary>
+    public static double[]? StartJoints(ReachRobotModel model, string? wallCode) =>
+        wallCode is not null && model.StartJointsByWall.TryGetValue(wallCode, out var s) && s is { Length: >= 5 } ? s : null;
 
     /// <summary>정차 하나에서 AMR 차체(리프트·팔과 무관)의 면 여유만 잰다 — 정차 후보를 빠르게 거를 때 쓴다.</summary>
     public static ReachBody BodyAt(ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station) =>
@@ -201,9 +272,10 @@ public static class ReachSimulator
     /// </summary>
     public static ReachSeamSurvey Survey(
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, IReadOnlyList<ReachStation> stations,
-        IReadOnlyList<double[]> seamPoints, double[] wallNormal, IReadOnlyList<double> strokesMm)
+        IReadOnlyList<double[]> seamPoints, double[] wallNormal, IReadOnlyList<double> strokesMm, string? wallCode = null)
     {
         (double H, double Cl, int Yaw)? bestClear = null, bestHit = null;
+        string? blocker = null, entryBlocker = null;
         for (var yi = 0; yi < stations.Count; yi++)
             foreach (var h in strokesMm)
             {
@@ -211,8 +283,14 @@ public static class ReachSimulator
                 var reachable = true;
                 foreach (var p in seamPoints)
                 {
-                    var r = Evaluate(model, planes, stations[yi], p, wallNormal, h, withGeometry: false);
-                    if (!r.Reachable) { reachable = false; break; }
+                    var r = Evaluate(model, planes, stations[yi], p, wallNormal, h, withGeometry: false, wallCode: wallCode);
+                    if (!r.Reachable)
+                    {
+                        reachable = false;
+                        blocker ??= r.Blocker;
+                        if (r.Stages.All(s => s.Chosen is { PostureOk: true })) entryBlocker ??= r.Blocker;
+                        break;
+                    }
                     min = Math.Min(min, r.MinClearanceM);
                 }
                 if (!reachable) continue;
@@ -221,7 +299,7 @@ public static class ReachSimulator
             }
         if (bestClear is { } c) return new ReachSeamSurvey(ReachVerdict.Clear, c.H, c.Cl, c.Yaw);
         if (bestHit is { } b) return new ReachSeamSurvey(ReachVerdict.Collision, b.H, b.Cl, b.Yaw);
-        return new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0);
+        return new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, entryBlocker ?? blocker);
     }
 
     /// <summary>층의 장애물 평면 — 탱크 면 + (2층 이상) 그 층 데크면.</summary>
@@ -232,12 +310,193 @@ public static class ReachSimulator
         return list;
     }
 
+    // ── 운영 ② 출발 자세·진입 경로(HD_AMR CobotInspectionMoveStep 평면 경유 접근과 같은 규칙) ──────────
+    // J6 은 보지 않는다 — 광축 둘레 회전은 J6 만 바꾸고 운영 roll 기준(벽면 수평·용접선 등)을 ACS 가 모르기 때문.
+    // 손목 반전 해는 J4 가 약 180° 돌아 관절 이동 한계(120°)에 걸리므로 J6 가중이 없어도 같은 해가 걸러진다.
+
+    /// <summary>TCP(도면)에서 광축이 면을 바라보는 자세의 IK 해(범위 밖 관절은 ±360 감음).</summary>
+    private static List<double[]> SolveIk(ReachRobotModel m, BaseFrame f, double[] tcpDrawing, double[] wallNormal) =>
+        m.Kinematics.InverseFlange(FlangeTarget(m, f, tcpDrawing, wallNormal)).Select(j => Normalize(m, j)).ToList();
+
+    private static bool InRange(ReachRobotModel m, double[] j) =>
+        Enumerable.Range(0, m.JointMinDeg.Length).All(i => j[i] >= m.JointMinDeg[i] && j[i] <= m.JointMaxDeg[i]);
+
+    private static double Travel(double[] a, double[] b) => Enumerable.Range(0, 5).Max(i => Math.Abs(a[i] - b[i]));
+
+    private static bool ElbowFlip(double[] reference, double[] j) =>
+        Math.Sign(reference[2]) != 0 && Math.Sign(j[2]) != 0 && Math.Sign(reference[2]) != Math.Sign(j[2]);
+
+    /// <summary>
+    /// 기준 자세에서 가장 가까운(J1~J5 이동 합) 관절 범위 안 해 — 팔꿈치 가지가 같은 해를 먼저 고른다
+    /// (HD_AMR GetInverseKinKeepWrist). 없으면 null.
+    /// </summary>
+    private static int? SameBranch(ReachRobotModel m, IReadOnlyList<double[]> sols, double[] reference)
+    {
+        int? best = null;
+        var bestCost = double.PositiveInfinity;
+        for (var i = 0; i < sols.Count; i++)
+        {
+            if (!InRange(m, sols[i])) continue;
+            var cost = Enumerable.Range(0, 5).Sum(k => Math.Abs(sols[i][k] - reference[k])) + (ElbowFlip(reference, sols[i]) ? 10000 : 0);
+            if (cost < bestCost) { bestCost = cost; best = i; }
+        }
+        return best;
+    }
+
+    /// <summary>기준 자세에서 J1~J5 이동 합이 가장 작은 관절 범위 안 해(HD_AMR GetInverseKinNearest). 없으면 null.</summary>
+    private static double[]? NearestInRange(ReachRobotModel m, IReadOnlyList<double[]> sols, double[] seed) =>
+        sols.Where(j => InRange(m, j)).MinBy(j => Enumerable.Range(0, 5).Sum(k => Math.Abs(j[k] - seed[k])));
+
+    /// <summary>
+    /// 출발 자세 → ② 해가 운영 ② 가 하지 않는 가지 전환인지(HD_AMR ReachMap.BranchChangeReason) — 팔꿈치(J3)·손목(J5) 부호 반전,
+    /// 관절별(J1~J5) 이동 &gt; <see cref="ReachRobotModel.MaxEntryJointTravelDeg"/>. 아니면 null.
+    /// </summary>
+    public static string? BranchChangeReason(ReachRobotModel m, double[] start, double[] approach)
+    {
+        var parts = new List<string>();
+        if (ElbowFlip(start, approach))
+            parts.Add($"팔꿈치 반전(J3 {start[2]:0.0}° → {approach[2]:0.0}°)");
+        if (Math.Sign(start[4]) != 0 && Math.Sign(start[4]) != Math.Sign(approach[4]))
+            parts.Add($"손목 반전(J5 {start[4]:0.0}° → {approach[4]:0.0}°)");
+        var (joint, travel) = Enumerable.Range(0, 5).Select(i => (i, Math.Abs(approach[i] - start[i]))).MaxBy(t => t.Item2);
+        if (travel > m.MaxEntryJointTravelDeg)
+            parts.Add($"J{joint + 1} {travel:0}° 이동 > {m.MaxEntryJointTravelDeg:0}°");
+        return parts.Count == 0 ? null : "출발 자세에서 가지 전환 — " + string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// 평면 경유 진입 — 출발 TCP 를 ② 접근점 이격 평면에서 <see cref="ReachRobotModel.PlanarRetreatMm"/> 더 물러난 후퇴 평면에
+    /// 투영하고, 진입점 후보(① 들어갈 점 직접: 면 방향 500mm 이내일 때만 ② 투영점부터 100mm 간격, 500mm 까지)마다
+    /// 진입 해(같은 가지·관절 이동 ≤120°·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
+    /// 관절 튐·팔꿈치 반전·손목 특이점·자기 간섭을 본다. 자세는 전 구간 ② 자세로 고정.
+    /// </summary>
+    private static ReachEntry PlanEntry(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal)
+    {
+        var fr = m.Kinematics.Frames(start);
+        var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
+        var r = m.PlanarRetreatMm / 1000.0;
+        var h = Vec3.Dot(Vec3.Sub(cur, approach), normal);
+        var projected = Vec3.Sub(cur, Vec3.Scale(normal, h - r));
+        var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
+        var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
+
+        var candidates = new List<(double[] P, bool Direct)>();
+        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
+        else
+        {
+            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
+            candidates.Add((projected, false));
+            var pts = Sample(projected, plunge, m.PlanarSampleMm);
+            var step = inPlaneMm / pts.Count;
+            for (var k = 0; k < pts.Count - 1; k++)
+                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
+        }
+
+        string Fmt(double[] p) => string.Join(", ", f.DrawingToBase(p).Select(v => v.ToString("0")));
+        var rejects = new List<string>();
+        foreach (var (cand, direct) in candidates)
+        {
+            var label = direct ? "들어갈 점 직접" : $"후퇴 평면 [{Fmt(cand)}]";
+            var sols = SolveIk(m, f, cand, normal);
+            if (SameBranch(m, sols, start) is not { } ci) { rejects.Add($"{label}: 도달 불가"); continue; }
+            var jc = sols[ci];
+            var travel = Travel(start, jc);
+            if (travel > m.MaxEntryJointTravelDeg) { rejects.Add($"{label}: 진입 관절 이동 {travel:0}° > {m.MaxEntryJointTravelDeg:0}°"); continue; }
+            if (ElbowFlip(start, jc)) { rejects.Add($"{label}: 팔꿈치 가지 전환"); continue; }
+            if (SelfClearance(m, f.BaseZMm, jc) is { ClearanceMm: < 0 } sc) { rejects.Add($"{label}: 자기 간섭 ({sc.Part}–{sc.Obstacle})"); continue; }
+
+            var path = new List<double[]>();
+            if (!direct) path.AddRange(Sample(cand, plunge, m.PlanarSampleMm));
+            if (m.PlanarRetreatMm > 0.5) path.AddRange(Sample(plunge, approach, m.PlanarSampleMm));
+            var seed = jc;
+            string? why = null;
+            foreach (var pt in path)
+            {
+                if (NearestInRange(m, SolveIk(m, f, pt, normal), seed) is not { } j) { why = $"[{Fmt(pt)}] 도달 불가"; break; }
+                var jump = Travel(seed, j);
+                if (jump > m.MaxPathJointStepDeg) { why = $"[{Fmt(pt)}] 관절이 {jump:0}° 튐"; break; }
+                if (ElbowFlip(jc, j)) { why = $"[{Fmt(pt)}] 팔꿈치 가지 전환"; break; }
+                if (Math.Sign(j[4]) != Math.Sign(jc[4]) || Math.Abs(j[4]) < m.PlanarWristMarginDeg) { why = $"[{Fmt(pt)}] 손목 특이점(J5 {j[4]:0.0}°)"; break; }
+                if (SelfClearance(m, f.BaseZMm, j) is { ClearanceMm: < 0 } s) { why = $"[{Fmt(pt)}] 자기 간섭 ({s.Part}–{s.Obstacle})"; break; }
+                seed = j;
+            }
+            if (why is not null) { rejects.Add($"{label}: 경로 {why}"); continue; }
+            return new ReachEntry(true, cur, cand, plunge, inPlaneMm, candidates.Count, rejects);
+        }
+        return new ReachEntry(false, cur, null, plunge, inPlaneMm, candidates.Count, rejects);
+    }
+
+    /// <summary>from→to 직선을 stepMm 이하 간격으로 나눈 점(시작 제외, 끝 포함). 좌표 m.</summary>
+    private static List<double[]> Sample(double[] from, double[] to, double stepMm)
+    {
+        var len = Vec3.Length(Vec3.Sub(to, from)) * 1000;
+        var n = Math.Max(1, (int)Math.Ceiling(len / stepMm));
+        return Enumerable.Range(1, n).Select(k => Vec3.Add(from, Vec3.Scale(Vec3.Sub(to, from), (double)k / n))).ToList();
+    }
+
+    /// <summary>자기 간섭 여유 — 팔 부품·검사 툴 몸체와 차체·신호탑·리프트 기둥 사이 최소 [mm] (HD_AMR CobotEnvelope 와 같은 규칙).</summary>
+    public readonly record struct SelfClearanceResult(double ClearanceMm, string Part, string Obstacle);
+
+    /// <summary>
+    /// 관절각 한 벌의 자기 간섭 여유 — HD_AMR <c>CobotEnvelope.Evaluate</c> 와 같다: BASE·J1 은 제외, 어깨는 기둥과 재지 않고,
+    /// 툴은 몸체 원통(<see cref="ReachRobotModel.SelfToolSegment"/>)만 본다. 장착 yaw 0(STEP).
+    /// </summary>
+    public static SelfClearanceResult SelfClearance(ReachRobotModel m, double baseZMm, double[] j)
+    {
+        var best = new SelfClearanceResult(double.PositiveInfinity, "", "");
+        var boxes = SelfBoxes(m, baseZMm);
+        double mc = Math.Cos(m.MountYawDeg * Math.PI / 180), ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
+        double[] Amr(double[] p) => new[] { mc * p[0] - ms * p[1], ms * p[0] + mc * p[1], p[2] + baseZMm };
+        foreach (var s in ArmSegments(m, m.Kinematics.Frames(j)).Where(s => s.Name != "BASE·J1"))
+        {
+            var pa = Amr(s.A);
+            var pb = Amr(s.B);
+            foreach (var box in s.NearColumn ? boxes[..2] : boxes)
+            {
+                var cl = SegmentBoxDistanceMm(pa, pb, box.Min, box.Max) - s.RadiusMm;
+                if (cl < best.ClearanceMm) best = new SelfClearanceResult(cl, s.Name, box.Name);
+            }
+        }
+        return best;
+    }
+
+    /// <summary>팔 부품 캡슐(BASE 기준 mm) — 마지막은 자기 간섭용 툴 몸체 원통.</summary>
+    private readonly record struct ArmSegment(string Name, double[] A, double[] B, double RadiusMm, bool NearColumn);
+
+    private static ArmSegment[] ArmSegments(ReachRobotModel m, IReadOnlyList<double[,]> fr)
+    {
+        double[] O(int i) => Mat4.Origin(fr[i]);
+        double[] Along(double[] p, double[] axis, double mm) => Vec3.Add(p, Vec3.Scale(axis, mm));
+        var z1 = Mat4.AxisZ(fr[1]);
+        var z6 = Mat4.AxisZ(fr[6]);
+        var s1 = Along(O(1), z1, m.ShoulderOffsetMm);
+        var e1 = Along(O(2), z1, m.ShoulderOffsetMm);
+        var e2 = Along(O(2), z1, m.ForearmOffsetMm);
+        var w1 = Along(O(3), z1, m.ForearmOffsetMm);
+        var core = m.SelfToolSegment;
+        return new[]
+        {
+            new ArmSegment("BASE·J1", O(0), O(1), m.BaseRadiusMm, true),
+            new ArmSegment("어깨(J2)", O(1), s1, m.ShoulderRadiusMm, true),
+            new ArmSegment("상완", s1, e1, m.UpperArmRadiusMm, false),
+            new ArmSegment("팔꿈치(J3)", e1, e2, m.ElbowRadiusMm, false),
+            new ArmSegment("전완", e2, w1, m.ForearmRadiusMm, false),
+            new ArmSegment("손목1(J4)", w1, O(4), m.WristRadiusMm, false),
+            new ArmSegment("손목2(J5)", O(4), O(5), m.WristRadiusMm, false),
+            new ArmSegment("손목3(J6)", O(5), O(6), m.WristRadiusMm, false),
+            new ArmSegment(core.Name, Along(O(6), z6, core.FromMm), Along(O(6), z6, core.ToMm), core.RadiusMm, false),
+        };
+    }
+
     // ── 내부 ─────────────────────────────────────────────────────────────
 
-    /// <summary>차체 기준(mm, x 전방·y 좌측·z 바닥 위) ↔ 도면(m). BASE 는 차체 중심 위 마운트 + 스트로크.</summary>
+    /// <summary>
+    /// 차체 기준(mm, x 전방·y 좌측·z 바닥 위) ↔ 도면(m). BASE 는 차체 중심 위 마운트 + 스트로크이고,
+    /// BASE +X 는 차체 +X 에서 <see cref="ReachRobotModel.MountYawDeg"/> 만큼 반시계로 돌아 있다(HD_AMR T_A_B rz).
+    /// </summary>
     private sealed class BaseFrame
     {
-        private readonly double _cos, _sin, _ox, _oy, _floor;
+        private readonly double _cos, _sin, _ox, _oy, _floor, _mc, _ms;
         public double BaseZMm { get; }
 
         public BaseFrame(ReachRobotModel m, ReachStation st, double strokeMm, double dF, double dL)
@@ -246,21 +505,34 @@ public static class ReachSimulator
             _ox = st.X + (_cos * dF - _sin * dL) / 1000.0;
             _oy = st.Y + (_sin * dF + _cos * dL) / 1000.0;
             _floor = st.FloorZ;
+            _mc = Math.Cos(m.MountYawDeg * Math.PI / 180); _ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
             BaseZMm = m.MountZMm + strokeMm;
         }
 
         public double[] AmrToDrawing(double x, double y, double z) =>
             new[] { _ox + (_cos * x - _sin * y) / 1000.0, _oy + (_sin * x + _cos * y) / 1000.0, _floor + z / 1000.0 };
 
-        public double[] BaseToDrawing(double[] p) => AmrToDrawing(p[0], p[1], p[2] + BaseZMm);
+        /// <summary>BASE 기준 점(mm) → 차체 기준(mm).</summary>
+        public double[] BaseToAmr(double[] p) => new[] { _mc * p[0] - _ms * p[1], _ms * p[0] + _mc * p[1], p[2] + BaseZMm };
+
+        public double[] BaseToDrawing(double[] p)
+        {
+            var a = BaseToAmr(p);
+            return AmrToDrawing(a[0], a[1], a[2]);
+        }
 
         public double[] DrawingToBase(double[] p)
         {
             double dx = (p[0] - _ox) * 1000, dy = (p[1] - _oy) * 1000;
-            return new[] { _cos * dx + _sin * dy, -_sin * dx + _cos * dy, (p[2] - _floor) * 1000 - BaseZMm };
+            double ax = _cos * dx + _sin * dy, ay = -_sin * dx + _cos * dy;
+            return new[] { _mc * ax + _ms * ay, -_ms * ax + _mc * ay, (p[2] - _floor) * 1000 - BaseZMm };
         }
 
-        public double[] DirectionToBase(double[] v) => new[] { _cos * v[0] + _sin * v[1], -_sin * v[0] + _cos * v[1], v[2] };
+        public double[] DirectionToBase(double[] v)
+        {
+            double ax = _cos * v[0] + _sin * v[1], ay = -_sin * v[0] + _cos * v[1];
+            return new[] { _mc * ax + _ms * ay, -_ms * ax + _mc * ay, v[2] };
+        }
     }
 
     private static double[,] FlangeTarget(ReachRobotModel m, BaseFrame f, double[] tcpDrawing, double[] wallNormal)
@@ -337,35 +609,18 @@ public static class ReachSimulator
         double[] Along(double[] p, double[] axis, double mm) => Vec3.Add(p, Vec3.Scale(axis, mm));
         var z1 = Mat4.AxisZ(fr[1]);
         var z6 = Mat4.AxisZ(fr[6]);
-        var s1 = Along(O(1), z1, m.ShoulderOffsetMm);
-        var e1 = Along(O(2), z1, m.ShoulderOffsetMm);
-        var e2 = Along(O(2), z1, m.ForearmOffsetMm);
-        var w1 = Along(O(3), z1, m.ForearmOffsetMm);
         double[] B(double[] p) => f.BaseToDrawing(p);
 
         var self = SelfBoxes(m, f.BaseZMm);
-        ReachPart Arm(string name, double[] a, double[] b, double radiusMm, bool nearColumn = false) =>
-            WithSelf(Part(name, B(a), B(b), radiusMm, planes), a, b, radiusMm, f.BaseZMm, nearColumn ? self[..2] : self);
-
-        var parts = new[]
-        {
-            Column(m, planes, f),
-            Arm("BASE·J1", O(0), O(1), m.BaseRadiusMm, nearColumn: true),
-            Arm("어깨(J2)", O(1), s1, m.ShoulderRadiusMm, nearColumn: true),
-            Arm("상완", s1, e1, m.UpperArmRadiusMm),
-            Arm("팔꿈치(J3)", e1, e2, m.ElbowRadiusMm),
-            Arm("전완", e2, w1, m.ForearmRadiusMm),
-            Arm("손목1(J4)", w1, O(4), m.WristRadiusMm),
-            Arm("손목2(J5)", O(4), O(5), m.WristRadiusMm),
-            Arm("손목3(J6)", O(5), O(6), m.WristRadiusMm),
-        }.Concat(m.ToolSegments.Select(t =>
-        {
-            var a = Along(O(6), z6, t.FromMm);
-            var b = Along(O(6), z6, t.ToMm);
-            var core = m.SelfToolSegment;
-            return WithSelf(CylinderPart(t.Name, B(a), B(b), t.RadiusMm, planes),
-                Along(O(6), z6, core.FromMm), Along(O(6), z6, core.ToMm), core.RadiusMm, f.BaseZMm, self);
-        })).ToArray();
+        var segs = ArmSegments(m, fr);
+        var core = segs[^1];
+        var parts = new[] { Column(m, planes, f) }
+            .Concat(segs[..^1].Select(s =>
+                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f, s.NearColumn ? self[..2] : self)))
+            .Concat(m.ToolSegments.Select(t =>
+                WithSelf(CylinderPart(t.Name, B(Along(O(6), z6, t.FromMm)), B(Along(O(6), z6, t.ToMm)), t.RadiusMm, planes),
+                    core.A, core.B, core.RadiusMm, f, self)))
+            .ToArray();
         var joints = new[]
         {
             new ReachJointMark("J1", B(O(0))),
@@ -407,10 +662,10 @@ public static class ReachSimulator
     }
 
     /// <summary>팔 부품의 탱크 면 여유와 차체·신호탑·기둥 여유 중 작은 쪽. a·b 는 BASE 기준 mm.</summary>
-    private static ReachPart WithSelf(ReachPart tank, double[] a, double[] b, double radiusMm, double baseZMm, SelfBox[] boxes)
+    private static ReachPart WithSelf(ReachPart tank, double[] a, double[] b, double radiusMm, BaseFrame f, SelfBox[] boxes)
     {
-        var pa = new[] { a[0], a[1], a[2] + baseZMm };
-        var pb = new[] { b[0], b[1], b[2] + baseZMm };
+        var pa = f.BaseToAmr(a);
+        var pb = f.BaseToAmr(b);
         var best = tank;
         foreach (var box in boxes)
         {

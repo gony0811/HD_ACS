@@ -8,7 +8,7 @@ public sealed record ReachSurveyAreaDto(Guid AreaId, string Name, string WallCod
 
 /// <summary>조사 — 용접선 하나. Z 는 층 바닥 위[m], Verdict = Clear | Collision | Unreachable.</summary>
 public sealed record ReachSurveySeamDto(Guid TaskId, int Seq, double ZMin, double ZMax, string Verdict,
-    double? StrokeMm, double? MinClearanceM, int YawIndex);
+    double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null);
 
 public sealed record ReachSeamLineDto(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);
@@ -27,7 +27,12 @@ public sealed record ReachDetailDto(
     double StationX, double StationY, double StationYaw, int YawCount, int YawIndex,
     double StrokeMm, double OffsetForwardMm, double OffsetLeftMm,
     Guid TaskId, int Point, double[] Target, List<ReachSeamLineDto> Seams,
-    ReachBodyDto Body, List<ReachStageDto> Stages, double WarnClearanceM);
+    ReachBodyDto Body, List<ReachStageDto> Stages, double WarnClearanceM,
+    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0);
+
+/// <summary>운영 ② 진입 경로(후퇴 평면 경유) 판정 — 출발 자세(홈 위치_2·ready)가 설정된 면만. 좌표 도면 m.</summary>
+public sealed record ReachEntryDto(bool Ok, string Summary, double InPlaneMm, int Candidates,
+    double[] StartTcp, double[]? Entry, double[] Plunge, List<string> Rejects);
 
 /// <summary>정차점 최적화 — 영역 하나의 지금 정차와 찾은 정차. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimumDto(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,

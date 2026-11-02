@@ -406,6 +406,17 @@ public sealed partial class ReachSimViewModel : ObservableObject
                             $"관절 {string.Join(" / ", sol.JointsDeg.Take(5).Select(v => v.ToString("0.0", CultureInfo.InvariantCulture)))}°";
         }
 
+        // 운영 ② 출발 자세(홈 위치_2·ready)가 설정된 면 — 가지 전환·진입 경로가 막히면 자세가 닿아도 실기는 움직이지 않는다.
+        var blocked = d.BranchChange ?? (d.Entry is { Ok: false } e ? e.Summary : null);
+        if (blocked is not null)
+        {
+            VerdictLevel = "bad";
+            VerdictTitle = "운영 진입 불가 · " + VerdictTitle;
+            VerdictDetail = blocked + " — " + VerdictDetail;
+        }
+        else if (d.Entry is { } ok)
+            VerdictDetail = ok.Summary + ". " + VerdictDetail;
+
         Scene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
         SceneChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -542,7 +553,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
         {
             "Clear" => $"간섭 없음 (h {s.StrokeMm:0})",
             "Collision" => $"간섭 {(s.MinClearanceM is { } c ? $"{c * 1000:0} mm" : "")}",
-            _ => "도달 불가",
+            _ => s.Blocker is { } b && (b.StartsWith("출발 자세", StringComparison.Ordinal) || b.StartsWith("진입 경로", StringComparison.Ordinal))
+                ? "도달 불가 (운영 진입)" : "도달 불가",
         };
         return $"{s.Seq}. 높이 {s.ZMin:0.00}–{s.ZMax:0.00} m · {tag}";
     }

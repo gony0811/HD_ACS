@@ -54,7 +54,7 @@ public static class StationOptimizer
     public static StationOptimum Optimize(
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, StationSearchSpace space,
         IReadOnlyList<IReadOnlyList<double[]>> seams, double[] wallNormal, IReadOnlyList<double> strokesMm,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? wallCode = null)
     {
         var cache = new Dictionary<(int, int, int), StationCandidate>();
         StationCandidate Eval(int di, int li, int yi)
@@ -62,7 +62,7 @@ public static class StationOptimizer
             ct.ThrowIfCancellationRequested();
             if (cache.TryGetValue((di, li, yi), out var hit)) return hit;
             var c = Evaluate(model, planes, space, di * space.DistStepM, li * space.LateralStepM, yi * space.YawStepDeg,
-                seams, wallNormal, strokesMm);
+                seams, wallNormal, strokesMm, wallCode: wallCode);
             cache[(di, li, yi)] = c;
             return c;
         }
@@ -71,7 +71,7 @@ public static class StationOptimizer
         // 탐색 창 — 차체가 면에서 떨어지는 가장 가까운 (거리, 좌우)에서 시작해 거리 MaxDistM − MinDistM 폭·좌우 ±MaxLateralM.
         // 경사면 위쪽 영역은 중심이 벽 깊숙이 있고, 하부 경사면에 걸친 횡격벽 끝 영역은 옆으로 비켜야 차체가 빠진다.
         var baseline = Evaluate(model, planes, space, space.BaselineDistM, space.BaselineLateralM, space.BaselineYawDeg,
-            seams, wallNormal, strokesMm, surveyInfeasible: true);
+            seams, wallNormal, strokesMm, surveyInfeasible: true, wallCode: wallCode);
         if (FirstBodyFeasible(model, planes, space) is not { } start) return new StationOptimum(baseline, baseline, 1);
         var dMin = Idx(start.DistM, space.DistStepM);
         var dMax = dMin + Idx(space.MaxDistM - space.MinDistM, space.DistStepM);
@@ -158,7 +158,7 @@ public static class StationOptimizer
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, StationSearchSpace space,
         double distM, double lateralM, double yawDeg,
         IReadOnlyList<IReadOnlyList<double[]>> seams, double[] wallNormal, IReadOnlyList<double> strokesMm,
-        bool surveyInfeasible = false)
+        bool surveyInfeasible = false, string? wallCode = null)
     {
         var station = space.StationOf(distM, lateralM, yawDeg);
         var body = ReachSimulator.BodyAt(model, planes, station).ClearanceM;
@@ -170,7 +170,7 @@ public static class StationOptimizer
         var results = new ReachSeamSurvey[seams.Count];
         var stations = new[] { station };
         Parallel.For(0, seams.Count, i =>
-            results[i] = ReachSimulator.Survey(model, planes, stations, seams[i], wallNormal, strokesMm));
+            results[i] = ReachSimulator.Survey(model, planes, stations, seams[i], wallNormal, strokesMm, wallCode));
         var clear = results.Where(r => r.Verdict == ReachVerdict.Clear).ToList();
         return new StationCandidate(distM, lateralM, yawDeg, station, body, feasible,
             clear.Count, results.Count(r => r.Verdict == ReachVerdict.Collision), results.Count(r => r.Verdict == ReachVerdict.Unreachable),

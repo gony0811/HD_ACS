@@ -204,4 +204,172 @@ public class ReachSimulatorTests
 
         Assert.Equal(ReachVerdict.Unreachable, survey.Verdict);
     }
+
+    // ── 운영 ② 출발 자세·진입 경로(HD_AMR 평면 경유 접근) ─────────────────────────
+
+    /// <summary>MidWall 한 점의 ② 운영 선택 해 — 출발 자세 시험용.</summary>
+    private static double[] ApproachJoints(ReachRobotModel m, GeneratedWall sm, double u, double v, double floor, double strokeMm = 0) =>
+        ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(u, v), sm.Normal, strokeMm).Stages[0].Chosen!.JointsDeg;
+
+    /// <summary>MidWall 에서 간섭 없이 닿는 리프트(조사).</summary>
+    private static double ClearStroke(GeneratedWall sm, double v, double floor) =>
+        ReachSimulator.Survey(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(12, v) }, sm.Normal,
+            Enumerable.Range(0, 11).Select(i => i * 100.0).ToArray()).StrokeMm!.Value;
+
+    [Fact]
+    public void 출발_자세가_없는_면은_종전_판정이다()
+    {
+        var (sm, v, floor) = MidWall();
+        var r = ReachSimulator.Evaluate(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 0, wallCode: "SM");
+
+        Assert.Null(r.Entry);
+        Assert.Null(r.BranchChange);
+        Assert.True(r.Reachable);
+    }
+
+    [Fact]
+    public void 출발_자세가_접근_자세와_같으면_들어갈_점으로_바로_진입한다()
+    {
+        // 후퇴 0 — 들어갈 점 = 접근점. (후퇴 100 mm 면 이 정차에서는 들어갈 점에서 전완이 기둥에 닿는다.)
+        var (sm, v, floor) = MidWall();
+        var h = ClearStroke(sm, v, floor);
+        var start = ApproachJoints(ReachRobotModel.Default, sm, 12, v, floor, h);
+        var m = ReachRobotModel.Default with { StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = start }, PlanarRetreatMm = 0 };
+
+        var r = ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, h, wallCode: "SM");
+
+        Assert.Null(r.BranchChange);
+        Assert.NotNull(r.Entry);
+        Assert.True(r.Entry!.Ok, r.Entry.Summary);
+        Assert.True(r.Entry.InPlaneMm < 1);
+        Assert.Equal(1, r.Entry.Candidates);
+        Assert.True(r.Reachable, r.Blocker);
+        // 출발 TCP = ② 접근점(면에서 400 mm).
+        Assert.True(Vec3.Length(Vec3.Sub(r.Entry.StartTcp, r.Stages[0].TcpTarget)) < 1e-6);
+    }
+
+    [Fact]
+    public void 진입점_후보는_투영점에서_500mm_까지만_본다()
+    {
+        // 출발 TCP 가 ② 접근점에서 면을 따라 600 mm 옆 — HD_AMR 처럼 들어갈 점 직접(600 > 500)은 빼고
+        // 투영점 + 100 mm 간격 5곳 = 후보 6개(실기 2026-11-02 PU H03: 면 방향 584 mm → 후보 6개).
+        var (sm, v, floor) = MidWall();
+        var start = ApproachJoints(ReachRobotModel.Default, sm, 12.6, v, floor);
+        var m = ReachRobotModel.Default with { StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = start } };
+
+        var r = ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 0, wallCode: "SM");
+
+        Assert.NotNull(r.Entry);
+        Assert.Equal(600, r.Entry!.InPlaneMm, 0);
+        Assert.Equal(6, r.Entry.Candidates);
+        if (r.Entry.Entry is { } entry)
+            Assert.True(Vec3.Length(Vec3.Sub(entry, r.Entry.Plunge)) > 0.05, "들어갈 점 직접은 후보가 아니다");
+    }
+
+    [Fact]
+    public void 진입_경로가_없으면_자세가_닿아도_도달불가다()
+    {
+        // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·120° 안의 진입점이 없다.
+        var (sm, v, floor) = MidWall();
+        var away = ApproachJoints(ReachRobotModel.Default, sm, 12, v, floor).ToArray();
+        away[0] += away[0] > 0 ? -170 : 170;
+        var m = ReachRobotModel.Default with { StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = away } };
+
+        var r = ReachSimulator.Evaluate(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, 0, wallCode: "SM");
+
+        Assert.False(r.Reachable);
+        Assert.NotNull(r.Blocker);
+        Assert.True(r.BranchChange is not null || r.Entry is { Ok: false });
+
+        var survey = ReachSimulator.Survey(m, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+            new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(12, v) }, sm.Normal, new[] { 0.0 }, "SM");
+        Assert.Equal(ReachVerdict.Unreachable, survey.Verdict);
+        Assert.NotNull(survey.Blocker);
+    }
+
+    [Fact]
+    public void 가지_전환_사유는_팔꿈치_손목_반전과_큰_관절_이동이다()
+    {
+        var m = ReachRobotModel.Default;
+        var start = new[] { 0.0, -90, 100, -90, 90, 0 };
+
+        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 30.0, -80, 90, -70, 80, 170 }));   // J6 는 보지 않는다
+        Assert.Contains("팔꿈치 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, -100, -90, 90, 0 }));
+        Assert.Contains("손목 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, -90, -90, 0 }));
+        Assert.Contains("J4 130°", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 40, 90, 0 }));
+    }
+
+    [Fact]
+    public void 장착_yaw는_J1_이름표만_바꾸고_간섭은_그대로다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var a = ReachSimulator.Evaluate(ReachRobotModel.Default, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var b = ReachSimulator.Evaluate(ReachRobotModel.Default with { MountYawDeg = 180 }, planes, st, sm.To3D(12, v), sm.Normal, 0);
+
+        foreach (var (sa, sb) in a.Stages.Zip(b.Stages))
+            foreach (var x in sa.Solutions)
+            {
+                var y = sb.Solutions.Single(s => Enumerable.Range(1, 4).All(k => Math.Abs(s.JointsDeg[k] - x.JointsDeg[k]) < 1e-6));
+                var dJ1 = ((y.JointsDeg[0] - x.JointsDeg[0]) % 360 + 360) % 360;
+                Assert.Equal(180, dJ1, 6);
+                Assert.Equal(x.MinClearanceM, y.MinClearanceM, 9);
+            }
+    }
+
+    [Fact]
+    public void 자기_간섭_판정은_장착_yaw를_따른다()
+    {
+        // BASE 가 180° 돌면 같은 팔 자세는 J1 + 180° 다 — 차체·기둥·신호탑까지 여유가 같아야 한다.
+        var j = new[] { 20.0, -150, 120, -60, -90, 0 };
+        var flipped = new[] { -160.0, -150, 120, -60, -90, 0 };
+        var m0 = ReachSimulator.SelfClearance(ReachRobotModel.Default, 1635, j);
+        var m180 = ReachSimulator.SelfClearance(ReachRobotModel.Default with { MountYawDeg = 180 }, 1635, flipped);
+        Assert.Equal(m0.ClearanceMm, m180.ClearanceMm, 6);
+    }
+    [Fact]
+    public void 실기_L4_R02C09_PU_H03_진입_경로_없음을_재현한다()
+    {
+        // 2026-11-02 15:50 현장 — AMR: "접근점은 현재 TCP 정면에서 면을 따라 584mm … 후보 6개 모두 거부:
+        // 후퇴 평면 [-1120, -154, 80] / [-1188, -144, 11] / [-1256, -134, -58] / [-1324, -123, -127]: 자기 간섭".
+        // 실기 값: 홈 위치_2 출발, T_A_B rz 180, 공구 #1 TCP 365(초점 자세는 10 mm 띄워 카메라 초점 375 를 용접선에), ② 이격 200, 실제 정차 (−3.037, 5.582, 94.1°), CT1 멤브레인 PU·L4 데크 10.1175.
+        var home2 = new[] { 0.158, 59.456, -140.907, 80.848, 90.048, -179.696 };
+        var m = ReachRobotModel.Default with
+        {
+            MountYawDeg = 180, ToolZMm = 365, StageStandoffsMm = new[] { 200.0, 300, 10 },
+            StartJointsByWall = new Dictionary<string, double[]> { ["PU"] = home2 },
+        };
+        var pu = new WallPose(new[] { -15.48, 8.64, 10.304 }, new[] { 1.0, 0, 0 }, new[] { 0, -Math.Sqrt(0.5), Math.Sqrt(0.5) });
+        var n = new[] { 0, -Math.Sqrt(0.5), -Math.Sqrt(0.5) };
+        const double floor = 10.1175;
+        var planes = ReachSimulator.PlanesForLevel(new[]
+        {
+            new ReachPlane("PU", pu.Origin, n),
+            new ReachPlane("T", new[] { -15.48, -5.984, 12.96 }, new[] { 0.0, 0, -1 }),
+        }, floor, 4);
+
+        var r = ReachSimulator.Evaluate(m, planes, new ReachStation(-3.037, 5.582, 1.6429, floor),
+            pu.LocalToDrawing(12.24, 1.8781), n, 0, wallCode: "PU");
+
+        Assert.False(r.Reachable);
+        Assert.NotNull(r.Entry);
+        Assert.False(r.Entry!.Ok);
+        Assert.Equal(584, r.Entry.InPlaneMm, 5.0);
+        Assert.Equal(6, r.Entry.Candidates);
+        Assert.All(r.Entry.Rejects, x => Assert.Contains("자기 간섭", x));
+        // 후보 위치(BASE mm)가 AMR 보고와 5 mm 안.
+        var amr = new[] { new[] { -1120.0, -154, 80 }, new[] { -1188.0, -144, 11 }, new[] { -1256.0, -134, -58 }, new[] { -1324.0, -123, -127 } };
+        for (var i = 0; i < amr.Length; i++)
+        {
+            var got = System.Text.RegularExpressions.Regex.Match(r.Entry.Rejects[i], @"\[(-?\d+), (-?\d+), (-?\d+)\]").Groups;
+            for (var k = 0; k < 3; k++) Assert.InRange(double.Parse(got[k + 1].Value) - amr[i][k], -6, 6);
+        }
+    }
 }

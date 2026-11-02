@@ -21,12 +21,43 @@ public sealed class ReachSimService
 
     private readonly AcsDbContext _db;
     private readonly InspectionDispatcher _dispatcher;
-    private ReachRobotModel _model = ReachRobotModel.Default;
+    private readonly ReachRobotModel _baseModel;
+    private ReachRobotModel _model;
 
-    public ReachSimService(AcsDbContext db, InspectionDispatcher dispatcher)
+    /// <param name="config">
+    /// HD_AMR 실기 값과 맞추는 설정 — <c>Acs:Reach:MountYawDeg</c>(T_A_B rz) · <c>ToolZMm</c>(공구 #1 z) ·
+    /// <c>ApproachStandoffMm</c>(inspection.approachStandoffMm) · <c>FocusStandoffMm</c>(초점 자세 TCP 이격 — 공구 #1 365 + 10 = 카메라 초점 375) · <c>PlanarRetreatMm</c>(inspection.planarApproachRetreatMm) ·
+    /// <c>StartJoints:{면 코드}</c>(운영 ② 출발 관절각 J1~J6 — 상부 면 T·SU·PU = 홈 위치_2, 그 외 = 작업 준비 위치).
+    /// 없으면 STEP 장착(0°)·모델 기본값·출발 자세 없음(종전 판정).
+    /// </param>
+    public ReachSimService(AcsDbContext db, InspectionDispatcher dispatcher, IConfiguration? config = null)
     {
         _db = db;
         _dispatcher = dispatcher;
+        _baseModel = ModelFrom(config);
+        _model = _baseModel;
+    }
+
+    /// <summary>설정에서 장착 yaw·면별 출발 관절각을 읽어 로봇 모델을 만든다. 6개가 아닌 값은 버린다.</summary>
+    public static ReachRobotModel ModelFrom(IConfiguration? config)
+    {
+        if (config is null) return ReachRobotModel.Default;
+        var starts = config.GetSection("Acs:Reach:StartJoints").GetChildren()
+            .Select(s => (Code: s.Key, J: s.Get<double[]>()))
+            .Where(s => s.J is { Length: 6 })
+            .ToDictionary(s => s.Code, s => s.J!, StringComparer.OrdinalIgnoreCase);
+        var d = ReachRobotModel.Default;
+        var stages = d.StageStandoffsMm.ToArray();
+        stages[0] = config.GetValue("Acs:Reach:ApproachStandoffMm", stages[0]);
+        stages[^1] = config.GetValue("Acs:Reach:FocusStandoffMm", stages[^1]);   // 공구 TCP 가 초점보다 짧으면 그 차만큼 띄운다
+        return d with
+        {
+            MountYawDeg = config.GetValue("Acs:Reach:MountYawDeg", 0.0),
+            ToolZMm = config.GetValue("Acs:Reach:ToolZMm", d.ToolZMm),
+            StageStandoffsMm = stages,
+            PlanarRetreatMm = config.GetValue("Acs:Reach:PlanarRetreatMm", d.PlanarRetreatMm),
+            StartJointsByWall = starts,
+        };
     }
 
     private IReadOnlyList<double> Strokes => Enumerable.Range(0, (int)(_model.StrokeMaxMm / StrokeStepMm) + 1)
@@ -38,7 +69,7 @@ public sealed class ReachSimService
     public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = ReachRobotModel.Default with { BranchRule = branch };
+        _model = _baseModel with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -54,10 +85,10 @@ public sealed class ReachSimService
             var seams = a.Tasks.OrderBy(t => t.Seq).Select(t =>
             {
                 var pts = SeamPoints(setup.Pose, t);
-                var s = ReachSimulator.Survey(_model, setup.Planes, setup.Stations, pts, setup.Normal, Strokes);
+                var s = ReachSimulator.Survey(_model, setup.Planes, setup.Stations, pts, setup.Normal, Strokes, a.WallCode);
                 return new ReachSurveySeam(t.TaskId, t.Seq,
                     Math.Round(pts.Min(p => p[2]) - setup.FloorZ, 3), Math.Round(pts.Max(p => p[2]) - setup.FloorZ, 3),
-                    s.Verdict.ToString(), s.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex);
+                    s.Verdict.ToString(), s.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker);
             }).ToList();
             list.Add(new ReachSurveyArea(a.AreaId, a.Name, a.WallCode, a.Level, setup.Stations[0].X, setup.Stations[0].Y, seams));
         }
@@ -72,7 +103,7 @@ public sealed class ReachSimService
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = ReachRobotModel.Default with { BranchRule = branch };
+        _model = _baseModel with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         var task = area?.Tasks.FirstOrDefault(t => t.TaskId == taskId);
         if (area is null || task is null) return null;
@@ -83,11 +114,11 @@ public sealed class ReachSimService
         var pts = SeamPoints(setup.Pose, task);
         yawIndex = Math.Clamp(yawIndex, 0, setup.Stations.Count - 1);
         var surveyed = strokeMm is null
-            ? ReachSimulator.Survey(_model, setup.Planes, new[] { setup.Stations[yawIndex] }, pts, setup.Normal, Strokes)
+            ? ReachSimulator.Survey(_model, setup.Planes, new[] { setup.Stations[yawIndex] }, pts, setup.Normal, Strokes, area.WallCode)
             : null;
         var h = Math.Clamp(strokeMm ?? surveyed?.StrokeMm ?? 0, 0, _model.StrokeMaxMm);
         var r = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[Math.Clamp(point, 0, 2)],
-            setup.Normal, h, offsetForwardMm, offsetLeftMm);
+            setup.Normal, h, offsetForwardMm, offsetLeftMm, wallCode: area.WallCode);
 
         var seams = area.Tasks.OrderBy(t => t.Seq).Select(t =>
         {
@@ -104,7 +135,9 @@ public sealed class ReachSimService
                     x.MinClearanceM, x.Focus,
                     x.Parts.Select(p => new ReachPartDto(p.Name, p.A, p.B, p.RadiusM, p.ClearanceM, p.NearestPlane)).ToList(),
                     x.Joints.Select(j => new ReachJointDto(j.Name, j.Position)).ToList())).ToList())).ToList(),
-            _model.WarnClearanceM);
+            _model.WarnClearanceM,
+            r.Entry is { } e ? new ReachEntryDto(e.Ok, e.Summary, e.InPlaneMm, e.Candidates, e.StartTcp, e.Entry, e.Plunge, e.Rejects) : null,
+            r.BranchChange, ReachSimulator.StartJoints(_model, area.WallCode), _model.MountYawDeg);
     }
 
     /// <summary>
@@ -114,7 +147,7 @@ public sealed class ReachSimService
     public async Task<IReadOnlyList<ReachStationOptimum>?> OptimizeAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = ReachRobotModel.Default with { BranchRule = branch };
+        _model = _baseModel with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -131,7 +164,7 @@ public sealed class ReachSimService
             if (SearchSpace(a, wall, setup) is not { } space) continue;
             var seams = a.Tasks.OrderBy(t => t.Seq).Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct);
+            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode);
             var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
             var perSeam = tasks.Select((t, i) => new ReachOptimumSeam(t.TaskId, t.Seq,
                 i < r.Baseline.Seams.Count ? r.Baseline.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
@@ -216,8 +249,9 @@ public sealed record ReachSurveyArea(Guid AreaId, string Name, string WallCode, 
     IReadOnlyList<ReachSurveySeam> Seams);
 
 /// <summary>조사 결과 — 용접선 하나. Z 는 층 바닥 위 높이[m], Verdict = Clear | Collision | Unreachable.</summary>
+/// Blocker = Unreachable 사유(출발 자세 가지 전환·진입 경로 없음 등, 없으면 null).
 public sealed record ReachSurveySeam(Guid TaskId, int Seq, double ZMin, double ZMax, string Verdict,
-    double? StrokeMm, double? MinClearanceM, int YawIndex);
+    double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null);
 
 /// <summary>정차점 최적화 결과 — 영역 하나. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimum(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
@@ -245,4 +279,9 @@ public sealed record ReachDetail(
     double StationX, double StationY, double StationYaw, int YawCount, int YawIndex,
     double StrokeMm, double OffsetForwardMm, double OffsetLeftMm,
     Guid TaskId, int Point, double[] Target, IReadOnlyList<ReachSeamLine> Seams,
-    ReachBodyDto Body, IReadOnlyList<ReachStageDto> Stages, double WarnClearanceM);
+    ReachBodyDto Body, IReadOnlyList<ReachStageDto> Stages, double WarnClearanceM,
+    ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0);
+
+/// <summary>운영 ② 진입 경로(후퇴 평면 경유) 판정 — 출발 자세가 있는 면만. 좌표 도면 m.</summary>
+public sealed record ReachEntryDto(bool Ok, string Summary, double InPlaneMm, int Candidates,
+    double[] StartTcp, double[]? Entry, double[] Plunge, IReadOnlyList<string> Rejects);

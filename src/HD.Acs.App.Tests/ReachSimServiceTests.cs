@@ -22,7 +22,7 @@ public class ReachSimServiceTests
     private static readonly Guid SmArea = Guid.Parse("5e000000-0000-4000-8000-000000000003");
     private static readonly Guid SmTask = Guid.Parse("5e000000-0000-4000-8000-000000000004");
 
-    private static async Task<ReachSimService> SeedAsync()
+    private static async Task<ReachSimService> SeedAsync(Dictionary<string, double[]>? startJoints = null)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var geom = new TankGeometry(31.785, 10.1497, Math.PI / 4, 3.9776, 6.9097, Math.PI / 4, 2.8976, new[] { 0.0, 3.63, 6.63, 10.53 });
@@ -58,7 +58,11 @@ public class ReachSimServiceTests
         // 조회는 정차 기본 이격만 쓴다 — 허브(SignalR)는 닿지 않는다.
         var dispatcher = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
             null!, new ConfigurationBuilder().Build(), NullLogger<InspectionDispatcher>.Instance);
-        return new ReachSimService(db, dispatcher);
+        var sim = new ReachSimService(db, dispatcher);
+        if (startJoints is null) return sim;
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(startJoints.SelectMany(kv =>
+            kv.Value.Select((j, i) => new KeyValuePair<string, string?>($"Acs:Reach:StartJoints:{kv.Key}:{i}", j.ToString(System.Globalization.CultureInfo.InvariantCulture))))).Build();
+        return new ReachSimService(db, dispatcher, cfg);
     }
 
     [Fact]
@@ -136,5 +140,39 @@ public class ReachSimServiceTests
 
         Assert.Single((await sim.OptimizeAsync("CT1", 1, "SL", null, default))!);
         Assert.Null(await sim.OptimizeAsync("NOPE", null, null, null, default));
+    }
+    [Fact]
+    public void 설정에서_장착_yaw와_면별_출발_관절각을_읽는다()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Acs:Reach:MountYawDeg"] = "180", ["Acs:Reach:ToolZMm"] = "365", ["Acs:Reach:ApproachStandoffMm"] = "200",
+            ["Acs:Reach:StartJoints:PU:0"] = "1", ["Acs:Reach:StartJoints:PU:1"] = "2", ["Acs:Reach:StartJoints:PU:2"] = "-3",
+            ["Acs:Reach:StartJoints:PU:3"] = "4", ["Acs:Reach:StartJoints:PU:4"] = "5", ["Acs:Reach:StartJoints:PU:5"] = "6",
+            ["Acs:Reach:StartJoints:T:0"] = "1",   // 6개가 아니면 버린다
+        }).Build();
+
+        var m = ReachSimService.ModelFrom(config);
+
+        Assert.Equal(180, m.MountYawDeg);
+        Assert.Equal(365, m.ToolZMm);
+        Assert.Equal(new[] { 200.0, 300, 0 }, m.StageStandoffsMm);
+        Assert.Equal(new[] { 1.0, 2, -3, 4, 5, 6 }, ReachSimulator.StartJoints(m, "PU"));
+        Assert.Equal(new[] { 1.0, 2, -3, 4, 5, 6 }, ReachSimulator.StartJoints(m, "pu"));
+        Assert.Null(ReachSimulator.StartJoints(m, "T"));
+        Assert.Equal(0, ReachSimService.ModelFrom(null).MountYawDeg);
+    }
+
+    [Fact]
+    public async Task 출발_자세가_있는_면은_상세에_진입_경로를_싣는다()
+    {
+        var sim = await SeedAsync(new Dictionary<string, double[]> { ["SM"] = new[] { 0.0, -90, 100, -90, 90, 0 } });
+        var d = (await sim.DetailAsync(SmArea, SmTask, 1, 0, 0, 0, 0, default))!;
+
+        Assert.NotNull(d.Entry);
+        Assert.NotNull(d.StartJointsDeg);
+        Assert.False(string.IsNullOrEmpty(d.Entry!.Summary));
+        var other = (await sim.DetailAsync(SlArea, SlTask, 1, 0, 0, 0, 0, default))!;
+        Assert.Null(other.Entry);   // SL 은 출발 자세 없음 — 종전 판정
     }
 }

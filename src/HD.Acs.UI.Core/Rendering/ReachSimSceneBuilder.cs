@@ -29,6 +29,7 @@ public static class ReachSimSceneBuilder
     public static readonly Rgba Seam = Rgba.FromRgb(0xB0, 0x8A, 0x2A);
     public static readonly Rgba SeamActive = Rgba.FromRgb(0xF0, 0xB4, 0x00);
     public static readonly Rgba LabelText = Rgba.FromRgb(0xEC, 0xF0, 0xF1);
+    public static readonly Rgba EntryPath = Rgba.FromRgb(0x6F, 0xC2, 0x76);
 
     /// <summary>단면 자르기 — 차체 좌측으로 이 거리[m]보다 먼 탱크 면은 그리지 않는다(카메라가 그쪽에서 본다).</summary>
     public const double ClipOffsetM = 0.9;
@@ -81,6 +82,27 @@ public static class ReachSimSceneBuilder
         AddBody(scene, d);
         foreach (var c in d.Body.Corners) scene.ExtentPoints.Add(Pt3.FromArray(c));
         scene.ExtentPoints.Add(target);
+
+        // 운영 ② 진입 경로 — 출발 TCP → 진입점 → 들어갈 점 → ② 접근점. 경로가 없으면 빨간색으로 출발 TCP → 들어갈 점만 가는 선으로.
+        if (d.Entry is { } e && input.StageIndex == 0)
+        {
+            var start = Pt3.FromArray(e.StartTcp);
+            var plunge = Pt3.FromArray(e.Plunge);
+            var approach = d.Stages.Count > 0 ? Pt3.FromArray(d.Stages[0].TcpTarget) : plunge;
+            var color = e.Ok ? EntryPath : Hit;
+            scene.Markers.Add(new Marker3(start, color, RadiusPx: 4));
+            scene.Labels.Add(new Label3(start + new Pt3(0, 0, 0.09), "출발", color, 11));
+            if (e.Entry is { } en)
+            {
+                var entry = Pt3.FromArray(en);
+                scene.Segments.Add(new Segment3(start, entry, color, 1.5));
+                scene.Segments.Add(new Segment3(entry, plunge, color, 2.5));
+                scene.Markers.Add(new Marker3(entry, color, RadiusPx: 3.5));
+            }
+            else scene.Segments.Add(new Segment3(start, plunge, color, 1));
+            scene.Segments.Add(new Segment3(plunge, approach, color, 2.5));
+            scene.ExtentPoints.Add(start);
+        }
 
         if (SolutionOf(d, input.StageIndex, input.SolutionIndex) is not { } sol) return scene;
         var warn = d.WarnClearanceM;
