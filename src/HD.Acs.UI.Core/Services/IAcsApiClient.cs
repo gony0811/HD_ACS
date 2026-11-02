@@ -60,8 +60,9 @@ public interface IAcsApiClient
         Task.FromResult<PlannedStationsDto?>(null);
     // 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세로 용접선에 닿는지·탱크 면과 부딪히는지(조회 전용). 선창·영역 없음=null
     /// <remarks>branch = "clearance" 면 IK 가지를 간섭 여유 최대로(대안 검토), null 이면 운영 규칙(자세 여유 최대).</remarks>
+    /// <summary>리치 조사 — areaLift 면 영역마다 리프트를 한 높이로 고정(고정 높이·용접선별 최적과 비교 포함).</summary>
     Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
-        CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
+        CancellationToken ct = default, string? branch = null, bool areaLift = false) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
     Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default, string? branch = null) =>
         Task.FromResult<ReachDetailDto?>(null);

@@ -25,6 +25,8 @@
                             <Button Content="다시 조사" Margin="8,0,0,0" Command="{Binding SurveyCommand}" />
                         </StackPanel>
                         <CheckBox Content="IK 가지: 간섭 여유 최대 (끄면 운영 규칙 = 자세 여유 최대)" IsChecked="{Binding ClearanceBranch}" FontSize="11.5" />
+                        <CheckBox Content="영역마다 리프트 한 높이로 고정 (간섭 없이 닿는 용접선이 가장 많은 높이)" IsChecked="{Binding AreaLift}" FontSize="11.5"
+                                  ToolTip.Tip="영역 안에서 리프트를 바꾸지 않는다고 보고 조사합니다. 영역 목록에 고정 높이와, 용접선별 최적보다 줄어든 수를 표시합니다." />
                         <TextBlock Text="{Binding SurveySummary}" FontSize="11.5" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="영역" Classes="lbl" />

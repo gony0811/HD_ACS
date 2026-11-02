@@ -92,6 +92,24 @@ public class ReachSimServiceTests
     }
 
     [Fact]
+    public async Task 리프트_영역_고정_조사는_고정_높이와_용접선별_최적을_싣는다()
+    {
+        var sim = await SeedAsync();
+        var plain = Assert.Single((await sim.SurveyAsync("CT1", 2, "SM", default))!);
+        var fixedArea = Assert.Single((await sim.SurveyAsync("CT1", 2, "SM", default, areaLift: true))!);
+
+        Assert.Null(plain.FixedStrokeMm);
+        Assert.NotNull(fixedArea.FixedStrokeMm);
+        // 용접선별 최적은 종전 조사와 같다.
+        Assert.Equal(plain.Seams.Select(s => s.Verdict), fixedArea.Seams.Select(s => s.BestVerdict));
+        Assert.Equal(plain.Seams.Select(s => s.StrokeMm), fixedArea.Seams.Select(s => s.BestStrokeMm));
+        Assert.Equal(plain.Seams.Count(s => s.Verdict == "Clear"), fixedArea.BestClear);
+        Assert.Equal(plain.Seams.Count(s => s.Verdict != "Unreachable"), fixedArea.BestReachable);
+        // 닿는 용접선은 모두 고정 높이 하나로 판정했다.
+        Assert.All(fixedArea.Seams.Where(s => s.Verdict != "Unreachable"), s => Assert.Equal(fixedArea.FixedStrokeMm, s.StrokeMm));
+    }
+
+    [Fact]
     public async Task 상세는_세_자세와_차체_간섭을_돌려주고_JSON_으로_나간다()
     {
         var sim = await SeedAsync();

@@ -259,9 +259,32 @@ public class ReachSimTests
         await Task.Delay(50);
 
         var call = ((RecordingApi)(object)api).Calls.Last(c => c.Method == nameof(IAcsApiClient.GetReachSurveyAsync));
-        Assert.Equal("clearance", call.Args[^1]);
+        Assert.Equal("clearance", call.Args[4]);   // tankId, level, wallCode, ct, branch, areaLift
         Assert.Empty(vm.Optima);   // 규칙이 바뀌면 최적화 결과는 버린다
     }
+    [Fact]
+    public async Task 리프트_영역_고정을_켜면_조사에_넘기고_요약에_손실을_보인다()
+    {
+        var api = DispatchProxy.Create<IAcsApiClient, RecordingApi>();
+        var vm = new ReachSimViewModel(api);
+
+        vm.AreaLift = true;
+        await Task.Delay(50);
+        var call = ((RecordingApi)(object)api).Calls.Last(c => c.Method == nameof(IAcsApiClient.GetReachSurveyAsync));
+        Assert.Equal(true, call.Args[5]);
+
+        ReachSurveySeamDto Seam(int seq, string v, string best, double? bestH) =>
+            new(Guid.NewGuid(), seq, 1, 1.2, v, v == "Unreachable" ? null : 500, 0.02, 0, null, best, bestH);
+        var area = new ReachSurveyAreaDto(Guid.NewGuid(), "L4-R03C01", "PU", 4, 0, 0, new List<ReachSurveySeamDto>
+        {
+            Seam(1, "Clear", "Clear", 500), Seam(2, "Unreachable", "Clear", 0), Seam(3, "Collision", "Collision", 500),
+        }, FixedStrokeMm: 500, BestClear: 2, BestReachable: 3);
+
+        Assert.Equal("\n리프트 영역 고정 — 용접선별 최적 대비 간섭 없이 도달 2 → 1 · 도달 3 → 2 (도달 불가 +1) · 손실 영역 1/1",
+            ReachSimViewModel.LiftSummary(new[] { area }));
+        Assert.Equal("", ReachSimViewModel.LiftSummary(new[] { area with { FixedStrokeMm = null } }));
+    }
+
     private static AreaDto AreaOn(int level, string wall) =>
         new(Guid.NewGuid(), "CT1", wall, level, $"L{level}-{wall}", 0, 0, 1, 1, null, null, null, 0, 1);
 

@@ -474,4 +474,62 @@ public class ReachSimulatorTests
             }
         Assert.True(verdicts.Count >= 2, $"판정이 한 가지뿐이라 비교가 약하다: {string.Join(",", verdicts)}");
     }
+
+    private static ReachSeamSurvey V(ReachVerdict v, double h, double? cl = null) =>
+        new(v, v == ReachVerdict.Unreachable ? null : h, v == ReachVerdict.Unreachable ? null : cl ?? 0.01, 0,
+            v == ReachVerdict.Unreachable ? "관절" : null);
+
+    [Fact]
+    public void 영역_리프트는_간섭_없음_최대_다음_도달_최대_다음_낮은_높이로_고른다()
+    {
+        var strokes = new[] { 0.0, 100, 200 };
+        var table = new[]
+        {
+            new[] { V(ReachVerdict.Clear, 0, 0.02), V(ReachVerdict.Clear, 100, 0.05), V(ReachVerdict.Collision, 200) },
+            new[] { V(ReachVerdict.Unreachable, 0), V(ReachVerdict.Collision, 100, -0.01), V(ReachVerdict.Clear, 200, 0.03) },
+            new[] { V(ReachVerdict.Clear, 0), V(ReachVerdict.Clear, 100), V(ReachVerdict.Unreachable, 200) },
+        };
+
+        var r = AreaLift.Choose(strokes, table);
+
+        // 0: 간섭 없음 2·도달 2 / 100: 간섭 없음 2·도달 3 / 200: 간섭 없음 1 → 100.
+        Assert.Equal(100, r.StrokeMm);
+        Assert.Equal(new[] { ReachVerdict.Clear, ReachVerdict.Collision, ReachVerdict.Clear }, r.Fixed.Select(s => s.Verdict));
+        Assert.Equal((2, 3, 3, 3), (r.FixedClear, r.FixedReachable, r.BestClear, r.BestReachable));
+        // 용접선별 최적 — 간섭 없음 중 여유가 큰 높이.
+        Assert.Equal(new double?[] { 100, 200, 0 }, r.Best.Select(s => s.StrokeMm));
+
+        // 점수가 같으면 낮은 높이.
+        var tie = AreaLift.Choose(strokes, new[] { new[] { V(ReachVerdict.Clear, 0), V(ReachVerdict.Clear, 100), V(ReachVerdict.Clear, 200) } });
+        Assert.Equal(0, tie.StrokeMm);
+    }
+
+    [Fact]
+    public void 영역_리프트_조사의_용접선별_최적은_전_높이_조사와_같다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = new[] { StationFor(sm, 12, v, 1.2, 2) };
+        var strokes = new[] { 0.0, 300, 600, 900 };
+        var seams = new IReadOnlyList<double[]>[]
+        {
+            new[] { sm.To3D(11.8, v), sm.To3D(12, v), sm.To3D(12.2, v) },
+            new[] { sm.To3D(12, v - 1.2), sm.To3D(12, v - 1.1), sm.To3D(12, v - 1.0) },
+            new[] { sm.To3D(12, v + 1.0), sm.To3D(12, v + 1.1), sm.To3D(12, v + 1.2) },
+        };
+
+        var r = AreaLift.Evaluate(ReachRobotModel.Default, planes, st, seams, sm.Normal, strokes, "SM");
+
+        for (var i = 0; i < seams.Length; i++)
+        {
+            var all = ReachSimulator.Survey(ReachRobotModel.Default, planes, st, seams[i], sm.Normal, strokes, "SM");
+            Assert.Equal(all.Verdict, r.Best[i].Verdict);
+            Assert.Equal(all.StrokeMm, r.Best[i].StrokeMm);
+            Assert.Equal(all.MinClearanceM, r.Best[i].MinClearanceM);
+            // 고정 판정은 고른 높이 하나로 푼 조사와 같다.
+            var one = ReachSimulator.Survey(ReachRobotModel.Default, planes, st, seams[i], sm.Normal, new[] { r.StrokeMm }, "SM");
+            Assert.Equal(one.Verdict, r.Fixed[i].Verdict);
+        }
+        Assert.True(r.FixedClear <= r.BestClear && r.FixedReachable <= r.BestReachable);
+    }
 }

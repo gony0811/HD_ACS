@@ -77,6 +77,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     [ObservableProperty] private bool _clipSection = true;
     /// <summary>IK 가지를 간섭 여유 최대로 고른다(대안 검토). 끄면 운영 규칙(HD_AMR — 자세 여유 최대).</summary>
     [ObservableProperty] private bool _clearanceBranch;
+    /// <summary>영역마다 텔레스코픽 리프트를 한 높이로 고정해 조사한다(영역 안에서 리프트를 바꾸지 않는 운영 가정).</summary>
+    [ObservableProperty] private bool _areaLift;
     /// <summary>그릴 IK 해 순번 — null = 운영 선택.</summary>
     [ObservableProperty] private int? _solutionIndex;
     [ObservableProperty] private ReachSolutionRow? _selectedSolution;
@@ -185,6 +187,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (!_suppress) _ = SurveyAsync();
     }
     partial void OnClearanceBranchChanged(bool value) { ClearOptima(); _ = SurveyAsync(); }
+    partial void OnAreaLiftChanged(bool value) => _ = SurveyAsync();
 
     private string? Branch => ClearanceBranch ? "clearance" : null;
 
@@ -214,10 +217,10 @@ public sealed partial class ReachSimViewModel : ObservableObject
     {
         var version = ++_surveyVersion;
         IsBusy = true;
-        StatusMessage = $"L{SelectedLevel} {SelectedWall} 조사 중… (리프트 0~1000 mm × 세 자세)";
+        StatusMessage = $"L{SelectedLevel} {SelectedWall} 조사 중… (리프트 0~1000 mm × 세 자세{(AreaLift ? " · 영역마다 리프트 고정" : "")})";
         try
         {
-            var areas = await _api.GetReachSurveyAsync(TankId, SelectedLevel, SelectedWall, branch: Branch);
+            var areas = await _api.GetReachSurveyAsync(TankId, SelectedLevel, SelectedWall, branch: Branch, areaLift: AreaLift);
             if (version != _surveyVersion) return;   // 그 사이 층·면이 또 바뀜
             Areas.Clear();
             Seams.Clear();
@@ -226,7 +229,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
             var all = areas.SelectMany(a => a.Seams).ToList();
             int clear = all.Count(s => s.Verdict == "Clear"), hit = all.Count(s => s.Verdict == "Collision");
-            SurveySummary = $"용접선 {all.Count} · 간섭 없이 도달 {clear} · 닿지만 간섭 {hit} · 도달 불가 {all.Count - clear - hit}";
+            SurveySummary = $"용접선 {all.Count} · 간섭 없이 도달 {clear} · 닿지만 간섭 {hit} · 도달 불가 {all.Count - clear - hit}"
+                            + LiftSummary(areas);
             StatusMessage = areas.Count == 0 ? $"L{SelectedLevel} {SelectedWall} 에 영역이 없습니다." : $"영역 {areas.Count}개 조사 완료";
             // 간섭이 있는 첫 영역부터 보여 준다(없으면 첫 영역).
             SelectedArea = Areas.FirstOrDefault(a => a.Area.Seams.Any(s => s.Verdict == "Collision")) ?? Areas.FirstOrDefault();
@@ -606,7 +610,24 @@ public sealed partial class ReachSimViewModel : ObservableObject
     {
         int n = a.Seams.Count, hit = a.Seams.Count(s => s.Verdict == "Collision"), un = a.Seams.Count(s => s.Verdict == "Unreachable");
         var tag = hit > 0 ? $"간섭 {hit}" : un == n && n > 0 ? "도달 불가" : un > 0 ? $"불가 {un}" : "간섭 없음";
-        return $"{a.Name} · {tag} / {n}";
+        if (a.FixedStrokeMm is not { } h) return $"{a.Name} · {tag} / {n}";
+        int lostReach = (a.BestReachable ?? 0) - (n - un), lostClear = (a.BestClear ?? 0) - a.Seams.Count(s => s.Verdict == "Clear");
+        var loss = lostReach > 0 ? $" · 고정으로 도달 불가 +{lostReach}" : lostClear > 0 ? $" · 고정으로 간섭 없음 −{lostClear}" : "";
+        return $"{a.Name} · 리프트 {h:0} · {tag} / {n}{loss}";
+    }
+
+    /// <summary>리프트 고정 조사의 비교 문구 — 용접선별 최적 대비 간섭 없음·도달 수(고정 조사가 아니면 빈 문자열).</summary>
+    public static string LiftSummary(IReadOnlyList<ReachSurveyAreaDto> areas)
+    {
+        var fixedAreas = areas.Where(a => a.FixedStrokeMm is not null).ToList();
+        if (fixedAreas.Count == 0) return "";
+        var seams = fixedAreas.SelectMany(a => a.Seams).ToList();
+        int clear = seams.Count(s => s.Verdict == "Clear"), reach = seams.Count(s => s.Verdict != "Unreachable");
+        int bestClear = fixedAreas.Sum(a => a.BestClear ?? 0), bestReach = fixedAreas.Sum(a => a.BestReachable ?? 0);
+        var lossAreas = fixedAreas.Count(a => (a.BestClear ?? 0) > a.Seams.Count(s => s.Verdict == "Clear")
+                                              || (a.BestReachable ?? 0) > a.Seams.Count(s => s.Verdict != "Unreachable"));
+        return $"\n리프트 영역 고정 — 용접선별 최적 대비 간섭 없이 도달 {bestClear} → {clear} · 도달 {bestReach} → {reach}" +
+               $" (도달 불가 +{bestReach - reach}) · 손실 영역 {lossAreas}/{fixedAreas.Count}";
     }
 
     private static string SeamLabel(ReachSurveySeamDto s)
@@ -618,6 +639,9 @@ public sealed partial class ReachSimViewModel : ObservableObject
             _ => s.Blocker is { } b && (b.StartsWith("출발 자세", StringComparison.Ordinal) || b.StartsWith("진입 경로", StringComparison.Ordinal))
                 ? "도달 불가 (운영 진입)" : "도달 불가",
         };
-        return $"{s.Seq}. 높이 {s.ZMin:0.00}–{s.ZMax:0.00} m · {tag}";
+        var best = s.BestVerdict is { } bv && bv != s.Verdict
+            ? $" (용접선별 최적이면 {(bv == "Clear" ? "간섭 없음" : bv == "Collision" ? "간섭" : "도달 불가")}{(s.BestStrokeMm is { } bh ? $" h {bh:0}" : "")})"
+            : "";
+        return $"{s.Seq}. 높이 {s.ZMin:0.00}–{s.ZMax:0.00} m · {tag}{best}";
     }
 }

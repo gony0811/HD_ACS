@@ -191,8 +191,11 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/area-stations",
 
 // ── 리치·간섭 시뮬레이션 — 정차에서 코봇이 세 자세(② 400 → 정렬 준비 300 → 초점 0)로 용접선에 닿는지·탱크 면과 부딪히는지 ──
 app.MapGet("/api/reach-sim/tanks/{tankId}/survey",
-    async (string tankId, int? level, string? wallCode, string? branch, ReachSimService sim, CancellationToken ct) =>
-        await sim.SurveyAsync(tankId, level, wallCode, ct, BranchRuleOf(branch)) is { } r
+    // stroke = 리프트를 그 높이 하나로 고정, lift=area = 영역마다 리프트를 한 높이로 고정(고른 높이·용접선별 최적과 비교).
+    async (string tankId, int? level, string? wallCode, string? branch, double? stroke, string? lift, ReachSimService sim, CancellationToken ct) =>
+        stroke is < 0 or > 1000 ? Results.BadRequest(new { error = "stroke 는 0~1000 mm" })
+        : lift is { Length: > 0 } && lift != "area" ? Results.BadRequest(new { error = "lift 는 area 만 지원" })
+        : await sim.SurveyAsync(tankId, level, wallCode, ct, BranchRuleOf(branch), stroke, lift == "area") is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 

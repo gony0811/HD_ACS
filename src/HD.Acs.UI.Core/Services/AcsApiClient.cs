@@ -257,10 +257,11 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
-        CancellationToken ct = default, string? branch = null)
+        CancellationToken ct = default, string? branch = null, bool areaLift = false)
     {
         var q = new List<string>();
         if (branch is { Length: > 0 }) q.Add($"branch={Uri.EscapeDataString(branch)}");
+        if (areaLift) q.Add("lift=area");
         if (level is { } lv) q.Add($"level={lv}");
         if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
         var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/survey" + (q.Count > 0 ? "?" + string.Join("&", q) : "");

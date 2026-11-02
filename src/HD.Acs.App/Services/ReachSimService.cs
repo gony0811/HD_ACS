@@ -74,10 +74,14 @@ public sealed class ReachSimService
 
     /// <summary>
     /// 선창(층·면 필터)의 용접선마다 정차·리프트를 훑어 간섭 없이 닿는지 판정한다. 선창이 없으면 null.
+    /// <paramref name="strokeMm"/> 를 주면 리프트를 그 높이 하나로 고정해 판정한다.
+    /// <paramref name="areaLift"/> 면 영역마다 리프트를 한 높이로 고정한다(<see cref="AreaLift"/> — 고른 높이에서의 판정을 돌려주고
+    /// 영역에 고정 높이·용접선별 최적과의 비교를, 용접선에 용접선별 최적 판정·높이를 싣는다).
     /// </summary>
     public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct,
-        ReachBranchRule branch = ReachBranchRule.MaxMargin)
+        ReachBranchRule branch = ReachBranchRule.MaxMargin, double? strokeMm = null, bool areaLift = false)
     {
+        var strokes = strokeMm is { } fixedStroke ? new[] { fixedStroke } : Strokes;
         _model = _baseModel with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
@@ -91,10 +95,15 @@ public sealed class ReachSimService
         {
             if (!ctx.Walls.TryGetValue(a.WallCode, out var wall)) continue;
             var setup = Setup(ctx, a, wall);
+            if (areaLift)
+            {
+                list.Add(AreaLiftSurvey(a, setup, strokes));
+                continue;
+            }
             var seams = a.Tasks.OrderBy(t => t.Seq).Select(t =>
             {
                 var pts = SeamPoints(setup.Pose, t);
-                var s = ReachSimulator.Survey(_model, setup.Planes, setup.Stations, pts, setup.Normal, Strokes, a.WallCode);
+                var s = ReachSimulator.Survey(_model, setup.Planes, setup.Stations, pts, setup.Normal, strokes, a.WallCode);
                 return new ReachSurveySeam(t.TaskId, t.Seq,
                     Math.Round(pts.Min(p => p[2]) - setup.FloorZ, 3), Math.Round(pts.Max(p => p[2]) - setup.FloorZ, 3),
                     s.Verdict.ToString(), s.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker);
@@ -102,6 +111,24 @@ public sealed class ReachSimService
             list.Add(new ReachSurveyArea(a.AreaId, a.Name, a.WallCode, a.Level, setup.Stations[0].X, setup.Stations[0].Y, seams));
         }
         return list;
+    }
+
+    /// <summary>영역 하나를 리프트 고정으로 조사 — 용접선 판정은 고정 높이의 것, 비교용 용접선별 최적을 함께 싣는다.</summary>
+    private ReachSurveyArea AreaLiftSurvey(InspectionAreaEntity a, AreaSetup setup, IReadOnlyList<double> strokes)
+    {
+        var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
+        var pts = tasks.Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+        var r = AreaLift.Evaluate(_model, setup.Planes, setup.Stations, pts, setup.Normal, strokes, a.WallCode);
+        var seams = tasks.Select((t, i) =>
+        {
+            var (s, b) = (r.Fixed[i], r.Best[i]);
+            return new ReachSurveySeam(t.TaskId, t.Seq,
+                Math.Round(pts[i].Min(p => p[2]) - setup.FloorZ, 3), Math.Round(pts[i].Max(p => p[2]) - setup.FloorZ, 3),
+                s.Verdict.ToString(), s.StrokeMm ?? r.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker,
+                b.Verdict.ToString(), b.StrokeMm);
+        }).ToList();
+        return new ReachSurveyArea(a.AreaId, a.Name, a.WallCode, a.Level, setup.Stations[0].X, setup.Stations[0].Y, seams,
+            r.StrokeMm, r.BestClear, r.BestReachable);
     }
 
     /// <summary>
@@ -253,14 +280,19 @@ public sealed class ReachSimService
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
 }
 
-/// <summary>조사 결과 — 영역 하나.</summary>
+/// <summary>
+/// 조사 결과 — 영역 하나. 리프트 고정 조사(<c>lift=area</c>)면 <paramref name="FixedStrokeMm"/> = 영역 고정 높이,
+/// BestClear·BestReachable = 용접선마다 높이를 따로 고를 때의 간섭 없음·도달 수(비교 기준). 아니면 셋 다 null.
+/// </summary>
 public sealed record ReachSurveyArea(Guid AreaId, string Name, string WallCode, int Level, double StationX, double StationY,
-    IReadOnlyList<ReachSurveySeam> Seams);
+    IReadOnlyList<ReachSurveySeam> Seams, double? FixedStrokeMm = null, int? BestClear = null, int? BestReachable = null);
 
 /// <summary>조사 결과 — 용접선 하나. Z 는 층 바닥 위 높이[m], Verdict = Clear | Collision | Unreachable.</summary>
 /// Blocker = Unreachable 사유(출발 자세 가지 전환·진입 경로 없음 등, 없으면 null).
+/// BestVerdict·BestStrokeMm = 리프트 고정 조사에서 이 용접선만 보고 높이를 고를 때의 판정·높이(아니면 null).
 public sealed record ReachSurveySeam(Guid TaskId, int Seq, double ZMin, double ZMax, string Verdict,
-    double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null);
+    double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null,
+    string? BestVerdict = null, double? BestStrokeMm = null);
 
 /// <summary>정차점 최적화 결과 — 영역 하나. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimum(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
