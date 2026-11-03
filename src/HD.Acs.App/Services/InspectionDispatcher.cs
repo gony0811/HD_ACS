@@ -718,9 +718,20 @@ public sealed class InspectionDispatcher
             string? failureSummary = null;
             (AlarmEntity Entity, string Severity, string Title)? alarm = null;
             bool anyFailed = acts.Any(a => a.Status == "FAILED");
+            bool runAborted = anyFailed && await _db.ScenarioRuns.AsNoTracking()
+                .AnyAsync(r => r.RunId == mission.RunId && r.State == "ABORTED", ct);
             if (!anyFailed)
             {
                 wi.Status = "DONE";
+            }
+            else if (runAborted)
+            {
+                // 중단(abort)으로 끊긴 정차 — 중단 시 cancelOrder·비상정지로 남은 액션이 FAILED 보고된다.
+                // 검사 실패가 아니므로 attempts·알람 없이 PENDING으로 되돌려 이어하기(resume)가 다시 배차하게 한다.
+                wi.Status = "PENDING";
+                wi.OrderId = null;
+                _log.LogInformation("Run {Run}: 중단된 run의 진행 중 정차 wi={Wi} → PENDING(이어하기 대상, 실패 집계 안 함)",
+                    mission.RunId, wi.WorkItemId);
             }
             else
             {

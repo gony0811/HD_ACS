@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.11** |
-| 작성일 | 2026-08-27 (최종 개정 2026-10-23) |
+| 문서 버전 | **1.13** |
+| 작성일 | 2026-08-27 (최종 개정 2026-11-03) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
@@ -20,6 +20,7 @@
 | 개정 1.10 | 2026-10-13 — **장치 통신 HEAVY 알람 반영 `[N22]`**: HD_AMR 장치통신 HEAVY알람 사양(rev.0, 2026-10-12) ACS 측 반응. ① §6.4 errorType 신규 7종 — 장치 6종 `visionLinkLost`·`depthCameraLinkLost`·`laserSensorLinkLost`·`ioModuleLinkLost`·`cobotLinkLost`·`amrLinkLost`(**FATAL**, RESET 전까지 래치) + `orderRejectedDeviceFault`(WARNING, 기존 orderId 유지). ② **`errorReferences` 발행·소비**(`device`·`orderId`·`actionId`) — 참조 없는 구 errors 파싱 유지. ③ §4.5.2 장치 알람 거부 — ACS는 거부 정차를 **PENDING으로 되돌림**(실행 없음, 실패 아님). ④ §9.6 신설 — 알람 중 **ACS 배차 보류**(order 미전송·명령 409), errors에서 사라지면 배차 자동 재개. ⑤ 알람 `DEVICE_LINK_LOST`(HEAVY→ACS CRITICAL)·`ORDER_REJECTED_DEVICE_FAULT`. 판정·래치·RESET·타워램프는 **AMR 로컬**(ACS 원격 RESET 없음) |
 | 개정 1.11 | 2026-10-23 — **seam 좌표 z 기준면 확정 `[N17]`**: `position.seamStartW`/`seamEndW` 의 z 를 **해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`)으로 발행한다(§8.1·§8.4 골든·§10 N17·부록 B). 종전엔 T_W_D 가 2D(x,y,yaw) 라 z 가 **도면 전역(선창 바닥=0) 그대로** 실려, L2 이상에서 층 바닥 높이만큼 어긋났다(L1 은 0 이라 단층 E2E 에서 드러나지 않음). 실기(2026-10-23) `moveToSeamStart` 접근점 z ≈ 9.7 m → IK 5회 연속 실패로 확인. `drawingPos.z` 는 도면 echo 라 **전역 z 유지**. x·y·Δz(방향 유도)는 무변경. ACS 는 층 정의(`level_z`) 가 없으면 0 폴백 없이 발행을 거부한다. HD_AMR 보유본의 N17 제기(AMR 개정 1.7)·확정(AMR 개정 1.10)을 ACS 정본에 병합한 것이며, 보유본의 다른 개정(N18 거리 파라미터·§4.4.1 정차 이격 산출식·LINE/CROSS4 레시피 통합)은 **미병합** |
 | 개정 1.12 (초안) | 2026-10-31 — **정차 온보드 보정 허용 범위 `params.stationAdjust` 제안 `[N23]`**(§4.4.2 신설·§8.1·§10). AMR이 도착 후 리치를 위해 `nodePosition`에서 옮겨 설 수 있는 한계(전진·후진·횡·각)를 ACS가 정차마다 준다. `allowedDeviation*`(도착 판정)은 의미 무변경. **선택 필드·기본 꺼짐 → 계약 하위 호환**. ACS 발행 구현 완료, AMR 회신·사인오프 대기 |
+| 개정 1.13 | 2026-11-03 — **run 중단 시 진행 중 Order 취소**(§4.5.3·§5.4): `cancelOrder` 발행 조건을 "통신 단절 PAUSE 중"에서 "**중단 시 그 run의 정차가 실행 중이거나 PAUSE 중**"으로 확장. 취소·비상정지로 FAILED 보고된 정차는 실패 집계 없이 PENDING(이어하기 대상). AMR 요구 동작은 무변경(HD_AMR `CancelOrderAsync`는 PAUSE 여부와 무관하게 주행 정지·검사 중단·잔여 액션 FAILED) |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -312,13 +313,12 @@ AMR이 수신한 Order를 실행할 수 없는 경우(모르는 `mapId`, 필수 
 - `errors[]`: `errorType: "orderRejectedDeviceFault"`, `errorLevel: "WARNING"`, `errorReferences`에 `orderId` 1건·`actionId` 1건(첫 액션, 없으면 생략)·알람 장치마다 `device` 1건. 다음 Order가 수락되면 지운다.
 - ACS: FATAL로 해석하지 않는다. `errorReferences.orderId`(없으면 description)로 현재 배차와 대조해 **그 정차를 PENDING으로 되돌린다**(실행된 적 없으므로 실패·재시도로 세지 않음, 사용자 결정 2026-10-13). 알람 중에는 배차 자체를 보류하므로 이 거부는 "알람 직전 발행"과의 경합에서만 생기며, 같은 Order를 반복 재전송하지 않는다.
 
-**4.5.3 취소(cancelOrder) — 통신 단절 PAUSE 중에 한해 사용 (개정 1.9)**
+**4.5.3 취소(cancelOrder) — run 중단 시 진행 중 Order 취소 (개정 1.9 → 1.13)**
 
-일반 운전에서 VDA 5050 표준의 `cancelOrder` instantAction은 **사용하지 않는다**.
-진행 중 작업의 중단은 ① `emergencyStop`(즉시 기능 정지, §5.1) → ② 운영자 판단 → ③ **신규 orderId의 새 Order 재배차**로 처리한다. 단일 노드 Order 모델이라 취소가 필요한 잔여 horizon이 없기 때문이다.
-
-**예외 — 통신 단절 PAUSE(§9.3.1)**: PAUSE/HOLD 상태의 AMR은 Order를 폐기하지 않고 쥐고 있으므로, 운영자가 그 상태에서 run을 중단하면
-ACS는 run ABORTED와 함께 `cancelOrder`(§5.4)를 1건 발행한다(`communicationLostPause` 보고 중일 때만). AMR은 미완료 액션을 종결하고 `communicationLostPause`를 클리어한 뒤 다음 Order를 수락할 수 있어야 한다(FT-11 #7) `[N21]`.
+운영자가 run을 중단(`POST /api/runs/{id}/abort`)할 때 그 run의 정차가 **AMR에서 실행 중**(ACS work_item `DISPATCHED`)이거나 AMR이 통신 단절 PAUSE(§9.3.1)를 보고 중이면,
+ACS는 run ABORTED와 함께 `cancelOrder`(§5.4)를 1건 발행한다. 정차 하나에 용접선 액션이 여러 개라, 취소하지 않으면 AMR이 남은 액션을 끝까지 수행한다
+(2026-11-03 현장: 용접선 8개 정차에서 중단 후에도 검사가 이어짐 — 개정 1.13에서 "PAUSE 중에 한해"를 확장).
+즉시 기능 정지가 필요하면 종전대로 `emergencyStop`(§5.1)을 쓴다. 취소·비상정지로 FAILED 보고된 그 정차는 ACS가 실패로 집계하지 않고 **PENDING으로 되돌려** 이어하기(resume) 대상으로 남긴다. AMR은 미완료 액션을 종결하고 `communicationLostPause`를 클리어한 뒤 다음 Order를 수락할 수 있어야 한다(FT-11 #7) `[N21]`.
 
 **4.5.4 완결 후 orderId 보고 유지**
 
@@ -395,14 +395,14 @@ Order가 "어디서 오는지": run 시작 시 ACS는 계획(검사 영역·용�
 | ACS 발행 조건 | 해당 로봇이 `errors[]`에 `communicationLostPause`를 보고 중이고 연결 ONLINE이며, 운영자가 현장 안전을 확인하고 '작업 재개'를 누른 경우만 (`POST /api/robots/{id}/resume-pause`). **자동 재개 없음** |
 | AMR 요구 동작 | 재개 전 확인(비상정지 해제·배터리 PowerMode NORMAL·측위 정상+mapId 일치·operatingMode AUTOMATIC) 통과 시 재개 — 주행 중이었으면 같은 목표 노드 재지령, 검사 중이었으면 **정지 직전 웨이포인트부터 재촬영**. 액션 `PAUSED`→`RUNNING`, `state.paused=false`, `communicationLostPause` 클리어. 불충족 시 거부 + `errors[]` `resumeRejected`(사유) |
 
-### 5.4 `cancelOrder` — 통신 단절 PAUSE 중 run 중단 `(1.9 신규)` `[N21]`
+### 5.4 `cancelOrder` — run 중단 시 진행 중 Order 취소 `(1.9 신규, 1.13 확장)` `[N21]`
 
 | 항목 | 값 |
 |---|---|
 | actionType | `cancelOrder` |
 | blockingType | HARD |
 | actionParameters | 없음 |
-| ACS 발행 조건 | 운영자 run 중단(`POST /api/runs/{id}/abort`) 시점에 그 로봇이 `communicationLostPause`를 보고 중일 때만 (§4.5.3 예외). 응답 `cancelOrderSent` |
+| ACS 발행 조건 | 운영자 run 중단(`POST /api/runs/{id}/abort`) 시점에 그 run의 정차가 실행 중(work_item DISPATCHED)이거나 그 로봇이 `communicationLostPause`를 보고 중일 때 (§4.5.3, 개정 1.13). 응답 `cancelOrderRequired`·`cancelOrderSent` |
 | AMR 요구 동작 | 현재 Order 종료(미완료 액션 종결), `paused=false`, `communicationLostPause` 클리어, 이후 신규 Order 수락 |
 
 instantAction에 대한 actionState 보고는 선택 사항이다 — ACS는 instantAction의 actionStates를 추적하지 않으며, `initPosition`의 성공 판정은 **state.agvPosition.mapId 변경**으로만 한다.

@@ -68,9 +68,10 @@ stateDiagram-v2
 재실행은 원인 조치 후 작업자가 새 run으로 시작한다.
 
 **중단(abort)·재개(resume) 규정** [2026-08-28]:
-- `POST /api/runs/{id}/abort` — run ABORTED·후속 배차 중지. **진행 중 Order는 회수하지 않음**(cancelOrder 미사용,
-  로봇은 현재 정차를 완주하고 그 결과는 DONE/FAILED로 기록됨 — 디스패처가 ABORTED/COMPLETED run에는 배차·완료 전이를 하지 않아
-  중단 상태가 유지된다). 즉시 정지는 비상정지 사용.
+- `POST /api/runs/{id}/abort` — run ABORTED·후속 배차 중지. **진행 중 정차가 있으면 `cancelOrder`로 회수**(2026-11-03 개정 —
+  종전엔 회수하지 않아 정차 하나의 용접선 여러 개를 AMR이 끝까지 수행했다, VDA 사양서 §4.5.3). 취소·비상정지로 FAILED 보고된
+  그 정차는 실패로 집계하지 않고 PENDING으로 되돌린다(이어하기 대상). 디스패처는 ABORTED/COMPLETED run에 배차·완료 전이를 하지 않아
+  중단 상태가 유지된다. 즉시 정지는 비상정지 사용.
 - `POST /api/runs/{id}/resume` — **DONE/SKIPPED 보존(재검사 없음)**, 중단 시점에 종결 못 한 DISPATCHED는
   PENDING으로 리셋(attempts 유지)해 재검사, 잔여 PENDING만 greedy 재배차. COMPLETED run은 재개 불가(400).
 - **[2026-10-02] 재개 시 남은 정차는 현재 계획으로 재계산** — run 시작 때 저장한 정차점·용접선 좌표(work_item 스냅샷)를 쓰지 않고

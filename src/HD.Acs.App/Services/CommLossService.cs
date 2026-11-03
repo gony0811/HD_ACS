@@ -9,7 +9,7 @@ namespace HD.Acs.App.Services;
 /// HD_AMR 통신 단절 Fail-Safe(rev.0) ACS 측 반응 [docs/HD_AMR_통신단절_FailSafe_사양.md §6].
 /// 판정·정지·재개 전 확인(§4.2)은 전부 AMR 로컬 — ACS는 단계를 복제하지 않고 errors[]에 반응만 한다.
 ///  · 재개: 운영자 확인 후 <c>stopPause</c> instantAction 1건 발행(자동 재개 금지 §4.1).
-///  · 취소: run 중단 + 로봇이 PAUSE 중이면 <c>cancelOrder</c> — PAUSE AMR은 Order를 폐기하지 않고 쥐고 있으므로.
+///  · 취소: run 중단 + 진행 중 정차가 있거나 로봇이 PAUSE 중이면 <c>cancelOrder</c> — AMR은 Order를 폐기하지 않고 쥐고 있으므로.
 /// </summary>
 public sealed class CommLossService
 {
@@ -30,7 +30,8 @@ public sealed class CommLossService
 
     public sealed record ResumePauseRequest(string? UserId);
     public sealed record ResumePauseResult(string RobotId, string ActionType);
-    public sealed record AbortResult(Guid RunId, string State, bool CancelOrderSent);
+    /// <summary>CancelOrderRequired = 진행 중 정차·일시정지가 있어 취소가 필요했는지, CancelOrderSent = 실제 발행 성공.</summary>
+    public sealed record AbortResult(Guid RunId, string State, bool CancelOrderSent, bool CancelOrderRequired = false);
 
     /// <summary>
     /// 운영자 재개 → <c>stopPause</c>. 로봇이 통신 단절 일시정지를 보고 중일 때만 보낸다(그 외 409 — 오조작 방지).
@@ -56,29 +57,36 @@ public sealed class CommLossService
     }
 
     /// <summary>
-    /// run 중단. 해당 로봇이 통신 단절 일시정지 중이면 <c>cancelOrder</c>도 발행한다(사용자 결정, VDA 사양서 §4.5.3 개정 1.9).
+    /// run 중단. 그 run의 정차가 AMR에서 실행 중(work_item DISPATCHED)이거나 로봇이 통신 단절 일시정지 중이면
+    /// <c>cancelOrder</c>도 발행한다 [VDA 사양서 §4.5.3]. 중단만 하고 Order를 두면 AMR이 그 정차의 남은 용접선을
+    /// 끝까지 수행한다(2026-11-03 현장: 용접선 8개 정차에서 중단 후에도 검사가 이어짐).
     /// 발행 실패는 중단 자체를 되돌리지 않는다 — run은 이미 ABORTED, 응답의 cancelOrderSent로 알린다.
+    /// 취소로 FAILED 보고되는 그 정차는 <see cref="InspectionDispatcher.HandleStopOutcomeAsync"/>가 PENDING으로 되돌려 이어하기 대상으로 남긴다.
     /// </summary>
     public async Task<AbortResult> AbortRunAsync(Guid runId, CancellationToken ct)
     {
         var robotId = await _db.ScenarioRuns.AsNoTracking().Where(r => r.RunId == runId)
             .Select(r => r.RobotId).FirstOrDefaultAsync(ct);
+        bool inFlight = await _db.WorkItems.AsNoTracking()
+            .AnyAsync(w => w.RunId == runId && w.Status == "DISPATCHED", ct);
         await _missions.AbortRunAsync(runId, ct);   // 없음 KeyNotFound / 종결 RunStateException 은 호출부가 매핑
 
         bool sent = false;
-        if (robotId is not null && _tracker.HasActiveError(robotId, PauseErrorType))
+        bool paused = robotId is not null && _tracker.HasActiveError(robotId, PauseErrorType);
+        bool required = robotId is not null && (inFlight || paused);
+        if (required)
         {
             var robot = await _db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId, ct);
             if (robot is not null)
             {
                 try
                 {
-                    await _vda.CancelOrderAsync(new RobotRef(robotId, robot.Manufacturer, robot.SerialNumber), ct);
+                    await _vda.CancelOrderAsync(new RobotRef(robotId!, robot.Manufacturer, robot.SerialNumber), ct);
                     sent = true;
                     _db.AuditLogs.Add(new AuditLogEntity
-                        { UserId = "operator", Action = "COMM_LOSS_CANCEL_ORDER", Target = robotId });
+                        { UserId = "operator", Action = paused ? "COMM_LOSS_CANCEL_ORDER" : "RUN_ABORT_CANCEL_ORDER", Target = robotId! });
                     await _db.SaveChangesAsync(ct);
-                    _log.LogInformation("통신 단절 일시정지 중 run {Run} 중단 — cancelOrder 발행(robot={Robot})", runId, robotId);
+                    _log.LogInformation("run {Run} 중단 — 진행 중 Order 취소(cancelOrder) 발행(robot={Robot}, 일시정지={Paused})", runId, robotId, paused);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -87,7 +95,7 @@ public sealed class CommLossService
                 }
             }
         }
-        return new AbortResult(runId, "ABORTED", sent);
+        return new AbortResult(runId, "ABORTED", sent, required);
     }
 }
 

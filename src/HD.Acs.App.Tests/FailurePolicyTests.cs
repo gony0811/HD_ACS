@@ -24,7 +24,9 @@ public class FailurePolicyTests
     private sealed record Ctx(AcsDbContext Db, MissionEntity Mission, WorkItemEntity Wi, Guid[] TaskIds);
 
     /// <summary>정차 1곳(영역 F-01, 용접선 W1·W2) — statuses[i] = i번째 용접선 액션 결과(사유 포함).</summary>
-    private static async Task<Ctx> Stop(params (string Status, string? Reason)[] actions)
+    private static Task<Ctx> Stop(params (string Status, string? Reason)[] actions) => StopIn("RUNNING", actions);
+
+    private static async Task<Ctx> StopIn(string runState, params (string Status, string? Reason)[] actions)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -36,7 +38,7 @@ public class FailurePolicyTests
         };
         db.ScenarioRuns.Add(new ScenarioRunEntity
         {
-            RunId = runId, ScenarioId = Guid.NewGuid(), RobotId = "AMR-01", State = "RUNNING", Missions = { mission },
+            RunId = runId, ScenarioId = Guid.NewGuid(), RobotId = "AMR-01", State = runState, Missions = { mission },
         });
         var area = new InspectionAreaEntity { AreaId = Guid.NewGuid(), TankId = "CT1", WallCode = "F", Level = 1, Name = "F-01" };
         var taskIds = actions.Select(_ => Guid.NewGuid()).ToArray();
@@ -92,6 +94,20 @@ public class FailurePolicyTests
         var c = await Stop(("FINISHED", "OK"), ("FINISHED", "OK"));
         Assert.Equal("DONE", c.Wi.Status);
         Assert.Empty(await c.Db.Alarms.AsNoTracking().ToListAsync());
+    }
+
+    /// <summary>
+    /// 중단된 run의 진행 중 정차가 cancelOrder·비상정지로 FAILED 보고되면 검사 실패가 아니다 —
+    /// attempts·알람 없이 PENDING으로 되돌려 이어하기 대상으로 남긴다(2026-11-03 현장).
+    /// </summary>
+    [Fact]
+    public async Task AbortedRun_InterruptedStop_ReturnsToPending_WithoutAlarm()
+    {
+        var c = await StopIn("ABORTED", ("FINISHED", "OK"), ("FAILED", "cancelled by cancelOrder"));
+
+        Assert.Equal(("PENDING", 0, (string?)null), (c.Wi.Status, c.Wi.Attempts, c.Wi.OrderId));
+        Assert.Empty(await c.Db.Alarms.AsNoTracking().ToListAsync());
+        Assert.Equal("ABORTED", (await c.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);   // COMPLETED로 덮이지 않음
     }
 
     [Fact]

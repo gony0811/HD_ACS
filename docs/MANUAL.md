@@ -345,7 +345,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |
-| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지(진행 중 정차는 완주·기록). 즉시 정지는 비상정지. 로봇이 통신 단절 일시정지 중이면 `cancelOrder`도 발행(응답 `cancelOrderSent`) |
+| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지 + 진행 중 정차가 있거나 로봇이 통신 단절 일시정지 중이면 `cancelOrder` 발행(AMR이 남은 용접선을 멈춤, 응답 `cancelOrderRequired`·`cancelOrderSent`). 끊긴 정차는 PENDING으로 돌아가 이어하기 때 다시 배차. 즉시 정지는 비상정지 |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
 | `GET /api/runs/{runId}/progress` | TASK 진행률 [SAIGE §5.4/§6] — 분모 `totalTasks`는 run 시작 시 고정, 분자는 **고유 taskId** 종결 수(재시도 중복 없음). `skippedTasks`⊂`failedTasks`, `excludedTasks`(미보정 층 등 제외분, 분모 미포함), `percent`·`fraction`. ~1초 TTL 캐시(1~5초 polling 대응) |

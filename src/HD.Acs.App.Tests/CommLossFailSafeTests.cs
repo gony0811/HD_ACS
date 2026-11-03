@@ -144,15 +144,34 @@ public class CommLossFailSafeTests
         Assert.DoesNotContain(await env.Db.AuditLogs.AsNoTracking().ToListAsync(), a => a.Action == "COMM_LOSS_RESUME");
     }
 
+    /// <summary>
+    /// 일시정지가 아니어도 진행 중 정차(DISPATCHED)가 있으면 cancelOrder가 필요하다 — 중단 후에도 AMR이
+    /// 그 정차의 남은 용접선을 계속 검사하던 문제(2026-11-03 현장).
+    /// </summary>
     [Fact]
-    public async Task Abort_NotPaused_DoesNotTryCancelOrder()
+    public async Task Abort_WithDispatchedStop_RequiresCancelOrder()
     {
         var env = Build();
         var wi = await SeedDispatchedRunAsync(env.Db);
         var r = await env.CommLoss.AbortRunAsync(wi.RunId, default);
         Assert.Equal("ABORTED", r.State);
-        Assert.False(r.CancelOrderSent);
+        Assert.True(r.CancelOrderRequired);
+        Assert.False(r.CancelOrderSent);   // MQTT 미연결 — 발행 실패해도 중단은 확정
         Assert.Equal("ABORTED", (await env.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);
+    }
+
+    [Fact]
+    public async Task Abort_NoStopInFlight_NotPaused_DoesNotTryCancelOrder()
+    {
+        var env = Build();
+        var wi = await SeedDispatchedRunAsync(env.Db);
+        var w = await env.Db.WorkItems.SingleAsync();
+        w.Status = "DONE";
+        await env.Db.SaveChangesAsync();
+
+        var r = await env.CommLoss.AbortRunAsync(wi.RunId, default);
+        Assert.False(r.CancelOrderRequired);
+        Assert.False(r.CancelOrderSent);
     }
 
     [Fact]
