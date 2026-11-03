@@ -81,6 +81,9 @@
                         <TextBlock Text="{Binding AutoStationText}" FontSize="12" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <CheckBox Content="정차 위치 조정 (자동 정차점 기준 오프셋)" IsChecked="{Binding StationOverride}" Margin="0,0,0,4"
                                   ToolTip.Tip="자동 정차점에서 도면 축으로 얼마나 옮길지 입력합니다. +x=선수 방향, +y=좌현 방향(m). 영역 코너를 고치면 정차점도 같은 오프셋으로 따라 움직입니다." />
+                        <Button Classes="form" Content="현재 AMR 위치를 정차점으로" HorizontalAlignment="Left" Margin="0,0,0,4"
+                                Command="{Binding UseRobotPoseAsStationCommand}"
+                                ToolTip.Tip="AMR이 지금 서 있는 위치·방향을 이 층의 T_W_D로 도면 좌표로 바꿔 아래 오프셋·θ에 채웁니다. 저장은 [선택 영역 수정](새 영역은 [영역 등록])을 눌러야 됩니다. AMR이 다른 층에 있으면 거부합니다." />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6" IsEnabled="{Binding StationOverride}">
                             <TextBlock Text="dx,dy[m]" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Increment="0.1" Value="{Binding StationDx}" Margin="0,0,6,0"

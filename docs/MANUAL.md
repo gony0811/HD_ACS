@@ -296,6 +296,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 |---|---|
 | `GET /api/robots` | 로봇 목록 |
 | `GET /api/robots/{robotId}/context` | 로봇 컨텍스트 — 보고 pose(ReportedX/Y/Theta), 층(mapId), 온라인 여부 |
+| `GET /api/robots/{robotId}/drawing-pose` | 로봇 현재 위치를 **도면 좌표**로 — 보고 층의 유효 T_W_D 역변환 `{ mapId, level, x, y, theta, mapX, mapY, mapTheta, connectionState, reportedAt }`. 계획 ▸ 영역·작업의 [현재 AMR 위치를 정차점으로]가 사용(404 보고 없음·409 층/위치 없음·400 T_W_D 무효) |
 | `POST /api/robots/{robotId}/zone` | 수동 층 지정 — `{ mapId, userId }`; AMR 보고 mapId 검증 게이트 설정 |
 | `POST /api/robots/{robotId}/emergency-stop` | 비상정지 — `{ userId }` (활성 run 자동 중단) |
 | `POST /api/robots/{robotId}/resume-pause` | 통신 단절 일시정지 재개 — `{ userId }` → `stopPause` 발행. 로봇이 `communicationLostPause` 보고 중이 아니면 409, 미연결 409 |

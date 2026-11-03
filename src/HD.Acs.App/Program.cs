@@ -62,6 +62,7 @@ builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
+builder.Services.AddScoped<RobotPoseService>();          // 로봇 보고 위치 → 도면 좌표(현재 위치를 정차점으로)
 builder.Services.AddHostedService<VdaBridgeService>();
 
 // SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
@@ -158,6 +159,15 @@ app.MapGet("/api/robots", async (AcsDbContext db) =>
 app.MapGet("/api/robots/{robotId}/context", async (string robotId, AcsDbContext db) =>
     await db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == robotId)
         is { } ctx ? Results.Ok(ctx) : Results.NotFound());
+
+// 로봇 현재 위치(도면 좌표) — 보고 층의 유효 T_W_D 역변환. 계획 ▸ 영역 "현재 AMR 위치를 정차점으로" 용.
+app.MapGet("/api/robots/{robotId}/drawing-pose", async (string robotId, RobotPoseService svc) =>
+{
+    try { return Results.Ok(await svc.GetDrawingPoseAsync(robotId)); }
+    catch (RobotPoseService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (RobotPoseService.ConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
 
 app.MapGet("/api/scenarios", async (AcsDbContext db) =>
     Results.Ok(await db.Scenarios.AsNoTracking()

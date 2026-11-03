@@ -423,6 +423,50 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"코봇 이동 시험 실패: {ex.Message}"; }   // 409 run중/타층·404·400 사유
     }
 
+    /// <summary>
+    /// 현재 AMR 위치를 정차점으로 — 로봇 보고 위치를 서버가 그 층 T_W_D로 도면 좌표화한 값을 정차 덮어쓰기 폼(오프셋·방향)에 채운다.
+    /// 저장은 하지 않는다: 운영자가 [선택 영역 수정](또는 등록)으로 확정한다. 로봇이 영역과 다른 층이면 거부.
+    /// 로봇은 활성 로봇(단일) 사용 — <see cref="TestSeamStartAsync"/> 와 같다.
+    /// </summary>
+    [RelayCommand]
+    private async Task UseRobotPoseAsStationAsync()
+    {
+        if (SelectedWall is not { } wall || AutoStation is not { } auto) { StatusMessage = "면을 먼저 선택하세요."; return; }
+        int? level = SelectedArea?.Level ?? SelectedLevel?.Level;
+        try
+        {
+            var robots = await _api.GetRobotsAsync();
+            if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
+            var p = await _api.GetRobotDrawingPoseAsync(robot.RobotId);
+            if (level is int lv && p.Level != lv)
+            {
+                StatusMessage = $"AMR이 L{p.Level}({p.MapId})에 있습니다 — 이 영역은 L{lv}라 정차점으로 쓸 수 없습니다.";
+                return;
+            }
+
+            StationOverride = true;
+            StationDx = Math.Round(p.X - auto.X, 4);   // 0.1mm 반올림 — 저장 시 절대 좌표 = 자동 정차점 + 오프셋 = 로봇 위치
+            StationDy = Math.Round(p.Y - auto.Y, 4);
+            if (p.Theta is double th) StationTheta = Math.Round(th, 4);
+
+            string wallText = "";
+            if (StandoffApplicable && wall is { Origin: { Length: >= 2 } o, Normal: { Length: >= 2 } n })
+            {
+                double h = Math.Sqrt(n[0] * n[0] + n[1] * n[1]);
+                double d = ((p.X - o[0]) * n[0] + (p.Y - o[1]) * n[1]) / h;   // 내부향 법선 → 벽 안쪽이 +
+                wallText = $" · 벽({wall.WallCode})까지 {d:0.000} m";
+            }
+            string stale = p.ConnectionState is { } cs && cs != "ONLINE" ? $" ⚠ 로봇 연결 {cs}"
+                : p.ReportedAt is { } at && DateTimeOffset.UtcNow - at > TimeSpan.FromSeconds(10)
+                    ? $" ⚠ 위치 보고가 {(DateTimeOffset.UtcNow - at).TotalSeconds:0}초 전 값" : "";
+            StatusMessage = $"현재 AMR 위치로 정차점 채움: 도면 ({p.X:0.###}, {p.Y:0.###})"
+                + (p.Theta is double t ? $", 방향 {t * 180 / Math.PI:0.0}°" : ", 방향 미보고(기존 값 유지)")
+                + wallText + stale
+                + (SelectedArea is null ? " — [영역 등록] 시 함께 저장됩니다." : " — [선택 영역 수정]을 눌러야 저장됩니다.");
+        }
+        catch (Exception ex) { StatusMessage = $"현재 AMR 위치 조회 실패: {ex.Message}"; }   // 409 층/위치 없음·400 T_W_D 무효·404
+    }
+
     partial void OnSelectedTaskChanged(AreaTaskDto? value)
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();

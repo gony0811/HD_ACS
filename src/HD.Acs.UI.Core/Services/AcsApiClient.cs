@@ -525,6 +525,13 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<SeamStartTestResultDto>(ct);
     }
 
+    public async Task<RobotDrawingPoseDto> GetRobotDrawingPoseAsync(string robotId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/robots/{robotId}/drawing-pose", ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return (await resp.Content.ReadFromJsonAsync<RobotDrawingPoseDto>(ct))!;
+    }
+
     public async Task<PlanChangeSetDto> ProposePlanAsync(PlanProposeRequestDto request, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/planning/assistant/propose", request, ct);

@@ -25,9 +25,9 @@ public class StationOffsetTests
     private static WallDto WallPm() => new("CT1", "PM", new[] { -22.5, 6.0, 1.9 }, new[] { 1.0, 0, 0 }, new[] { 0.0, 0, 1 },
         new[] { 0.0, -1, 0 }, 45, 5.4, Math.PI / 2, true, null, ReachableVBand: new[] { 2.4, 4.8 });
 
-    private static async Task<(AreaPlanningViewModel Vm, FakeAcs Server)> BuildAsync(WallDto wall, object area)
+    private static async Task<(AreaPlanningViewModel Vm, FakeAcs Server)> BuildAsync(WallDto wall, object area, object? pose = null)
     {
-        var server = new FakeAcs(area);
+        var server = new FakeAcs(area, pose);
         var http = new HttpClient(server) { BaseAddress = new Uri("http://acs.test") };
         var vm = new AreaPlanningViewModel(new AcsApiClient(http), Options.Create(new AcsOptions { OperatorId = "tester" }));
         vm.SelectedWall = wall;
@@ -117,13 +117,62 @@ public class StationOffsetTests
         Assert.Equal(6.0 - AreaPlanningViewModel.DefaultVerticalStandoffM, vm.AutoStation!.Value.Y, 6);
     }
 
+    private static object PmArea() => new
+    {
+        areaId = Area, tankId = "CT1", wallCode = "PM", level = 2, name = "PM-L2-01",
+        corners = new[] { new[] { 3.0, 3.0 }, new[] { 4.0, 3.0 }, new[] { 4.0, 4.2 }, new[] { 3.0, 4.2 } },
+        uMin = 3.0, vMin = 3.0, uMax = 4.0, vMax = 4.2, stationX = (double?)null, stationY = (double?)null, stationTheta = (double?)null,
+        stationStandoffM = (double?)null, sortOrder = 0, taskCount = 0,
+    };
+
+    private static object Pose(int level, double x, double y, double? theta) => new
+    {
+        robotId = "AMR-01", mapId = $"CT1-L{level}", level, x, y, theta, mapX = 0.0, mapY = 0.0, mapTheta = 0.0,
+        connectionState = "ONLINE", reportedAt = DateTimeOffset.UtcNow,
+    };
+
+    /// <summary>현재 AMR 위치를 정차점으로 — 폼에 채우기만 하고(저장 없음), 저장하면 절대 좌표 = 로봇 도면 위치.</summary>
+    [Fact]
+    public async Task UseRobotPose_FillsOverride_AndUpdateSendsRobotPosition()
+    {
+        var (vm, server) = await BuildAsync(WallPm(), PmArea(), Pose(2, -18.7, 4.4, 1.5708));
+
+        await vm.UseRobotPoseAsStationCommand.ExecuteAsync(null);
+
+        Assert.True(vm.StationOverride);
+        Assert.Equal(-18.7, vm.StationX, 6);
+        Assert.Equal(4.4, vm.StationY, 6);
+        Assert.Equal(1.5708, vm.StationTheta, 6);
+        Assert.Contains("벽(PM)까지 1.600 m", vm.StatusMessage);       // 벽 y=6, 내부향 −y
+        Assert.Contains("[선택 영역 수정]", vm.StatusMessage);
+        Assert.Empty(server.Writes);                                     // 채우기만, 저장 안 함
+
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        var put = Assert.Single(server.Writes, w => w.Method == "PUT");
+        Assert.Equal(-18.7, put.Body.GetProperty("stationX").GetDouble(), 6);
+        Assert.Equal(4.4, put.Body.GetProperty("stationY").GetDouble(), 6);
+        Assert.Equal(1.5708, put.Body.GetProperty("stationTheta").GetDouble(), 6);
+    }
+
+    [Fact]
+    public async Task UseRobotPose_OtherLevel_IsRejected()
+    {
+        var (vm, _) = await BuildAsync(WallPm(), PmArea(), Pose(3, -18.7, 4.4, 1.5708));
+
+        await vm.UseRobotPoseAsStationCommand.ExecuteAsync(null);
+
+        Assert.False(vm.StationOverride);
+        Assert.Contains("L3", vm.StatusMessage);
+        Assert.Contains("L2", vm.StatusMessage);
+    }
+
     private static async Task WaitAsync(Func<bool> cond)
     {
         for (int i = 0; i < 200 && !cond(); i++) await Task.Delay(10);
         Assert.True(cond(), "VM 비동기 로드가 제한 시간 안에 끝나지 않았습니다.");
     }
 
-    private sealed class FakeAcs(object area) : HttpMessageHandler
+    private sealed class FakeAcs(object area, object? pose = null) : HttpMessageHandler
     {
         public List<(string Method, string Path, JsonElement Body)> Writes { get; } = new();
 
@@ -138,6 +187,8 @@ public class StationOffsetTests
             }
             if (path == "/api/internal/areas") return Json(new[] { area });
             if (path == $"/api/internal/areas/{Area}/tasks") return Json(Array.Empty<object>());
+            if (path == "/api/robots") return Json(new[] { new { robotId = "AMR-01", name = "AMR", manufacturer = "HHI", serialNumber = "AMR-01", vdaVersion = "2.0", isActive = true } });
+            if (path == "/api/robots/AMR-01/drawing-pose" && pose is not null) return Json(pose);
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 

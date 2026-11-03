@@ -122,6 +122,9 @@ public interface IAcsApiClient
         double[][] arms, CancellationToken ct = default);
     /// <summary>코봇 seam 시작점 이동 시험 — 지정 용접선의 정차점으로 주행 후 코봇을 seam 시작점까지만 이동(촬영 없음) [VDA §8].</summary>
     Task<SeamStartTestResultDto?> MoveToSeamStartTestAsync(string robotId, Guid taskId, CancellationToken ct = default);
+    /// <summary>로봇 현재 위치(도면 좌표) — 404 보고 없음·409 층/위치 없음·400 T_W_D 무효는 예외 메시지로.</summary>
+    Task<RobotDrawingPoseDto> GetRobotDrawingPoseAsync(string robotId, CancellationToken ct = default)
+        => throw new NotSupportedException();
 
     // ── 계획 자연어 어시스턴트 [ADR-013] — 기본 구현은 미지원(기존 테스트 대역 무수정) ──
     /// <summary>자연어 명령 → 변경안 미리보기(DB 무변경). 서버 비활성 503·LLM 실패 502는 {error} 메시지 예외.</summary>
