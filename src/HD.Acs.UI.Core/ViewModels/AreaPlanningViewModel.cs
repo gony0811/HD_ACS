@@ -309,7 +309,14 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         var local = InputCorners();
         var (miu, miv, mau, mav) = AreaBboxLocal(local);
         if (mau - miu < 1e-6 || mav - miv < 1e-6) { StatusMessage = "영역이 퇴화했습니다 — 유효한 사각형 4점을 입력하세요."; return null; }
-        if (mau - miu > 1.44 + 1e-9 || mav - miv > 1.44 + 1e-9) { StatusMessage = "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다."; return null; }
+        var maxV = ProjectService.MaxAreaSpanV(SelectedWall?.WallCode);
+        if (mau - miu > ProjectService.MaxAreaSizeM + 1e-9 || mav - miv > maxV + 1e-9)
+        {
+            StatusMessage = maxV > ProjectService.MaxAreaSizeM
+                ? $"AREA 최대 크기는 u 1.44m · v {maxV:0.0#}m입니다(면 {SelectedWall?.WallCode})."
+                : "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다.";
+            return null;
+        }
         if (mav > SliceH + 1e-6 || miv < -1e-6) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장(각 코너 v)
         return local.Select(p => new[] { p[0], p[1] + off }).ToArray();

@@ -30,6 +30,15 @@ public class AreaRulesTests
         Assert.Contains("1.44m", AreaRules.ValidateCorners(Rect(1, 1, 3, 2), "PM", 45, 5.4, out _));
 
     [Fact]
+    public void SideWall_TallV_Passes_ButNotBeyond29_AndNotOnFloor()
+    {
+        Assert.Null(AreaRules.ValidateCorners(Rect(1, 0.5, 2.44, 3.4), "PM", 45, 5.4, out _));        // v 2.9
+        Assert.Contains("v 2.9m", AreaRules.ValidateCorners(Rect(1, 0.5, 2.44, 3.5), "PM", 45, 5.4, out _));
+        Assert.Contains("각 1.44m", AreaRules.ValidateCorners(Rect(1, 0.5, 2.44, 2.5), "B", 45, 10, out _)); // 바닥은 v 도 수평
+        Assert.Contains("각 1.44m", AreaRules.ValidateCorners(Rect(1, 0.5, 2.44, 2.5), "F", 17, 12, out _)); // 격벽
+    }
+
+    [Fact]
     public void TooFewCorners_Rejected() =>
         Assert.Contains("3점 미만", AreaRules.ValidateCorners(new[] { new[] { 1.0, 1 }, new[] { 2.0, 2 } }, "PM", 45, 5.4, out _));
 

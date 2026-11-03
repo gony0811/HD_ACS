@@ -184,6 +184,29 @@ public class ProjectIdentityTests : IDisposable
         Assert.Empty(server.Posts);   // 선창 재등록(=기존 영역 삭제)을 시작하지 않음
     }
 
+    /// <summary>경사면·수직벽은 세로 2.9 m 까지 사전 검사를 통과하고, 바닥은 1.44 m 그대로 거부. [2026-11-03 상한 완화]</summary>
+    [Fact]
+    public async Task TallSideWallArea_PassesPrecheck_FloorDoesNot()
+    {
+        var (svc, server) = Build();
+        const string json = """
+            {"version":3,"tankId":"CT1","geometry":{"lengthL":30,"wFloor":10,"thetaLowDeg":45,"hLow":3,"hWall":8,"thetaUpDeg":45,"hUp":2,
+             "levelZ":[0,3.2,6.4,9.6],"originOx":0,"originOy":0},
+             "areas":[
+              {"wallCode":"PU","level":4,"name":"tall-pu","uMin":1,"vMin":0.2,"uMax":2.44,"vMax":2.9,"tasks":[],"corners":[[1,0.2],[2.44,0.2],[2.44,2.9],[1,2.9]]},
+              {"wallCode":"PM","level":3,"name":"over-pm","uMin":1,"vMin":0,"uMax":2,"vMax":3.0,"tasks":[],"corners":[[1,0],[2,0],[2,3.0],[1,3.0]]},
+              {"wallCode":"B","level":1,"name":"tall-b","uMin":1,"vMin":0,"uMax":2,"vMax":2.0,"tasks":[],"corners":[[1,0],[2,0],[2,2.0],[1,2.0]]}]}
+            """;
+        WriteContainer(_path, 3, json);
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => svc.OpenAsync(_path));
+        Assert.Contains("영역 2개", ex.Message);
+        Assert.Contains("'over-pm': 1 × 3 m", ex.Message);
+        Assert.Contains("'tall-b': 1 × 2 m", ex.Message);
+        Assert.DoesNotContain("tall-pu", ex.Message);
+        Assert.Empty(server.Posts);
+    }
+
     [Fact]
     public async Task NewerFormat_IsRejected()
     {

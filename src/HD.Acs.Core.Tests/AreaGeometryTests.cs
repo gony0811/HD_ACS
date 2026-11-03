@@ -16,6 +16,26 @@ public class AreaGeometryTests
         Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.0, 1.441));
     }
 
+    /// <summary>경사면·수직벽은 세로(v)만 2.9 m 까지, 가로(u)와 바닥·천장·격벽은 1.44 m 그대로. [2026-11-03 상한 완화]</summary>
+    [Theory]
+    [InlineData("SL"), InlineData("PL"), InlineData("SM"), InlineData("PM"), InlineData("SU"), InlineData("PU")]
+    public void WithinMaxSize_SideWalls_AllowTallerV(string wall)
+    {
+        Assert.Equal(2.9, AreaGeometry.MaxSpanV(wall));
+        Assert.True(AreaGeometry.WithinMaxSize(0, 0, 1.44, 2.9, wall));
+        Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.44, 2.901, wall));
+        Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.441, 1.0, wall));   // 가로는 그대로
+    }
+
+    [Theory]
+    [InlineData("B"), InlineData("T"), InlineData("F"), InlineData("A"), InlineData(null)]
+    public void WithinMaxSize_FloorCeilingBulkhead_Stay144(string? wall)
+    {
+        Assert.Equal(1.44, AreaGeometry.MaxSpanV(wall));
+        Assert.False(AreaGeometry.WithinMaxSize(0, 0, 1.0, 1.441, wall));
+        Assert.Contains("각 1.44m", AreaGeometry.MaxSizeText(wall));
+    }
+
     /// <summary>standoff 정차점 — 수직벽: 중심 투영에서 내부향 법선 방향으로 standoff만큼 이격. [standoff 정차]</summary>
     [Fact]
     public void StationDrawing_OffsetsAlongHorizontalNormal()

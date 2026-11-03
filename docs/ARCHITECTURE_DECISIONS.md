@@ -246,7 +246,7 @@
 **결정** (2026-10-03): 폐쇄망에서 돌아가는 **로컬 LLM(Ollama)** 을 HD_ACS 서버에 연결하되, LLM은 **변경안(ChangeSet)만** 만든다.
 1. **LLM = 의도 해석기, 계산기 아님** — LLM은 고수준 연산(`gridAreas`·`renameAreas`·`moveAreas`·`setSeamType`·`shiftTasks`·`delete*`·`setScenarioAreas`·`query` 및 직접 연산 `createArea/createTask/updateTask/deleteTask`)을 JSON(Ollama structured output, 스키마 강제)으로만 출력한다. 좌표 전개(격자·층-로컬 v→면-전체 v)·검증은 결정적 C# 코드(`PlanChangeSetEngine`)가 한다. 조회 답의 수치도 서버 집계 값만 쓴다.
 2. **제안 → 미리보기 → 승인 → 적용** — 제안은 DB 무변경(연산별 통과/사유 + 전개도 점선 미리보기). 운영자가 [적용]을 눌러야 반영되며, **전부 또는 전무**(SaveChanges 1회)로 적용한다. 미리보기 이후 계획 데이터가 바뀌었으면 409(지문 비교), 변경안은 1회용·10분 만료.
-3. **검증 정본 공유** — `AreaRules`·`AreaTaskRules`(1.44m·면 범위·층 유도·영역 내부·seamType 5종)를 REST 등록과 같이 쓴다. 매크로는 대상 필터 필수(전체는 `namePattern "*"` 명시), 격자는 기존 영역과 겹치는 칸·격벽 팔각 밖 칸을 건너뛴다.
+3. **검증 정본 공유** — `AreaRules`·`AreaTaskRules`(크기 상한 u 1.44m·v 1.44~2.9m·면 범위·층 유도·영역 내부·seamType 5종)를 REST 등록과 같이 쓴다. 매크로는 대상 필터 필수(전체는 `namePattern "*"` 명시), 격자는 기존 영역과 겹치는 칸·격벽 팔각 밖 칸을 건너뛴다.
 4. **범위 = 계획 데이터만**(ref.inspection_area·area_task·scenario·scenario_area). run·배차·VDA 5050·선창 지오메트리 재등록은 다루지 않는다 — 단일 상대 원칙(ADR-001)·로봇 인터페이스 무변경.
 5. **배치** — Ollama는 `Acs:Llm:BaseUrl` 하나로 지정(같은 서버 `http://127.0.0.1:11434` 또는 같은 폐쇄망의 GPU PC `http://{IP}:11434`, 그 PC는 `OLLAMA_HOST=0.0.0.0:11434`). 호출 주체는 HD_ACS 서버(UI 아님). 기본 비활성(`Enabled=false`), 모델은 오프라인 반입. 감사로그 `PLANNING_ASSISTANT_APPLY`(원문 명령·연산·건수).
 

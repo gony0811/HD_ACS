@@ -226,8 +226,15 @@ public sealed class ProjectService : IProjectService
         }
     }
 
-    /// <summary>AREA 최대 크기 [SPEC v3 §4] — 서버 AreaRules 와 같은 값. 구버전에서 만든 파일이 지금 규칙을 넘는 경우를 열기 전에 잡는다.</summary>
+    /// <summary>AREA 가로(u) 최대 크기 [SPEC v3 §4] — 서버 AreaGeometry.MaxSpanM 과 같은 값. 구버전에서 만든 파일이 지금 규칙을 넘는 경우를 열기 전에 잡는다.</summary>
     public const double MaxAreaSizeM = 1.44;
+
+    /// <summary>경사면·수직벽(SL·PL·SM·PM·SU·PU)의 AREA 세로(v) 최대 크기 — 서버 AreaGeometry.MaxSpanSideVM 과 맞출 것.</summary>
+    public const double MaxAreaSideVM = 2.9;
+
+    /// <summary>면의 AREA 세로(v) 최대 크기 [m] — 서버 AreaGeometry.MaxSpanV 와 같은 규칙(UI.Core 는 도메인 Core 를 참조하지 않아 미러).</summary>
+    public static double MaxAreaSpanV(string? wallCode) =>
+        wallCode is "SL" or "PL" or "SM" or "PM" or "SU" or "PU" ? MaxAreaSideVM : MaxAreaSizeM;
 
     /// <summary>
     /// 영역 형상 사전 검사 — 코너 3점 이상·유한값·u/v 폭 1.44m 이하. 위반 영역을 모두 모아 한 번에 알린다.
@@ -242,12 +249,12 @@ public sealed class ProjectService : IProjectService
             if (a.Corners is { Length: < 3 } || c.Any(p => p.Length < 2 || !double.IsFinite(p[0]) || !double.IsFinite(p[1])))
             { bad.Add($"{a.WallCode} '{a.Name}': 코너가 잘못됨"); continue; }
             double du = c.Max(p => p[0]) - c.Min(p => p[0]), dv = c.Max(p => p[1]) - c.Min(p => p[1]);
-            if (du > MaxAreaSizeM + 1e-9 || dv > MaxAreaSizeM + 1e-9)
+            if (du > MaxAreaSizeM + 1e-9 || dv > MaxAreaSpanV(a.WallCode) + 1e-9)
                 bad.Add($"{a.WallCode} '{a.Name}': {du:0.###} × {dv:0.###} m");
         }
         if (bad.Count > 0)
             throw new InvalidDataException(
-                $"영역 {bad.Count}개가 현재 규칙(AREA 최대 u/v 각 {MaxAreaSizeM}m, 코너 3점 이상)을 벗어나 열 수 없습니다 — DB는 변경하지 않았습니다.\n" +
+                $"영역 {bad.Count}개가 현재 규칙(AREA 최대 u {MaxAreaSizeM}m · v {MaxAreaSizeM}m, 경사면·수직벽은 v {MaxAreaSideVM}m, 코너 3점 이상)을 벗어나 열 수 없습니다 — DB는 변경하지 않았습니다.\n" +
                 string.Join("\n", bad.Take(10)) + (bad.Count > 10 ? $"\n… 외 {bad.Count - 10}개" : "") +
                 "\n\n규칙이 생기기 전에 만든 파일일 수 있습니다. 영역을 1.44m 이하로 나눈 파일을 사용하세요.");
     }

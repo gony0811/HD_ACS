@@ -113,6 +113,18 @@ public class AreaUpdateTests
         Assert.Contains("1.44m", vm.StatusMessage);
     }
 
+    [Fact]
+    public async Task UpdateArea_TooTall_MessageNamesFaceLimit()
+    {
+        var (vm, server) = await BuildAsync();
+        vm.C1V = 0; vm.C2V = 0; vm.C3V = 3.0; vm.C4V = 3.0;   // PM 면, v 폭 3.0m > 2.9m
+
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+
+        Assert.Empty(server.Writes);
+        Assert.Contains("v 2.9m", vm.StatusMessage);
+    }
+
     private static async Task WaitAsync(Func<bool> cond)
     {
         for (int i = 0; i < 200 && !cond(); i++) await Task.Delay(10);

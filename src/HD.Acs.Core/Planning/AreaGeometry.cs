@@ -5,11 +5,30 @@ namespace HD.Acs.Core.Planning;
 /// <summary>영역(Area) 순수 기하 [PHASE2 개정]. 디폴트 정차 pose·경계 판정. 도면 좌표(m).</summary>
 public static class AreaGeometry
 {
+    /// <summary>AREA 가로(u) 최대 범위 — 모든 면 1440 mm(결정 001: 코봇을 좌우로 멀리 뻗으면 J5·J6 부하·진동).</summary>
     public const double MaxSpanM = 1.44;
 
-    /// <summary>벽면 로컬 좌표의 축별 AREA 최대 범위(각 1440 mm).</summary>
-    public static bool WithinMaxSize(double minU, double minV, double maxU, double maxV) =>
-        maxU - minU <= MaxSpanM + 1e-9 && maxV - minV <= MaxSpanM + 1e-9;
+    /// <summary>
+    /// 경사면·수직벽(SL·PL·SM·PM·SU·PU)의 AREA 세로(v) 최대 범위. 이 면들의 v 는 높이 방향이라 결정 001 의
+    /// 가로 제약에 해당하지 않는다(높이는 리프트 + 코봇 도달로 덮음). 2.9 m = 2026-11-03 CT1 면·층별 후보 평가
+    /// (리치 조사·정차점 최적화·영역 리프트 고정)에서 채택한 최대값(PM L3·SU L4). 바닥·천장(v 도 수평)·
+    /// 격벽 F/A(팔각 모서리에 작업이 걸림)는 1440 mm 그대로.
+    /// </summary>
+    public const double MaxSpanSideVM = 2.9;
+
+    /// <summary>면의 AREA 세로(v) 최대 범위 [m]. 면 코드를 모르면 1440 mm.</summary>
+    public static double MaxSpanV(string? wallCode) =>
+        wallCode is "SL" or "PL" or "SM" or "PM" or "SU" or "PU" ? MaxSpanSideVM : MaxSpanM;
+
+    /// <summary>벽면 로컬 좌표의 축별 AREA 최대 범위 — u 1440 mm, v 는 <see cref="MaxSpanV"/>.</summary>
+    public static bool WithinMaxSize(double minU, double minV, double maxU, double maxV, string? wallCode = null) =>
+        maxU - minU <= MaxSpanM + 1e-9 && maxV - minV <= MaxSpanV(wallCode) + 1e-9;
+
+    /// <summary>최대 범위 안내 문구 — 서버 400 사유·UI 사전 검사 공통.</summary>
+    public static string MaxSizeText(string? wallCode) =>
+        MaxSpanV(wallCode) > MaxSpanM
+            ? $"AREA 최대 크기는 벽면 로컬 u 1.44m · v {MaxSpanV(wallCode):0.0#}m입니다(면 {wallCode})."
+            : "AREA 최대 크기는 벽면 로컬 u/v 각 1.44m(1440mm)입니다.";
 
     /// <summary>
     /// standoff 정차점(도면 좌표) — 영역 중심 (uc,vc)의 3D 투영에서 벽 내부향 법선의 **수평 성분** 방향으로

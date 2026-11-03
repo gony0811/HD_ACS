@@ -342,8 +342,8 @@ public sealed class PlanChangeSetEngine
         if (op.Level is not int lv) return [Invalid("gridAreas 에는 level 이 필요합니다.")];
         if (Band(ws, wall, lv) is not var (vLo, vHi)) return [Invalid($"면 {op.WallCode}는 L{lv}에서 도달할 수 없습니다.")];
         double cu = op.CellU ?? 1.4, cv = op.CellV ?? cu, gap = op.Gap ?? 0;
-        if (cu <= MinCell || cv <= MinCell || !AreaGeometry.WithinMaxSize(0, 0, cu, cv))
-            return [Invalid($"격자 칸 크기 {cu:0.###}×{cv:0.###} m — 0.05 초과, 1.44 m 이하여야 합니다.")];
+        if (cu <= MinCell || cv <= MinCell || !AreaGeometry.WithinMaxSize(0, 0, cu, cv, op.WallCode))
+            return [Invalid($"격자 칸 크기 {cu:0.###}×{cv:0.###} m — 0.05 초과, u 1.44 m · v {AreaGeometry.MaxSpanV(op.WallCode):0.0#} m 이하여야 합니다.")];
         if (gap < 0) return [Invalid("gap 은 0 이상이어야 합니다.")];
 
         double u0 = Math.Max(0, op.UFrom ?? 0), u1 = Math.Min(wall.ULen, op.UTo ?? wall.ULen);

@@ -2,6 +2,8 @@
 
 기준 = 위키 "결정 001 검사영역 분할"(2026-09-27 개정):
   - AREA 최대 1440 x 1440 mm(코봇 최대 검사 범위), 층마다 새로 배치, 한 층 범위 안에만 둔다.
+    단 세로(v)는 2026-11-03 평가로 면·층별 상한을 늘렸다(DEFAULT_WIN_V — PM L2·PU L4·SM L3 2.6 m,
+    PM L3·SU L4 2.9 m; 서버 상한 = 경사면·수직벽 v 2.9 m). --uniform 이면 종전 1440 x 1440.
   - TASK 1개 = 인접한 두 top(CENTER 선) 사이 용접선 1칸. 가로·세로 모두.
   - 교차점: CROSS3(T자)·2갈래 교차점에 닿는 TASK는 제거, CROSS4(十자) 교차점은 가로 TASK 1개만
     남겨 seamType=CROSS4 (가로 TASK가 없으면 세로 1개).
@@ -43,7 +45,12 @@ GEOMETRY = dict(lengthL=30.960, wFloor=9.808, thetaLowDeg=45, hLow=3.736, hWall=
                 originOx=0, originOy=0, reachZMin=None, reachZMax=None)   # 높이 도달 제한 없음(리프트)
 MEMBRANE_INSET_M = 0.4125   # 선체선 → 멤브레인 면 법선 거리 (검증용 — 면별 원점 이동량은 도면 외곽선과 위 치수에서 계산)
 
-WIN = 1440.0            # AREA 최대 크기 (mm)
+WIN = 1440.0            # AREA 최대 크기 (mm) — 가로(u)는 항상 이 값
+WIN_V = {}              # 세로(v) 최대 크기 덮어쓰기 (mm) — 키 "PU" 또는 "PU-L4"(층 지정이 우선). --win-v 로 채운다
+# 서버 세로(v) 상한 (mm) — AreaGeometry.MaxSpanV 와 같은 규칙(경사면·수직벽 2900, 그 밖 1440). 바뀌면 함께 맞출 것
+SERVER_MAX_V = {w: 2900.0 for w in ('SL', 'PL', 'SM', 'PM', 'SU', 'PU')}
+# 2026-11-03 CT1 면·층별 후보 평가로 채택한 세로 상한 — 옵션 없이 돌리면 이 값을 쓴다(--win-v 가 덮어씀)
+DEFAULT_WIN_V = {'PM-L2': 2600.0, 'PM-L3': 2900.0, 'PU-L4': 2600.0, 'SM-L3': 2600.0, 'SU-L4': 2900.0}
 PAD = 30.0              # AREA = 작업 범위 + 여유(창 안으로 클리핑)
 PITCH_OK = (360.0, 254.6)
 PITCH_TOL = 0.2
@@ -216,6 +223,11 @@ def clamp_bulkhead_u(u, v):
     return u
 
 
+def win_v(w, level):
+    """면·층의 세로(v) AREA 최대 크기 mm — 층 지정("PU-L4") > 면 지정("PU") > 기본 WIN."""
+    return WIN_V.get(f'{w}-L{level}', WIN_V.get(w, WIN))
+
+
 def z_range(cfg, v1, v2):
     a, b = cfg['z0'] + v1 * cfg['kz'], cfg['z0'] + v2 * cfg['kz']
     return min(a, b), max(a, b)
@@ -245,7 +257,7 @@ def build():
                 vlo, vhi = sorted(((lo - cfg['z0']) / cfg['kz'], (hi - cfg['z0']) / cfg['kz']))
                 vlo, vhi = max(0.0, round(vlo, 4)), min(d['vlen'], round(vhi, 4))
             uw = windows(sorted({0.0, d['ulen'], *d['tu']}), W)
-            vw = windows(sorted({vlo, vhi, *[x for x in d['tv'] if vlo < x < vhi]}), W)
+            vw = windows(sorted({vlo, vhi, *[x for x in d['tv'] if vlo < x < vhi]}), win_v(w, li + 1) / 1000.0)
             cells = defaultdict(list)
             for t in ts:
                 (u1, v1), (u2, v2) = t['p1'], t['p2']
@@ -321,7 +333,9 @@ def validate(areas):
         us, vs = [p[0] for p in c], [p[1] for p in c]
         if any(not (0 <= p[0] <= ul and 0 <= p[1] <= vl) for p in c): err['코너가 면 범위 밖'] += 1
         if max(us) - min(us) < 1e-6 or max(vs) - min(vs) < 1e-6: err['영역 퇴화'] += 1
-        if max(us) - min(us) > 1.44 + 1e-9 or max(vs) - min(vs) > 1.44 + 1e-9: err['1.44m 초과'] += 1
+        if max(us) - min(us) > WIN / 1000 + 1e-9: err['가로 1.44m 초과'] += 1
+        if max(vs) - min(vs) > win_v(a['wallCode'], a['level']) / 1000 + 1e-9: err['세로 상한 초과'] += 1
+        if max(vs) - min(vs) > SERVER_MAX_V.get(a['wallCode'], WIN) / 1000 + 1e-9: err['서버 세로 상한 초과'] += 1
         za, zb = sorted((z0 + min(vs) * kz, z0 + max(vs) * kz))
         hits = [i + 1 for i, (lo, hi) in enumerate(BANDS) if za >= lo - 0.005 and zb <= hi + 0.005]
         if hits != [a['level']]: err['층 유도 불일치'] += 1
@@ -342,7 +356,16 @@ def main():
     ap.add_argument('out', help='출력 .hdacs 경로')
     ap.add_argument('--report', help='분류·제외 보고서 JSON 경로')
     ap.add_argument('--preview', help='전개도 미리보기 PNG 경로 (matplotlib 필요)')
+    ap.add_argument('--win-v', action='append', default=[], metavar='면[-L층]=mm',
+                    help='세로(v) AREA 최대 크기 덮어쓰기, 예: --win-v PU=2600 --win-v SM-L3=2000 (기본 1440, 가로는 항상 1440)')
+    ap.add_argument('--uniform', action='store_true',
+                    help='채택 세로 상한(DEFAULT_WIN_V)을 쓰지 않고 모든 면 1440 x 1440 으로 (2026-11-03 이전 배치)')
     args = ap.parse_args()
+    if not args.uniform:
+        WIN_V.update(DEFAULT_WIN_V)
+    for s in args.win_v:
+        k, v = s.split('=')
+        WIN_V[k.strip().upper()] = float(v)
 
     areas, excluded, stats = build()
     errors = validate(areas)

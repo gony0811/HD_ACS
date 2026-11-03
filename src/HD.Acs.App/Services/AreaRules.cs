@@ -26,8 +26,8 @@ public static class AreaRules
         bbox = AreaGeometry.Bbox(corners);
         if (bbox.MaxU - bbox.MinU < 1e-6 || bbox.MaxV - bbox.MinV < 1e-6)
             return "영역이 퇴화(면적 0)했습니다 — 유효한 사각형 4점을 입력하세요.";
-        if (!AreaGeometry.WithinMaxSize(bbox.MinU, bbox.MinV, bbox.MaxU, bbox.MaxV))
-            return "AREA 최대 크기는 벽면 로컬 u/v 각 1.44m(1440mm)입니다.";
+        if (!AreaGeometry.WithinMaxSize(bbox.MinU, bbox.MinV, bbox.MaxU, bbox.MaxV, wallCode))
+            return AreaGeometry.MaxSizeText(wallCode);
         return null;
     }
 
