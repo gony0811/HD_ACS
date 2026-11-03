@@ -21,6 +21,9 @@ public class ReachSimServiceTests
     private static readonly Guid SlTask = Guid.Parse("5e000000-0000-4000-8000-000000000002");
     private static readonly Guid SmArea = Guid.Parse("5e000000-0000-4000-8000-000000000003");
     private static readonly Guid SmTask = Guid.Parse("5e000000-0000-4000-8000-000000000004");
+    private static readonly Guid TArea = Guid.Parse("5e000000-0000-4000-8000-000000000005");
+    private static readonly Guid TTask1 = Guid.Parse("5e000000-0000-4000-8000-000000000006");
+    private static readonly Guid TTask2 = Guid.Parse("5e000000-0000-4000-8000-000000000007");
 
     private static async Task<ReachSimService> SeedAsync(Dictionary<string, double[]>? startJoints = null)
     {
@@ -53,6 +56,17 @@ public class ReachSimServiceTests
             AreaId = SmArea, TankId = "CT1", WallCode = "SM", Level = 2, Name = "L2-SM-R01",
             Corners = JsonSerializer.Serialize(new[] { new[] { 11.3, vm - 0.6 }, new[] { 12.7, vm - 0.6 }, new[] { 12.7, vm + 0.6 }, new[] { 11.3, vm + 0.6 } }),
             Tasks = { new AreaTaskEntity { TaskId = SmTask, Seq = 1, StartU = 11.8, StartV = vm, EndU = 12.2, EndV = vm } },
+        });
+        // L4 천장 T — 정면 방향(FacingYaw)이 없는 수평면.
+        db.InspectionAreas.Add(new InspectionAreaEntity
+        {
+            AreaId = TArea, TankId = "CT1", WallCode = "T", Level = 4, Name = "L4-T-R01",
+            Corners = JsonSerializer.Serialize(new[] { new[] { 14.4, 1.4 }, new[] { 15.6, 1.4 }, new[] { 15.6, 2.6 }, new[] { 14.4, 2.6 } }),
+            Tasks =
+            {
+                new AreaTaskEntity { TaskId = TTask1, Seq = 1, StartU = 14.7, StartV = 1.8, EndU = 15.3, EndV = 1.8 },
+                new AreaTaskEntity { TaskId = TTask2, Seq = 2, StartU = 14.7, StartV = 2.2, EndU = 15.3, EndV = 2.2 },
+            },
         });
         await db.SaveChangesAsync();
         // 조회는 정차 기본 이격만 쓴다 — 허브(SignalR)는 닿지 않는다.
@@ -157,7 +171,13 @@ public class ReachSimServiceTests
         Assert.Equal(1, sm.Best.Clear);
         Assert.InRange(sm.Current.DistM, 1.19, 1.21);   // 수직벽 기본 1.2 m
 
+        var t = list.Single(o => o.WallCode == "T");
+        Assert.Equal(2, t.Best.Clear);
+        Assert.NotNull(t.Best.StrokeMm);
+        Assert.All(t.Seams, s => Assert.Equal(t.Best.StrokeMm, s.BestStrokeMm));
+
         Assert.Single((await sim.OptimizeAsync("CT1", 1, "SL", null, default))!);
+        Assert.Single((await sim.OptimizeAsync("CT1", 4, "T", null, default))!);
         Assert.Null(await sim.OptimizeAsync("NOPE", null, null, null, default));
     }
     [Fact]

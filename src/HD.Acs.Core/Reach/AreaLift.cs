@@ -29,6 +29,102 @@ public static class AreaLift
         return Choose(strokesMm, table);
     }
 
+    /// <summary>
+    /// 정차 하나(<paramref name="station"/>)에서 영역 공통 리프트 높이를 빠르게 고른다 — 진입 경로 검사 전 판정으로
+    /// 상한(최대 Clear·도달 수)을 먼저 구해 더 나아질 수 없는 리프트 높이는 진입 경로를 풀지 않는다.
+    /// 고른 높이와 그 높이에서의 용접선 판정은 <see cref="Evaluate"/> 의 <c>StrokeMm</c>·<c>Fixed</c> 와 같다.
+    /// </summary>
+    public static (double StrokeMm, IReadOnlyList<ReachSeamSurvey> Seams) EvaluateFixed(
+        ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station,
+        IReadOnlyList<IReadOnlyList<double[]>> seams, double[] wallNormal, IReadOnlyList<double> strokesMm, string? wallCode = null)
+    {
+        if (strokesMm.Count == 0 || seams.Count == 0)
+            return (strokesMm.Count > 0 ? strokesMm[0] : 0,
+                seams.Select(_ => new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0)).ToArray());
+
+        var pre = new (bool Reach, double MinCl, string? Blocker)[seams.Count][];
+        Parallel.For(0, seams.Count, i =>
+        {
+            var row = new (bool Reach, double MinCl, string? Blocker)[strokesMm.Count];
+            var pts = seams[i];
+            for (var k = 0; k < strokesMm.Count; k++)
+            {
+                var h = strokesMm[k];
+                var min = double.PositiveInfinity;
+                var reach = true;
+                string? blocker = null, entryBlocker = null;
+                double[]? seed = null;
+                for (var p = 0; p < pts.Count; p++)
+                {
+                    var r = ReachSimulator.Evaluate(model, planes, station, pts[p], wallNormal, h, withGeometry: false,
+                        wallCode: p == 0 ? wallCode : null, checkEntry: false, seedJoints: seed);
+                    seed = ReachSimulator.ScanSeed(r);
+                    if (!r.Reachable)
+                    {
+                        reach = false;
+                        blocker ??= r.Blocker;
+                        if (r.JudgedStages.All(s => s.Chosen is { PostureOk: true })) entryBlocker ??= r.Blocker;
+                        break;
+                    }
+                    min = Math.Min(min, r.MinClearanceM);
+                }
+                row[k] = (reach, min, entryBlocker ?? blocker);
+            }
+            pre[i] = row;
+        });
+
+        var needEntry = ReachSimulator.StartJoints(model, wallCode) is not null;
+        var ub = Enumerable.Range(0, strokesMm.Count).Select(k => (
+            K: k,
+            Clear: pre.Count(r => r[k].Reach && r[k].MinCl >= 0),
+            Reach: pre.Count(r => r[k].Reach))).ToArray();
+
+        var bestScore = (Clear: -1, Reach: -1);
+        var bestStroke = double.PositiveInfinity;
+        var bestRow = Array.Empty<ReachSeamSurvey>();
+        bool Better(int c, int r, double h) =>
+            c > bestScore.Clear || (c == bestScore.Clear && r > bestScore.Reach)
+            || ((c, r) == bestScore && h < bestStroke);
+
+        foreach (var u in ub.OrderByDescending(x => x.Clear).ThenByDescending(x => x.Reach).ThenBy(x => strokesMm[x.K]))
+        {
+            var h = strokesMm[u.K];
+            if (!Better(u.Clear, u.Reach, h)) continue;
+            int remClear = u.Clear, remReach = u.Reach;
+            var row = new ReachSeamSurvey[seams.Count];
+            var aborted = false;
+            for (var i = 0; i < seams.Count; i++)
+            {
+                var p = pre[i][u.K];
+                if (!p.Reach)
+                {
+                    row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, p.Blocker);
+                    continue;
+                }
+                if (needEntry && seams[i].Count > 0)
+                {
+                    var e = ReachSimulator.Evaluate(model, planes, station, seams[i][0], wallNormal, h, withGeometry: false, wallCode: wallCode);
+                    if (!e.Reachable)
+                    {
+                        row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, e.Blocker ?? p.Blocker);
+                        remReach--;
+                        if (p.MinCl >= 0) remClear--;
+                        if (!Better(remClear, remReach, h)) { aborted = true; break; }
+                        continue;
+                    }
+                }
+                row[i] = new ReachSeamSurvey(p.MinCl >= 0 ? ReachVerdict.Clear : ReachVerdict.Collision, h, p.MinCl, 0);
+            }
+            if (!aborted && Better(remClear, remReach, h))
+            {
+                bestScore = (remClear, remReach);
+                bestStroke = h;
+                bestRow = row;
+            }
+        }
+        return (bestStroke, bestRow);
+    }
+
     /// <summary>높이 × 용접선 판정표(<paramref name="table"/>[용접선][높이])에서 영역 공통 높이를 고른다.</summary>
     public static AreaLiftResult Choose(IReadOnlyList<double> strokesMm, IReadOnlyList<IReadOnlyList<ReachSeamSurvey>> table)
     {

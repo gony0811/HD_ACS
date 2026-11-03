@@ -47,6 +47,7 @@ public sealed record ReachStationOptimumDto(Guid AreaId, string Name, string Wal
 /// <summary>용접선 하나의 지금·찾은 정차 판정(Clear | Collision | Unreachable)과 찾은 정차에서 고른 리프트.</summary>
 public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm);
 
-/// <summary>후보 정차 — 도면 x·y·방향, 영역 중심에서 안쪽 거리·좌측·방향 보정(°), 차체 여유, 판정 개수.</summary>
+/// <summary>후보 정차 — 도면 x·y·방향, 영역 중심에서 안쪽 거리·좌측·방향 보정(°), 차체 여유, 판정 개수, 공통 리프트.</summary>
 public sealed record ReachStationCandidateDto(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
-    double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness);
+    double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
+    double? StrokeMm = null);

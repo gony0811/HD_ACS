@@ -77,4 +77,64 @@ public class StationOptimizerTests
         Assert.Equal(-Math.PI / 2 + Math.PI / 18, st.Yaw, 9);
         Assert.Equal(0.5, st.FloorZ);
     }
+
+    [Fact]
+    public void 정차_최적화는_영역의_모든_용접선에_동일한_리프트_높이를_고른다()
+    {
+        // SM 수직벽 영역 — 높이가 다른 용접선 2개(바닥 위 1.2 m, 1.8 m). 용접선별로는 h=0 과 h=500 을 따로 고르지만,
+        // 정차 최적화는 영역 공통 리프트 높이 하나로 두 용접선이 함께 닿는 정차·높이를 고른다.
+        var sm = Ct1.GenerateWalls().Single(w => w.WallCode == "SM");
+        var vLow = 3.63 + 1.2 - 3.9776;
+        var vHigh = 3.63 + 1.8 - 3.9776;
+        var c = sm.To3D(12, (vLow + vHigh) / 2);
+        var planes = ReachSimulator.PlanesForLevel(
+            Ct1.GenerateWalls().Select(w => new ReachPlane(w.WallCode, w.Pose.Origin, w.Normal)), 3.63, 2);
+        var space = new StationSearchSpace(new[] { c[0], c[1] }, new[] { sm.Normal[0], sm.Normal[1] }, sm.FacingYaw!.Value, 3.63, 1.2);
+        var seams = new IReadOnlyList<double[]>[]
+        {
+            new[] { sm.To3D(11.8, vLow), sm.To3D(12.0, vLow), sm.To3D(12.2, vLow) },
+            new[] { sm.To3D(11.8, vHigh), sm.To3D(12.0, vHigh), sm.To3D(12.2, vHigh) },
+        };
+
+        var r = StationOptimizer.Optimize(ReachRobotModel.Default, planes, space, seams, sm.Normal, Strokes);
+
+        Assert.Equal(2, r.Best.Clear);
+        Assert.NotNull(r.Best.StrokeMm);
+        Assert.All(r.Best.Seams, s => Assert.Equal(r.Best.StrokeMm, s.StrokeMm));
+    }
+
+    [Fact]
+    public void 천장_T_면은_중심_주위_수평_이동과_회전으로_운영_진입_가능한_정차를_찾는다()
+    {
+        // L4(10.53 m) 천장 T 면(z ≈ 13.785 m) — 출발 자세(홈 위치_2)가 있을 때 영역 중심 바로 아래(0,0,0°)에 서면
+        // 머리 위·뒤쪽 용접선이 손목 반전·J1 회전 한계로 막히지만, 옆으로 비켜 서고 방향을 돌리면 같은 리프트로 모두 닿는다.
+        var t = Ct1.GenerateWalls().Single(w => w.WallCode == "T");
+        var planes = ReachSimulator.PlanesForLevel(
+            Ct1.GenerateWalls().Select(w => new ReachPlane(w.WallCode, w.Pose.Origin, w.Normal)), 10.53, 4);
+        var model = ReachRobotModel.Default with
+        {
+            MountYawDeg = 180,
+            ToolZMm = 365,
+            StageStandoffsMm = new[] { 200.0, 300, 10 },
+            StartJointsByWall = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["T"] = new[] { 0.158, 59.456, -140.907, 80.848, 90.048, -179.696 },
+            },
+        };
+        var c = t.To3D(15, 2.0);
+        var space = new StationSearchSpace(new[] { c[0], c[1] }, new[] { t.Pose.U[0], t.Pose.U[1] }, 0, 10.53,
+            0, 0, 0, MinDistM: -1.2, MaxDistM: 1.2, MaxLateralM: 1.2, MaxYawDeg: 180, YawStepDeg: 15);
+        var seams = new IReadOnlyList<double[]>[]
+        {
+            new[] { t.To3D(14.7, 1.8), t.To3D(15.0, 1.8), t.To3D(15.3, 1.8) },
+            new[] { t.To3D(14.7, 2.2), t.To3D(15.0, 2.2), t.To3D(15.3, 2.2) },
+        };
+
+        var r = StationOptimizer.Optimize(model, planes, space, seams, t.Normal, Strokes, wallCode: "T");
+
+        Assert.True(r.Best.Clear > r.Baseline.Clear, $"Baseline={r.Baseline.Clear}, Best={r.Best.Clear}");
+        Assert.Equal(2, r.Best.Clear);
+        Assert.NotNull(r.Best.StrokeMm);
+        Assert.All(r.Best.Seams, s => Assert.Equal(r.Best.StrokeMm, s.StrokeMm));
+    }
 }

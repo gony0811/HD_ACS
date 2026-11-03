@@ -201,7 +201,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     {
         if (value is null) { OptimumDetail = ""; return; }
         var (c, b) = (value.Optimum.Current, value.Optimum.Best);
-        static string Cnt(ReachStationCandidateDto x) => $"간섭 없음 {x.Clear} · 간섭 {x.Collision} · 불가 {x.Unreachable}";
+        static string Cnt(ReachStationCandidateDto x) =>
+            (x.StrokeMm is { } h ? $"리프트 {h:0} mm · " : "") + $"간섭 없음 {x.Clear} · 간섭 {x.Collision} · 불가 {x.Unreachable}";
         OptimumDetail = $"{value.Optimum.Name}: 지금 — 중심에서 안쪽 {c.DistM:0.00} m · 좌 {c.LateralM:+0.00;-0.00} m · 방향 {c.YawDeg:+0;-0}° · " +
                         $"차체 여유 {c.BodyClearanceM * 1000:0} mm · {Cnt(c)}\n" +
                         (value.Improved || value.Applied
@@ -518,7 +519,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (list is null) { OptimizeSummary = ""; return; }
         foreach (var o in list) Optima.Add(Row(o));
         int cur = list.Sum(o => o.Current.Clear), best = list.Sum(o => o.Best.Clear), n = list.Sum(o => o.Current.Clear + o.Current.Collision + o.Current.Unreachable);
-        OptimizeSummary = $"간섭 없이 도달 {cur} → {best} / {n} · 옮길 영역 {Optima.Count(r => r.Improved)}개 (바닥·천장은 대상 아님)";
+        OptimizeSummary = $"간섭 없이 도달 {cur} → {best} / {n} · 옮길 영역 {Optima.Count(r => r.Improved)}개";
         SelectedOptimum = Optima.FirstOrDefault(r => r.Improved);
     }
 
@@ -553,7 +554,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         _suppress = true;
         OffsetForwardMm = Math.Round((dx * Math.Cos(c.Theta) + dy * Math.Sin(c.Theta)) * 1000);
         OffsetLeftMm = Math.Round((-dx * Math.Sin(c.Theta) + dy * Math.Cos(c.Theta)) * 1000);
-        StrokeMm = pick?.BestStrokeMm ?? StrokeMm;
+        StrokeMm = b.StrokeMm ?? pick?.BestStrokeMm ?? StrokeMm;
         SolutionIndex = null;
         _suppress = false;
         ViewResetPending = true;

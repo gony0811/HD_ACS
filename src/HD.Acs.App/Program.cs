@@ -221,10 +221,12 @@ static HD.Acs.Core.Reach.ReachBranchRule BranchRuleOf(string? branch) =>
     string.Equals(branch, "clearance", StringComparison.OrdinalIgnoreCase)
         ? HD.Acs.Core.Reach.ReachBranchRule.MaxClearance : HD.Acs.Core.Reach.ReachBranchRule.MaxMargin;
 
-// 정차점 최적화 — 조회 전용(계산만). 적용은 아래 POST 로 영역 정차 덮어쓰기에 쓴다.
+// 정차점 최적화 — 조회 전용(계산만). 적용은 아래 PUT 으로 영역 정차 덮어쓰기에 쓴다.
+// lift = area(기본, 영역 공통 리프트) | seam(용접선별 리프트).
 app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
-    async (string tankId, int? level, string? wallCode, Guid? areaId, string? branch, ReachSimService sim, CancellationToken ct) =>
-        await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct, BranchRuleOf(branch)) is { } r
+    async (string tankId, int? level, string? wallCode, Guid? areaId, string? branch, string? lift, ReachSimService sim, CancellationToken ct) =>
+        lift is { Length: > 0 } && lift is not ("area" or "seam") ? Results.BadRequest(new { error = "lift 는 area 또는 seam 만 지원" })
+        : await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct, BranchRuleOf(branch), lift != "seam") is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
