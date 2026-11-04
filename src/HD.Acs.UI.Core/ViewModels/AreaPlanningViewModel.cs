@@ -330,7 +330,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         return local.Select(p => new[] { p[0], p[1] + off }).ToArray();
     }
 
-    private bool CanUpdateArea() => SelectedArea is not null;
+    // 분리 묶음을 담는 중에는 폼(이름·P1~P4)이 새 영역용이라, 선택된 기존 영역에 덮어쓰지 않도록 수정을 막는다.
+    private bool CanUpdateArea() => SelectedArea is not null && SplitTasks.Count == 0;
 
     /// <summary>
     /// 선택 영역 수정 — 삭제→재등록과 달리 **areaId와 소속 작업(taskId)이 유지**된다 [SAIGE v2.6 §2.5].
@@ -696,6 +697,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         OnPropertyChanged(nameof(HasSplitTasks));
         OnPropertyChanged(nameof(SplitSummaryText));
         SplitTasksToNewAreaCommand.NotifyCanExecuteChanged();
+        UpdateAreaCommand.NotifyCanExecuteChanged();
         Project();
     }
 

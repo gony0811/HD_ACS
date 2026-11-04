@@ -53,6 +53,27 @@ public static class AreaRules
              .Select(t => t.Seq).OrderBy(s => s).ToList();
 
     /// <summary>
+    /// 영역 안 작업을 "라인 순"으로 정렬 — tools/renumber_area_tasks_line_order.sql·생성 도구와 같은 규칙(2026-10-30).
+    /// 가로(start_v=end_v) 먼저 라인(v) → 진행(u), 그다음 세로(start_u=end_u) 라인(u) → 진행(v),
+    /// 축에 평행하지 않은 작업은 맨 뒤. 같은 키는 입력 순서를 유지한다(안정 정렬).
+    /// </summary>
+    public static IReadOnlyList<AreaTaskEntity> OrderByLine(IEnumerable<AreaTaskEntity> tasks) =>
+        tasks.OrderBy(t => t.StartV == t.EndV ? 0 : t.StartU == t.EndU ? 1 : 2)
+             .ThenBy(t => t.StartV == t.EndV ? Math.Min(t.StartV, t.EndV) : t.StartU == t.EndU ? Math.Min(t.StartU, t.EndU) : 0)
+             .ThenBy(t => t.StartV == t.EndV ? Math.Min(t.StartU, t.EndU) : t.StartU == t.EndU ? Math.Min(t.StartV, t.EndV) : 0)
+             .ToList();
+
+    /// <summary>
+    /// 순번이 바뀐 작업의 이름 — 도구 형식(H01·V03 …)만 새 순번으로 바꾸고 운영자가 붙인 이름은 그대로 둔다(SQL 도구와 같은 규칙).
+    /// </summary>
+    public static string? RenameForSeq(AreaTaskEntity t, int newSeq)
+    {
+        if (t.Name is null || !System.Text.RegularExpressions.Regex.IsMatch(t.Name, "^[HV][0-9]{2,}$")) return t.Name;
+        char? dir = t.StartV == t.EndV ? 'H' : t.StartU == t.EndU ? 'V' : null;
+        return dir is { } d ? $"{d}{newSeq:00}" : t.Name;
+    }
+
+    /// <summary>
     /// 선택된 작업들의 모든 점(시작·끝·교차 가지)을 감싸는 사각형 4점 코너(면-전체 v)를 자동 산출한다.
     /// 작업들이 속한 층의 도달 가능 v 밴드 안으로 여백을 클램핑해 층 유도(<see cref="DeriveLevel"/>)가 깨지지 않게 한다.
     /// </summary>

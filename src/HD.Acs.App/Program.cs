@@ -541,10 +541,13 @@ app.MapPost("/api/areas/split-tasks", async (SplitTasksToAreaRequest req, AcsDbC
         SortOrder = req.SortOrder ?? (maxSort + 1), CreatedBy = req.UserId,
     };
     db.InspectionAreas.Add(newArea);
-    for (int i = 0; i < orderedTasks.Count; i++)
+    // 순번은 담은 순서가 아니라 "라인 순"(코봇이 라인을 번갈아 오가지 않게) — AreaRules.OrderByLine
+    var lineOrdered = AreaRules.OrderByLine(orderedTasks);
+    for (int i = 0; i < lineOrdered.Count; i++)
     {
-        orderedTasks[i].AreaId = newArea.AreaId;
-        orderedTasks[i].Seq = i + 1;
+        lineOrdered[i].AreaId = newArea.AreaId;
+        lineOrdered[i].Name = AreaRules.RenameForSeq(lineOrdered[i], i + 1);
+        lineOrdered[i].Seq = i + 1;
     }
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {

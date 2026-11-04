@@ -76,6 +76,26 @@ public class AreaRulesTests
     }
 
     [Fact]
+    public void OrderByLine_HorizontalByLineThenU_ThenVerticalByLineThenV_ObliqueLast()
+    {
+        // 담은 순서는 뒤섞여 있다 — 세로 u 6.30 라인과 5.94 라인이 번갈아, 가로·사선이 중간에
+        var v630a = new AreaTaskEntity { Name = "V03", StartU = 6.30, StartV = 0.5, EndU = 6.30, EndV = 0.8 };
+        var oblique = new AreaTaskEntity { Name = "사선", StartU = 1.0, StartV = 1.0, EndU = 1.2, EndV = 1.3 };
+        var v594b = new AreaTaskEntity { Name = "V04", StartU = 5.94, StartV = 0.8, EndU = 5.94, EndV = 0.5 };   // 역방향도 min 기준
+        var hHigh = new AreaTaskEntity { Name = "H07", StartU = 5.0, StartV = 0.9, EndU = 5.5, EndV = 0.9 };
+        var v594a = new AreaTaskEntity { Name = "V05", StartU = 5.94, StartV = 0.2, EndU = 5.94, EndV = 0.4 };
+        var hLowRight = new AreaTaskEntity { Name = "내 이름", StartU = 6.0, StartV = 0.1, EndU = 6.4, EndV = 0.1 };
+        var hLowLeft = new AreaTaskEntity { Name = "H09", StartU = 5.5, StartV = 0.1, EndU = 5.0, EndV = 0.1 };
+        var v630b = new AreaTaskEntity { Name = "V10", StartU = 6.30, StartV = 0.1, EndU = 6.30, EndV = 0.3 };
+
+        var ordered = AreaRules.OrderByLine(new[] { v630a, oblique, v594b, hHigh, v594a, hLowRight, hLowLeft, v630b });
+
+        Assert.Equal(new[] { hLowLeft, hLowRight, hHigh, v594a, v594b, v630b, v630a, oblique }, ordered);
+        Assert.Equal(new[] { "H01", "내 이름", "H03", "V04", "V05", "V06", "V07", "사선" },
+            ordered.Select((t, i) => AreaRules.RenameForSeq(t, i + 1)));
+    }
+
+    [Fact]
     public void AutoCornersForTasks_EnclosesTasks_AndPassesValidationAndLevelDerivation()
     {
         var g = new TankGeometryEntity

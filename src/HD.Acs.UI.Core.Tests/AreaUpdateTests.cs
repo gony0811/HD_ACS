@@ -132,9 +132,13 @@ public class AreaUpdateTests
         var t1 = new AreaTaskDto(Guid.Parse("11111111-1111-4111-8111-111111111111"), 1, null, "LINE_I", 3.2, 3.0 - VOff, 3.6, 3.0 - VOff, "R0", "");
         var t2 = new AreaTaskDto(Guid.Parse("22222222-2222-4222-8222-222222222222"), 2, null, "LINE_I", 3.3, 3.0 - VOff, 3.8, 3.5 - VOff, "R0", "");
 
+        Assert.True(vm.UpdateAreaCommand.CanExecute(null));
+
         // 1번째 작업 추가 → P1~P4 자동 맞춤 + 새 영역 이름 추천
         vm.AddTaskToSplitCommand.Execute(t1);
         Assert.Single(vm.SplitTasks);
+        // 폼이 새 영역용으로 바뀌었으므로 기존 영역 수정은 막힌다(덮어쓰기 방지)
+        Assert.False(vm.UpdateAreaCommand.CanExecute(null));
         Assert.Equal("PM-L2-01-S1", vm.AreaName);
         Assert.Equal(3.15, vm.C1U, 6);
         Assert.Equal(3.65, vm.C3U, 6);
@@ -172,6 +176,7 @@ public class AreaUpdateTests
 
         Assert.Empty(vm.SplitTasks);
         Assert.Contains("taskId 유지", vm.StatusMessage);
+        Assert.Equal(vm.SelectedArea is not null, vm.UpdateAreaCommand.CanExecute(null));   // 묶음이 비면 다시 수정 가능
     }
 
     private static async Task WaitAsync(Func<bool> cond)
