@@ -74,4 +74,35 @@ public class AreaRulesTests
         Assert.Null(AreaRules.DeriveLevel(g, wall, 0.5, 3.0, out var reason)); // z 2.4~4.9 → 층 경계 걸침
         Assert.NotNull(reason);
     }
+
+    [Fact]
+    public void AutoCornersForTasks_EnclosesTasks_AndPassesValidationAndLevelDerivation()
+    {
+        var g = new TankGeometryEntity
+        {
+            TankId = "CT1", LengthL = 30, WFloor = 10, ThetaLow = Math.PI / 4, HLow = 1.9, HWall = 8.2, ThetaUp = Math.PI / 4, HUp = 2.9,
+            LevelZ = "[0,3.2,6.4,9.6]", OriginOx = 0, OriginOy = 0,
+        };
+        var wall = new WallEntity
+        {
+            TankId = "CT1", WallCode = "PM", Origin = "[0,6,1.9]", VAxis = "[0,0,1]",
+            ULen = 45, VLen = 5.4,
+        };
+        // 수평 단일 용접선 (v=3.0 동일) + 인접 용접선 1개
+        var tasks = new[]
+        {
+            new AreaTaskEntity { Seq = 1, StartU = 3.2, StartV = 3.0, EndU = 3.8, EndV = 3.0 },
+            new AreaTaskEntity { Seq = 2, StartU = 3.3, StartV = 3.0, EndU = 3.7, EndV = 3.4 },
+        };
+
+        var corners = AreaRules.AutoCornersForTasks(tasks, wall, g, targetLevel: 2);
+
+        Assert.Null(AreaRules.ValidateCorners(corners, wall.WallCode, wall.ULen, wall.VLen, out var bb));
+        Assert.Empty(AreaRules.TasksOutside(corners, tasks));
+        Assert.Equal(2, AreaRules.DeriveLevel(g, wall, bb.MinV, bb.MaxV, out _));
+        Assert.Equal(3.15, bb.MinU, 6);
+        Assert.Equal(3.85, bb.MaxU, 6);
+        Assert.Equal(2.95, bb.MinV, 6);
+        Assert.Equal(3.45, bb.MaxV, 6);
+    }
 }

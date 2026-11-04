@@ -95,6 +95,45 @@ public static class AreaGeometry
         return (minU, minV, maxU, maxV);
     }
 
+    /// <summary>
+    /// 용접선 점 목록(시작·끝·교차 가지)을 감싸는 축정렬 사각형 4점 코너 [[minU,minV],[maxU,minV],[maxU,maxV],[minU,maxV]] 생성.
+    /// 여백(<paramref name="padM"/>, 기본 50mm)을 양쪽에 두되 AREA 최대 크기(<see cref="MaxSpanM"/>·<see cref="MaxSpanV"/>)와
+    /// 허용 범위([uLo,uHi]×[vLo,vHi])를 넘지 않게 자른다. 수평·수직 단일 선분도 면적이 0이 되지 않는다.
+    /// </summary>
+    public static double[][] BoundingCornersFromPoints(
+        IReadOnlyList<double[]> points, string? wallCode,
+        double uLo, double vLo, double uHi, double vHi, double padM = 0.05)
+    {
+        var (rawMinU, rawMinV, rawMaxU, rawMaxV) = Bbox(points);
+        var (minU, maxU) = ExpandAxis(rawMinU, rawMaxU, uLo, uHi, MaxSpanM, padM);
+        var (minV, maxV) = ExpandAxis(rawMinV, rawMaxV, vLo, vHi, MaxSpanV(wallCode), padM);
+        return new[]
+        {
+            new[] { minU, minV },
+            new[] { maxU, minV },
+            new[] { maxU, maxV },
+            new[] { minU, maxV },
+        };
+
+        static (double Min, double Max) ExpandAxis(double rawMin, double rawMax, double lo, double hi, double maxSpan, double pad)
+        {
+            var span = rawMax - rawMin;
+            if (span >= maxSpan) return (rawMin, rawMax);
+            var half = Math.Min(pad, (maxSpan - span) / 2.0);
+            var min = Math.Max(lo, rawMin - half);
+            var max = Math.Min(hi, rawMax + half);
+            if (max - min < Math.Min(0.02, Math.Max(0, hi - lo)))
+            {
+                var want = Math.Min(Math.Max(pad, 0.02), Math.Min(maxSpan, Math.Max(0, hi - lo)));
+                if (min - lo < hi - max) max = Math.Min(hi, min + want);
+                else min = Math.Max(lo, max - want);
+            }
+            min = Math.Min(rawMin, Math.Round(min, 4));
+            max = Math.Max(rawMax, Math.Round(max, 4));
+            return (min, max);
+        }
+    }
+
     /// <summary>다각형 정점 평균(코너 centroid) — 영역 중심(정차 기준).</summary>
     public static (double U, double V) Centroid(IReadOnlyList<double[]> poly)
     {

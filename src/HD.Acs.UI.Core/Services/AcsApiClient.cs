@@ -423,6 +423,22 @@ public sealed class AcsApiClient : IAcsApiClient
         return r?.Level ?? 0;
     }
 
+    public async Task<(Guid AreaId, int Level, int MovedCount)> SplitTasksToNewAreaAsync(
+        string tankId, string wallCode, string name, IReadOnlyList<Guid> taskIds, double[][]? corners,
+        double? stationX, double? stationY, double? stationTheta, string userId,
+        double? stationStandoffM = null, double? stationMaxBackwardMm = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/areas/split-tasks", new
+        {
+            TankId = tankId, WallCode = wallCode, Name = name, TaskIds = taskIds, Corners = corners,
+            StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
+            StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm
+        }, ct);
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var r = await resp.Content.ReadFromJsonAsync<SplitTasksResult>(ct);
+        return (r?.AreaId ?? Guid.Empty, r?.Level ?? 0, r?.MovedCount ?? 0);
+    }
+
     public async Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default)
     {
         var url = $"/api/internal/areas?tankId={Uri.EscapeDataString(tankId)}"
@@ -571,6 +587,7 @@ public sealed class AcsApiClient : IAcsApiClient
     private sealed record ReleaseResult(bool Released);
     private sealed record ErrorBody(string? Error);
     private sealed record IdResult(Guid ScenarioId, Guid SeamId, Guid AreaId, int Level);
+    private sealed record SplitTasksResult(Guid AreaId, int Level, int MovedCount);
     private sealed record AreaTaskResult(Guid TaskId, int Seq);
     private sealed record GenerateResult(int Stations, int Tasks);
     private sealed record GeometryResult(int WallsGenerated);

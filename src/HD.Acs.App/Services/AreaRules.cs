@@ -51,4 +51,38 @@ public static class AreaRules
     public static IReadOnlyList<int> TasksOutside(IReadOnlyList<double[]> poly, IEnumerable<AreaTaskEntity> tasks) =>
         tasks.Where(t => !AreaGeometry.PointInPolygon(t.StartU, t.StartV, poly) || !AreaGeometry.PointInPolygon(t.EndU, t.EndV, poly))
              .Select(t => t.Seq).OrderBy(s => s).ToList();
+
+    /// <summary>
+    /// 선택된 작업들의 모든 점(시작·끝·교차 가지)을 감싸는 사각형 4점 코너(면-전체 v)를 자동 산출한다.
+    /// 작업들이 속한 층의 도달 가능 v 밴드 안으로 여백을 클램핑해 층 유도(<see cref="DeriveLevel"/>)가 깨지지 않게 한다.
+    /// </summary>
+    public static double[][] AutoCornersForTasks(IReadOnlyList<AreaTaskEntity> tasks, WallEntity wall, TankGeometryEntity g, int? targetLevel = null)
+    {
+        var pts = new List<double[]>(tasks.Count * 2);
+        foreach (var t in tasks)
+        {
+            pts.Add(new[] { t.StartU, t.StartV });
+            pts.Add(new[] { t.EndU, t.EndV });
+            if (!string.IsNullOrWhiteSpace(t.Points) && JsonSerializer.Deserialize<double[][]>(t.Points) is { } arms)
+                foreach (var p in arms.Where(p => p is { Length: >= 2 }))
+                    pts.Add(new[] { p[0], p[1] });
+        }
+
+        double vLo = 0, vHi = wall.VLen;
+        var geom = new TankGeometry(
+            g.LengthL, g.WFloor, g.ThetaLow, g.HLow, g.HWall, g.ThetaUp, g.HUp,
+            JsonSerializer.Deserialize<double[]>(g.LevelZ) ?? Array.Empty<double>(),
+            g.OriginOx, g.OriginOy, g.ReachZMin, g.ReachZMax);
+        var origin = JsonSerializer.Deserialize<double[]>(wall.Origin)!;
+        var vAxis = JsonSerializer.Deserialize<double[]>(wall.VAxis)!;
+        var (_, rawMinV, _, rawMaxV) = AreaGeometry.Bbox(pts);
+        var lv = targetLevel ?? DeriveLevel(g, wall, rawMinV, rawMaxV, out _);
+        if (lv is int level && geom.LevelBandList().FirstOrDefault(b => b.Level == level) is { } band
+            && LevelBands.ReachableVBand(origin[2], vAxis[2], wall.VLen, band) is { } vb)
+        {
+            vLo = Math.Min(rawMinV, vb.VLo);
+            vHi = Math.Max(rawMaxV, vb.VHi);
+        }
+        return AreaGeometry.BoundingCornersFromPoints(pts, wall.WallCode, 0, vLo, wall.ULen, vHi);
+    }
 }

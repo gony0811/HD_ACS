@@ -100,6 +100,12 @@ public interface IAcsApiClient
     Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
         double? stationMaxBackwardMm = null, CancellationToken ct = default);
+    /// <summary>선택 작업들을 묶어 새 영역으로 분리·이동(taskId 유지). corners 미지정 시 서버가 작업 외접 사각형을 자동 생성.</summary>
+    Task<(Guid AreaId, int Level, int MovedCount)> SplitTasksToNewAreaAsync(
+        string tankId, string wallCode, string name, IReadOnlyList<Guid> taskIds, double[][]? corners,
+        double? stationX, double? stationY, double? stationTheta, string userId,
+        double? stationStandoffM = null, double? stationMaxBackwardMm = null, CancellationToken ct = default) =>
+        Task.FromResult((Guid.Empty, 0, 0));
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,

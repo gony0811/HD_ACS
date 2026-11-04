@@ -12,6 +12,13 @@ namespace HD.Acs.UI.ViewModels;
 
 // 캔버스 렌더 레코드(AreaPoly/TaskSeg/StationMarker/LevelOption)는 PlotShapes.cs — TankViewModel과 공유.
 
+/// <summary>새 영역으로 묶어 분리·이동할 작업 항목(층-로컬 v). taskId(SAIGE 영구 식별자)를 유지한 채 소속 영역만 옮긴다.</summary>
+public sealed record SplitTaskItem(Guid TaskId, Guid SourceAreaId, string SourceAreaName, int Seq,
+    string SeamType, string TypeLabel, double StartU, double StartV, double EndU, double EndV, double[][]? Points = null)
+{
+    public string Label => $"{SourceAreaName} #{Seq} [{TypeLabel}] ({StartU:0.00},{StartV:0.00})–({EndU:0.00},{EndV:0.00})";
+}
+
 /// <summary>
 /// 선창 3D 정의(§2/§3) + 영역·검사 작업 (u,v) 등록(§4) [SPEC v3].
 /// 파라미터 등록 → 면 자동생성 → 면 선택 → (u,v) 영역/작업 등록.
@@ -52,6 +59,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     public ObservableCollection<AreaDto> Areas { get; } = new();              // 그리드용 — 선택 층, 층-로컬 v
     private readonly List<AreaDto> _allAreas = new();                          // 전개도용 — 그 면 모든 층, 면-전체 v
     public ObservableCollection<AreaTaskDto> AreaTasks { get; } = new();
+    public ObservableCollection<SplitTaskItem> SplitTasks { get; } = new();    // 묶어서 새 영역으로 분리·이동할 작업 목록(층-로컬 v)
     public ObservableCollection<AreaPoly> AreaBoxes { get; } = new();          // 선택 층 영역(활성·녹색) — 4점 폴리곤
     public ObservableCollection<AreaPoly> InactiveAreaBoxes { get; } = new();  // 타 층 영역(회색·비활성)
     public ObservableCollection<AreaPoly> DraftAreas { get; } = new();          // 입력 중 영역 미리보기(점선)
@@ -471,6 +479,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();
         TestSeamStartCommand.NotifyCanExecuteChanged();
+        AddTaskToSplitCommand.NotifyCanExecuteChanged();
         // 작업 재선택 = 진행 중 교차 그리기 버퍼 비움(섞임 방지)
         CrossDrawShape = null; CrossStep = 0; CrossStepText = "";
         _crossCenter = null; _crossArms.Clear(); _crossPointsForRegister = null; CrossPreview.Clear();
@@ -494,8 +503,200 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private async Task DeleteTaskAsync(AreaTaskDto? task)
     {
         if (task is null) return;
-        try { await _api.DeleteAreaTaskAsync(task.TaskId); StatusMessage = "작업 삭제됨."; await LoadTasksAndProjectAsync(); await RefreshAreasAsync(); }
+        try
+        {
+            await _api.DeleteAreaTaskAsync(task.TaskId);
+            if (SplitTasks.FirstOrDefault(x => x.TaskId == task.TaskId) is { } s) RemoveTaskFromSplit(s);
+            StatusMessage = "작업 삭제됨.";
+            await LoadTasksAndProjectAsync();
+            await RefreshAreasAsync();
+        }
         catch (Exception ex) { StatusMessage = $"작업 삭제 실패: {ex.Message}"; }
+    }
+
+    // ── 선택 작업들을 묶어 새 영역으로 분리·이동 (사각형 자동 생성 · taskId 유지) ──
+
+    public bool HasSplitTasks => SplitTasks.Count > 0;
+
+    public string SplitSummaryText => SplitTasks.Count == 0
+        ? "작업 목록에서 [분리 담기]를 누르면 선택된 작업들을 포함하도록 영역 사각형(P1~P4)이 자동 생성됩니다."
+        : $"분리할 작업 {SplitTasks.Count}건 담김 — 영역 사각형(P1~P4) 자동 맞춤 완료 (기존 영역에서 빼고 새 영역으로 이동 · taskId 유지)";
+
+    private bool CanAddTaskToSplit(AreaTaskDto? task) => (task ?? SelectedTask) is not null && SelectedArea is not null;
+
+    /// <summary>
+    /// 작업을 분리 묶음에 추가하고, 묶인 모든 작업(시작·끝·교차 가지)을 감싸도록 영역 사각형 P1~P4를 자동 생성한다.
+    /// 첫 작업을 담을 때 새 영역 이름(예: 기존영역명-S1)도 자동으로 제안한다.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanAddTaskToSplit))]
+    private void AddTaskToSplit(AreaTaskDto? task = null)
+    {
+        var t = task ?? SelectedTask;
+        if (t is null || SelectedArea is not { } area) return;
+        if (SplitTasks.Any(x => x.TaskId == t.TaskId))
+        {
+            StatusMessage = $"이미 분리 묶음에 담긴 작업입니다: {area.Name} #{t.Seq}";
+            return;
+        }
+        bool wasEmpty = SplitTasks.Count == 0;
+        SplitTasks.Add(new SplitTaskItem(t.TaskId, area.AreaId, area.Name, t.Seq,
+            t.SeamType, t.TypeLabel, t.StartU, t.StartV, t.EndU, t.EndV, t.Points));
+        if (wasEmpty) StationOverride = false;
+        if (wasEmpty || Areas.Any(a => a.Name == AreaName))
+            AreaName = SuggestSplitAreaName(area.Name);
+        FitCornersToSplitTasks();
+        NotifySplitState();
+    }
+
+    [RelayCommand]
+    private void RemoveTaskFromSplit(SplitTaskItem? item)
+    {
+        if (item is null || !SplitTasks.Remove(item)) return;
+        if (SplitTasks.Count > 0) FitCornersToSplitTasks();
+        else if (SelectedArea is { } a) FillAreaForm(a);
+        NotifySplitState();
+    }
+
+    [RelayCommand]
+    private void ClearSplitTasks()
+    {
+        if (SplitTasks.Count == 0) return;
+        SplitTasks.Clear();
+        if (SelectedArea is { } a) FillAreaForm(a);
+        NotifySplitState();
+        StatusMessage = "분리 작업 묶음을 비웠습니다.";
+    }
+
+    /// <summary>
+    /// 현재 분리 묶음(없으면 선택 영역의 작업들 또는 입력 중인 작업)을 감싸도록 영역 사각형 P1~P4를 자동 생성한다.
+    /// </summary>
+    [RelayCommand]
+    private void FitCornersToTasks()
+    {
+        if (SplitTasks.Count > 0)
+        {
+            FitCornersToSplitTasks();
+            return;
+        }
+        if (SelectedWall is not { } w) return;
+        var pts = new List<double[]>();
+        foreach (var t in AreaTasks)
+        {
+            pts.Add(new[] { t.StartU, t.StartV });
+            pts.Add(new[] { t.EndU, t.EndV });
+            if (t.Points is { } arms)
+                foreach (var p in arms.Where(p => p is { Length: >= 2 }))
+                    pts.Add(new[] { p[0], p[1] });
+        }
+        if (pts.Count == 0 || SelectedTask is null)
+        {
+            pts.Add(new[] { StartU, StartV });
+            pts.Add(new[] { EndU, EndV });
+            if (_crossArms.Count > 0)
+                foreach (var arm in _crossArms)
+                    pts.Add(new[] { arm.U, arm.V });
+        }
+        ApplyAutoCornersFromLocalPoints(pts, w, $"작업 {Math.Max(1, AreaTasks.Count)}건");
+    }
+
+    private void FitCornersToSplitTasks()
+    {
+        if (SelectedWall is not { } w || SplitTasks.Count == 0) return;
+        var pts = new List<double[]>(SplitTasks.Count * 2);
+        foreach (var t in SplitTasks)
+        {
+            pts.Add(new[] { t.StartU, t.StartV });
+            pts.Add(new[] { t.EndU, t.EndV });
+            if (t.Points is { } arms)
+                foreach (var p in arms.Where(p => p is { Length: >= 2 }))
+                    pts.Add(new[] { p[0], p[1] });
+        }
+        ApplyAutoCornersFromLocalPoints(pts, w, $"분리 묶음 {SplitTasks.Count}건");
+    }
+
+    private void ApplyAutoCornersFromLocalPoints(IReadOnlyList<double[]> pts, WallDto w, string label)
+    {
+        if (pts.Count == 0) return;
+        var (rawMinU, rawMinV, rawMaxU, rawMaxV) = AreaBboxLocal(pts.ToArray());
+        double maxSpanU = ProjectService.MaxAreaSizeM;
+        double maxSpanV = ProjectService.MaxAreaSpanV(w.WallCode);
+        double hiV = SliceH > 1e-9 ? SliceH : w.VLen;
+        const double padM = 0.05;   // 상하좌우 50mm 기본 여백
+
+        static (double Min, double Max) Expand(double rMin, double rMax, double lo, double hi, double maxSpan)
+        {
+            double span = rMax - rMin;
+            if (span >= maxSpan) return (rMin, rMax);
+            double half = Math.Min(padM, (maxSpan - span) / 2.0);
+            double min = Math.Max(lo, rMin - half);
+            double max = Math.Min(hi, rMax + half);
+            if (max - min < Math.Min(0.02, Math.Max(0, hi - lo)))
+            {
+                double want = Math.Min(padM, Math.Min(maxSpan, Math.Max(0, hi - lo)));
+                if (min - lo < hi - max) max = Math.Min(hi, min + want);
+                else min = Math.Max(lo, max - want);
+            }
+            return (Math.Min(rMin, Math.Round(min, 4)), Math.Max(rMax, Math.Round(max, 4)));
+        }
+
+        var (minU, maxU) = Expand(rawMinU, rawMaxU, 0, w.ULen, maxSpanU);
+        var (minV, maxV) = Expand(rawMinV, rawMaxV, 0, hiV, maxSpanV);
+        SetCorner(0, minU, minV);
+        SetCorner(1, maxU, minV);
+        SetCorner(2, maxU, maxV);
+        SetCorner(3, minU, maxV);
+        Project();
+        NotifyStation();
+
+        double du = maxU - minU, dv = maxV - minV;
+        if (du > maxSpanU + 1e-9 || dv > maxSpanV + 1e-9)
+            StatusMessage = $"⚠ {label} 범위(u {du:0.00}m × v {dv:0.00}m)가 AREA 최대 크기(u {maxSpanU:0.00}m × v {maxSpanV:0.0#}m)를 초과합니다 — 너무 먼 작업을 빼세요.";
+        else
+            StatusMessage = $"{label} 기준 영역 사각형 자동 생성: u [{minU:0.###}, {maxU:0.###}] · v [{minV:0.###}, {maxV:0.###}] m ({du:0.00}×{dv:0.00} m)";
+    }
+
+    private string SuggestSplitAreaName(string baseName)
+    {
+        var existing = _allAreas.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (int i = 1; i < 100; i++)
+        {
+            var candidate = $"{baseName}-S{i}";
+            if (!existing.Contains(candidate)) return candidate;
+        }
+        return $"{baseName}-S";
+    }
+
+    private bool CanSplitTasksToNewArea() => SelectedWall is not null && SplitTasks.Count > 0;
+
+    /// <summary>
+    /// 묶은 작업들을 포함하는 새 영역을 만들고, 기존 영역에서 해당 작업들을 빼서 새 영역으로 이동(taskId 유지).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSplitTasksToNewArea))]
+    private async Task SplitTasksToNewAreaAsync()
+    {
+        if (SelectedWall is not { } w || SplitTasks.Count == 0) return;
+        if (InputCornersFaceGlobal() is not { } corners) return;
+        var taskIds = SplitTasks.Select(t => t.TaskId).ToArray();
+        try
+        {
+            var (areaId, level, moved) = await _api.SplitTasksToNewAreaAsync(
+                TankId, w.WallCode, AreaName, taskIds, corners,
+                StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
+                _operatorId, StationStandoffM, StationMaxBackwardMm);
+            SplitTasks.Clear();
+            NotifySplitState();
+            StatusMessage = $"새 영역 분리 완료: {w.WallCode}/{AreaName} (L{level}) — 작업 {moved}건 이동 (taskId 유지)";
+            await RefreshAreasAsync(select: areaId);
+        }
+        catch (Exception ex) { StatusMessage = $"새 영역 분리 실패: {ex.Message}"; }
+    }
+
+    private void NotifySplitState()
+    {
+        OnPropertyChanged(nameof(HasSplitTasks));
+        OnPropertyChanged(nameof(SplitSummaryText));
+        SplitTasksToNewAreaCommand.NotifyCanExecuteChanged();
+        Project();
     }
 
     /// <summary>영역·작업이 등록/삭제되어 3D 오버레이 갱신이 필요함(등록/삭제가 모두 RefreshAreasAsync 경유).</summary>
@@ -535,7 +736,10 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
 
     partial void OnSelectedWallChanged(WallDto? value)
     {
+        SplitTasks.Clear();
+        NotifySplitState();
         RegisterAreaCommand.NotifyCanExecuteChanged();
+        SplitTasksToNewAreaCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SelectedWallInfo));
         NotifyStation();
         _ = RefreshAreasAsync();
@@ -547,7 +751,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         RegisterTaskCommand.NotifyCanExecuteChanged();
         UpdateAreaCommand.NotifyCanExecuteChanged();
-        if (value is not null && value.AreaId != _formAreaId) FillAreaForm(value);
+        AddTaskToSplitCommand.NotifyCanExecuteChanged();
+        // 분리할 작업을 담는 중에는 다른 영역을 눌러 작업을 추가해도 새 영역 폼(사각형·이름)을 유지한다
+        if (value is not null && value.AreaId != _formAreaId && SplitTasks.Count == 0) FillAreaForm(value);
         _formAreaId = value?.AreaId;
         _ = LoadTasksAndProjectAsync();
     }
@@ -616,6 +822,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         // 선택 영역의 작업(로컬 v → +off) — 교차(CROSS3/4)는 저장된 가지로 T/十자 [SeamGlyph]
         foreach (var t in AreaTasks)
             TaskSegments.Add(SeamGlyph.ToSeg(t, Proj, off, null, BadgeStyle.Full));
+        // 다른 영역에서 담아 둔 분리 대상 작업도 캔버스에 함께 표시
+        foreach (var s in SplitTasks.Where(s => AreaTasks.All(t => t.TaskId != s.TaskId)))
+        {
+            var (sx1, sy1) = Proj(s.StartU, s.StartV + off);
+            var (sx2, sy2) = Proj(s.EndU, s.EndV + off);
+            ProposalSegments.Add(new TaskSeg(sx1, sy1, sx2, sy2, sx2 - 4, sy2 - 4, (sx1 + sx2) / 2, (sy1 + sy2) / 2, $"#{s.Seq}"));
+        }
         // 입력 미리보기(코너, 로컬 v → +off) — 활성 밴드 위치에 표시
         var draft = InputCorners();
         var (dmiu, dmiv, dmau, dmav) = AreaBboxLocal(draft);

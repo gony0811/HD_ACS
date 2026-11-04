@@ -464,6 +464,92 @@ app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, AcsDbContext db) =
     return Results.Ok();
 });
 
+// 선택 작업들을 묶어 새 영역으로 분리·이동 — **taskId(SAIGE productId·attempt 누적 키) 유지** [SAIGE v2.6 §2.5].
+// 코너 미지정(null/빈 배열) 시 선택 작업들을 감싸는 사각형 4점을 서버가 자동 생성한다.
+// 기존 영역에서는 해당 작업들이 빠지고 새 영역 소속(seq 1..N)으로 이동한다.
+app.MapPost("/api/areas/split-tasks", async (SplitTasksToAreaRequest req, AcsDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Name))
+        return Results.BadRequest(new { error = "새 영역 이름은 빈 값일 수 없습니다." });
+    var taskIds = (req.TaskIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToArray();
+    if (taskIds.Length == 0)
+        return Results.BadRequest(new { error = "분리 이동할 작업을 1개 이상 선택하세요." });
+
+    var wall = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == req.TankId && w.WallCode == req.WallCode);
+    if (wall is null)
+        return Results.NotFound(new { error = $"면이 없습니다: {req.TankId}/{req.WallCode}." });
+    var g = await db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == req.TankId);
+    if (g is null)
+        return Results.BadRequest(new { error = $"선창 지오메트리가 없습니다: {req.TankId}." });
+
+    var loaded = await db.AreaTasks.Where(t => taskIds.Contains(t.TaskId)).ToListAsync();
+    if (loaded.Count != taskIds.Length)
+        return Results.NotFound(new { error = "선택한 작업 중 존재하지 않는 작업이 있습니다." });
+    var byId = loaded.ToDictionary(t => t.TaskId);
+    var orderedTasks = taskIds.Select(id => byId[id]).ToList();
+
+    var sourceAreaIds = orderedTasks.Select(t => t.AreaId).Distinct().ToArray();
+    var sourceAreas = await db.InspectionAreas.AsNoTracking()
+        .Where(a => sourceAreaIds.Contains(a.AreaId))
+        .ToDictionaryAsync(a => a.AreaId);
+    if (sourceAreas.Values.Any(a => a.TankId != req.TankId || a.WallCode != req.WallCode))
+        return Results.BadRequest(new { error = $"같은 선창({req.TankId})·같은 면({req.WallCode})의 작업만 묶어서 분리할 수 있습니다." });
+
+    var corners = (req.Corners is { Length: >= 3 }
+        ? req.Corners.Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }).ToList()
+        : AreaRules.AutoCornersForTasks(orderedTasks, wall, g, sourceAreas.Values.First().Level).ToList());
+    if (AreaRules.ValidateCorners(corners, req.WallCode, wall.ULen, wall.VLen, out var bb) is { } cornerViolation)
+        return Results.BadRequest(new { error = cornerViolation });
+    int? derivedLevel = AreaRules.DeriveLevel(g, wall, bb.MinV, bb.MaxV, out var reason);
+    if (derivedLevel is null)
+        return Results.BadRequest(new { error = $"층 유도 실패 (면 {req.WallCode}): {reason}", reason });
+    if (req.StationStandoffM is < 0)
+        return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
+    if (req.StationMaxBackwardMm is < 0)
+        return Results.BadRequest(new { error = "정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다." });
+    if (await db.InspectionAreas.AsNoTracking().AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name))
+        return Results.Conflict(new { error = $"면 {req.WallCode} 내에 영역 '{req.Name}'이(가) 이미 있습니다." });
+
+    var cornersJson = JsonSerializer.Serialize(corners);
+    foreach (var t in orderedTasks)
+    {
+        if (AreaTaskRules.Validate(t.SeamType, cornersJson, t.StartU, t.StartV, t.EndU, t.EndV) is { } tv)
+            return Results.BadRequest(new { error = tv });
+        var pts = string.IsNullOrWhiteSpace(t.Points) ? null : JsonSerializer.Deserialize<double[][]>(t.Points);
+        if (AreaTaskRules.ValidatePoints(t.SeamType, cornersJson, pts) is { } pv)
+            return Results.BadRequest(new { error = pv });
+    }
+
+    int maxSort = await db.InspectionAreas.AsNoTracking()
+        .Where(a => a.TankId == req.TankId && a.WallCode == req.WallCode)
+        .MaxAsync(a => (int?)a.SortOrder) ?? 0;
+    var newArea = new HD.Acs.Data.Entities.InspectionAreaEntity
+    {
+        AreaId = Guid.NewGuid(), TankId = req.TankId, WallCode = req.WallCode, Level = derivedLevel.Value, Name = req.Name,
+        Corners = cornersJson, UMin = bb.MinU, VMin = bb.MinV, UMax = bb.MaxU, VMax = bb.MaxV,
+        StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
+        StationStandoffM = req.StationStandoffM, StationMaxBackwardMm = req.StationMaxBackwardMm,
+        SortOrder = req.SortOrder ?? (maxSort + 1), CreatedBy = req.UserId,
+    };
+    db.InspectionAreas.Add(newArea);
+    for (int i = 0; i < orderedTasks.Count; i++)
+    {
+        orderedTasks[i].AreaId = newArea.AreaId;
+        orderedTasks[i].Seq = i + 1;
+    }
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "", Action = "AREA_SPLIT_TASKS", Target = newArea.AreaId.ToString(),
+        Detail = JsonSerializer.Serialize(new
+        {
+            newArea.Name, newArea.WallCode, newArea.Level, corners, sourceAreaIds, taskIds,
+            newArea.StationX, newArea.StationY, newArea.StationTheta, newArea.StationStandoffM, newArea.StationMaxBackwardMm,
+        }),
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { areaId = newArea.AreaId, level = newArea.Level, movedCount = orderedTasks.Count, corners });
+});
+
 app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTaskRequest req, AcsDbContext db) =>
 {
     var a = await db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(x => x.AreaId == areaId);
@@ -1140,3 +1226,10 @@ public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double 
     double[][]? Points = null);   // (선택) CROSS 가지 끝점 — null=기존 유지, []=지움 [VDA §8.5.1]
 // CROSS 교차 기하 미리보기 요청 [VDA §8.5.1] — 중심·가지(면-전체 v), seamType=CROSS3|CROSS4(계열)
 public sealed record CrossPreviewRequest(string SeamType, double CenterU, double CenterV, double[][] Arms);
+// 선택 작업들을 묶어 새 영역으로 분리·이동(taskId 유지) — Corners 미지정 시 작업 외접 사각형 자동 생성
+public sealed record SplitTasksToAreaRequest(
+    string TankId, string WallCode, string Name, Guid[] TaskIds,
+    double[][]? Corners = null,
+    double? StationX = null, double? StationY = null, double? StationTheta = null,
+    double? StationStandoffM = null, double? StationMaxBackwardMm = null,
+    int? SortOrder = null, string? UserId = null);

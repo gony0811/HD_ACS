@@ -125,6 +125,55 @@ public class AreaUpdateTests
         Assert.Contains("v 2.9m", vm.StatusMessage);
     }
 
+    [Fact]
+    public async Task SplitTasks_AddingTasksAutoExpandsCorners_AndSplitsToNewArea()
+    {
+        var (vm, server) = await BuildAsync();
+        var t1 = new AreaTaskDto(Guid.Parse("11111111-1111-4111-8111-111111111111"), 1, null, "LINE_I", 3.2, 3.0 - VOff, 3.6, 3.0 - VOff, "R0", "");
+        var t2 = new AreaTaskDto(Guid.Parse("22222222-2222-4222-8222-222222222222"), 2, null, "LINE_I", 3.3, 3.0 - VOff, 3.8, 3.5 - VOff, "R0", "");
+
+        // 1번째 작업 추가 → P1~P4 자동 맞춤 + 새 영역 이름 추천
+        vm.AddTaskToSplitCommand.Execute(t1);
+        Assert.Single(vm.SplitTasks);
+        Assert.Equal("PM-L2-01-S1", vm.AreaName);
+        Assert.Equal(3.15, vm.C1U, 6);
+        Assert.Equal(3.65, vm.C3U, 6);
+        Assert.Equal(3.0 - 0.05 - VOff, vm.C1V, 6);
+        Assert.Equal(3.0 + 0.05 - VOff, vm.C3V, 6);
+
+        // 2번째 작업 추가 → P1~P4가 두 작업을 모두 감싸도록 자동 확장
+        vm.AddTaskToSplitCommand.Execute(t2);
+        Assert.Equal(2, vm.SplitTasks.Count);
+        Assert.Equal(3.15, vm.C1U, 6);
+        Assert.Equal(3.85, vm.C3U, 6);
+        Assert.Equal(3.0 - 0.05 - VOff, vm.C1V, 6);
+        Assert.Equal(3.5 + 0.05 - VOff, vm.C3V, 6);
+
+        // 새 영역으로 분리·이동 실행
+        await vm.SplitTasksToNewAreaCommand.ExecuteAsync(null);
+
+        var (method, path, body) = Assert.Single(server.Writes);
+        Assert.Equal(("POST", "/api/areas/split-tasks"), (method, path));
+        Assert.Equal("CT1", body.GetProperty("tankId").GetString());
+        Assert.Equal("PM", body.GetProperty("wallCode").GetString());
+        Assert.Equal("PM-L2-01-S1", body.GetProperty("name").GetString());
+
+        var ids = body.GetProperty("taskIds");
+        Assert.Equal(2, ids.GetArrayLength());
+        Assert.Equal(t1.TaskId, ids[0].GetGuid());
+        Assert.Equal(t2.TaskId, ids[1].GetGuid());
+
+        var c = body.GetProperty("corners");
+        Assert.Equal(4, c.GetArrayLength());
+        Assert.Equal(3.15, c[0][0].GetDouble(), 6);
+        Assert.Equal(2.95, c[0][1].GetDouble(), 6);   // 층-로컬 → 면-전체 v
+        Assert.Equal(3.85, c[2][0].GetDouble(), 6);
+        Assert.Equal(3.55, c[2][1].GetDouble(), 6);
+
+        Assert.Empty(vm.SplitTasks);
+        Assert.Contains("taskId 유지", vm.StatusMessage);
+    }
+
     private static async Task WaitAsync(Func<bool> cond)
     {
         for (int i = 0; i < 200 && !cond(); i++) await Task.Delay(10);
@@ -143,6 +192,8 @@ public class AreaUpdateTests
             {
                 var body = JsonDocument.Parse(await req.Content!.ReadAsStringAsync(ct)).RootElement.Clone();
                 Writes.Add((req.Method.Method, path, body));
+                if (path == "/api/areas/split-tasks")
+                    return Json(new { areaId = Area, level = 2, movedCount = 2, corners = new[] { new[] { 3.15, 2.95 }, new[] { 3.85, 2.95 }, new[] { 3.85, 3.55 }, new[] { 3.15, 3.55 } } });
                 return PutStatus == HttpStatusCode.OK
                     ? Json(new { areaId = Area, level = 2 })
                     : Json(new { error = "기존 작업이 새 영역 밖으로 나갑니다 (seq 3)" }, PutStatus);

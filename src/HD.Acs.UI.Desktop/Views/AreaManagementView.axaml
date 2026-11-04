@@ -43,9 +43,14 @@
                             <TextBlock Text="이름" Classes="lbl" />
                             <TextBox Width="100" Classes="field" Text="{Binding AreaName}" />
                         </StackPanel>
-                        <ToggleButton Content="도면에서 4점 선택" HorizontalAlignment="Left" MinWidth="130" Margin="0,2,0,4"
-                                      IsChecked="{Binding PickMode}"
-                                      ToolTip.Tip="켜면 전개도 커서가 크로스헤어로 바뀌고 클릭으로 P1~P4를 지정합니다. 캔버스 우클릭 또는 ESC로 해제." />
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,4">
+                            <ToggleButton Content="도면에서 4점 선택" HorizontalAlignment="Left" MinWidth="130"
+                                          IsChecked="{Binding PickMode}"
+                                          ToolTip.Tip="켜면 전개도 커서가 크로스헤어로 바뀌고 클릭으로 P1~P4를 지정합니다. 캔버스 우클릭 또는 ESC로 해제." />
+                            <Button Classes="form" Content="작업에 맞춰 사각형 자동 맞춤" Margin="6,0,0,0"
+                                    Command="{Binding FitCornersToTasksCommand}"
+                                    ToolTip.Tip="분리 묶음(없으면 현재 영역 작업·입력 작업)을 감싸도록 P1~P4 사각형을 자동 생성합니다." />
+                        </StackPanel>
                         <TextBlock Text="사각형 4점 (면 로컬 u,v) — 숫자 입력 또는 [도면에서 4점 선택] 후 캔버스를 순서대로 4번 클릭(우클릭=해제)" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,2" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="P1 u,v" Classes="lbl" />
@@ -139,13 +144,45 @@
                         <TextBlock Text="{Binding SeamRotationText, StringFormat='회전: {0}'}" Foreground="{DynamicResource AppGoodBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"
                                    IsVisible="{Binding SeamRotationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <StackPanel Orientation="Horizontal">
-                            <Button Classes="form" Content="작업 등록" MinWidth="110" Command="{Binding RegisterTaskCommand}" />
-                            <Button Classes="form" Content="선택 작업 수정" MinWidth="110" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
+                            <Button Classes="form" Content="작업 등록" MinWidth="100" Command="{Binding RegisterTaskCommand}" />
+                            <Button Classes="form" Content="선택 작업 수정" MinWidth="105" Margin="6,0,0,0" Command="{Binding UpdateTaskCommand}"
                                     ToolTip.Tip="작업 목록에서 선택한 용접선의 좌표·타입을 고칩니다. 삭제 후 재등록과 달리 taskId(검사 이력 키)가 유지됩니다." />
+                            <Button Classes="form" Content="선택 작업 분리 담기" MinWidth="120" Margin="6,0,0,0" Command="{Binding AddTaskToSplitCommand}"
+                                    ToolTip.Tip="선택한 작업을 새 영역 분리 묶음에 담고, 담긴 작업들을 감싸도록 영역 사각형(P1~P4)을 자동 생성합니다." />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <Button Classes="form" Content="코봇 이동 시험(시작점)" MinWidth="150" Command="{Binding TestSeamStartCommand}"
                                     ToolTip.Tip="선택 용접선의 정차점으로 AMR을 보낸 뒤 코봇을 seam 시작점까지만 이동시켜 reach를 확인합니다(촬영 없음). 실행은 HD_AMR. 진행 중 run이 없고 로봇이 해당 층에 있어야 합니다." />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ④ 작업 묶어 새 영역 분리·이동 (사각형 자동 생성 · taskId 유지) -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Text="④ 작업 묶어 새 영역 분리·이동 (사각형 자동 생성)" FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="작업 목록에서 [분리 담기]를 누르면 담긴 작업들을 감싸도록 ②의 영역 사각형(P1~P4)과 정차점이 자동 계산됩니다. 기존 영역에서 빠지고 새 영역으로 이동하며 taskId(SAIGE 이력 키)는 그대로 유지됩니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SplitSummaryText}" FontSize="12" Margin="0,0,0,4" TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding SplitTasks}" IsVisible="{Binding HasSplitTasks}" Margin="0,0,0,6">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,1">
+                                        <Button DockPanel.Dock="Right" Content="제거" Padding="6,1" Margin="6,0,0,0"
+                                                Command="{Binding $parent[ItemsControl].DataContext.RemoveTaskFromSplitCommand}"
+                                                CommandParameter="{Binding}" />
+                                        <TextBlock Text="{Binding Label}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Classes="form" Content="묶은 작업으로 새 영역 분리" MinWidth="165"
+                                    Command="{Binding SplitTasksToNewAreaCommand}"
+                                    ToolTip.Tip="담긴 작업들을 기존 영역에서 빼서 ②의 이름·사각형(P1~P4)·정차점으로 새 영역을 생성해 이동합니다 (taskId 유지)." />
+                            <Button Classes="form" Content="묶음 비우기" MinWidth="90" Margin="6,0,0,0"
+                                    Command="{Binding ClearSplitTasksCommand}"
+                                    IsEnabled="{Binding HasSplitTasks}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -196,9 +233,15 @@
                         <DataGridTemplateColumn Header="" Width="Auto">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
-                                    <Button Content="삭제" Padding="8,1"
-                                            Command="{Binding $parent[DataGrid].DataContext.DeleteTaskCommand}"
-                                            CommandParameter="{Binding}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <Button Content="분리 담기" Padding="8,1"
+                                                Command="{Binding $parent[DataGrid].DataContext.AddTaskToSplitCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="이 작업을 새 영역 분리 묶음에 추가하고 사각형(P1~P4)을 자동 생성합니다." />
+                                        <Button Content="삭제" Padding="8,1"
+                                                Command="{Binding $parent[DataGrid].DataContext.DeleteTaskCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
