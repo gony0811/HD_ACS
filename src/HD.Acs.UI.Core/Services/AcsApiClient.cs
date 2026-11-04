@@ -299,10 +299,10 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<List<ReachStationOptimumDto>>(ct);
     }
 
-    public async Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, CancellationToken ct = default)
+    public async Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, double? stationLiftMm = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/reach-sim/areas/{areaId}/station",
-            new { stationX = x, stationY = y, stationTheta = theta, reason, userId = "operator" }, ct);
+            new { stationX = x, stationY = y, stationTheta = theta, stationLiftMm, reason, userId = "operator" }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);
     }
 

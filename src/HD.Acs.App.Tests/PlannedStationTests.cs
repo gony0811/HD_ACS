@@ -97,4 +97,28 @@ public class PlannedStationTests
 
         Assert.Null(await d.GetPlannedStationsAsync(Guid.NewGuid(), default));
     }
+
+    [Fact]
+    public async Task BuildQueue_IncludesLiftStrokeMm_WithZeroFallbackWhenNull()
+    {
+        var db = NewDb();
+        await ActionCatalogSeed.EnsureAsync(db, NullLogger.Instance);
+        var (scId, f, pm) = await Seed(db, link: false);
+        f.StationLiftMm = 600;   // 정차점 최적화로 리프트 높이 저장된 영역
+        pm.StationLiftMm = null; // 최적화 미적용 영역 → 기본값 0 전송
+        await db.SaveChangesAsync();
+
+        var d = Dispatcher(db);
+        var run = new ScenarioRunEntity { RunId = Guid.NewGuid(), ScenarioId = scId, RobotId = "AMR-01" };
+        db.ScenarioRuns.Add(run);
+        await d.BuildQueueAsync(run, "CT1", default);
+        await db.SaveChangesAsync();
+
+        var items = await db.WorkItems.AsNoTracking().ToDictionaryAsync(w => w.AreaId);
+        using var fDoc = JsonDocument.Parse(items[f.AreaId].Actions!);
+        using var pmDoc = JsonDocument.Parse(items[pm.AreaId].Actions!);
+
+        Assert.Equal(600.0, fDoc.RootElement[0].GetProperty("params").GetProperty("liftStrokeMm").GetDouble());
+        Assert.Equal(0.0, pmDoc.RootElement[0].GetProperty("params").GetProperty("liftStrokeMm").GetDouble());
+    }
 }

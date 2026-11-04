@@ -230,22 +230,25 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
-// 영역 정차 덮어쓰기(x·y·방향) 설정 — 셋 다 null 이면 덮어쓰기 해제(배차 식으로 복귀).
+// 영역 정차 덮어쓰기(x·y·방향·리프트 높이) 설정 — 셋 다 null 이면 덮어쓰기 해제(배차 식으로 복귀).
 app.MapPut("/api/reach-sim/areas/{areaId:guid}/station", async (Guid areaId, SetAreaStationRequest req, AcsDbContext db) =>
 {
     var area = await db.InspectionAreas.FirstOrDefaultAsync(a => a.AreaId == areaId);
     if (area is null) return Results.NotFound(new { error = $"영역 '{areaId}' 없음" });
     if ((req.StationX is null) != (req.StationY is null))
         return Results.BadRequest(new { error = "정차 x·y 는 함께 지정하거나 함께 비워야 합니다." });
-    var old = new { area.StationX, area.StationY, area.StationTheta };
+    if (req.StationLiftMm is < 0 or > 1000)
+        return Results.BadRequest(new { error = "리프트 높이(stationLiftMm)는 0~1000 mm 범위여야 합니다." });
+    var old = new { area.StationX, area.StationY, area.StationTheta, area.StationLiftMm };
     area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
+    area.StationLiftMm = req.StationLiftMm;
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {
         UserId = req.UserId ?? "", Action = "AREA_STATION_SET", Target = areaId.ToString(),
-        Detail = System.Text.Json.JsonSerializer.Serialize(new { old, area.StationX, area.StationY, area.StationTheta, req.Reason }),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new { old, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm, req.Reason }),
     });
     await db.SaveChangesAsync();
-    return Results.Ok(new { areaId, area.StationX, area.StationY, area.StationTheta });
+    return Results.Ok(new { areaId, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm });
 });
 
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
@@ -365,6 +368,8 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
     if (req.StationMaxBackwardMm is < 0)
         return Results.BadRequest(new { error = "정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다." });
+    if (req.StationLiftMm is < 0 or > 1000)
+        return Results.BadRequest(new { error = "리프트 높이(stationLiftMm)는 0~1000 mm 범위여야 합니다." });
     bool dup = await db.InspectionAreas.AsNoTracking()
         .AnyAsync(a => a.TankId == req.TankId && a.WallCode == req.WallCode && a.Name == req.Name);
     if (dup)
@@ -381,6 +386,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         UMin = uMin, VMin = vMin, UMax = uMax, VMax = vMax,
         StationX = req.StationX, StationY = req.StationY, StationTheta = req.StationTheta,
         StationStandoffM = req.StationStandoffM, StationMaxBackwardMm = req.StationMaxBackwardMm,
+        StationLiftMm = req.StationLiftMm,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
     db.InspectionAreas.Add(area);
@@ -414,6 +420,8 @@ app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req
         return Results.BadRequest(new { error = "정차 이격(stationStandoffM)은 0 이상이어야 합니다." });
     if (req.StationMaxBackwardMm is < 0)
         return Results.BadRequest(new { error = "정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다." });
+    if (req.StationLiftMm is < 0 or > 1000)
+        return Results.BadRequest(new { error = "리프트 높이(stationLiftMm)는 0~1000 mm 범위여야 합니다." });
     var outside = AreaRules.TasksOutside(corners, area.Tasks);
     if (outside.Count > 0)
         return Results.BadRequest(new { error = $"기존 작업이 새 영역 밖으로 나갑니다 (seq {string.Join(", ", outside)}) — 작업을 먼저 옮기거나 영역을 넓히세요." });
@@ -429,12 +437,13 @@ app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req
     area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
     area.StationStandoffM = req.StationStandoffM;
     area.StationMaxBackwardMm = req.StationMaxBackwardMm;
+    if (req.StationLiftMm is not null) area.StationLiftMm = req.StationLiftMm;
     if (req.SortOrder is int so) area.SortOrder = so;
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {
         UserId = req.UserId ?? "", Action = "AREA_UPDATE", Target = areaId.ToString(),
         Detail = System.Text.Json.JsonSerializer.Serialize(new
-        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM, area.StationMaxBackwardMm }),
+        { area.Name, area.WallCode, oldLevel, area.Level, corners, area.StationX, area.StationY, area.StationTheta, area.StationStandoffM, area.StationMaxBackwardMm, area.StationLiftMm }),
     });
     await db.SaveChangesAsync();
     return Results.Ok(new { areaId, level = area.Level });
@@ -450,7 +459,7 @@ app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? 
     {
         a.AreaId, a.TankId, a.WallCode, a.Level, a.Name,
         corners = System.Text.Json.JsonSerializer.Deserialize<double[][]>(a.Corners),
-        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM, a.StationMaxBackwardMm, a.SortOrder,
+        a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM, a.StationMaxBackwardMm, a.StationLiftMm, a.SortOrder,
         TaskCount = a.Tasks.Count
     }));
 });
@@ -1190,7 +1199,8 @@ public sealed record UpdateCalibrationPointRequest(double DrawingX, double Drawi
 public sealed record RotateCalibrationRequest(double Deg, string? UserId = null);
 public sealed record GenerateFromSeamsRequest(Guid[]? SeamIds, string? UserId);
 public sealed record CreateScenarioRequest(string Name, string TankId);
-public sealed record SetAreaStationRequest(double? StationX, double? StationY, double? StationTheta, string? UserId, string? Reason);
+public sealed record SetAreaStationRequest(double? StationX, double? StationY, double? StationTheta, string? UserId, string? Reason,
+    double? StationLiftMm = null);
 
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
@@ -1209,12 +1219,14 @@ public sealed record CreateAreaRequest(string TankId, string WallCode, int Level
     double? StationX, double? StationY, double? StationTheta, int? SortOrder, string? UserId,
     double[][]? Corners = null, double? StationStandoffM = null,
     Guid? AreaId = null,    // (선택) 식별자 보존 등록 — .hdacs 재적재용. 미지정=서버 발급
-    double? StationMaxBackwardMm = null);   // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
+    double? StationMaxBackwardMm = null,    // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
+    double? StationLiftMm = null);          // 정차 리프트 높이 [mm, 0~1000] — null=배차 기본 0
 // 영역 수정(PUT) — 이름·코너·정차 전체 교체(정차 null=수동 지정 해제, 이격 null=서버 기본). SortOrder null=유지. 면·areaId 불변.
 public sealed record UpdateAreaRequest(string Name, double[][] Corners,
     double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
     int? SortOrder = null, string? UserId = null,
-    double? StationMaxBackwardMm = null);   // 전체 교체 — null=서버 기본(덮어쓰기 해제)
+    double? StationMaxBackwardMm = null,    // 전체 교체 — null=서버 기본(덮어쓰기 해제)
+    double? StationLiftMm = null);          // 지정 시 갱신, null=기존 리프트 높이 유지
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
     Guid? TaskId = null,    // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급

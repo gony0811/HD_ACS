@@ -42,7 +42,8 @@ public sealed record AreaDoc(
     double[][]? Corners = null,          // 임의 4점 사각형. 구파일(null)=bbox 사각형 폴백
     double? StationStandoffM = null,     // 정차 이격 [m]. 구파일(null)=서버 기본
     Guid? SourceId = null,               // v3: 시나리오-영역 연결 복원용 파일 내부 ID
-    double? StationMaxBackwardMm = null); // 정차 보정 후진 상한 [mm]. 구파일(null)=서버 기본 [VDA §4.4.2 N23]
+    double? StationMaxBackwardMm = null, // 정차 보정 후진 상한 [mm]. 구파일(null)=서버 기본 [VDA §4.4.2 N23]
+    double? StationLiftMm = null);       // 정차 리프트 높이 [mm, 0~1000]. 구파일(null)=배차 기본 0
 
 /// <summary>검사 작업 스냅샷 (벽면-로컬 u,v).</summary>
 public sealed record TaskDoc(

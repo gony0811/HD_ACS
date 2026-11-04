@@ -11,7 +11,8 @@ public sealed record ProjectImportArea(string WallCode, string Name, double[][]?
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
     int? SortOrder, Guid? AreaId, CreateAreaTaskRequest[]? Tasks,
-    double? StationMaxBackwardMm = null);   // 구파일(null)=서버 기본
+    double? StationMaxBackwardMm = null,   // 구파일(null)=서버 기본
+    double? StationLiftMm = null);         // 구파일(null)=배차 기본 0
 
 /// <summary>프로젝트 일괄 가져오기 요청 — 지오메트리(각도 deg) + 영역·작업 전체.</summary>
 public sealed record ProjectImportRequest(CreateTankGeometryRequest Geometry, ProjectImportArea[] Areas, string? UserId);
@@ -85,6 +86,7 @@ public sealed class ProjectImportService
             if (AreaRules.DeriveLevel(gEntity, wall, bb.MinV, bb.MaxV, out var why) is not int level) { Reject($"{at}: 층 유도 실패 — {why}"); continue; }
             if (a.StationStandoffM is < 0) Reject($"{at}: 정차 이격(stationStandoffM)은 0 이상이어야 합니다.");
             if (a.StationMaxBackwardMm is < 0) Reject($"{at}: 정차 보정 후진 상한(stationMaxBackwardMm)은 0 이상이어야 합니다.");
+            if (a.StationLiftMm is < 0 or > 1000) Reject($"{at}: 리프트 높이(stationLiftMm)는 0~1000 mm 범위여야 합니다.");
             if (!names.Add((a.WallCode, a.Name))) Reject($"{at}: 같은 면에 같은 이름의 영역이 둘 이상입니다.");
             if (a.AreaId == Guid.Empty) Reject($"{at}: areaId 는 빈 GUID일 수 없습니다.");
             var areaId = a.AreaId ?? Guid.NewGuid();
@@ -96,7 +98,8 @@ public sealed class ProjectImportService
                 AreaId = areaId, TankId = tankId, WallCode = a.WallCode, Level = level, Name = a.Name,
                 Corners = cornersJson, UMin = bb.MinU, VMin = bb.MinV, UMax = bb.MaxU, VMax = bb.MaxV,
                 StationX = a.StationX, StationY = a.StationY, StationTheta = a.StationTheta,
-                StationStandoffM = a.StationStandoffM, StationMaxBackwardMm = a.StationMaxBackwardMm, SortOrder = a.SortOrder ?? 0, CreatedBy = req.UserId,
+                StationStandoffM = a.StationStandoffM, StationMaxBackwardMm = a.StationMaxBackwardMm,
+                StationLiftMm = a.StationLiftMm, SortOrder = a.SortOrder ?? 0, CreatedBy = req.UserId,
             });
 
             var seqs = new HashSet<int>();

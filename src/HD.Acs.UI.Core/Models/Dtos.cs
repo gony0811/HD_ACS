@@ -274,7 +274,8 @@ public sealed record AreaDto(
     double? StationX, double? StationY, double? StationTheta, int SortOrder, int TaskCount,
     double[][]? Corners = null,    // 임의 4점 사각형 [[u,v]…]. bbox(u/v min·max)와 함께 반환
     double? StationStandoffM = null,    // 정차 이격 [m] — null=서버 설정 기본
-    double? StationMaxBackwardMm = null);   // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
+    double? StationMaxBackwardMm = null,   // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
+    double? StationLiftMm = null);         // 정차 리프트 높이 [mm, 0~1000] — null=배차 기본 0
 
 /// <summary>GET /api/internal/areas/{id}/tasks 항목 — ref.area_task (u,v) [SPEC v3 §4].</summary>
 public sealed record AreaTaskDto(

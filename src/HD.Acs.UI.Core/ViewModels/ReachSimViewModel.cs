@@ -564,15 +564,15 @@ public sealed partial class ReachSimViewModel : ObservableObject
                         + (Math.Abs(b.YawDeg - c.YawDeg) > 1e-6 ? $" (방향 {b.YawDeg - c.YawDeg:+0;-0}° 는 미리보기에 반영 안 됨)" : "") + ".";
     }
 
-    /// <summary>고른 행의 찾은 정차를 영역 정차 덮어쓰기로 저장한다(배차가 이 정차를 쓴다).</summary>
+    /// <summary>고른 행의 찾은 정차(위치·방향·리프트 높이)를 영역 정차 덮어쓰기로 저장한다(배차가 이 정차와 리프트 높이를 쓴다).</summary>
     [RelayCommand]
     private async Task ApplyOptimumAsync()
     {
-        if (SelectedOptimum is not { Improved: true } row) return;
+        if (SelectedOptimum is not { Applied: false } row) return;
         await ApplyRowsAsync(new[] { row });
     }
 
-    /// <summary>옮길 만한 영역(닿는 용접선이 늘어나는 영역) 모두에 찾은 정차를 저장한다.</summary>
+    /// <summary>옮길 만한 영역(닿는 용접선이 늘어나는 영역) 모두에 찾은 정차와 리프트 높이를 저장한다.</summary>
     [RelayCommand]
     private async Task ApplyAllOptimaAsync() => await ApplyRowsAsync(Optima.Where(r => r.Improved && !r.Applied).ToList());
 
@@ -587,12 +587,13 @@ public sealed partial class ReachSimViewModel : ObservableObject
             {
                 var b = r.Optimum.Best;
                 await _api.SetAreaStationAsync(r.Optimum.AreaId, b.X, b.Y, b.Theta,
-                    $"정차점 최적화: 간섭 없이 도달 {r.Optimum.Current.Clear}→{b.Clear}");
+                    $"정차점 최적화: 간섭 없이 도달 {r.Optimum.Current.Clear}→{b.Clear}" + (b.StrokeMm is { } h ? $" (리프트 {h:0}mm)" : ""),
+                    b.StrokeMm);
                 var i = Optima.IndexOf(r);
                 if (i >= 0) Optima[i] = Row(r.Optimum with { Overridden = true }, applied: true) with { Improved = false };
                 done++;
             }
-            StatusMessage = $"정차 덮어쓰기 {done}개 영역 적용 — 다시 조사합니다.";
+            StatusMessage = $"정차·리프트 덮어쓰기 {done}개 영역 적용 — 다시 조사합니다.";
         }
         catch (Exception ex) { StatusMessage = $"정차 적용 실패({done}개 적용 후): {ex.Message}"; }
         finally { IsBusy = false; }
@@ -606,7 +607,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (SelectedArea is not { } a) return;
         try
         {
-            await _api.SetAreaStationAsync(a.Area.AreaId, null, null, null, "정차 덮어쓰기 해제");
+            await _api.SetAreaStationAsync(a.Area.AreaId, null, null, null, "정차 덮어쓰기 해제", null);
             StatusMessage = $"{a.Area.Name} 정차 덮어쓰기 해제 — 다시 조사합니다.";
         }
         catch (Exception ex) { StatusMessage = $"덮어쓰기 해제 실패: {ex.Message}"; return; }

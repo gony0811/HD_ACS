@@ -61,6 +61,7 @@ public static class ActionCatalogSeed
             "workingDistanceMm":   { "type": "number" },
             "anchorGroupId":       { "type": "string" },
             "seqInGroup":          { "type": "integer", "minimum": 1 },
+            "liftStrokeMm":        { "type": "number", "minimum": 0, "maximum": 1000 },
             "taskId":              { "type": "string", "format": "uuid" },
             "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
             "stationAdjust": {

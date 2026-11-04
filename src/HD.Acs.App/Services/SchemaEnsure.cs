@@ -22,6 +22,8 @@ public static class SchemaEnsure
         "ALTER TABLE ref.area_task ADD COLUMN IF NOT EXISTS points jsonb",
         // db/migrations/2026-10-31_area_station_max_backward.sql — 영역별 정차 보정 후진 상한(VDA §4.4.2 N23)
         "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_max_backward_mm double precision",
+        // db/migrations/2026-11-04_area_station_lift_mm.sql — 영역별 정차 리프트 높이(0~1000mm, NULL=배차 기본 0)
+        "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_lift_mm double precision",
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

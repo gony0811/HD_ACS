@@ -29,5 +29,6 @@ public class ActionCatalogSeedTests
         Assert.True(ActionCatalogSeed.SameJson(ActionCatalogSeed.StartWeldInspectionParamSchema, ActionCatalogSeed.StartWeldInspectionParamSchema));
         Assert.Contains("\"taskId\"", ActionCatalogSeed.StartWeldInspectionParamSchema);
         Assert.Contains("\"attempt\"", ActionCatalogSeed.StartWeldInspectionParamSchema);
+        Assert.Contains("\"liftStrokeMm\"", ActionCatalogSeed.StartWeldInspectionParamSchema);
     }
 }

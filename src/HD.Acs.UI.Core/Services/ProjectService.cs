@@ -55,7 +55,7 @@ public sealed class ProjectService : IProjectService
                 t.SectionDxfId, t.ProfileId, t.TaskId, t.Points)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
-                a.StationStandoffM, a.AreaId, a.StationMaxBackwardMm));
+                a.StationStandoffM, a.AreaId, a.StationMaxBackwardMm, a.StationLiftMm));
         }
 
         progress?.Report(new ProjectProgress("캘리브레이션·시나리오 조회", 0, 0));
@@ -142,7 +142,7 @@ public sealed class ProjectService : IProjectService
                 null, a.SourceId,
                 a.Tasks.Select(t => new ProjectImportTaskDto(t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
                     t.SectionDxfId, t.ProfileId, _operatorId, t.SourceId, t.Points)).ToArray(),
-                a.StationMaxBackwardMm)).ToArray(),
+                a.StationMaxBackwardMm, a.StationLiftMm)).ToArray(),
             _operatorId);
         var result = await _api.ImportProjectAsync(doc.TankId, request, ct);
         if (result is null) return null;

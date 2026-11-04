@@ -69,8 +69,8 @@ public interface IAcsApiClient
     /// <summary>정차점 최적화(계산만) — 층·면·영역 필터. 선창이 없으면 null.</summary>
     Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
-    /// <summary>영역 정차 덮어쓰기(x·y·방향) 설정 — 모두 null 이면 해제.</summary>
-    Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, CancellationToken ct = default) =>
+    /// <summary>영역 정차 덮어쓰기(x·y·방향·리프트 높이) 설정 — 모두 null 이면 해제.</summary>
+    Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, double? stationLiftMm = null, CancellationToken ct = default) =>
         Task.CompletedTask;
     Task<Guid> CreateSeamAsync(string tankId, int level, string wallCode, string seamType,
         double[][] pathDrawing, double[] normalDrawing, string sectionDxfId, string profileId,

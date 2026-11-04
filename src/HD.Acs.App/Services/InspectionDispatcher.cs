@@ -302,6 +302,7 @@ public sealed class InspectionDispatcher
                 ["workingDistanceMm"] = _workingDistanceMm,
                 ["anchorGroupId"] = anchorGroupId,
                 ["seqInGroup"] = t.Seq,
+                ["liftStrokeMm"] = area.StationLiftMm ?? 0.0,
                 // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
                 // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
                 ["taskId"] = t.TaskId.ToString(),
@@ -525,11 +526,13 @@ public sealed class InspectionDispatcher
 
         var actionsJson = wi.Actions is null ? new JsonArray() : JsonNode.Parse(wi.Actions)!.AsArray();
 
-        // 정차 보정 허용 범위 — 전역 설정에 영역별 후진 상한 덮어쓰기를 얹는다 [VDA §4.4.2 / N23].
-        // 발행 시점에 읽으므로 run 도중 영역 값을 고쳐도 다음 정차부터 반영된다.
-        var stationAdjust = _stationAdjust is null ? null
-            : _stationAdjust.ForArea(await _db.InspectionAreas.AsNoTracking()
-                .Where(a => a.AreaId == wi.AreaId).Select(a => a.StationMaxBackwardMm).FirstOrDefaultAsync(ct));
+        // 정차 보정 허용 범위 및 영역 리프트 높이 — 전역 설정에 영역별 후진 상한 덮어쓰기를 얹고 [VDA §4.4.2 / N23],
+        // 영역 리프트 높이(station_lift_mm, 미지정 시 기본 0mm)를 함께 읽는다. 발행 시점에 읽으므로 run 도중 고쳐도 다음 정차부터 반영된다.
+        var areaMeta = await _db.InspectionAreas.AsNoTracking()
+            .Where(a => a.AreaId == wi.AreaId)
+            .Select(a => new { a.StationMaxBackwardMm, a.StationLiftMm })
+            .FirstOrDefaultAsync(ct);
+        var stationAdjust = _stationAdjust is null ? null : _stationAdjust.ForArea(areaMeta?.StationMaxBackwardMm);
 
         // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
         // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
@@ -552,6 +555,7 @@ public sealed class InspectionDispatcher
                     run.RunId, taskId, TaskAttempt.Max);
             var prm = o["params"]?.DeepClone() as JsonObject ?? new JsonObject();
             prm["attempt"] = attempt;
+            prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction

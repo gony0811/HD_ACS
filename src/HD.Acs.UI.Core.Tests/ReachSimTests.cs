@@ -193,13 +193,13 @@ public class ReachSimTests
         }
     }
 
-    private static ReachStationCandidateDto Cand(double x, double dist, int clear, int hit, int un, double lateral = 0, double yaw = 0) =>
-        new(x, 0, 0, dist, lateral, yaw, 0.2, true, clear, hit, un, 0.1);
+    private static ReachStationCandidateDto Cand(double x, double dist, int clear, int hit, int un, double lateral = 0, double yaw = 0, double? strokeMm = null) =>
+        new(x, 0, 0, dist, lateral, yaw, 0.2, true, clear, hit, un, 0.1, strokeMm);
 
     private static List<ReachStationOptimumDto> Optima() => new()
     {
-        new(Guid.NewGuid(), "L1-R01", "SL", 1, false, Cand(1, 0.57, 0, 0, 7), Cand(1.8, 1.4, 7, 0, 0), 90, 300),
-        new(Guid.NewGuid(), "L1-R04", "SL", 1, false, Cand(1, 0.57, 0, 0, 4), Cand(1, 0.57, 0, 0, 4), 1, 5),
+        new(Guid.NewGuid(), "L1-R01", "SL", 1, false, Cand(1, 0.57, 0, 0, 7, strokeMm: 0), Cand(1.8, 1.4, 7, 0, 0, strokeMm: 600), 90, 300),
+        new(Guid.NewGuid(), "L1-R04", "SL", 1, false, Cand(1, 0.57, 0, 0, 4, strokeMm: 0), Cand(1, 0.57, 0, 0, 4, strokeMm: 0), 1, 5),
     };
 
     [Fact]
@@ -233,6 +233,7 @@ public class ReachSimTests
         var set = Assert.Single(((RecordingApi)(object)api).Calls, c => c.Method == nameof(IAcsApiClient.SetAreaStationAsync));
         Assert.Equal(optima[0].AreaId, set.Args[0]);
         Assert.Equal(1.8, set.Args[1]);
+        Assert.Equal(600.0, set.Args[5]);   // 최적화된 영역 공통 리프트 높이(StrokeMm) 함께 저장
         Assert.True(vm.Optima[0].Applied);
         Assert.False(vm.Optima[0].Improved);   // 다시 적용하지 않는다
         Assert.EndsWith("(덮어씀)", vm.Optima[0].Area);

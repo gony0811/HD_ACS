@@ -21,7 +21,8 @@ public sealed record ProjectImportAreaDto(string WallCode, string Name, double[]
     double UMin, double VMin, double UMax, double VMax,
     double? StationX, double? StationY, double? StationTheta, double? StationStandoffM,
     int? SortOrder, Guid? AreaId, ProjectImportTaskDto[] Tasks,
-    double? StationMaxBackwardMm = null);
+    double? StationMaxBackwardMm = null,
+    double? StationLiftMm = null);
 
 public sealed record ProjectImportRequestDto(ProjectImportGeometryDto Geometry, ProjectImportAreaDto[] Areas, string? UserId);
 
