@@ -104,6 +104,13 @@
                             <Button Content="옮길 영역 모두 적용" Command="{Binding ApplyAllOptimaCommand}" />
                             <Button Content="선택 영역 덮어쓰기 해제" Command="{Binding ClearStationOverrideCommand}" />
                         </StackPanel>
+                        <TextBlock Text="영역 분리 — 한 정차로 순회 여유를 확보하지 못하는 영역을 용접선 묶음으로 나누고 묶음마다 정차·리프트를 고릅니다(계산 수십 초). 적용하면 큰 묶음은 원래 영역에 남고 나머지는 새 영역이 되며, 작업 ID·시나리오 연결은 유지됩니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="선택 영역 분리 제안" Command="{Binding PlanSplitCommand}" IsEnabled="{Binding !IsSplitting}" />
+                            <Button Content="제안대로 분리 적용" Command="{Binding ApplySplitCommand}" IsEnabled="{Binding CanApplySplit}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding SplitPlanText}" FontSize="11.5" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 

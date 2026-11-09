@@ -202,14 +202,17 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (value is null) { OptimumDetail = ""; return; }
         var (c, b) = (value.Optimum.Current, value.Optimum.Best);
         static string Cnt(ReachStationCandidateDto x) =>
-            (x.StrokeMm is { } h ? $"리프트 {h:0} mm · " : "") + $"간섭 없음 {x.Clear} · 간섭 {x.Collision} · 불가 {x.Unreachable}";
+            (x.StrokeMm is { } h ? $"리프트 {h:0} mm · " : "") + $"간섭 없음 {x.Clear} · 간섭 {x.Collision} · 불가 {x.Unreachable}"
+            + (x.SafeClear is { } safe ? $" · 순회 여유 {x.MarginTargetDeg ?? 10:0}° 이상 {safe}" : "")
+            + (x.TraverseMarginDeg is { } tm ? $" · 순회 최소 여유 {tm.ToString("0.0", CultureInfo.InvariantCulture)}°" : "");
         OptimumDetail = $"{value.Optimum.Name}: 지금 — 중심에서 안쪽 {c.DistM:0.00} m · 좌 {c.LateralM:+0.00;-0.00} m · 방향 {c.YawDeg:+0;-0}° · " +
                         $"차체 여유 {c.BodyClearanceM * 1000:0} mm · {Cnt(c)}\n" +
                         (value.Improved || value.Applied
                             ? $"찾은 정차 — 안쪽 {b.DistM:0.00} m · 좌 {b.LateralM:+0.00;-0.00} m · 방향 {b.YawDeg:+0;-0}° · " +
                               $"차체 여유 {b.BodyClearanceM * 1000:0} mm · {Cnt(b)} · 도면 ({b.X:0.000}, {b.Y:0.000}, {b.Theta:0.0000} rad)" +
                               (value.Applied ? " — 적용됨" : "")
-                            : "더 나은 정차 없음 — 옮겨도 닿는 용접선이 늘지 않습니다.");
+                            : "더 나은 정차 없음 — 옮겨도 닿는 용접선·순회 여유가 나아지지 않습니다.")
+                        + WeakSeams(value.Optimum);
     }
 
     /// <summary>선택 층·면의 영역·용접선마다 리프트를 훑어 간섭 없이 닿는지 서버에 묻는다.</summary>
@@ -422,6 +425,22 @@ public sealed partial class ReachSimViewModel : ObservableObject
         else if (d.Entry is { } ok)
             VerdictDetail = ok.Summary + ". " + VerdictDetail;
 
+        // 도면 순회 — 세 자세가 닿아도 용접선을 따라 기울인 자세에서 손목 특이점·J6 안전 범위·관절 한계에 걸리면 실기는 움직이지 않고 중단한다.
+        if (blocked is null && d.Traversal is { } tr)
+        {
+            if (!tr.Ok)
+            {
+                VerdictLevel = "bad";
+                VerdictTitle = "도면 순회 불가 · " + VerdictTitle;
+                VerdictDetail = (tr.Blocker ?? "도면 순회 불가") + " — " + VerdictDetail;
+            }
+            else
+            {
+                if (tr.MinMarginDeg is < 10 && VerdictLevel == "ok") VerdictLevel = "warn";
+                VerdictDetail = TraversalText(tr) + " " + VerdictDetail;
+            }
+        }
+
         // 용접선 중간·끝점 — 운영은 시작점에서만 ②·정렬 준비를 하고 그 뒤는 초점 거리에서 용접선을 따라 스캔한다.
         if (d.ScanOnly)
             VerdictDetail = (StageIndex < 2
@@ -519,19 +538,47 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (list is null) { OptimizeSummary = ""; return; }
         foreach (var o in list) Optima.Add(Row(o));
         int cur = list.Sum(o => o.Current.Clear), best = list.Sum(o => o.Best.Clear), n = list.Sum(o => o.Current.Clear + o.Current.Collision + o.Current.Unreachable);
-        OptimizeSummary = $"간섭 없이 도달 {cur} → {best} / {n} · 옮길 영역 {Optima.Count(r => r.Improved)}개";
+        var safe = list.All(o => o.Current.SafeClear is not null && o.Best.SafeClear is not null)
+            ? $" · 순회 여유 확보 {list.Sum(o => o.Current.SafeClear!.Value)} → {list.Sum(o => o.Best.SafeClear!.Value)}" : "";
+        OptimizeSummary = $"간섭 없이 도달 {cur} → {best} / {n}{safe} · 옮길 영역 {Optima.Count(r => r.Improved)}개";
         SelectedOptimum = Optima.FirstOrDefault(r => r.Improved);
     }
 
     private static ReachOptimumRow Row(ReachStationOptimumDto o, bool applied = false)
     {
-        static string Counts(ReachStationCandidateDto c) => $"{c.Clear}/{c.Collision}/{c.Unreachable}";
-        var improved = o.Best.Clear > o.Current.Clear;
+        static string Counts(ReachStationCandidateDto c) => $"{c.Clear}/{c.Collision}/{c.Unreachable}"
+            + (c.SafeClear is { } s && s < c.Clear ? $" (여유 {s})" : "");
+        var improved = IsImproved(o.Current, o.Best);
         var move = !improved ? "그대로"
             : $"{o.Best.DistM:0.0} m ← {o.Current.DistM:0.0}" +
               (Math.Abs(o.Best.LateralM - o.Current.LateralM) > 1e-6 ? $" · 좌 {o.Best.LateralM:+0.0;-0.0}" : "") +
               (Math.Abs(o.Best.YawDeg - o.Current.YawDeg) > 1e-6 ? $" · {o.Best.YawDeg:+0;-0}°" : "");
         return new ReachOptimumRow(o, o.Name + (o.Overridden ? " (덮어씀)" : ""), Counts(o.Current), Counts(o.Best), move, improved, applied);
+    }
+
+    /// <summary>
+    /// 찾은 정차가 나은가 — 서버 순위와 같게 순회 여유 확보 수 → 간섭 없음 수 → 순회 최소 여유(목표까지, 0.5°).
+    /// 구서버(여유 필드 없음)면 간섭 없음 수만 본다.
+    /// </summary>
+    public static bool IsImproved(ReachStationCandidateDto cur, ReachStationCandidateDto best)
+    {
+        if (cur.SafeClear is not { } cs || best.SafeClear is not { } bs) return best.Clear > cur.Clear;
+        if (bs != cs) return bs > cs;
+        if (best.Clear != cur.Clear) return best.Clear > cur.Clear;
+        var target = best.MarginTargetDeg ?? 10;
+        double Key(double? m) => m is { } v ? Math.Round(Math.Min(v, target) * 2, MidpointRounding.AwayFromZero) / 2 : target;
+        return Key(best.TraverseMarginDeg) > Key(cur.TraverseMarginDeg);
+    }
+
+    /// <summary>찾은 정차에서 순회 여유가 목표에 못 미치거나 막히는 용접선 — 영역을 나눠야 할 후보.</summary>
+    private static string WeakSeams(ReachStationOptimumDto o)
+    {
+        if (o.Seams is null || o.Best.SafeClear is null) return "";
+        var target = o.Best.MarginTargetDeg ?? 10;
+        var weak = o.Seams.Where(s => s.Best == "Unreachable" || s.BestTraverseMarginDeg is { } m && m < target)
+            .Select(s => s.Best == "Unreachable" ? $"{s.Seq}번 불가" : $"{s.Seq}번 {s.BestTraverseMarginDeg!.Value.ToString("0.0", CultureInfo.InvariantCulture)}°")
+            .ToList();
+        return weak.Count == 0 ? "" : $"\n순회 여유 {target:0}° 미만 — {string.Join(", ", weak)} (한 정차로 부족하면 영역 분리 검토)";
     }
 
     /// <summary>
@@ -600,6 +647,73 @@ public sealed partial class ReachSimViewModel : ObservableObject
         await SurveyAsync();
     }
 
+    // ── 영역 재분할 ─────────────────────────────────────────────────
+
+    /// <summary>마지막 재분할 제안(적용 대상). 묶음이 2개 이상일 때만 적용할 수 있다.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanApplySplit))] private ReachSplitPlanDto? _splitPlan;
+    [ObservableProperty] private string _splitPlanText = "";
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanApplySplit))] private bool _isSplitting;
+    public bool CanApplySplit => SplitPlan is { Groups.Count: >= 2 } && !IsSplitting;
+
+    /// <summary>
+    /// 고른 영역(최적화 표 선택 → 없으면 조사 목록 선택)을 나누는 안을 서버에서 계산한다(계산만 — 영역 하나 수십 초).
+    /// 한 정차로 모든 용접선에 도면 순회 여유를 확보하면 "나누지 않아도 됨".
+    /// </summary>
+    [RelayCommand]
+    private async Task PlanSplitAsync()
+    {
+        var areaId = SelectedOptimum?.Optimum.AreaId ?? SelectedArea?.Area.AreaId;
+        if (areaId is not { } id || IsSplitting) { if (areaId is null) StatusMessage = "나눌 영역을 고르세요(최적화 표 또는 조사 목록)."; return; }
+        IsSplitting = true;
+        SplitPlan = null;
+        SplitPlanText = "영역 분리안 계산 중… (영역 하나 수십 초)";
+        try
+        {
+            var plan = await _api.GetSplitPlanAsync(id, 4, default, Branch);
+            SplitPlan = plan;
+            SplitPlanText = plan is null ? "영역을 찾지 못했습니다(서버가 구버전이거나 영역이 지워짐)." : SplitText(plan);
+        }
+        catch (Exception ex) { SplitPlanText = $"영역 분리안 계산 실패: {ex.Message}"; }
+        finally { IsSplitting = false; }
+    }
+
+    /// <summary>제안대로 영역을 나눈다 — 큰 묶음은 원래 영역(사각형 축소), 나머지는 새 영역. 정차·리프트·시나리오 연결까지 서버가 한 번에 반영.</summary>
+    [RelayCommand]
+    private async Task ApplySplitAsync()
+    {
+        if (SplitPlan is not { Groups.Count: >= 2 } plan || IsSplitting) return;
+        IsSplitting = true;
+        try
+        {
+            var r = await _api.ApplySplitAsync(plan);
+            if (r is null) { SplitPlanText = "서버가 영역 분리 적용을 지원하지 않습니다(구버전) — 관제 서버를 갱신하세요."; return; }
+            SplitPlan = null;
+            SplitPlanText = $"{plan.Name} 분리 완료 — " + string.Join(", ", r.Areas.Select(a => $"{a.Name}({a.TaskCount}개{(a.Created ? ", 새 영역" : "")})"))
+                            + ". 계획 ▸ 영역·작업과 시나리오 대상에서 확인하세요.";
+            StatusMessage = $"{plan.Name} 영역 분리 적용 — 다시 조사합니다.";
+        }
+        catch (Exception ex) { SplitPlanText = $"영역 분리 적용 실패(DB 변경 없음): {ex.Message}"; return; }
+        finally { IsSplitting = false; }
+        ClearOptima();
+        await SurveyAsync();
+    }
+
+    /// <summary>재분할 제안 요약 — 묶음마다 용접선 순번·정차·리프트·순회 최소 여유.</summary>
+    public static string SplitText(ReachSplitPlanDto p)
+    {
+        string Seam(ReachSplitSeamDto s) => s.Verdict == "Unreachable" ? $"{s.Seq}(불가)"
+            : s.TraverseMarginDeg is { } m ? $"{s.Seq}({m.ToString("0", CultureInfo.InvariantCulture)}°)" : $"{s.Seq}";
+        var head = p.Groups.Count <= 1
+            ? $"{p.Name}: 나누지 않아도 됩니다 — 한 정차가 최선입니다."
+            : $"{p.Name}: {p.Groups.Count}개 영역으로 나누는 안" + (p.Unsafe > 0 ? $" — 그래도 순회 여유 미확보 {p.Unsafe}개" : " — 모든 용접선 순회 여유 확보");
+        var lines = p.Groups.Select((g, i) =>
+            $"  {i + 1}) 용접선 {string.Join(" ", g.Seams.Select(Seam))} · 정차 ({g.Station.X:0.000}, {g.Station.Y:0.000}, {g.Station.Theta:0.000} rad)"
+            + (g.Station.StrokeMm is { } h ? $" · 리프트 {h:0} mm" : "")
+            + (g.Station.TraverseMarginDeg is { } tm ? $" · 순회 최소 여유 {tm.ToString("0.0", CultureInfo.InvariantCulture)}°" : ""));
+        var tail = p.Hopeless.Count > 0 ? $"\n  어느 정차에서도 여유를 확보 못 하는 용접선 {p.Hopeless.Count}개 — 나눠도 해결되지 않습니다(정차 최적화·실기 확인)." : "";
+        return head + "\n" + string.Join("\n", lines) + tail + $"\n  (판정 격자 {p.GridCells}칸, {p.ElapsedMs / 1000.0:0} s)";
+    }
+
     /// <summary>선택 영역의 정차 덮어쓰기를 지워 배차 식 정차로 되돌린다.</summary>
     [RelayCommand]
     private async Task ClearStationOverrideAsync()
@@ -638,6 +752,11 @@ public sealed partial class ReachSimViewModel : ObservableObject
                $" (도달 불가 +{bestReach - reach}) · 손실 영역 {lossAreas}/{fixedAreas.Count}";
     }
 
+    /// <summary>순회 통과 요약 — "도면 순회 여유 12.3° (손목 특이점 …) · 이격 400 mm · ±40°".</summary>
+    public static string TraversalText(ReachTraversalDto t) =>
+        $"도면 순회 여유 {(t.MinMarginDeg is { } m ? m.ToString("0.0", CultureInfo.InvariantCulture) : "—")}° ({t.Limiting})"
+        + $" · 이격 {t.StandoffMm:0} mm · {(t.TiltDeg is { } tilt ? $"±{tilt:0}° 포괄 근사" : "실제 경유점")}.";
+
     private static string SeamLabel(ReachSurveySeamDto s)
     {
         var tag = s.Verdict switch
@@ -645,8 +764,11 @@ public sealed partial class ReachSimViewModel : ObservableObject
             "Clear" => $"간섭 없음 (h {s.StrokeMm:0})",
             "Collision" => $"간섭 {(s.MinClearanceM is { } c ? $"{c * 1000:0} mm" : "")}",
             _ => s.Blocker is { } b && (b.StartsWith("출발 자세", StringComparison.Ordinal) || b.StartsWith("진입 경로", StringComparison.Ordinal))
-                ? "도달 불가 (운영 진입)" : "도달 불가",
+                ? "도달 불가 (운영 진입)"
+                : s.Blocker?.StartsWith("도면 순회", StringComparison.Ordinal) == true ? "도달 불가 (도면 순회)" : "도달 불가",
         };
+        if (s.Verdict != "Unreachable" && s.TraverseMarginDeg is { } tm)
+            tag += $" · 순회 여유 {tm.ToString("0", CultureInfo.InvariantCulture)}°";
         var best = s.BestVerdict is { } bv && bv != s.Verdict
             ? $" (용접선별 최적이면 {(bv == "Clear" ? "간섭 없음" : bv == "Collision" ? "간섭" : "도달 불가")}{(s.BestStrokeMm is { } bh ? $" h {bh:0}" : "")})"
             : "";

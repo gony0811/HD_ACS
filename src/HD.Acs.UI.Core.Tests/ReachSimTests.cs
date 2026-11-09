@@ -92,6 +92,73 @@ public class ReachSimTests
     }
 
     [Fact]
+    public void 도면_순회가_막히면_자세가_닿아도_막힘으로_판정하고_통과면_여유를_보인다()
+    {
+        var vm = Vm();
+        var blocked = new ReachTraversalDto(false, "도면 순회 — 0mm 지점 기울기 +40° 손목 특이점(J5 55.6° → -1.2°)", -14,
+            "손목 특이점(J5 55.6° → -9.0°)", 0, 400, 40, null, 63);
+        vm.ApplyDetail(ThreeStages(0.8) with { Traversal = blocked });
+
+        Assert.Equal("bad", vm.VerdictLevel);
+        Assert.StartsWith("도면 순회 불가", vm.VerdictTitle);
+        Assert.StartsWith("도면 순회 — 0mm 지점", vm.VerdictDetail);
+
+        var ok = blocked with { Ok = true, Blocker = null, MinMarginDeg = 15.2, Limiting = "J5 관절 한계 근접(157.8°)" };
+        vm.ApplyDetail(ThreeStages(0.8) with { Traversal = ok });
+        Assert.DoesNotContain("도면 순회 불가", vm.VerdictTitle);
+        Assert.StartsWith("도면 순회 여유 15.2° (J5 관절 한계 근접(157.8°)) · 이격 400 mm · ±40° 포괄 근사.", vm.VerdictDetail);
+        Assert.Equal("실제 경유점", ReachSimViewModel.TraversalText(ok with { TiltDeg = null }).Split(" · ")[^1].TrimEnd('.'));
+    }
+
+    [Fact]
+    public void 최적화_결과는_순회_여유_확보를_먼저_보고_부족한_용접선을_알린다()
+    {
+        ReachStationCandidateDto C(int clear, int? safe, double? margin, double dist = 1.8) =>
+            new(13.7, 2.5, 0, dist, 0, 0, 0.3, true, clear, 0, 4 - clear, 0.1, 0, safe, margin, safe is null ? null : 10);
+        // 간섭 없음 수는 같아도(4 → 4) 여유 확보가 늘면(2 → 3) 옮길 영역
+        Assert.True(ReachSimViewModel.IsImproved(C(4, 2, 1.0), C(4, 3, 1.5, 2.1)));
+        Assert.False(ReachSimViewModel.IsImproved(C(4, 3, 12), C(4, 3, 15, 2.1)));   // 목표(10°) 넘는 여유는 같게 본다
+        Assert.True(ReachSimViewModel.IsImproved(C(4, 3, 2), C(4, 3, 6, 2.1)));
+        Assert.True(ReachSimViewModel.IsImproved(C(2, null, null), C(3, null, null)));   // 구서버 — 간섭 없음 수만
+
+        var vm = Vm();
+        var seams = new List<ReachOptimumSeamDto>
+        {
+            new(Guid.NewGuid(), 1, "Clear", "Clear", 100, 19, 10.9),
+            new(Guid.NewGuid(), 4, "Unreachable", "Clear", 100, null, 1.5),
+        };
+        vm.ApplyOptima(new[] { new ReachStationOptimumDto(Guid.NewGuid(), "L2-R02C05", "F", 2, true, C(2, 1, 8.9), C(4, 3, 1.5, 2.1), 98, 25000, seams) });
+
+        Assert.Equal("간섭 없이 도달 2 → 4 / 4 · 순회 여유 확보 1 → 3 · 옮길 영역 1개", vm.OptimizeSummary);
+        Assert.Equal("4/0/0 (여유 3)", vm.Optima[0].Best);
+        Assert.Contains("순회 여유 10° 미만 — 4번 1.5°", vm.OptimumDetail);
+    }
+
+    [Fact]
+    public void 영역_분리안_요약과_적용_조건()
+    {
+        ReachStationCandidateDto C(double x, double y, double? h, double? m) =>
+            new(x, y, 0, 2.0, 0, 0, 0.5, true, 2, 0, 0, 0.1, h, 2, m, 10);
+        var g1 = new ReachSplitGroupDto(new() { Guid.NewGuid(), Guid.NewGuid() }, new() { 1, 5 }, C(13.88, 2.7, 0, 12.6), new double[4][],
+            new() { new(Guid.NewGuid(), 1, "Clear", 19.3, null), new(Guid.NewGuid(), 5, "Clear", 12.6, null) });
+        var g2 = g1 with { Seqs = new() { 4 }, Station = C(13.38, 1.88, 300, 10.6),
+            Seams = new() { new(Guid.NewGuid(), 4, "Clear", 10.6, null) } };
+        var plan = new ReachSplitPlanDto(Guid.NewGuid(), "L2-R02C05", "F", 2, 0, new(), 2772, 37741, new() { g1, g2 });
+
+        var text = ReachSimViewModel.SplitText(plan);
+        Assert.StartsWith("L2-R02C05: 2개 영역으로 나누는 안 — 모든 용접선 순회 여유 확보\n  1) 용접선 1(19°) 5(13°) · 정차 (13.880, 2.700, 0.000 rad) · 리프트 0 mm · 순회 최소 여유 12.6°", text);
+        Assert.EndsWith("(판정 격자 2772칸, 38 s)", text);
+        Assert.StartsWith("L2-R02C05: 나누지 않아도 됩니다", ReachSimViewModel.SplitText(plan with { Groups = new() { g1 } }));
+
+        var vm = Vm();
+        Assert.False(vm.CanApplySplit);
+        vm.SplitPlan = plan;
+        Assert.True(vm.CanApplySplit);
+        vm.SplitPlan = plan with { Groups = new() { g1 } };
+        Assert.False(vm.CanApplySplit);   // 묶음 1개 = 나눌 것 없음
+    }
+
+    [Fact]
     public void 운영_선택_해의_간섭으로_판정한다()
     {
         var vm = Vm();

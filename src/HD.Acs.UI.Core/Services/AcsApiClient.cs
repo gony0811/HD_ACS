@@ -299,6 +299,33 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<List<ReachStationOptimumDto>>(ct);
     }
 
+    public async Task<ReachSplitPlanDto?> GetSplitPlanAsync(Guid areaId, int maxGroups = 4, CancellationToken ct = default, string? branch = null)
+    {
+        var url = $"/api/reach-sim/areas/{areaId}/split-plan?maxGroups={maxGroups}" + (branch is { Length: > 0 } ? $"&branch={Uri.EscapeDataString(branch)}" : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSplitPlanDto>(ct);
+    }
+
+    public async Task<AreaSplitResultDto?> ApplySplitAsync(ReachSplitPlanDto plan, CancellationToken ct = default)
+    {
+        var body = new
+        {
+            groups = plan.Groups.Select(g => new
+            {
+                taskIds = g.TaskIds, stationX = g.Station.X, stationY = g.Station.Y, stationTheta = g.Station.Theta,
+                stationLiftMm = g.Station.StrokeMm,
+            }),
+            userId = "operator",
+        };
+        var resp = await _http.PostAsJsonAsync($"/api/reach-sim/areas/{plan.AreaId}/split-apply", body, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed
+            && !(await resp.Content.ReadAsStringAsync(ct)).Contains("error", StringComparison.Ordinal)) return null;   // 구서버(라우트 없음)
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<AreaSplitResultDto>(ct);
+    }
+
     public async Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, double? stationLiftMm = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/reach-sim/areas/{areaId}/station",

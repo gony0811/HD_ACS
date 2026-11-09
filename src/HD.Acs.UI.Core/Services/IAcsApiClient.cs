@@ -69,6 +69,12 @@ public interface IAcsApiClient
     /// <summary>정차점 최적화(계산만) — 층·면·영역 필터. 선창이 없으면 null.</summary>
     Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
+    /// <summary>영역 재분할 제안(계산만, 수십 초) — 영역이 없으면 null.</summary>
+    Task<ReachSplitPlanDto?> GetSplitPlanAsync(Guid areaId, int maxGroups = 4, CancellationToken ct = default, string? branch = null) =>
+        Task.FromResult<ReachSplitPlanDto?>(null);
+    /// <summary>영역 재분할 적용 — 제안의 묶음(작업·정차·리프트)을 서버가 한 트랜잭션으로 반영. 구서버면 null.</summary>
+    Task<AreaSplitResultDto?> ApplySplitAsync(ReachSplitPlanDto plan, CancellationToken ct = default) =>
+        Task.FromResult<AreaSplitResultDto?>(null);
     /// <summary>영역 정차 덮어쓰기(x·y·방향·리프트 높이) 설정 — 모두 null 이면 해제.</summary>
     Task SetAreaStationAsync(Guid areaId, double? x, double? y, double? theta, string reason, double? stationLiftMm = null, CancellationToken ct = default) =>
         Task.CompletedTask;

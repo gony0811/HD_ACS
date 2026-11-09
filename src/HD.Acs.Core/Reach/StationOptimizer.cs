@@ -31,17 +31,20 @@ public sealed record StationSearchSpace(
 /// <summary>후보 정차 하나의 영역 조사 결과. 차체가 면에 너무 가까우면 <see cref="Feasible"/> = false 이고 조사하지 않는다.</summary>
 /// <param name="Robustness">Clear 용접선 여유(최대 <see cref="StationOptimizer.RobustCapM"/>로 자름)의 평균 [m] — 같은 개수일 때 순위.</param>
 /// <param name="StrokeMm">영역 리프트 고정 최적화에서 고른 공통 리프트 높이 [mm] (용접선별 리프트면 null).</param>
+/// <param name="SafeClear">Clear 중 도면 순회 관절 여유가 목표(<see cref="ReachRobotModel.TraverseMarginTargetDeg"/>) 이상인 수(순회 판정을 안 하면 Clear 와 같다).</param>
+/// <param name="TraverseMarginDeg">닿는 용접선들의 도면 순회 최소 관절 여유 [도](순회 판정을 안 했으면 null).</param>
 public sealed record StationCandidate(
     double DistM, double LateralM, double YawDeg, ReachStation Station, double BodyClearanceM, bool Feasible,
     int Clear, int Collision, int Unreachable, double Robustness, IReadOnlyList<ReachSeamSurvey> Seams,
-    double? StrokeMm = null);
+    double? StrokeMm = null, int SafeClear = 0, double? TraverseMarginDeg = null, double MarginTargetDeg = ReachRobotModel.DefaultTraverseMarginTargetDeg);
 
 /// <summary>최적화 결과 — 기본 정차와 찾은 정차, 평가한 후보 수.</summary>
 public sealed record StationOptimum(StationCandidate Baseline, StationCandidate Best, int Evaluated);
 
 /// <summary>
 /// 영역 정차점 최적화 — 후보 정차마다 영역의 모든 용접선을 공통 리프트 높이(<see cref="AreaLift"/>)로 조사해
-/// ① 간섭 없이 닿는 용접선 수 ② 여유(<see cref="StationCandidate.Robustness"/>) ③ 기본 정차에서 덜 옮긴 쪽 순으로 고른다.
+/// ① 도면 순회 관절 여유를 목표 이상 확보하고 간섭 없이 닿는 용접선 수 ② 간섭 없이 닿는 수 ③ 순회 최소 관절 여유(목표까지)
+/// ④ 면 간섭 여유(<see cref="StationCandidate.Robustness"/>) ⑤ 기본 정차에서 덜 옮긴 쪽 순으로 고른다.
 /// 탐색 = 거리×좌우 성긴 격자(수평면은 네 방향 포함) → 최상위 몇 곳에서 세 축 패턴 탐색(정해진 간격). 같은 후보는 한 번만 계산한다.
 /// </summary>
 public static class StationOptimizer
@@ -126,9 +129,8 @@ public static class StationOptimizer
         }
 
         var winner = cache.Values.Max(Ranking)!;
-        // 닿는 용접선이 늘지 않으면(같은 수면 여유가 나아질 때만) 지금 정차를 그대로 둔다 — 옮겨도 검사할 수 없으면 옮길 이유가 없다.
-        var better = winner.Clear > baseline.Clear
-                     || (winner.Clear == baseline.Clear && winner.Clear > 0 && Ranking.Compare(winner, baseline) > 0);
+        // 순위가 나아질 때만 옮긴다 — 아무것도 닿지 않으면 옮길 이유가 없다(지금 정차 유지).
+        var better = winner.Clear > 0 && Ranking.Compare(winner, baseline) > 0;
         if (!better) winner = baseline;
         return new StationOptimum(baseline, winner, cache.Count);
     }
@@ -213,17 +215,55 @@ public static class StationOptimizer
             results = arr;
         }
         var clear = results.Where(r => r.Verdict == ReachVerdict.Clear).ToList();
+        var cap = model.TraverseMarginTargetDeg;
+        var margins = results.Where(r => r.Verdict != ReachVerdict.Unreachable && r.TraverseMarginDeg is not null)
+            .Select(r => r.TraverseMarginDeg!.Value).ToList();
         return new StationCandidate(distM, lateralM, yawDeg, station, body, feasible,
             clear.Count, results.Count(r => r.Verdict == ReachVerdict.Collision), results.Count(r => r.Verdict == ReachVerdict.Unreachable),
-            clear.Count == 0 ? 0 : clear.Average(r => Math.Min(r.MinClearanceM ?? 0, RobustCapM)), results, strokeMm);
+            clear.Count == 0 ? 0 : clear.Average(r => Math.Min(r.MinClearanceM ?? 0, RobustCapM)), results, strokeMm,
+            clear.Count(r => r.TraverseMarginDeg is not { } m || m >= cap), margins.Count == 0 ? null : margins.Min(), cap);
     }
 
-    /// <summary>순위 — 가능 &gt; Clear 수 &gt; 여유(1 mm 단위) &gt; 덜 옮김(좌우·방향·거리).</summary>
+    /// <summary>
+    /// 영역 판정 점수 — (여유 확보 간섭 없음 수, 간섭 없음 수, 도달 수, 순회 최소 여유 키). 여유 확보 = Clear 이고 도면 순회 여유 ≥ 목표
+    /// (순회 판정이 없으면 Clear 그대로). 최소 여유는 닿는 용접선 중 최소를 목표에서 자르고 0.5° 로 반올림한다(<see cref="MarginKey"/>).
+    /// </summary>
+    public static (int Safe, int Clear, int Reach, double Margin) Score(IReadOnlyList<ReachSeamSurvey> seams, double marginTargetDeg)
+    {
+        var margins = seams.Where(r => r.Verdict != ReachVerdict.Unreachable && r.TraverseMarginDeg is not null)
+            .Select(r => r.TraverseMarginDeg!.Value).ToList();
+        return (seams.Count(r => r.Verdict == ReachVerdict.Clear && (r.TraverseMarginDeg is not { } m || m >= marginTargetDeg)),
+            seams.Count(r => r.Verdict == ReachVerdict.Clear), seams.Count(r => r.Verdict != ReachVerdict.Unreachable),
+            MarginKey(margins.Count == 0 ? null : margins.Min(), marginTargetDeg));
+    }
+
+    /// <summary>순위용 최소 여유 — 목표 이상은 같게, 0.5° 단위. 순회 판정이 없으면(null) 목표.</summary>
+    public static double MarginKey(double? marginDeg, double targetDeg) =>
+        marginDeg is { } m ? Math.Round(Math.Min(m, targetDeg) * 2, MidpointRounding.AwayFromZero) / 2 : targetDeg;
+
+    /// <summary>점수 사전식 비교 — 여유 확보 > 간섭 없음 > 도달 > 최소 여유.</summary>
+    public static int CompareScore((int Safe, int Clear, int Reach, double Margin) a, (int Safe, int Clear, int Reach, double Margin) b)
+    {
+        var c = a.Safe.CompareTo(b.Safe);
+        if (c != 0) return c;
+        c = a.Clear.CompareTo(b.Clear);
+        if (c != 0) return c;
+        c = a.Reach.CompareTo(b.Reach);
+        return c != 0 ? c : a.Margin.CompareTo(b.Margin);
+    }
+
+    /// <summary>
+    /// 순위 — 가능 &gt; 여유 확보 Clear 수 &gt; Clear 수 &gt; 순회 최소 관절 여유(목표까지, 0.5°) &gt; 면 간섭 여유(1 mm 단위) &gt; 덜 옮김(좌우·방향·거리).
+    /// </summary>
     public static readonly IComparer<StationCandidate> Ranking = Comparer<StationCandidate>.Create((a, b) =>
     {
         var c = a.Feasible.CompareTo(b.Feasible);
         if (c != 0) return c;
+        c = a.SafeClear.CompareTo(b.SafeClear);
+        if (c != 0) return c;
         c = a.Clear.CompareTo(b.Clear);
+        if (c != 0) return c;
+        c = MarginKey(a.TraverseMarginDeg, a.MarginTargetDeg).CompareTo(MarginKey(b.TraverseMarginDeg, b.MarginTargetDeg));
         if (c != 0) return c;
         c = Math.Round(a.Robustness, 3).CompareTo(Math.Round(b.Robustness, 3));
         if (c != 0) return c;

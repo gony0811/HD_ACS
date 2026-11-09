@@ -130,6 +130,50 @@ public sealed record ReachRobotModel
     /// <summary>경로 손목 특이점 여유 |J5| [도] — PlanarWristMarginDeg.</summary>
     public double PlanarWristMarginDeg { get; init; } = 5;
 
+    // ── 도면 순회(⑱ inspectionRun) 판정 — HD_AMR InspectionRunStep.CheckWaypointChainAsync 와 같은 규칙. 바뀌면 함께 맞출 것. ──
+    /// <summary>
+    /// 용접선 따라 검사 툴 순회(티칭 프로필 경유점)를 판정할지. 세 자세가 닿아도 순회 중 기울인 자세에서 손목 특이점·J6 안전 범위·
+    /// 관절 한계에 걸리면 운영이 움직이지 않고 중단한다(실기 2026-11-03 L2-R02C05 H04 경유점 #5 J5 0.48°).
+    /// </summary>
+    public bool CheckTraversal { get; init; } = true;
+    /// <summary>
+    /// 순회 작업물 프레임 Top(점1)의 TCP 면 이격 [mm] — LINE 레시피는 ② 접근점(면 이격 inspection.approachStandoffMm, 현장 400)에서
+    /// 점1(Top)을 기록하고 프레임 원점을 그 자리 − 33.8(면 쪽)에 둔다(2026-11-03·06·09 AMR 로그). 그래서 경유점 Z 33.8 = 이 이격.
+    /// App 은 설정이 없으면 ② 접근 이격(<c>Acs:Reach:ApproachStandoffMm</c>)을 쓴다. 설정 <c>Acs:Reach:ScanStandoffMm</c>.
+    /// </summary>
+    public double ScanStandoffMm { get; init; } = 400;
+    /// <summary>
+    /// 순회 중 광축 기울기 최대 [도] — 경유점이 코러게이션 법선을 따라 용접선 진행 방향으로 앞뒤로 기운다(용접선에 수직인 면 내 축 둘레).
+    /// 실기 H04 #5 = +39°. 프로필 경유점을 ACS 가 모르므로 용접선 전 구간에서 ±이 값까지 기울 수 있다고 보고 판정한다(포괄 근사).
+    /// 설정 <c>Acs:Reach:ScanTiltDeg</c>.
+    /// </summary>
+    public double ScanTiltDeg { get; init; } = 40;
+    /// <summary>
+    /// 실제 티칭 프로필 경유점 — [용접선 시작점에서의 거리 mm(프레임 X), 광축 기울기 도(Ry θ), (선택) 프레임 Z mm] 순서 목록.
+    /// 주면 포괄 근사(±<see cref="ScanTiltDeg"/>) 대신 이 순서대로 이어 판정한다(HD_AMR 프로필 WaypointsJson 의 X·Theta·Z 를 옮겨 적는다).
+    /// Z 는 작업물 프레임 원점(Top − <see cref="ScanTopZMm"/>, 면 쪽) 기준이라 TCP 면 이격 = <see cref="ScanStandoffMm"/> + (Z − 33.8). 설정 <c>Acs:Reach:ScanTiltProfile</c>.
+    /// </summary>
+    public IReadOnlyList<double[]>? ScanTiltProfile { get; init; }
+    /// <summary>작업물 프레임 Top 높이 [mm] — HD_AMR InternalWorkpieceFrame.DefaultCorrugationTopHeightMm. 점1(Top)이 이 Z 다.</summary>
+    public const double ScanTopZMm = 33.8;
+    /// <summary>기울기 판정 간격 [도] — HD_AMR 경로 검증 자세 간격(ChainSampleDeg 10°)과 같다.</summary>
+    public double ScanTiltStepDeg { get; init; } = 10;
+    /// <summary>용접선 따라 판정 간격 [mm] — 경로 검증 간격(100mm)보다 촘촘히(360mm 용접선 = 7점).</summary>
+    public double ScanSampleMm { get; init; } = 60;
+    /// <summary>경로 관절 한계 여유 [도] — PathJointLimitMarginDeg(하드 한계에서 이만큼 안쪽이어야 통과).</summary>
+    public double PathJointLimitMarginDeg { get; init; } = 2;
+    /// <summary>
+    /// J6 안전 범위(실제 관절값, 대기 자세 −180° 쪽 감김 기준) [도] — HD_AMR WObjAttitude.SafeJ6Min/MaxDeg. 밖이면 센서 헤드–링크암 간섭·케이블 감김.
+    /// </summary>
+    /// <summary>
+    /// 도면 순회 관절 여유 목표 [도] — 정차 최적화가 이 여유 이상으로 순회하는 용접선 수('여유 확보')를 먼저 늘리고, 같으면 최소 여유를 이 값까지 키운다
+    /// (넘는 여유는 같게 본다). 실기 백테스트에서 모델 오차가 약 ±5° 라(경계 −4° 사례가 실기 통과) 그 두 배. 설정 <c>Acs:Reach:TraverseMarginTargetDeg</c>.
+    /// </summary>
+    public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
+    public const double DefaultTraverseMarginTargetDeg = 10;
+    public double SafeJ6MinDeg { get; init; } = -300;
+    public double SafeJ6MaxDeg { get; init; } = -160;
+
     public static ReachRobotModel Default { get; } = new();
 }
 
@@ -232,8 +276,9 @@ public enum ReachVerdict { Clear, Collision, Unreachable }
 /// <param name="StrokeMm">Clear 면 여유가 가장 큰 리프트, Collision 이면 간섭이 가장 덜한 리프트, 아니면 null.</param>
 /// <param name="YawIndex">바닥·천장처럼 차체 방향이 자유일 때 고른 후보 순번.</param>
 /// <param name="Blocker">Unreachable 일 때 사유 — 세 자세는 닿는데 출발 자세 가지·진입 경로로 막힌 경우를 먼저 고른다.</param>
+/// <param name="TraverseMarginDeg">고른 리프트·방향에서 도면 순회의 가장 빡빡한 관절 여유 [도](순회 판정을 안 했으면 null).</param>
 public sealed record ReachSeamSurvey(ReachVerdict Verdict, double? StrokeMm, double? MinClearanceM, int YawIndex,
-    string? Blocker = null);
+    string? Blocker = null, double? TraverseMarginDeg = null);
 
 /// <summary>
 /// 리치·간섭 시뮬레이터. 정차·리프트·정차 이동이 주어지면 용접선 점마다 운영과 같은 세 접근 자세
@@ -245,7 +290,7 @@ public sealed record ReachSeamSurvey(ReachVerdict Verdict, double? StrokeMm, dou
 /// TOOL 은 광축(+Z)이 면 법선 반대(면을 바라봄)이다. 광축 둘레 회전은 J6 만 바꾸므로(J1~J5 무관) IK 해의 J6 를
 /// 운영 값(<see cref="ReachRobotModel.OperationJ6Deg"/>)으로 바꿔 한쪽으로 치우친 툴 상자의 실제 방향을 잰다.
 /// </summary>
-public static class ReachSimulator
+public static partial class ReachSimulator
 {
     /// <param name="seamPoint">용접선 점(도면 m).</param>
     /// <param name="wallNormal">면 내부향 단위 법선(도면).</param>
@@ -345,6 +390,13 @@ public static class ReachSimulator
         return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null);
     }
 
+    /// <summary>
+    /// 도면 순회 직전 자세 — 시작점 ② 접근 자세 해(J6 운영 값). LINE 레시피는 이 자리(면 이격 = ② 이격)에서 작업물 프레임 점1(Top)을 잡고
+    /// 순회를 시작하며, 손목·팔꿈치 가지와 J6 감김의 기준도 이 자세다. 없으면 null.
+    /// </summary>
+    public static double[]? TraverseSeed(ReachPointResult r) =>
+        r.Stages.FirstOrDefault(s => s.Stage == ReachStage.Approach)?.Chosen?.JointsDeg;
+
     /// <summary>점 평가에서 다음 점으로 넘길 기준 — 초점 자세 해(용접선 스캔은 초점 거리에서 이어 간다). 없으면 null.</summary>
     public static double[]? ScanSeed(ReachPointResult r) =>
         r.Stages.LastOrDefault(s => s.Stage == ReachStage.Focus)?.Chosen?.JointsDeg;
@@ -380,7 +432,7 @@ public static class ReachSimulator
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, IReadOnlyList<ReachStation> stations,
         IReadOnlyList<double[]> seamPoints, double[] wallNormal, IReadOnlyList<double> strokesMm, string? wallCode = null)
     {
-        var candidates = new List<(double H, double Cl, int Yaw)>();
+        var candidates = new List<(double H, double Cl, int Yaw, double[] Seed)>();
         string? blocker = null, entryBlocker = null;
         for (var yi = 0; yi < stations.Count; yi++)
             foreach (var h in strokesMm)
@@ -388,11 +440,13 @@ public static class ReachSimulator
                 var min = double.PositiveInfinity;
                 var reachable = true;
                 double[]? seed = null;   // 중간·끝점은 시작점 ② 해의 가지를 따라간다(운영과 같게)
+                double[]? startSeed = null;   // 도면 순회 직전 자세 = 시작점 초점 자세
                 for (var i = 0; i < seamPoints.Count; i++)
                 {
                     var r = Evaluate(model, planes, stations[yi], seamPoints[i], wallNormal, h, withGeometry: false,
                         wallCode: i == 0 ? wallCode : null, checkEntry: false, seedJoints: seed);
                     seed = ScanSeed(r);   // 다음 점은 이 점의 초점 자세에서 용접선을 따라 이어 간다
+                    if (i == 0) startSeed = TraverseSeed(r);
                     if (!r.Reachable)
                     {
                         reachable = false;
@@ -402,10 +456,11 @@ public static class ReachSimulator
                     }
                     min = Math.Min(min, r.MinClearanceM);
                 }
-                if (reachable) candidates.Add((h, min, yi));
+                if (reachable) candidates.Add((h, min, yi, startSeed!));
             }
 
         var needEntry = seamPoints.Count > 0 && StartJoints(model, wallCode) is not null;
+        string? traverseBlocker = null;
         foreach (var c in candidates.OrderByDescending(c => c.Cl >= 0).ThenByDescending(c => c.Cl))
         {
             if (needEntry)
@@ -413,10 +468,28 @@ public static class ReachSimulator
                 var e = Evaluate(model, planes, stations[c.Yaw], seamPoints[0], wallNormal, c.H, withGeometry: false, wallCode: wallCode);
                 if (!e.Reachable) { entryBlocker ??= e.Blocker; continue; }
             }
-            return new ReachSeamSurvey(c.Cl >= 0 ? ReachVerdict.Clear : ReachVerdict.Collision, c.H, c.Cl, c.Yaw);
+            double? margin = null;
+            if (TraverseSeam(model, stations[c.Yaw], c.H, seamPoints, wallNormal, c.Seed) is { } t)
+            {
+                if (!t.Ok) { traverseBlocker ??= t.Blocker; continue; }
+                margin = t.MinMarginDeg;
+            }
+            return new ReachSeamSurvey(c.Cl >= 0 ? ReachVerdict.Clear : ReachVerdict.Collision, c.H, c.Cl, c.Yaw,
+                TraverseMarginDeg: margin);
         }
-        return new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, entryBlocker ?? blocker);
+        return new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, traverseBlocker ?? entryBlocker ?? blocker);
     }
+
+    /// <summary>
+    /// 용접선(시작 … 끝 점) 도면 순회 판정 — <see cref="ReachRobotModel.CheckTraversal"/> 가 꺼져 있거나 점이 없으면 null.
+    /// <paramref name="startSeed"/> 는 시작점 ② 접근 자세 해(<see cref="TraverseSeed"/>).
+    /// </summary>
+    public static ReachTraversal? TraverseSeam(ReachRobotModel model, ReachStation station, double strokeMm,
+        IReadOnlyList<double[]> seamPoints, double[] wallNormal, double[]? startSeed,
+        double offsetForwardMm = 0, double offsetLeftMm = 0) =>
+        model.CheckTraversal && seamPoints.Count > 0 && startSeed is { Length: >= 6 }
+            ? Traverse(model, station, strokeMm, seamPoints[0], seamPoints[^1], wallNormal, startSeed, offsetForwardMm, offsetLeftMm)
+            : null;
 
     /// <summary>층의 장애물 평면 — 탱크 면 + (2층 이상) 그 층 데크면.</summary>
     public static IReadOnlyList<ReachPlane> PlanesForLevel(IEnumerable<ReachPlane> walls, double floorZ, int level)

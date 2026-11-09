@@ -53,6 +53,7 @@ builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
+builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
@@ -229,6 +230,20 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
         : await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct, BranchRuleOf(branch), lift != "seam") is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
+
+// 영역 재분할 제안(조회 전용) — 한 정차로 도면 순회 관절 여유를 확보하지 못하는 영역을 묶음으로 나누고 묶음마다 정차·리프트를 고른다.
+app.MapGet("/api/reach-sim/areas/{areaId:guid}/split-plan",
+    async (Guid areaId, int? maxGroups, string? branch, ReachSimService sim, CancellationToken ct) =>
+        await sim.SplitPlanAsync(areaId, maxGroups ?? 4, ct, BranchRuleOf(branch)) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"영역 '{areaId}' 또는 선창 형상 없음" }));
+
+// 영역 재분할 적용 — 가장 큰 묶음은 원래 영역(축소), 나머지는 새 영역. taskId 유지, 정차·리프트 설정, 시나리오 연결 승계.
+app.MapPost("/api/reach-sim/areas/{areaId:guid}/split-apply", async (Guid areaId, ApplyAreaSplitRequest req, AreaSplitService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.ApplyAsync(areaId, req, ct)); }
+    catch (AreaSplitException e) { return Results.Json(new { error = e.Message }, statusCode: e.Status); }
+});
 
 // 영역 정차 덮어쓰기(x·y·방향·리프트 높이) 설정 — 셋 다 null 이면 덮어쓰기 해제(배차 식으로 복귀).
 app.MapPut("/api/reach-sim/areas/{areaId:guid}/station", async (Guid areaId, SetAreaStationRequest req, AcsDbContext db) =>

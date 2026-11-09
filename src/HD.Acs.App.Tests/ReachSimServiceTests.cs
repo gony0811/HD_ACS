@@ -25,7 +25,8 @@ public class ReachSimServiceTests
     private static readonly Guid TTask1 = Guid.Parse("5e000000-0000-4000-8000-000000000006");
     private static readonly Guid TTask2 = Guid.Parse("5e000000-0000-4000-8000-000000000007");
 
-    private static async Task<ReachSimService> SeedAsync(Dictionary<string, double[]>? startJoints = null)
+    /// <param name="traverse">도면 순회 판정을 켤지 — 기존 테스트는 세 자세·진입·리프트 규칙만 보므로 끈다(순회는 Core ReachTraversalTests).</param>
+    private static async Task<ReachSimService> SeedAsync(Dictionary<string, double[]>? startJoints = null, bool traverse = false)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var geom = new TankGeometry(31.785, 10.1497, Math.PI / 4, 3.9776, 6.9097, Math.PI / 4, 2.8976, new[] { 0.0, 3.63, 6.63, 10.53 });
@@ -72,11 +73,10 @@ public class ReachSimServiceTests
         // 조회는 정차 기본 이격만 쓴다 — 허브(SignalR)는 닿지 않는다.
         var dispatcher = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
             null!, new ConfigurationBuilder().Build(), NullLogger<InspectionDispatcher>.Instance);
-        var sim = new ReachSimService(db, dispatcher);
-        if (startJoints is null) return sim;
-        var cfg = new ConfigurationBuilder().AddInMemoryCollection(startJoints.SelectMany(kv =>
-            kv.Value.Select((j, i) => new KeyValuePair<string, string?>($"Acs:Reach:StartJoints:{kv.Key}:{i}", j.ToString(System.Globalization.CultureInfo.InvariantCulture))))).Build();
-        return new ReachSimService(db, dispatcher, cfg);
+        var entries = (startJoints ?? new Dictionary<string, double[]>()).SelectMany(kv =>
+                kv.Value.Select((j, i) => new KeyValuePair<string, string?>($"Acs:Reach:StartJoints:{kv.Key}:{i}", j.ToString(System.Globalization.CultureInfo.InvariantCulture))))
+            .Append(new KeyValuePair<string, string?>("Acs:Reach:CheckTraversal", traverse ? "true" : "false"));
+        return new ReachSimService(db, dispatcher, new ConfigurationBuilder().AddInMemoryCollection(entries).Build());
     }
 
     [Fact]
@@ -202,6 +202,54 @@ public class ReachSimServiceTests
         Assert.Equal(0, ReachSimService.ModelFrom(null).MountYawDeg);
         Assert.Equal(180, m.OperationJ6Deg);   // 없으면 운영 기본 180°
         Assert.Equal(0, m.ToolMountRollDeg);
+        // 도면 순회 — 없으면 켜짐·이격 = ② 접근 이격(점1 Top = ② 접근점)·±40° 포괄 근사·여유 목표 10°
+        Assert.True(m.CheckTraversal);
+        Assert.Equal(200, m.ScanStandoffMm);
+        Assert.Equal(10, m.TraverseMarginTargetDeg);
+        Assert.Equal(40, m.ScanTiltDeg);
+        Assert.Null(m.ScanTiltProfile);
+    }
+
+    [Fact]
+    public void 도면_순회_설정을_읽는다()
+    {
+        var m = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Acs:Reach:CheckTraversal"] = "false", ["Acs:Reach:ScanStandoffMm"] = "417", ["Acs:Reach:ScanTiltDeg"] = "30",
+            ["Acs:Reach:TraverseMarginTargetDeg"] = "12",
+            ["Acs:Reach:ScanTiltProfile:3:0"] = "200", ["Acs:Reach:ScanTiltProfile:3:1"] = "-45", ["Acs:Reach:ScanTiltProfile:3:2"] = "2.9",
+            ["Acs:Reach:ScanTiltProfile:0:0"] = "0", ["Acs:Reach:ScanTiltProfile:0:1"] = "0",
+            ["Acs:Reach:ScanTiltProfile:1:0"] = "180", ["Acs:Reach:ScanTiltProfile:1:1"] = "-39",
+            ["Acs:Reach:ScanTiltProfile:2:0"] = "1",   // 2개가 아니면 버린다
+        }).Build());
+
+        Assert.False(m.CheckTraversal);
+        Assert.Equal(417, m.ScanStandoffMm);
+        Assert.Equal(30, m.ScanTiltDeg);
+        Assert.Equal(3, m.ScanTiltProfile!.Count);   // [거리, 기울기] 또는 [거리, 기울기, Z]
+        Assert.Equal(new[] { 180.0, -39 }, m.ScanTiltProfile[1]);
+        Assert.Equal(new[] { 200.0, -45, 2.9 }, m.ScanTiltProfile[2]);
+        Assert.Equal(12, m.TraverseMarginTargetDeg);
+    }
+
+    [Fact]
+    public async Task 상세는_도면_순회_판정을_싣는다()
+    {
+        var off = (await (await SeedAsync()).DetailAsync(SmArea, SmTask, 1, null, 0, 0, 0, default))!;
+        Assert.Null(off.Traversal);
+
+        var sim = await SeedAsync(traverse: true);
+        var d = (await sim.DetailAsync(SmArea, SmTask, 1, 500, 0, 0, 0, default))!;
+        Assert.NotNull(d.Traversal);
+        Assert.Equal(400, d.Traversal!.StandoffMm);
+        Assert.Equal(40, d.Traversal.TiltDeg);
+        Assert.True(d.Traversal.States > 1);
+        Assert.Equal(d.Traversal.Ok, d.Traversal.Blocker is null);
+        if (!d.Traversal.Ok) Assert.StartsWith("도면 순회", d.Traversal.Blocker);
+        // 대상 점(중간)과 무관하게 시작점부터 같은 판정
+        var d0 = (await sim.DetailAsync(SmArea, SmTask, 0, 500, 0, 0, 0, default))!;
+        Assert.Equal(d.Traversal.Blocker, d0.Traversal!.Blocker);
+        Assert.Equal(d.Traversal.MinMarginDeg, d0.Traversal.MinMarginDeg);
     }
 
     [Fact]

@@ -60,7 +60,8 @@ public class StationOptimizerTests
         var space = new StationSearchSpace(new[] { c[0], c[1] }, new[] { a.Normal[0], a.Normal[1] }, a.FacingYaw!.Value, 0, 1.2);
         var seams = new IReadOnlyList<double[]>[] { new[] { a.To3D(3.7, 2.5), c, a.To3D(4.3, 2.5) } };
 
-        var r = StationOptimizer.Optimize(ReachRobotModel.Default, Planes, space, seams, a.Normal, Strokes);
+        // 차체 회피(옆으로 비키기)만 본다 — 도면 순회 판정을 켜면 이 격벽 끝 용접선은 ±40° 포괄 근사에서 손목 여유가 모자란다.
+        var r = StationOptimizer.Optimize(ReachRobotModel.Default with { CheckTraversal = false }, Planes, space, seams, a.Normal, Strokes);
 
         Assert.False(r.Baseline.Feasible);
         Assert.Equal(1, r.Best.Clear);

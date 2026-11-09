@@ -28,7 +28,9 @@ public sealed class ReachSimService
     /// HD_AMR 실기 값과 맞추는 설정 — <c>Acs:Reach:MountYawDeg</c>(T_A_B rz) · <c>ToolZMm</c>(공구 #1 z) ·
     /// <c>ApproachStandoffMm</c>(inspection.approachStandoffMm) · <c>FocusStandoffMm</c>(초점 자세 TCP 이격 — 공구 #1 365 + 10 = 카메라 초점 375) · <c>PlanarRetreatMm</c>(inspection.planarApproachRetreatMm) ·
     /// <c>StartJoints:{면 코드}</c>(운영 ② 출발 관절각 J1~J6 — 상부 면 T·SU·PU = 홈 위치_2, 그 외 = 작업 준비 위치) ·
-    /// <c>OperationJ6Deg</c>(세 자세 J6 — 기본 180°, "none" 이면 IK 값) · <c>ToolMountRollDeg</c>(툴 상자 광축 둘레 장착 보정).
+    /// <c>OperationJ6Deg</c>(세 자세 J6 — 기본 180°, "none" 이면 IK 값) · <c>ToolMountRollDeg</c>(툴 상자 광축 둘레 장착 보정) ·
+    /// 도면 순회 판정 <c>CheckTraversal</c>(기본 true) · <c>ScanStandoffMm</c>(순회 TCP 면 이격, 기본 400) · <c>ScanTiltDeg</c>(포괄 근사 ±기울기, 기본 40) ·
+    /// <c>ScanTiltProfile</c>(실제 경유점 [[거리 mm, 기울기 도, Z mm], …] — 주면 포괄 근사 대신 사용) · <c>TraverseMarginTargetDeg</c>(정차 최적화 순회 여유 목표, 기본 10).
     /// 없으면 STEP 장착(0°)·모델 기본값·출발 자세 없음(종전 판정).
     /// </param>
     public ReachSimService(AcsDbContext db, InspectionDispatcher dispatcher, IConfiguration? config = null)
@@ -50,6 +52,7 @@ public sealed class ReachSimService
         var d = ReachRobotModel.Default;
         var stages = d.StageStandoffsMm.ToArray();
         stages[0] = config.GetValue("Acs:Reach:ApproachStandoffMm", stages[0]);
+        var scanStandoff = config.GetValue("Acs:Reach:ScanStandoffMm", stages[0]);   // 없으면 ② 접근 이격(점1 Top = ② 접근점)
         stages[^1] = config.GetValue("Acs:Reach:FocusStandoffMm", stages[^1]);   // 공구 TCP 가 초점보다 짧으면 그 차만큼 띄운다
         return d with
         {
@@ -60,7 +63,21 @@ public sealed class ReachSimService
             StartJointsByWall = starts,
             ToolMountRollDeg = config.GetValue("Acs:Reach:ToolMountRollDeg", d.ToolMountRollDeg),
             OperationJ6Deg = OperationJ6From(config["Acs:Reach:OperationJ6Deg"], d.OperationJ6Deg),
+            CheckTraversal = config.GetValue("Acs:Reach:CheckTraversal", d.CheckTraversal),
+            ScanStandoffMm = scanStandoff,
+            ScanTiltDeg = config.GetValue("Acs:Reach:ScanTiltDeg", d.ScanTiltDeg),
+            ScanTiltProfile = TiltProfileFrom(config.GetSection("Acs:Reach:ScanTiltProfile")),
+            TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
         };
+    }
+
+    /// <summary>
+    /// 도면 순회 실제 경유점 — [[거리 mm, 기울기 도(, Z mm)], …]. 없거나 비면 null(±ScanTiltDeg 포괄 근사). 값이 2~3개가 아닌 항목은 버린다.
+    /// </summary>
+    private static IReadOnlyList<double[]>? TiltProfileFrom(IConfigurationSection section)
+    {
+        var list = section.GetChildren().Select(c => c.Get<double[]>()).Where(v => v is { Length: 2 or 3 }).Select(v => v!).ToList();
+        return list.Count == 0 ? null : list;
     }
 
     /// <summary>운영 J6 설정 — 없으면 모델 기본값(180°), "none"·빈 값이면 IK 값 그대로(광축 둘레 임의).</summary>
@@ -106,12 +123,15 @@ public sealed class ReachSimService
                 var s = ReachSimulator.Survey(_model, setup.Planes, setup.Stations, pts, setup.Normal, strokes, a.WallCode);
                 return new ReachSurveySeam(t.TaskId, t.Seq,
                     Math.Round(pts.Min(p => p[2]) - setup.FloorZ, 3), Math.Round(pts.Max(p => p[2]) - setup.FloorZ, 3),
-                    s.Verdict.ToString(), s.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker);
+                    s.Verdict.ToString(), s.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker,
+                    TraverseMarginDeg: Round1(s.TraverseMarginDeg));
             }).ToList();
             list.Add(new ReachSurveyArea(a.AreaId, a.Name, a.WallCode, a.Level, setup.Stations[0].X, setup.Stations[0].Y, seams));
         }
         return list;
     }
+
+    private static double? Round1(double? v) => v is { } x && double.IsFinite(x) ? Math.Round(x, 1) : null;
 
     /// <summary>영역 하나를 리프트 고정으로 조사 — 용접선 판정은 고정 높이의 것, 비교용 용접선별 최적을 함께 싣는다.</summary>
     private ReachSurveyArea AreaLiftSurvey(InspectionAreaEntity a, AreaSetup setup, IReadOnlyList<double> strokes)
@@ -125,7 +145,7 @@ public sealed class ReachSimService
             return new ReachSurveySeam(t.TaskId, t.Seq,
                 Math.Round(pts[i].Min(p => p[2]) - setup.FloorZ, 3), Math.Round(pts[i].Max(p => p[2]) - setup.FloorZ, 3),
                 s.Verdict.ToString(), s.StrokeMm ?? r.StrokeMm, s.MinClearanceM is { } c ? Math.Round(c, 4) : null, s.YawIndex, s.Blocker,
-                b.Verdict.ToString(), b.StrokeMm);
+                b.Verdict.ToString(), b.StrokeMm, Round1(s.TraverseMarginDeg));
         }).ToList();
         return new ReachSurveyArea(a.AreaId, a.Name, a.WallCode, a.Level, setup.Stations[0].X, setup.Stations[0].Y, seams,
             r.StrokeMm, r.BestClear, r.BestReachable);
@@ -165,6 +185,11 @@ public sealed class ReachSimService
         }
         var r = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[point],
             setup.Normal, h, offsetForwardMm, offsetLeftMm, wallCode: area.WallCode, seedJoints: seed);
+        // 도면 순회 — 시작점 ② 접근 자세에서 용접선 끝까지(대상 점과 무관하게 같은 판정).
+        var startSeed = point == 0 ? ReachSimulator.TraverseSeed(r)
+            : ReachSimulator.TraverseSeed(ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[0], setup.Normal, h,
+                offsetForwardMm, offsetLeftMm, withGeometry: false, wallCode: area.WallCode, checkEntry: false));
+        var trav = ReachSimulator.TraverseSeam(_model, setup.Stations[yawIndex], h, pts, setup.Normal, startSeed, offsetForwardMm, offsetLeftMm);
 
         var seams = area.Tasks.OrderBy(t => t.Seq).Select(t =>
         {
@@ -183,7 +208,12 @@ public sealed class ReachSimService
                     x.Joints.Select(j => new ReachJointDto(j.Name, j.Position)).ToList())).ToList())).ToList(),
             _model.WarnClearanceM,
             r.Entry is { } e ? new ReachEntryDto(e.Ok, e.Summary, e.InPlaneMm, e.Candidates, e.StartTcp, e.Entry, e.Plunge, e.Rejects) : null,
-            r.BranchChange, ReachSimulator.StartJoints(_model, area.WallCode), _model.MountYawDeg, r.ScanOnly);
+            r.BranchChange, ReachSimulator.StartJoints(_model, area.WallCode), _model.MountYawDeg, r.ScanOnly,
+            trav is null ? null : new ReachTraversalDto(trav.Ok, trav.Blocker,
+                double.IsFinite(trav.MinMarginDeg) ? trav.MinMarginDeg : null, trav.Limiting, trav.TwistDeg,
+                _model.ScanStandoffMm, _model.ScanTiltProfile is null ? _model.ScanTiltDeg : null,
+                trav.Worst is { } w ? new ReachTraversalPointDto(w.AlongMm, w.TiltDeg, w.Tcp, w.JointsDeg, w.MarginDeg, w.Limiting) : null,
+                trav.Points.Count));
     }
 
     /// <summary>
@@ -215,12 +245,64 @@ public sealed class ReachSimService
             var perSeam = tasks.Select((t, i) => new ReachOptimumSeam(t.TaskId, t.Seq,
                 i < r.Baseline.Seams.Count ? r.Baseline.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
                 i < r.Best.Seams.Count ? r.Best.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
-                i < r.Best.Seams.Count ? (r.Best.Seams[i].StrokeMm ?? r.Best.StrokeMm) : r.Best.StrokeMm)).ToList();
+                i < r.Best.Seams.Count ? (r.Best.Seams[i].StrokeMm ?? r.Best.StrokeMm) : r.Best.StrokeMm,
+                i < r.Baseline.Seams.Count ? Round1(r.Baseline.Seams[i].TraverseMarginDeg) : null,
+                i < r.Best.Seams.Count ? Round1(r.Best.Seams[i].TraverseMarginDeg) : null,
+                i < r.Best.Seams.Count && r.Best.Seams[i].Verdict == ReachVerdict.Unreachable ? r.Best.Seams[i].Blocker : null)).ToList();
             list.Add(new ReachStationOptimum(a.AreaId, a.Name, a.WallCode, a.Level,
                 a.StationX is not null || a.StationY is not null || a.StationTheta is not null,
                 Candidate(r.Baseline), Candidate(r.Best), r.Evaluated, sw.ElapsedMilliseconds, perSeam));
         }
         return list;
+    }
+
+    /// <summary>
+    /// 영역 재분할 제안(조회 전용 — DB 를 바꾸지 않는다). 한 정차로 영역 모든 용접선에 도면 순회 관절 여유를 확보하지 못하면
+    /// 용접선을 면 (u, v) 축 방향으로 잘라 최대 <paramref name="maxGroups"/> 묶음으로 나누고 묶음마다 정차·리프트를 고른다(<see cref="AreaSplitPlanner"/>).
+    /// 묶음마다 새 영역 사각형(TASK 묶음 분리와 같은 자동 사각형)을 함께 싣는다. 영역이 없으면 null.
+    /// </summary>
+    public async Task<ReachSplitPlan?> SplitPlanAsync(Guid areaId, int maxGroups, CancellationToken ct,
+        ReachBranchRule branch = ReachBranchRule.MaxMargin)
+    {
+        _model = _baseModel with { BranchRule = branch };
+        var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
+        if (area is null) return null;
+        var ctx = await LoadTankAsync(area.TankId, ct);
+        var g = await _db.TankGeometries.AsNoTracking().FirstOrDefaultAsync(x => x.TankId == area.TankId, ct);
+        if (ctx is null || g is null || !ctx.Walls.TryGetValue(area.WallCode, out var wall)) return null;
+        var tasks = area.Tasks.OrderBy(t => t.Seq).ToList();
+        var setup = Setup(ctx, area, wall);
+        if (tasks.Count == 0 || SearchSpace(area, wall, setup) is not { } space)
+            return new ReachSplitPlan(area.AreaId, area.Name, area.WallCode, area.Level, 0, new List<Guid>(), 0, 0, new List<ReachSplitGroup>());
+
+        var seams = tasks.Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+        var uv = tasks.Select(t => (IReadOnlyList<double[]>)TaskUv(t)).ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var plan = AreaSplitPlanner.Plan(_model, setup.Planes, space, seams, uv, AreaGeometry.MaxSpanM, AreaGeometry.MaxSpanV(area.WallCode),
+            setup.Normal, Strokes, area.WallCode, Math.Clamp(maxGroups, 1, 6), ct: ct);
+        var groups = plan.Groups.Select(gr =>
+        {
+            var members = gr.Seams.Select(i => tasks[i]).ToList();
+            var seamRows = gr.Seams.Select((i, k) =>
+            {
+                var r = gr.Best.Seams[k];
+                return new ReachSplitSeam(tasks[i].TaskId, tasks[i].Seq, r.Verdict.ToString(), Round1(r.TraverseMarginDeg),
+                    r.Verdict == ReachVerdict.Unreachable ? r.Blocker : null);
+            }).ToList();
+            return new ReachSplitGroup(members.Select(t => t.TaskId).ToList(), members.Select(t => t.Seq).ToList(),
+                Candidate(gr.Best), AreaRules.AutoCornersForTasks(members, wall, g, area.Level), seamRows);
+        }).ToList();
+        return new ReachSplitPlan(area.AreaId, area.Name, area.WallCode, area.Level, plan.Unsafe,
+            plan.Hopeless.Select(i => tasks[i].TaskId).ToList(), plan.GridCells, sw.ElapsedMilliseconds, groups);
+    }
+
+    /// <summary>작업의 면 (u, v) 점 — 시작·끝·교차 가지.</summary>
+    private static double[][] TaskUv(AreaTaskEntity t)
+    {
+        var pts = new List<double[]> { new[] { t.StartU, t.StartV }, new[] { t.EndU, t.EndV } };
+        if (!string.IsNullOrWhiteSpace(t.Points) && JsonSerializer.Deserialize<double[][]>(t.Points) is { } arms)
+            pts.AddRange(arms.Where(p => p is { Length: >= 2 }).Select(p => new[] { p[0], p[1] }));
+        return pts.ToArray();
     }
 
     /// <summary>
@@ -263,7 +345,7 @@ public sealed class ReachSimService
         Math.Round(c.Station.X, 3), Math.Round(c.Station.Y, 3), Math.Round(c.Station.Yaw, 4),
         Math.Round(c.DistM, 3), Math.Round(c.LateralM, 3), Math.Round(c.YawDeg, 1),
         Math.Round(c.BodyClearanceM, 3), c.Feasible, c.Clear, c.Collision, c.Unreachable, Math.Round(c.Robustness, 4),
-        c.StrokeMm);
+        c.StrokeMm, c.SafeClear, Round1(c.TraverseMarginDeg), c.MarginTargetDeg);
 
     // ── 내부 ─────────────────────────────────────────────────────────────
 
@@ -314,21 +396,37 @@ public sealed record ReachSurveyArea(Guid AreaId, string Name, string WallCode, 
 /// <summary>조사 결과 — 용접선 하나. Z 는 층 바닥 위 높이[m], Verdict = Clear | Collision | Unreachable.</summary>
 /// Blocker = Unreachable 사유(출발 자세 가지 전환·진입 경로 없음 등, 없으면 null).
 /// BestVerdict·BestStrokeMm = 리프트 고정 조사에서 이 용접선만 보고 높이를 고를 때의 판정·높이(아니면 null).
+/// TraverseMarginDeg = 도면 순회의 가장 빡빡한 관절 여유[도](순회 판정을 안 했거나 도달 불가면 null).
 public sealed record ReachSurveySeam(Guid TaskId, int Seq, double ZMin, double ZMax, string Verdict,
     double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null,
-    string? BestVerdict = null, double? BestStrokeMm = null);
+    string? BestVerdict = null, double? BestStrokeMm = null, double? TraverseMarginDeg = null);
+
+/// <summary>
+/// 영역 재분할 제안 — 묶음(작업·정차·리프트·새 사각형·용접선별 판정). Unsafe = 나눈 뒤에도 순회 여유(목표)를 확보하지 못한 용접선 수
+/// (가망 없는 용접선 제외), Hopeless = 어느 정차·리프트에서도 여유를 확보하지 못한 작업(분할로 해결 안 됨). 묶음이 1개면 나누지 않아도 된다.
+/// </summary>
+public sealed record ReachSplitPlan(Guid AreaId, string Name, string WallCode, int Level, int Unsafe, List<Guid> Hopeless,
+    int GridCells, long ElapsedMs, List<ReachSplitGroup> Groups);
+
+/// <summary>재분할 묶음 하나 — 작업(용접선)·정차 후보(리프트·여유 포함)·새 영역 사각형(면 u,v)·용접선별 판정.</summary>
+public sealed record ReachSplitGroup(List<Guid> TaskIds, List<int> Seqs, ReachStationCandidate Station, double[][] Corners,
+    List<ReachSplitSeam> Seams);
+
+/// <summary>묶음 안 용접선 하나의 판정(Clear | Collision | Unreachable)·도면 순회 관절 여유[도]·막힘 사유.</summary>
+public sealed record ReachSplitSeam(Guid TaskId, int Seq, string Verdict, double? TraverseMarginDeg, string? Blocker);
 
 /// <summary>정차점 최적화 결과 — 영역 하나. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimum(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
     ReachStationCandidate Current, ReachStationCandidate Best, int Evaluated, long ElapsedMs, IReadOnlyList<ReachOptimumSeam> Seams);
 
-/// <summary>용접선 하나의 지금·찾은 정차 판정과 찾은 정차에서 고른 리프트.</summary>
-public sealed record ReachOptimumSeam(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm);
+/// <summary>용접선 하나의 지금·찾은 정차 판정과 찾은 정차에서 고른 리프트·도면 순회 관절 여유[도](순회 판정 없음·도달 불가면 null)·찾은 정차에서 막히는 사유.</summary>
+public sealed record ReachOptimumSeam(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm,
+    double? CurrentTraverseMarginDeg = null, double? BestTraverseMarginDeg = null, string? BestBlocker = null);
 
 /// <summary>후보 정차 — 도면 x·y·방향, 탐색 좌표(중심에서 안쪽 거리·좌측·방향 보정 °), 차체 여유, 판정 개수, 공통 리프트.</summary>
 public sealed record ReachStationCandidate(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
     double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
-    double? StrokeMm = null);
+    double? StrokeMm = null, int SafeClear = 0, double? TraverseMarginDeg = null, double MarginTargetDeg = 10);
 
 public sealed record ReachSeamLine(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);
@@ -349,7 +447,17 @@ public sealed record ReachDetail(
     Guid TaskId, int Point, double[] Target, IReadOnlyList<ReachSeamLine> Seams,
     ReachBodyDto Body, IReadOnlyList<ReachStageDto> Stages, double WarnClearanceM,
     ReachEntryDto? Entry = null, string? BranchChange = null, double[]? StartJointsDeg = null, double MountYawDeg = 0,
-    bool ScanOnly = false);
+    bool ScanOnly = false, ReachTraversalDto? Traversal = null);
+
+/// <summary>
+/// 도면 순회 판정 — 시작점 초점 자세에서 용접선 끝까지 경유점을 이어 풀 때 HD_AMR 이 막는가.
+/// <paramref name="MinMarginDeg"/> = 가장 빡빡한 관절 여유(해가 없으면 null), <paramref name="TiltDeg"/> = 포괄 근사 ±기울기(실제 경유점을 쓰면 null).
+/// </summary>
+public sealed record ReachTraversalDto(bool Ok, string? Blocker, double? MinMarginDeg, string Limiting, double TwistDeg,
+    double StandoffMm, double? TiltDeg, ReachTraversalPointDto? Worst, int States);
+
+/// <summary>순회 판정 자세 하나 — 시작점에서의 거리 mm·기울기 도·TCP(도면 m)·관절각·여유.</summary>
+public sealed record ReachTraversalPointDto(double AlongMm, double TiltDeg, double[] Tcp, double[] JointsDeg, double MarginDeg, string Limiting);
 
 /// <summary>운영 ② 진입 경로(후퇴 평면 경유) 판정 — 출발 자세가 있는 면만. 좌표 도면 m.</summary>
 public sealed record ReachEntryDto(bool Ok, string Summary, double InPlaneMm, int Candidates,

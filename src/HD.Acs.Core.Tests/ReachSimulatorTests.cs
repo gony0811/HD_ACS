@@ -133,7 +133,7 @@ public class ReachSimulatorTests
             new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(11.8, v), sm.To3D(12, v), sm.To3D(12.2, v) },
             sm.Normal, new[] { 0.0, 500, 1000 });
 
-        var survey = Run(ReachRobotModel.Default);
+        var survey = Run(NoTraverse);
         Assert.Equal(ReachVerdict.Clear, survey.Verdict);
         Assert.NotNull(survey.StrokeMm);
         Assert.True(survey.MinClearanceM >= 0);
@@ -144,6 +144,7 @@ public class ReachSimulatorTests
 
     private static readonly ReachRobotModel Symmetric175 = ReachRobotModel.Default with
     {
+        CheckTraversal = false,
         JointMinDeg = new[] { -175.0, -175, -175, -175, -175 },
         JointMaxDeg = new[] { 175.0, 175, 175, 175, 175 },
     };
@@ -258,8 +259,11 @@ public class ReachSimulatorTests
             StationFor(sm, 12, v, 1.2, 2), sm.To3D(u, v), sm.Normal, strokeMm).Stages[0].Chosen!.JointsDeg;
 
     /// <summary>MidWall 에서 간섭 없이 닿는 리프트(조사).</summary>
+    /// <summary>세 자세·진입만 보는 모델 — 리프트·진입·가지 규칙 테스트용(도면 순회 판정은 ReachTraversalTests).</summary>
+    private static readonly ReachRobotModel NoTraverse = ReachRobotModel.Default with { CheckTraversal = false };
+
     private static double ClearStroke(GeneratedWall sm, double v, double floor) =>
-        ReachSimulator.Survey(ReachRobotModel.Default, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
+        ReachSimulator.Survey(NoTraverse, ReachSimulator.PlanesForLevel(WallPlanes, floor, 2),
             new[] { StationFor(sm, 12, v, 1.2, 2) }, new[] { sm.To3D(12, v) }, sm.Normal,
             Enumerable.Range(0, 11).Select(i => i * 100.0).ToArray()).StrokeMm!.Value;
 
@@ -437,6 +441,7 @@ public class ReachSimulatorTests
         {
             MountYawDeg = 180, ToolZMm = 365, StageStandoffsMm = new[] { 200.0, 300, 10 },
             StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = home2 },
+            CheckTraversal = false,   // 기준 구현이 세 자세·진입만 본다
         };
         var (sm, _, floor) = MidWall();
         var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
