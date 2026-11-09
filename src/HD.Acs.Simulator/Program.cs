@@ -412,10 +412,19 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
             }
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
+        string lift = "없음";
+        try
+        {
+            var prmParam = action.ActionParameters.FirstOrDefault(p => p.Key == "params");
+            if (prmParam?.Value is not null
+                && System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prmParam.Value))?["liftStrokeMm"] is { } ln)
+                lift = $"{ln.GetValue<double>():0}mm";
+        }
+        catch { /* 로그용 — 파싱 실패 무해 */ }
         await Task.Delay(fullMs);
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = "OK;moveToSeamStart";
-        Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam}");
+        actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift}";
+        Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift}");
     }
     else
     {

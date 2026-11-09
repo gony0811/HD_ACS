@@ -5,6 +5,7 @@ using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
+using HD.Acs.Vda5050.Messages;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -54,6 +55,42 @@ public class SeamStartTestTests
         Assert.False(string.IsNullOrEmpty(act.ActionId));
         Assert.Contains(act.ActionParameters, p => p.Key == "jobRef");
         Assert.Contains(act.ActionParameters, p => p.Key == "position");
+        // 리프트 미지정 → 본검사와 같은 기본 0
+        Assert.Equal(0.0, LiftOf(act));
+    }
+
+    // 시험 Order 에도 영역 리프트 높이를 params.liftStrokeMm 으로 싣고, 카탈로그 param_schema 를 통과한다.
+    [Fact]
+    public void BuildSeamStartTestOrder_CarriesLiftStroke_AndPassesSchema()
+    {
+        var position = new JsonObject
+        {
+            ["seamStartW"] = new JsonArray(12.5, 5.98, 1.42),
+            ["seamEndW"] = new JsonArray(13.3, 5.98, 1.42),
+            ["drawingPos"] = new JsonObject
+            {
+                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "SM",
+                ["u"] = 5.0, ["v"] = 1.6, ["x"] = 1.0, ["y"] = 2.0, ["z"] = 3.0,
+            },
+        };
+        var order = InspectionDispatcher.BuildSeamStartTestOrder("CT1-L2", 12.482, 5.117, 1.571, position, "TEST-SEAM-x", 0.08, 0.07, 600);
+        var act = Assert.Single(Assert.Single(order.Nodes).Actions);
+        Assert.Equal(600.0, LiftOf(act));
+
+        var asObject = new JsonObject();
+        foreach (var p in act.ActionParameters)
+            asObject[p.Key] = JsonNode.Parse(JsonSerializer.Serialize(p.Value));
+        Assert.Empty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+
+        // 범위 밖 리프트는 스키마가 거부(0~1000 mm)
+        asObject["params"] = new JsonObject { ["liftStrokeMm"] = 1200 };
+        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+    }
+
+    private static double LiftOf(VdaAction act)
+    {
+        var prm = act.ActionParameters.Single(p => p.Key == "params").Value;
+        return JsonNode.Parse(JsonSerializer.Serialize(prm))!["liftStrokeMm"]!.GetValue<double>();
     }
 
     private static async Task<Guid> SeedAsync(AcsDbContext db, string reportedMapId, bool withRobot = true, bool runningRun = false)

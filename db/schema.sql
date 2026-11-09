@@ -179,6 +179,12 @@ VALUES ('moveToSeamStart', 'NODE', 'HARD',
   "required": ["jobRef", "position"],
   "properties": {
     "jobRef": { "type": "string" },
+    "params": {
+      "type": "object",
+      "properties": {
+        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+      }
+    },
     "position": {
       "type": "object",
       "required": ["seamStartW", "seamEndW", "drawingPos"],

@@ -601,7 +601,7 @@ public sealed class InspectionDispatcher
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
-    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW);
+    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW, double LiftStrokeMm = 0.0);
 
     /// <summary>
     /// 코봇툴 seam 시작점 이동 시험 [VDA §8 moveToSeamStart, N협의] — 지정 용접선(area-task)의 정차점(standoff)으로
@@ -651,27 +651,30 @@ public sealed class InspectionDispatcher
         var position = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
         var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
 
-        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta);
+        // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
+        var liftStrokeMm = area.StationLiftMm ?? 0.0;
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm);
 
         _db.AuditLogs.Add(new AuditLogEntity
         {
             UserId = userId ?? "", Action = "TEST_SEAM_START",
-            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2})",
+            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
         });
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
-        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2})", robotId, taskId, mapId, mx, my);
-        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW);
+        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm", robotId, taskId, mapId, mx, my, liftStrokeMm);
+        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm);
     }
 
-    /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션). 순수 — 테스트 대상.</summary>
+    /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm 포함). 순수 — 테스트 대상.</summary>
     public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
-        JsonObject position, string jobRef, double allowedXy, double allowedTheta)
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0)
     {
         var orderId = Guid.NewGuid().ToString();
         var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
         action.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = jobRef });
         action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
+        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = new JsonObject { ["liftStrokeMm"] = liftStrokeMm } });
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(new OrderNode
         {

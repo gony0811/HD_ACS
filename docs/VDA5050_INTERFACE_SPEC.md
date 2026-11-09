@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.13** |
-| 작성일 | 2026-08-27 (최종 개정 2026-11-03) |
+| 문서 버전 | **1.14** |
+| 작성일 | 2026-08-27 (최종 개정 2026-11-09) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
@@ -21,6 +21,7 @@
 | 개정 1.11 | 2026-10-23 — **seam 좌표 z 기준면 확정 `[N17]`**: `position.seamStartW`/`seamEndW` 의 z 를 **해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`)으로 발행한다(§8.1·§8.4 골든·§10 N17·부록 B). 종전엔 T_W_D 가 2D(x,y,yaw) 라 z 가 **도면 전역(선창 바닥=0) 그대로** 실려, L2 이상에서 층 바닥 높이만큼 어긋났다(L1 은 0 이라 단층 E2E 에서 드러나지 않음). 실기(2026-10-23) `moveToSeamStart` 접근점 z ≈ 9.7 m → IK 5회 연속 실패로 확인. `drawingPos.z` 는 도면 echo 라 **전역 z 유지**. x·y·Δz(방향 유도)는 무변경. ACS 는 층 정의(`level_z`) 가 없으면 0 폴백 없이 발행을 거부한다. HD_AMR 보유본의 N17 제기(AMR 개정 1.7)·확정(AMR 개정 1.10)을 ACS 정본에 병합한 것이며, 보유본의 다른 개정(N18 거리 파라미터·§4.4.1 정차 이격 산출식·LINE/CROSS4 레시피 통합)은 **미병합** |
 | 개정 1.12 (초안) | 2026-10-31 — **정차 온보드 보정 허용 범위 `params.stationAdjust` 제안 `[N23]`**(§4.4.2 신설·§8.1·§10). AMR이 도착 후 리치를 위해 `nodePosition`에서 옮겨 설 수 있는 한계(전진·후진·횡·각)를 ACS가 정차마다 준다. `allowedDeviation*`(도착 판정)은 의미 무변경. **선택 필드·기본 꺼짐 → 계약 하위 호환**. ACS 발행 구현 완료, AMR 회신·사인오프 대기 |
 | 개정 1.13 | 2026-11-03 — **run 중단 시 진행 중 Order 취소**(§4.5.3·§5.4): `cancelOrder` 발행 조건을 "통신 단절 PAUSE 중"에서 "**중단 시 그 run의 정차가 실행 중이거나 PAUSE 중**"으로 확장. 취소·비상정지로 FAILED 보고된 정차는 실패 집계 없이 PENDING(이어하기 대상). AMR 요구 동작은 무변경(HD_AMR `CancelOrderAsync`는 PAUSE 여부와 무관하게 주행 정지·검사 중단·잔여 액션 FAILED) |
+| 개정 1.14 | 2026-11-09 — **정차 리프트 높이 `params.liftStrokeMm` 명문화**(§8.1·§8.7). 정차점 최적화로 찾은 영역 공통 리프트 높이(0~1000 mm, 미지정 0)를 `startWeldInspection` 의 모든 액션에 싣는 것(ACS 구현 2026-11-04)을 표에 반영하고, **시험 액션 `moveToSeamStart` 에도 같은 값을 `params.liftStrokeMm` 으로 싣는다**(종전엔 `params` 없음 → 시험이 리프트 없이 수행돼 운영 자세와 달랐다). 선택 필드라 하위 호환(부재 = 0). HD_AMR 쪽 리프트 구동 반영 여부는 확인 필요 |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
 
 > **이 문서가 인터페이스 계약의 단일 출처(single source of truth)다.**
@@ -597,6 +598,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `params.seqInGroup` | 그룹 내 순번 (1부터) |
 | `params.taskId` | **(1.6 신설, 선택)** 검사 작업(용접선 1구간)의 **영구 식별자** — GUID 문자열(하이픈 포함 36자, 소문자). ACS가 작업 등록 시 발급하며 **실행(run)이 바뀌어도 같은 용접선이면 같은 값**. AMR은 이 액션 수행 중 발생하는 **모든 CAPTURE_REQ에 같은 값**을 싣는다(비전 v3.2 [15-30], 바이너리 16B). 비전 S/W→SAIGE 메타데이터의 `taskId`·`productId`가 되어 도면·진행률·촬영 이미지를 잇는 유일한 키다(§8.6) |
 | `params.attempt` | **(1.6 신설, 선택)** 그 `taskId`의 **몇 번째 시도인지** — 정수 1~255, **ACS 발급**. AMR은 값을 해석·증감하지 않고 CAPTURE_REQ [31]에 그대로 싣는다. 발급 규칙은 §8.6.2 |
+| `params.liftStrokeMm` | **(1.14, 선택)** 정차 리프트(텔레스코픽) 높이 [mm, 0~1000] — 정차점 최적화로 찾은 **영역 공통** 높이(`ref.inspection_area.station_lift_mm`). **같은 정차의 모든 액션에 같은 값**, 저장값이 없으면 `0`. 발행 시점에 읽으므로 run 도중 고쳐도 다음 정차부터 반영. 시험 액션 `moveToSeamStart`(§8.7)에도 같은 값이 실린다 |
 | `params.stationAdjust` | **(1.12 초안, 선택) `[N23]`** 정차 온보드 보정 허용 범위 객체 `{maxForwardMm, maxBackwardMm, maxLateralMm, maxThetaDeg}`(전부 필수·0 이상). 의미·프레임·보고는 §4.4.2. **같은 정차의 모든 액션에 같은 값**이 실린다(VDA 노드에 커스텀 필드 자리가 없음). ACS 설정에서 꺼져 있거나 정차각(`theta`)이 없는 정차(바닥·천장)에는 **싣지 않는다** — 없으면 AMR은 `nodePosition`에 그대로 선다(종전 동작) |
 
 `wallNormalW`(벽 법선)는 **전송하지 않는다** — 툴 자세는 AMR이 `wall_code` 티칭으로 결정한다.
@@ -868,7 +870,7 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
 정지**한다 — **촬영·측정·자세 시퀀스 없음**. `wall_code`(§8.1)로 툴 자세를 정한다.
 
 - **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(nodePosition=검사 정차점 standoff) + 액션 1건.
-- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`). `params` 없음.
+- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm` 하나만: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0`). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
 - **완료 판정**: `state.actionStates`로 `FINISHED`(도달 성공) / `FAILED`(reach 불가·특이자세 등 — `errors`에 사유). 이 시험의 FAILED가 곧 **N10(정차 이격) 실측 근거**가 된다.
 - **발행**: `POST /api/robots/{id}/test/seam-start { taskId }` — ACS가 area→정차점·task→seamStartW·wall_code 산출.
   진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).

@@ -426,7 +426,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
             var r = await _api.MoveToSeamStartTestAsync(robot.RobotId, task.TaskId);
             StatusMessage = r?.SeamStartW is { Length: >= 2 } sw
-                ? $"코봇 이동 시험 발행: {robot.RobotId} → seam 시작점 ({sw[0]:F2},{sw[1]:F2}) @{r.MapId} (실행은 HD_AMR)"
+                ? $"코봇 이동 시험 발행: {robot.RobotId} → seam 시작점 ({sw[0]:F2},{sw[1]:F2}) @{r.MapId}"
+                  + (r.LiftStrokeMm is { } lift ? $" · 리프트 {lift:0} mm" : "") + " (실행은 HD_AMR)"
                 : $"코봇 이동 시험 발행: {robot.RobotId} ← 용접선 seq {task.Seq}";
         }
         catch (Exception ex) { StatusMessage = $"코봇 이동 시험 실패: {ex.Message}"; }   // 409 run중/타층·404·400 사유
