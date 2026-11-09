@@ -34,6 +34,7 @@ public static class AreaLift
     /// 상한(최대 Clear·도달 수)을 먼저 구해 더 나아질 수 없는 리프트 높이는 진입 경로·도면 순회를 풀지 않는다.
     /// 순위는 여유 확보 간섭 없음(도면 순회 관절 여유 ≥ <see cref="ReachRobotModel.TraverseMarginTargetDeg"/>) → 간섭 없음 → 도달 → 순회 최소 여유 → 낮은 높이.
     /// 고른 높이와 그 높이에서의 용접선 판정은 <see cref="Evaluate"/> 의 <c>StrokeMm</c>·<c>Fixed</c> 와 같다.
+    /// 리프트는 모든 높이를 본다 — 높이별 판정이 들쭉날쭉해 한 칸 건너 보면 최적 높이를 놓친다(CT1 L2 F 에서 10/33 영역 결과가 달라짐, 2026-11-09).
     /// </summary>
     public static (double StrokeMm, IReadOnlyList<ReachSeamSurvey> Seams) EvaluateFixed(
         ReachRobotModel model, IReadOnlyList<ReachPlane> planes, ReachStation station,
@@ -43,13 +44,19 @@ public static class AreaLift
             return (strokesMm.Count > 0 ? strokesMm[0] : 0,
                 seams.Select(_ => new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0)).ToArray());
 
+        // 사전 판정(세 자세 체인) — 용접선 × 리프트 높이를 모두 병렬로 푼다.
         var pre = new (bool Reach, double MinCl, string? Blocker, double[]? Seed)[seams.Count][];
-        Parallel.For(0, seams.Count, i =>
+        for (var i = 0; i < seams.Count; i++) pre[i] = new (bool, double, string?, double[]?)[strokesMm.Count];
+        var done = new bool[strokesMm.Count];
+        void ComputePre(IReadOnlyList<int> ks)
         {
-            var row = new (bool Reach, double MinCl, string? Blocker, double[]? Seed)[strokesMm.Count];
-            var pts = seams[i];
-            for (var k = 0; k < strokesMm.Count; k++)
+            var todo = ks.Where(k => !done[k]).ToArray();
+            if (todo.Length == 0) return;
+            Parallel.For(0, seams.Count * todo.Length, job =>
             {
+                var i = job / todo.Length;
+                var k = todo[job % todo.Length];
+                var pts = seams[i];
                 var h = strokesMm[k];
                 var min = double.PositiveInfinity;
                 var reach = true;
@@ -70,16 +77,12 @@ public static class AreaLift
                     }
                     min = Math.Min(min, r.MinClearanceM);
                 }
-                row[k] = (reach, min, entryBlocker ?? blocker, startSeed);
-            }
-            pre[i] = row;
-        });
+                pre[i][k] = (reach, min, entryBlocker ?? blocker, startSeed);
+            });
+            foreach (var k in todo) done[k] = true;
+        }
 
         var needEntry = ReachSimulator.StartJoints(model, wallCode) is not null;
-        var ub = Enumerable.Range(0, strokesMm.Count).Select(k => (
-            K: k,
-            Clear: pre.Count(r => r[k].Reach && r[k].MinCl >= 0),
-            Reach: pre.Count(r => r[k].Reach))).ToArray();
 
         // 순위 — 여유 확보 간섭 없음(도면 순회 관절 여유 ≥ 목표) > 간섭 없음 > 도달 > 순회 최소 여유(목표에서 자름) > 낮은 높이.
         var cap = model.TraverseMarginTargetDeg;
@@ -92,63 +95,77 @@ public static class AreaLift
             return c > 0 || (c == 0 && h < bestStroke);
         }
 
-        foreach (var u in ub.OrderByDescending(x => x.Clear).ThenByDescending(x => x.Reach).ThenBy(x => strokesMm[x.K]))
+        void Select(IReadOnlyList<int> ks)
         {
-            var h = strokesMm[u.K];
-            if (!Better((u.Clear, u.Clear, u.Reach, cap), h)) continue;
-            int safeUb = u.Clear, clearUb = u.Clear, reachUb = u.Reach;
-            var minMargin = double.PositiveInfinity;
-            var row = new ReachSeamSurvey[seams.Count];
-            var aborted = false;
-            bool Lost(bool wasClear, bool clearStays)
+            ComputePre(ks);
+            var ub = ks.Select(k => (
+                K: k,
+                Clear: pre.Count(r => r[k].Reach && r[k].MinCl >= 0),
+                Reach: pre.Count(r => r[k].Reach))).ToArray();
+            foreach (var u in ub.OrderByDescending(x => x.Clear).ThenByDescending(x => x.Reach).ThenBy(x => strokesMm[x.K]))
             {
-                if (!clearStays) { reachUb--; if (wasClear) clearUb--; }
-                if (wasClear) safeUb--;
-                return !Better((safeUb, clearUb, reachUb, cap), h);
-            }
-            for (var i = 0; i < seams.Count; i++)
-            {
-                var p = pre[i][u.K];
-                if (!p.Reach)
+                var h = strokesMm[u.K];
+                if (!Better((u.Clear, u.Clear, u.Reach, cap), h)) continue;
+                int safeUb = u.Clear, clearUb = u.Clear, reachUb = u.Reach;
+                var minMargin = double.PositiveInfinity;
+                var row = new ReachSeamSurvey[seams.Count];
+                var aborted = false;
+                bool Lost(bool wasClear, bool clearStays)
                 {
-                    row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, p.Blocker);
-                    continue;
+                    if (!clearStays) { reachUb--; if (wasClear) clearUb--; }
+                    if (wasClear) safeUb--;
+                    return !Better((safeUb, clearUb, reachUb, cap), h);
                 }
-                var wasClear = p.MinCl >= 0;
-                if (needEntry && seams[i].Count > 0)
+                // 진입 경로·도면 순회 — 용접선마다 독립이라 먼저 병렬로 풀고, 집계·가지치기는 아래에서 순서대로 한다(결과는 순차 계산과 같다).
+                var gate = new (bool Blocked, string? Blocker, double? Margin)[seams.Count];
+                Parallel.For(0, seams.Count, i =>
                 {
-                    var e = ReachSimulator.Evaluate(model, planes, station, seams[i][0], wallNormal, h, withGeometry: false, wallCode: wallCode);
-                    if (!e.Reachable)
+                    var p = pre[i][u.K];
+                    if (!p.Reach) return;
+                    if (needEntry && seams[i].Count > 0)
                     {
-                        row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, e.Blocker ?? p.Blocker);
+                        var e = ReachSimulator.Evaluate(model, planes, station, seams[i][0], wallNormal, h, withGeometry: false, wallCode: wallCode);
+                        if (!e.Reachable) { gate[i] = (true, e.Blocker ?? p.Blocker, null); return; }
+                    }
+                    if (ReachSimulator.TraverseSeam(model, station, h, seams[i], wallNormal, p.Seed) is { } t)
+                        gate[i] = t.Ok ? (false, null, t.MinMarginDeg) : (true, t.Blocker, null);
+                });
+                for (var i = 0; i < seams.Count; i++)
+                {
+                    var p = pre[i][u.K];
+                    if (!p.Reach)
+                    {
+                        row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, p.Blocker);
+                        continue;
+                    }
+                    var wasClear = p.MinCl >= 0;
+                    var (blocked, blocker, margin) = gate[i];
+                    if (blocked)
+                    {
+                        row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, blocker);
                         if (Lost(wasClear, false)) { aborted = true; break; }
                         continue;
                     }
-                }
-                double? margin = null;
-                if (ReachSimulator.TraverseSeam(model, station, h, seams[i], wallNormal, p.Seed) is { } t)
-                {
-                    if (!t.Ok)
+                    if (margin is { } m)
                     {
-                        row[i] = new ReachSeamSurvey(ReachVerdict.Unreachable, null, null, 0, t.Blocker);
-                        if (Lost(wasClear, false)) { aborted = true; break; }
-                        continue;
+                        minMargin = Math.Min(minMargin, m);
+                        if (wasClear && m < cap && Lost(true, true)) { aborted = true; row[i] = Row(p, h, margin); break; }
                     }
-                    margin = t.MinMarginDeg;
-                    minMargin = Math.Min(minMargin, t.MinMarginDeg);
-                    if (wasClear && t.MinMarginDeg < cap && Lost(true, true)) { aborted = true; row[i] = Row(p, h, margin); break; }
+                    row[i] = Row(p, h, margin);
                 }
-                row[i] = Row(p, h, margin);
-            }
-            if (aborted) continue;
-            var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap));
-            if (Better(score, h))
-            {
-                bestScore = score;
-                bestStroke = h;
-                bestRow = row;
+                if (aborted) continue;
+                var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap));
+                if (Better(score, h))
+                {
+                    bestScore = score;
+                    bestStroke = h;
+                    bestRow = row;
+                }
             }
         }
+
+        Select(Enumerable.Range(0, strokesMm.Count).ToList());
+
         return (bestStroke, bestRow);
     }
 

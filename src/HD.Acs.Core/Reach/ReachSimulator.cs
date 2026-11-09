@@ -376,7 +376,8 @@ public static partial class ReachSimulator
             var next = focus.J;
             for (var i = count - 2; i >= 0; i--)
             {
-                if (next is null) { refs[i] = Skipped(i); continue; }
+                // 참고 자세는 판정에 쓰지 않는다(ScanOnly) — 조사·최적화(withGeometry: false)에서는 풀지 않고 상세 화면에서만 푼다.
+                if (next is null || !withGeometry) { refs[i] = Skipped(i); continue; }
                 var (stage, j) = SolveStage(i, next);
                 refs[i] = stage;
                 next = j;

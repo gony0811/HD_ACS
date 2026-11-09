@@ -65,6 +65,41 @@ public class AreaSplitPlannerTests
     }
 
     [Fact]
+    public void 지금_정차가_이미_최상이면_정차_최적화는_탐색하지_않는다()
+    {
+        // 분리안의 왼쪽 묶음(H01·H05)을 그 묶음 정차로 — 두 용접선 모두 여유 확보. 최상 점수면 후보를 더 보지 않는다(평가 1곳).
+        var (seams, uv) = R02C05();
+        var sub = new List<IReadOnlyList<double[]>> { seams[0], seams[4] };
+        var first = StationOptimizer.Optimize(Field, Planes, Space() with { CenterXY = new[] { 15.48, 2.70 } }, sub, Normal, Strokes, wallCode: "F");
+        var best = first.Best;
+        var again = StationOptimizer.Optimize(Field, Planes,
+            Space() with { CenterXY = new[] { 15.48, 2.70 }, BaselineDistM = best.DistM, BaselineLateralM = best.LateralM, BaselineYawDeg = best.YawDeg },
+            sub, Normal, Strokes, wallCode: "F");
+
+        // 면 간섭 여유는 초점 자세에서 툴 끝–면 98.5 mm 가 최대 — 그 값이면 더 나은 후보가 없다.
+        Assert.Equal(0.0985, StationOptimizer.RobustnessBound(Field), 4);
+        Assert.True(StationOptimizer.IsTop(again.Baseline, 2, Field.TraverseMarginTargetDeg, StationOptimizer.RobustnessBound(Field)));
+        Assert.Equal(1, again.Evaluated);
+        Assert.Same(again.Baseline, again.Best);
+        Assert.True(first.Evaluated > 1);
+        Assert.Equal(StationOptimizer.Score(best.Seams, 10), StationOptimizer.Score(again.Best.Seams, 10));
+    }
+
+    [Fact]
+    public void 최상_점수_판정()
+    {
+        StationCandidate C(int safe, double? margin, double robust, bool feasible = true) =>
+            new(1, 0, 0, new ReachStation(0, 0, 0, 0), 0.3, feasible, safe, 0, 0, robust, Array.Empty<ReachSeamSurvey>(), 0, safe, margin, 10);
+        Assert.True(StationOptimizer.IsTop(C(4, 12, 0.15), 4, 10));
+        Assert.True(StationOptimizer.IsTop(C(4, null, 0.15), 4, 10));     // 순회 판정 없음 = 목표로 본다
+        Assert.False(StationOptimizer.IsTop(C(3, 12, 0.15), 4, 10));     // 여유 확보 못 한 용접선
+        Assert.False(StationOptimizer.IsTop(C(4, 9.6, 0.15), 4, 10));    // 최소 여유가 목표 미만(0.5° 단위 9.5)
+        Assert.False(StationOptimizer.IsTop(C(4, 12, 0.12), 4, 10));     // 면 간섭 여유가 상한 미만 — 더 나은 후보가 있을 수 있다
+        Assert.True(StationOptimizer.IsTop(C(4, 12, 0.0985), 4, 10, 0.0985));   // 기구상 최대 여유(초점 자세 툴 끝–면)면 최상
+        Assert.False(StationOptimizer.IsTop(C(4, 12, 0.15, feasible: false), 4, 10));
+    }
+
+    [Fact]
     public void 한_정차로_충분하면_나누지_않는다()
     {
         // 왼쪽 두 칸(H01·H02·H05·H06)만 — 한 정차로 모두 여유 확보.

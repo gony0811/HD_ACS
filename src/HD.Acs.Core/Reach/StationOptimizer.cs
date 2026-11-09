@@ -78,6 +78,9 @@ public static class StationOptimizer
         // 수평면(T·B, MinDistM < 0)은 영역 중심 주위 [MinDistM, MaxDistM] × ±MaxLateralM 와 전 방향(±180°)을 본다.
         var baseline = Evaluate(model, planes, space, space.BaselineDistM, space.BaselineLateralM, space.BaselineYawDeg,
             seams, wallNormal, strokesMm, surveyInfeasible: true, wallCode: wallCode, areaLift: areaLift);
+        // 지금 정차가 이미 최상 점수(모두 여유 확보·순회 여유 목표·면 간섭 여유가 기구상 최대)면 탐색하지 않는다 — 어느 후보도 점수를 올릴 수 없다.
+        // (같은 점수의 더 가운데 정차는 있을 수 있지만, 점수가 같으면 옮길 이유가 없다 — UI 도 옮길 영역으로 치지 않는다.)
+        if (IsTop(baseline, seams.Count, model.TraverseMarginTargetDeg, RobustnessBound(model))) return new StationOptimum(baseline, baseline, 1);
         if (FirstBodyFeasible(model, planes, space) is not { } start) return new StationOptimum(baseline, baseline, 1);
         var dMin = space.MinDistM < 0
             ? Idx(start.DistM + space.MinDistM, space.DistStepM)
@@ -236,6 +239,25 @@ public static class StationOptimizer
             seams.Count(r => r.Verdict == ReachVerdict.Clear), seams.Count(r => r.Verdict != ReachVerdict.Unreachable),
             MarginKey(margins.Count == 0 ? null : margins.Min(), marginTargetDeg));
     }
+
+    /// <summary>
+    /// 더 올릴 수 없는 점수인가 — 차체 가능·모든 용접선 여유 확보·순회 최소 여유 키 = 목표·면 간섭 여유 = 도달 가능한 최대(<paramref name="robustBoundM"/>).
+    /// 순위에서 이보다 앞서는 후보는 없다(남은 기준은 정차 위치뿐).
+    /// </summary>
+    /// <param name="robustBoundM">면 간섭 여유가 가질 수 있는 최대 — <see cref="RobustnessBound"/>. 없으면 <see cref="RobustCapM"/>.</param>
+    public static bool IsTop(StationCandidate c, int seamCount, double marginTargetDeg, double robustBoundM = RobustCapM) =>
+        c.Feasible && seamCount > 0 && c.SafeClear == seamCount
+        && MarginKey(c.TraverseMarginDeg, marginTargetDeg) >= marginTargetDeg
+        && Math.Round(c.Robustness, 3) >= Math.Round(Math.Min(robustBoundM, RobustCapM), 3);
+
+    /// <summary>
+    /// 면 간섭 여유(<see cref="StationCandidate.Robustness"/>)의 상한 [m] — 초점 자세는 TCP 가 용접선 면에서 초점 이격만큼 떨어지고 광축이 면에 수직이라
+    /// 툴 상자의 가장 먼 끝(플랜지 z 최대)과 그 면 사이가 (공구 z + 초점 이격 − 툴 끝 z) 로 정해진다. 어느 정차도 이보다 큰 여유를 낼 수 없다
+    /// (실기 모델 365 + 10 − 276.5 = 98.5 mm). <see cref="RobustCapM"/> 보다 크면 그 값.
+    /// </summary>
+    public static double RobustnessBound(ReachRobotModel m) =>
+        m.ToolBoxes.Count == 0 || m.StageStandoffsMm.Length == 0 ? RobustCapM
+        : Math.Min(RobustCapM, Math.Max(0, (m.ToolZMm + m.StageStandoffsMm[^1] - m.ToolBoxes.Max(b => b.Max[2])) / 1000.0));
 
     /// <summary>순위용 최소 여유 — 목표 이상은 같게, 0.5° 단위. 순회 판정이 없으면(null) 목표.</summary>
     public static double MarginKey(double? marginDeg, double targetDeg) =>
