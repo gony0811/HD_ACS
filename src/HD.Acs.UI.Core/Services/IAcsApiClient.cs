@@ -124,6 +124,9 @@ public interface IAcsApiClient
     /// <summary>선창 전 작업 일괄 조회(프로젝트 저장용). null = 서버 미지원(구빌드) — 호출자는 영역별 조회로 폴백.</summary>
     Task<IReadOnlyList<TankAreaTaskDto>?> GetTankAreaTasksAsync(string tankId, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<TankAreaTaskDto>?>(null);
+    /// <summary>선창 누적 검사 기록 — 용접선마다 가장 최근 결과 1건(미검사는 없음). null = 서버 미지원(구빌드).</summary>
+    Task<IReadOnlyList<TaskLatestResultDto>?> GetTaskLatestResultsAsync(string tankId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TaskLatestResultDto>?>(null);
     /// <summary>프로젝트 일괄 가져오기(선창 재등록+영역·작업, 전부 또는 전무). null = 서버 미지원(구빌드) — 호출자는 단건 등록으로 폴백.
     /// 검증 거부는 <see cref="ProjectRejectedException"/>(DB 무변경).</summary>
     Task<ProjectImportResultDto?> ImportProjectAsync(string tankId, ProjectImportRequestDto request, CancellationToken ct = default) =>

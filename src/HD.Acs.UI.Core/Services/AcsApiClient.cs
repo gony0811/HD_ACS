@@ -535,6 +535,14 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<List<TankAreaTaskDto>>(ct) ?? new();
     }
 
+    public async Task<IReadOnlyList<TaskLatestResultDto>?> GetTaskLatestResultsAsync(string tankId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/internal/tanks/{Uri.EscapeDataString(tankId)}/task-results", ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버 — 누적 기록 없이 표시
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<TaskLatestResultDto>>(ct) ?? new();
+    }
+
     public async Task<ProjectImportResultDto?> ImportProjectAsync(string tankId, ProjectImportRequestDto request, CancellationToken ct = default)
     {
         // 수천 건 본문 — chunked 대신 Content-Length 명시(수신기 호환, 09-21 SAIGE 결함과 같은 계열 예방)

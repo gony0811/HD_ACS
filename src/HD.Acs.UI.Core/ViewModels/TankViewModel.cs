@@ -52,18 +52,73 @@ public sealed partial class TankViewModel : ObservableObject
         SceneInvalidated?.Invoke(this, EventArgs.Empty);   // 색만 바뀜 — 카메라는 유지(ViewChanged는 맞춤을 다시 함)
     }
 
-    /// <summary>영역의 현재 결과 (run 표시 중이 아니면 null = 계획 보기).
-    /// run 표시 중인데 그 run에 없는 영역은 EXCLUDED(흐리게) — 계획 녹색이 "성공"으로 읽히지 않게 한다.</summary>
-    public string? WorkItemStatusOf(Guid areaId) =>
-        _workStatusByArea.TryGetValue(areaId, out var s) ? s
-        : _workStatusByArea.Count > 0 ? WorkOutcome.Excluded : null;
+    // ── 선창 전체 누적 기록 — 용접선마다 가장 최근 검사 결과(run 무관) ──
+    private readonly Dictionary<Guid, string> _historyByTask = new();      // FINISHED | FAILED
+    private readonly Dictionary<Guid, Guid[]> _tasksByArea = new();         // 영역 → 소속 용접선 (Overlays에서)
 
-    /// <summary>run 진행 표시 중인지(범례 표시용).</summary>
-    public bool HasRunStatuses => _workStatusByArea.Count > 0;
+    /// <summary>누적 기록 표시 — 켜면 현재 run이 아직 검사하지 않은(또는 run에 없는) 용접선·영역을
+    /// 선창 전체 기록의 가장 최근 결과로 칠한다. 끄면 현재 run 진행만 본다.</summary>
+    [ObservableProperty] private bool _showHistory = true;
 
-    /// <summary>용접라인의 현재 액션 상태 (없으면 null = 계획 보기, 기본 주황).</summary>
-    public string? TaskStatusOf(Guid taskId) =>
-        _workStatusByTask.TryGetValue(taskId, out var s) ? s : null;
+    partial void OnShowHistoryChanged(bool value) => RefreshStatusColors();
+
+    /// <summary>누적 기록이 있는 용접선 수 / 그중 실패 수 (상단 요약).</summary>
+    public string HistorySummary => _historyByTask.Count == 0 ? "누적 기록 없음"
+        : $"누적 검사 {_historyByTask.Count}개 · 실패 {_historyByTask.Values.Count(s => s == "FAILED")}";
+
+    /// <summary>선창 누적 기록(용접선별 가장 최근 결과)을 다시 불러온다 — 선창 로드·run 시작/종료 때.
+    /// 구빌드 서버(조회 미지원)·조회 실패면 기록 없이 종전 표시.</summary>
+    public async Task LoadTaskHistoryAsync()
+    {
+        IReadOnlyList<TaskLatestResultDto>? rows = null;
+        try { rows = await _api.GetTaskLatestResultsAsync(TankId); } catch { /* 무해 — 기록 없이 표시 */ }
+        _historyByTask.Clear();
+        if (rows is not null)
+            foreach (var r in rows) _historyByTask[r.TaskId] = r.Status;
+        OnPropertyChanged(nameof(HistorySummary));
+        RefreshStatusColors();
+    }
+
+    private void RefreshStatusColors()
+    {
+        OnPropertyChanged(nameof(HasRunStatuses));
+        BuildFacePlots();
+        SceneInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>영역의 표시 결과. 현재 run에서 진행됐으면(대기가 아니면) 그 결과, 아니면 누적 기록:
+    /// 소속 용접선 전부의 최근 결과가 성공이면 SUCCESS, 하나라도 실패면 FAILED(일부만 검사됐고 실패가 없으면 판정하지 않음).
+    /// 기록도 없으면 run 대기색, run에 없는 영역은 EXCLUDED(흐리게), run 표시가 없으면 null = 계획 보기.</summary>
+    public string? WorkItemStatusOf(Guid areaId)
+    {
+        bool inRun = _workStatusByArea.TryGetValue(areaId, out var run);
+        if (inRun && run is not ("PENDING" or "PLANNED" or "WAITING")) return run;
+        if (ShowHistory && _historyByTask.Count > 0 && _tasksByArea.TryGetValue(areaId, out var tasks) && tasks.Length > 0)
+        {
+            int ok = 0;
+            foreach (var t in tasks)
+            {
+                if (!_historyByTask.TryGetValue(t, out var h)) continue;
+                if (h == "FAILED") return "FAILED";
+                ok++;
+            }
+            if (ok == tasks.Length) return "SUCCESS";
+        }
+        return inRun ? run : _workStatusByArea.Count > 0 ? WorkOutcome.Excluded : null;
+    }
+
+    /// <summary>진행·기록 색을 표시 중인지(범례 표시용) — run 진행 중이거나 누적 기록을 보여줄 때.</summary>
+    public bool HasRunStatuses => _workStatusByArea.Count > 0 || (ShowHistory && _historyByTask.Count > 0);
+
+    /// <summary>용접라인의 표시 상태. 현재 run에서 검사 중·성공·실패면 그 상태, 아니면 누적 기록의 가장 최근 결과,
+    /// 그것도 없으면 run 대기(회색) 또는 null = 미검사(계획 주황).</summary>
+    public string? TaskStatusOf(Guid taskId)
+    {
+        bool inRun = _workStatusByTask.TryGetValue(taskId, out var run);
+        if (inRun && run is "RUNNING" or "FINISHED" or "FAILED") return run;
+        if (ShowHistory && _historyByTask.TryGetValue(taskId, out var h)) return h;
+        return inRun ? run : null;
+    }
 
     /// <summary>상태 → (채움, 외곽선) 색 — 전개도(브러시 컨버터)·3D(material)·상태 배지가 공유하는 단일 매핑.
     /// 영역(work_item): null=계획(녹) / PENDING=회 / DISPATCHED=파랑 / DONE=녹(진) / SKIPPED·FAILED=빨강.
@@ -245,6 +300,7 @@ public sealed partial class TankViewModel : ObservableObject
             foreach (var w in walls) ShellWalls.Add(w);
             await LoadOverlaysAsync();     // 영역·작업 로드 후 ViewChanged
             await LoadLevelWallsAsync();   // ViewChanged 발생(셸+강조 재빌드)
+            await LoadTaskHistoryAsync();  // 선창 누적 검사 기록(용접선별 최근 결과) → 색
         }
         catch
         {
@@ -284,7 +340,12 @@ public sealed partial class TankViewModel : ObservableObject
             var loaded = await FetchOverlaysAsync();
             if (_overlayReloadPending) continue;   // 조회 중 다시 요청됨 — 낡은 결과는 그리지 않고 다시 조회
             Overlays.Clear();
-            foreach (var o in loaded) Overlays.Add(o);
+            _tasksByArea.Clear();
+            foreach (var o in loaded)
+            {
+                Overlays.Add(o);
+                _tasksByArea[o.Area.AreaId] = o.Tasks.Select(t => t.TaskId).ToArray();
+            }
             BuildFacePlots();   // 전개도(면별 2D 도면) 갱신
             ViewChanged?.Invoke(this, EventArgs.Empty);
             return;

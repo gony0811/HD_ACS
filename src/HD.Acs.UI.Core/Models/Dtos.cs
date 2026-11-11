@@ -71,6 +71,10 @@ public sealed record ResumableRunDto(
     Guid RunId, Guid ScenarioId, string State, DateTimeOffset StartedAt,
     int Pending, int Done, int Skipped);
 
+/// <summary>GET /api/internal/tanks/{id}/task-results — 용접선의 가장 최근 검사 결과(run 무관). Status = FINISHED | FAILED.</summary>
+public sealed record TaskLatestResultDto(Guid TaskId, Guid AreaId, string Status, DateTimeOffset At,
+    Guid? RunId = null, int Attempt = 0, string? Reason = null);
+
 /// <summary>GET /api/runs/{id}/task-actions — 용접라인(액션) 단위 상태. CreatedAt 오름차순(재시도 시 나중 것이 최신).</summary>
 public sealed record TaskActionDto(
     Guid ActionId,

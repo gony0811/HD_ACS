@@ -109,6 +109,12 @@ public sealed partial class ShellViewModel : ObservableObject
                 Mission.WorkItems.ToDictionary(w => w.AreaId, w => w.DisplayStatus),   // 영역 성공 = 소속 용접선 전부 성공
                 Mission.WorkItems.SelectMany(w => w.Tasks).ToDictionary(t => t.TaskId, t => t.Status));
 
+        // run 시작·종료·전환 → 선창 누적 검사 기록(용접선별 최근 결과)을 다시 읽어 지난 run의 결과를 도면에 남긴다
+        Mission.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MissionViewModel.CurrentRun)) _ = Tank.LoadTaskHistoryAsync();
+        };
+
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);
         RobotStatus.PropertyChanged += (_, e) =>
         {

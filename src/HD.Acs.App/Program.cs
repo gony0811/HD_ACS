@@ -940,6 +940,10 @@ app.MapGet("/api/runs/{runId:guid}/task-actions", async (Guid runId, AcsDbContex
             a.Status, a.Result, a.CreatedAt,
         }).ToListAsync()));
 
+// 선창 전체 누적 검사 기록 — 용접선마다 가장 최근 결과 1건(run 무관, 미검사는 없음). 운영 화면 도면 색 소스.
+app.MapGet("/api/internal/tanks/{tankId}/task-results", async (string tankId, AcsDbContext db, CancellationToken ct) =>
+    Results.Ok(await TaskHistoryQuery.LatestAsync(db, tankId, ct)));
+
 // TASK 단위 진행률 [SAIGE §5.4/§6] — SAIGE 주기 조회(1~5초)·운영 화면 공용 pull, ~1초 TTL 캐시.
 // 분모는 run 시작 시 고정, 분자는 고유 TASK 종결 수(재시도 중복 없음). 실시간은 SignalR "RunProgress".
 app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, ProgressService progress) =>

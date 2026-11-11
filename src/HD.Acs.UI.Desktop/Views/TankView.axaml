@@ -11,6 +11,12 @@
                 <ComboBox Width="90" ItemsSource="{Binding ViewModes}" SelectedItem="{Binding SelectedViewMode}" />
                 <CheckBox Content="영역·작업 표시" VerticalAlignment="Center" Margin="16,0,0,0"
                           IsChecked="{Binding ShowOverlays}" />
+                <CheckBox Content="누적 기록" VerticalAlignment="Center" Margin="16,0,0,0"
+                          ToolTip.Tip="선창 전체 검사 기록 — 용접선마다 가장 최근 결과(성공·실패)를 색으로 표시합니다. 끄면 현재 미션 진행만 봅니다."
+                          IsChecked="{Binding ShowHistory}" />
+                <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="{Binding HistorySummary}" />
                 <CheckBox Content="수동 이동" VerticalAlignment="Center" Margin="16,0,0,0"
                            IsEnabled="{Binding IsolateLevel}"
                           ToolTip.Tip="바닥의 정차 위치에서 원하는 방향으로 드래그하세요. 짧게 클릭하면 방향 자유로 이동합니다."
@@ -48,6 +54,7 @@
                     <Style Selector="Border"><Setter Property="Width" Value="14" /><Setter Property="Height" Value="12" /><Setter Property="BorderThickness" Value="1.5" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
                 </StackPanel.Styles>
                 <TextBlock Text="용접선" FontWeight="Bold" />
+                <Rectangle Fill="#E67E22" /><TextBlock Text="미검사" />
                 <Rectangle Fill="#808A94" /><TextBlock Text="대기" />
                 <Rectangle Fill="#2E86DE" /><TextBlock Text="검사 중" />
                 <Rectangle Fill="#2ECC71" /><TextBlock Text="성공" />
