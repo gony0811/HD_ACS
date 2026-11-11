@@ -443,10 +443,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var robots = await _api.GetRobotsAsync();
             if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
-            var runId = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId });
-            StatusMessage = runId is null
+            StatusMessage = $"용접선 seq {task.Seq} 검사 준비 — 이 용접선에 맞춰 정차 최적화 중…";
+            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId });
+            StatusMessage = r is null
                 ? "검사 실행 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."
-                : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} (run {runId}) — 진행은 운영 화면에서 확인";
+                : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} · {MissionViewModel.DescribeStops(r.Stops, true)} — 진행은 운영 화면에서 확인";
         }
         catch (Exception ex) { StatusMessage = $"검사 실행 실패: {ex.Message}"; }   // 409 진행 중 run·미연결, 400 사유
     }

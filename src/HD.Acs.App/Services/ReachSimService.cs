@@ -257,6 +257,61 @@ public sealed partial class ReachSimService
     }
 
     /// <summary>
+    /// 재검사(리페어) 정차 — 영역마다 **지정한 용접선만** 놓고 정차점 최적화를 돌려 그 용접선에 맞는 정차·리프트를 고른다(조회 전용).
+    /// 영역에 저장된 정차는 영역의 모든 용접선을 보고 고른 값이라, 일부 용접선에는 거리·리프트가 모자랄 수 있다.
+    /// 닿는 정차를 찾지 못하면(또는 면·탐색 좌표를 만들 수 없으면) 저장된 정차 그대로(<see cref="RepairStop.Applied"/> = false).
+    /// </summary>
+    public async Task<IReadOnlyList<RepairStop>> RepairStopsAsync(string tankId, IReadOnlySet<Guid> taskIds, CancellationToken ct,
+        IReadOnlySet<Guid>? onlyAreas = null)
+    {
+        _model = _baseModel;   // 운영 가지 규칙(MaxMargin)
+        var list = new List<RepairStop>();
+        var ctx = await LoadTankAsync(tankId, ct);
+        if (ctx is null) return list;
+        var areas = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks)
+            .Where(a => a.TankId == tankId && a.Tasks.Any(t => taskIds.Contains(t.TaskId)))
+            .OrderBy(a => a.Level).ThenBy(a => a.WallCode).ThenBy(a => a.Name).ToListAsync(ct);
+        foreach (var a in areas)
+        {
+            if (onlyAreas is not null && !onlyAreas.Contains(a.AreaId)) continue;
+            var tasks = a.Tasks.Where(t => taskIds.Contains(t.TaskId)).OrderBy(t => t.Seq).ToList();
+            if (tasks.Count == 0 || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) continue;
+            var setup = Setup(ctx, a, wall);
+            var saved = setup.Stations[0];
+            var savedLift = a.StationLiftMm ?? 0.0;
+            if (SearchSpace(a, wall, setup) is not { } space)
+            {
+                list.Add(new RepairStop(a.AreaId, a.Name, saved.X, saved.Y, saved.Yaw, savedLift, false, tasks.Count, 0, 0, 0, 0, 0,
+                    savedLift, "탐색 좌표를 만들 수 없음 — 저장된 정차 그대로"));
+                continue;
+            }
+            var seams = tasks.Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+            // 지금 조건 = 저장된 정차 + 저장된 리프트(배차가 보내는 값)
+            var nowSeams = seams.Select(p => ReachSimulator.Survey(_model, setup.Planes, new[] { saved }, p, setup.Normal,
+                new[] { savedLift }, a.WallCode)).ToList();
+            int nowClear = nowSeams.Count(s => s.Verdict == ReachVerdict.Clear);
+            int nowReach = nowSeams.Count(s => s.Verdict != ReachVerdict.Unreachable);
+
+            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, areaLift: true);
+            var b = r.Best;
+            int bestReach = b.Clear + b.Collision;
+            if (!b.Feasible || bestReach == 0)
+            {
+                list.Add(new RepairStop(a.AreaId, a.Name, saved.X, saved.Y, saved.Yaw, savedLift, false, tasks.Count,
+                    nowClear, nowClear, nowReach, nowReach, 0, savedLift, "닿는 정차를 찾지 못함 — 저장된 정차 그대로"));
+                continue;
+            }
+            var lift = b.StrokeMm ?? savedLift;
+            var moved = Math.Sqrt(Math.Pow(b.Station.X - saved.X, 2) + Math.Pow(b.Station.Y - saved.Y, 2));
+            var note = moved < 0.005 && Math.Abs(lift - savedLift) < 0.5 ? "저장된 정차가 이미 최적"
+                : $"정차 {moved:0.00} m 이동 · 리프트 {savedLift:0} → {lift:0} mm";
+            list.Add(new RepairStop(a.AreaId, a.Name, Math.Round(b.Station.X, 3), Math.Round(b.Station.Y, 3), Math.Round(b.Station.Yaw, 4),
+                lift, true, tasks.Count, nowClear, b.Clear, nowReach, bestReach, Math.Round(moved, 3), savedLift, note));
+        }
+        return list;
+    }
+
+    /// <summary>
     /// 영역 재분할 제안(조회 전용 — DB 를 바꾸지 않는다). 한 정차로 영역 모든 용접선에 도면 순회 관절 여유를 확보하지 못하면
     /// 용접선을 면 (u, v) 축 방향으로 잘라 최대 <paramref name="maxGroups"/> 묶음으로 나누고 묶음마다 정차·리프트를 고른다(<see cref="AreaSplitPlanner"/>).
     /// 묶음마다 새 영역 사각형(TASK 묶음 분리와 같은 자동 사각형)을 함께 싣는다. 영역이 없으면 null.
@@ -385,6 +440,13 @@ public sealed partial class ReachSimService
 
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;
 }
+
+/// <summary>
+/// 재검사 정차 하나(영역 1곳) — 지정한 용접선만 보고 고른 정차(도면 x·y·방향)·리프트. Applied = false 면 저장된 정차 그대로.
+/// ClearBefore/ReachBefore = 저장된 정차·리프트에서 간섭 없이 닿는/닿는 용접선 수, …After = 고른 정차에서. MovedM = 정차 이동 거리.
+/// </summary>
+public sealed record RepairStop(Guid AreaId, string AreaName, double X, double Y, double Yaw, double LiftMm, bool Applied,
+    int Welds, int ClearBefore, int ClearAfter, int ReachBefore, int ReachAfter, double MovedM, double SavedLiftMm, string Note);
 
 /// <summary>
 /// 조사 결과 — 영역 하나. 리프트 고정 조사(<c>lift=area</c>)면 <paramref name="FixedStrokeMm"/> = 영역 고정 높이,

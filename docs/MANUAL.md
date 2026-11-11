@@ -261,7 +261,8 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 **용접선 재검사(리페어)**: 영역 검사에서 실패한 용접선만 골라 다시 검사한다. 영역 전체를 다시 돌리지 않는다.
 - **실패분 한꺼번에**: 운영 ▸ 작업 현황 탭의 **[실패 용접선 재검사 (n)]** — 지금 표시 중인 run에서 실패한 용접선 전부.
 - **용접선 1개**: 작업 현황에서 영역 행을 눌러 펼친 뒤 그 용접선의 **[재검사]**. 또는 계획 ▸ 영역·작업에서 작업을 선택하고 **[선택 작업만 검사 실행]**(한 번도 검사하지 않은 용접선도 가능).
-- 재검사는 별도의 run("재검사 · …"으로 표시)이며, 정차점·리프트·재시도 정책·결과 기록은 일반 검사와 같다. 같은 영역의 용접선은 정차 한 번에 묶인다.
+- **재검사 전 정차 최적화(기본 켬)**: 영역 검사 때의 정차는 그 영역의 모든 용접선에 맞춘 자리라, 실패한 용접선에는 거리·리프트가 모자랐을 수 있다. 재검사를 시작하면 관제가 **재검사할 용접선만 놓고 정차점·리프트를 다시 골라** 그 자리에서 검사한다(영역마다 수 초, 상태줄에 "정차 0.42 m 이동 · 리프트 0 → 500 mm (간섭 없이 닿음 0 → 2 / 2)" 식으로 표시). 이 재검사 run의 정차에만 쓰이고 **영역에 저장된 정차는 바뀌지 않는다**. 닿는 정차를 찾지 못하면 저장된 정차 그대로 간다. 끄려면 작업 현황 탭의 "재검사 전 정차 최적화" 체크를 해제.
+- 재검사는 별도의 run("재검사 · …"으로 표시)이며, 재시도 정책·결과 기록은 일반 검사와 같다. 같은 영역의 용접선은 정차 한 번에 묶인다.
 - 진행 중인 run이 있으면 쓸 수 없다(먼저 끝나거나 중단). **재검사를 시작하면 그 전에 중단한 run은 "이어하기" 대상에서 빠진다**(이어하기는 가장 최근 run만).
 - AMR이 그 용접선의 층에 있어야 한다 — 다른 층이면 "AMR 층 불일치" 경고가 뜨고 작업 지시가 보류된다.
 - 도면의 영역 색은 재검사한 용접선만이 아니라 **그 영역의 모든 용접선의 최근 결과**로 정한다(고친 용접선이 성공해도 다른 실패가 남아 있으면 실패).
@@ -358,7 +359,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |
 | `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지 + 진행 중 정차가 있거나 로봇이 통신 단절 일시정지 중이면 `cancelOrder` 발행(AMR이 남은 용접선을 멈춤, 응답 `cancelOrderRequired`·`cancelOrderSent`). 끊긴 정차는 PENDING으로 돌아가 이어하기 때 다시 배차. 즉시 정지는 비상정지 |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
-| `POST /api/runs/repair` | 용접선 재검사(리페어 run) — `{robotId, taskIds[], scenarioId?}` 지정한 용접선만 검사. scenarioId 생략 = 그 선창의 최근 run 시나리오. 400(용접선 없음·선창 혼재·캘리브레이션 없음)·409(진행 중 run·미연결·장치 알람). Run 상세(`GET /api/runs/{id}`)의 `repairTaskIds`로 구분 |
+| `POST /api/runs/repair` | 용접선 재검사(리페어 run) — `{robotId, taskIds[], scenarioId?, optimize?}` 지정한 용접선만 검사. `optimize`(기본 true) = 시작 전에 그 용접선만 놓고 정차점 최적화를 돌려 이 run의 정차·리프트에 반영(응답 `stops[]`에 영역별 결과). scenarioId 생략 = 그 선창의 최근 run 시나리오. 400(용접선 없음·선창 혼재·캘리브레이션 없음)·409(진행 중 run·미연결·장치 알람). Run 상세(`GET /api/runs/{id}`)의 `repairTaskIds`로 구분 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |
 | `GET /api/runs/{runId}/progress` | TASK 진행률 [SAIGE §5.4/§6] — 분모 `totalTasks`는 run 시작 시 고정, 분자는 **고유 taskId** 종결 수(재시도 중복 없음). `skippedTasks`⊂`failedTasks`, `excludedTasks`(미보정 층 등 제외분, 분모 미포함), `percent`·`fraction`. ~1초 TTL 캐시(1~5초 polling 대응) |
 | `GET /api/runs/{runId}/work-items` | 실행 큐(정차 단위) 상태 조회 |

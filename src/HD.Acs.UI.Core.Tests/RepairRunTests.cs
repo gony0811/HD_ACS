@@ -15,6 +15,8 @@ public class RepairRunTests
         public static readonly Guid RepairRun = Guid.NewGuid(), Wi = Guid.NewGuid();
         public static List<(string Robot, List<Guid> Tasks, Guid? Scenario)> Started = new();
         public static bool OldServer;
+        public static List<bool> Optimize = new();
+        public static List<RepairStopDto>? Stops;
         public static string? Reject;
 
         protected override object? Invoke(MethodInfo? m, object?[]? args)
@@ -25,7 +27,8 @@ public class RepairRunTests
                 case nameof(IAcsApiClient.StartRepairRunAsync):
                     if (Reject is not null) throw new InvalidOperationException(Reject);
                     Started.Add(((string)args![0]!, ((IReadOnlyCollection<Guid>)args[1]!).ToList(), (Guid?)args[2]));
-                    v = OldServer ? null : RepairRun;
+                    Optimize.Add((bool)args[3]!);
+                    v = OldServer ? null : new RepairRunStartedDto(RepairRun, Stops);
                     break;
                 case nameof(IAcsApiClient.GetRunAsync):
                     v = new ScenarioRunDto(RepairRun, Guid.NewGuid(), 1, "AMR-01", "RUNNING", DateTimeOffset.Now, null,
@@ -52,6 +55,7 @@ public class RepairRunTests
     private static (MissionViewModel Vm, Guid Scenario) FinishedRunWithFailures(string state = "COMPLETED")
     {
         RepairApi.Started = new(); RepairApi.OldServer = false; RepairApi.Reject = null;
+        RepairApi.Optimize = new(); RepairApi.Stops = null;
         var vm = new MissionViewModel(DispatchProxy.Create<IAcsApiClient, RepairApi>(),
             DispatchProxy.Create<IMonitoringClient, OverlayLoadTests.NoMonitoring>()) { SelectedRobotId = "AMR-01" };
         var row = new WorkItemRow(new WorkItemDto(Guid.NewGuid(), RepairApi.Area, "A", 1, "CT1-L1", 0, "SKIPPED", 2));
@@ -100,6 +104,36 @@ public class RepairRunTests
 
         Assert.Equal(new[] { RepairApi.A2 }, Assert.Single(RepairApi.Started).Tasks);
         Assert.Equal(new[] { RepairApi.A2 }, Assert.Single(vm.WorkItems).Tasks.Select(t => t.TaskId));
+    }
+
+    [Fact]
+    public async Task Repair_OptimizesStationByDefault_AndShowsWhatChanged()
+    {
+        var (vm, _) = FinishedRunWithFailures();
+        RepairApi.Stops = new()
+        {
+            new(RepairApi.Area, "L2-R02C05", 13.38, 2.16, 0, 500, true, 2, 0, 2, 1, 2, 0.42, 0, "정차 0.42 m 이동 · 리프트 0 → 500 mm"),
+        };
+        Assert.True(vm.RepairOptimize);
+
+        await vm.RepairFailedCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { true }, RepairApi.Optimize);
+        Assert.Equal("재검사 시작: 실패 용접선 2개 · 정차 최적화 — L2-R02C05: 정차 0.42 m 이동 · 리프트 0 → 500 mm (간섭 없이 닿음 0 → 2 / 2)",
+            vm.StatusMessage);
+        Assert.False(vm.RepairStarting);
+    }
+
+    [Fact]
+    public async Task Repair_OptimizeOff_KeepsSavedStation()
+    {
+        var (vm, _) = FinishedRunWithFailures();
+        vm.RepairOptimize = false;
+
+        await vm.RepairTaskCommand.ExecuteAsync(vm.WorkItems[0].Tasks[1]);
+
+        Assert.Equal(new[] { false }, RepairApi.Optimize);
+        Assert.Contains("정차 최적화 끔", vm.StatusMessage);
     }
 
     [Fact]

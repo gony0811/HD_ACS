@@ -194,6 +194,9 @@ public sealed class InspectionDispatcher
         }
     }
 
+    /// <summary>리페어 run의 정차 덮어쓰기(도면 프레임 x·y·방향, 리프트 mm) — 재검사 전 정차 최적화가 고른 값.</summary>
+    public sealed record StopOverride(double X, double Y, double Yaw, double LiftMm);
+
     /// <summary>리페어 run의 검사 대상 용접선(run.task_ids). 일반 run이면 null.</summary>
     public static HashSet<Guid>? RepairFilter(ScenarioRunEntity run)
     {
@@ -208,7 +211,8 @@ public sealed class InspectionDispatcher
     /// 각 영역 = 정차 1곳(맵 프레임) + 그 영역 작업(용접선)의 startWeldInspection 액션들.
     /// 유효 T_W_D(맵버전 일치) 없는 층의 영역은 배차 불가라 제외(경고). 층마다 미션 1개 생성.
     /// </summary>
-    public async Task BuildQueueAsync(ScenarioRunEntity run, string tankId, CancellationToken ct)
+    public async Task BuildQueueAsync(ScenarioRunEntity run, string tankId, CancellationToken ct,
+        IReadOnlyDictionary<Guid, StopOverride>? overrides = null)
     {
         var only = RepairFilter(run);
         var (areas, linkedCount, total) = await LoadScenarioAreasAsync(run.ScenarioId, tankId, ct);
@@ -257,7 +261,7 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema);
+            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(area.AreaId));
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -289,13 +293,16 @@ public sealed class InspectionDispatcher
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
         Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
-        IReadOnlyList<double>? levelZ, string? weldSchema)
+        IReadOnlyList<double>? levelZ, string? weldSchema, StopOverride? ov = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
         // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
         var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
+        // 리페어 정차 최적화 결과 — 이 run의 이 정차에만 쓴다(영역에 저장된 정차는 그대로)
+        if (ov is not null) (stationDx, stationDy, stationYaw) = (ov.X, ov.Y, ov.Yaw);
+        var liftMm = ov?.LiftMm ?? area.StationLiftMm ?? 0.0;
         var (mx, my) = tWd.DrawingToMap(stationDx, stationDy);
         double? mTheta = stationYaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 
@@ -322,7 +329,7 @@ public sealed class InspectionDispatcher
                 ["workingDistanceMm"] = _workingDistanceMm,
                 ["anchorGroupId"] = anchorGroupId,
                 ["seqInGroup"] = t.Seq,
-                ["liftStrokeMm"] = area.StationLiftMm ?? 0.0,
+                ["liftStrokeMm"] = liftMm,
                 // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
                 // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
                 ["taskId"] = t.TaskId.ToString(),
@@ -359,6 +366,7 @@ public sealed class InspectionDispatcher
                 ["position"] = worldPos,
                 ["params"] = taskParams.DeepClone(),
             });
+            if (ov is not null) actionsJson[^1]!["liftFixed"] = true;   // 발행 때 영역 리프트로 덮지 않음
         }
 
         return (mx, my, mTheta, actionsJson.ToJsonString(), area.Tasks.Count);
@@ -371,7 +379,8 @@ public sealed class InspectionDispatcher
     /// 진행률 분모(total_tasks)는 작업 수 증감만큼 보정. 저장은 호출자가 한다.
     /// </summary>
     public async Task<(int Refreshed, int Skipped)> RefreshOpenItemsAsync(
-        ScenarioRunEntity run, IReadOnlyList<WorkItemEntity> items, CancellationToken ct)
+        ScenarioRunEntity run, IReadOnlyList<WorkItemEntity> items, CancellationToken ct,
+        IReadOnlyDictionary<Guid, StopOverride>? overrides = null)
     {
         if (items.Count == 0) return (0, 0);
         var areaIds = items.Select(w => w.AreaId).Distinct().ToList();
@@ -416,7 +425,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema);
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(wi.AreaId));
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
@@ -615,7 +624,8 @@ public sealed class InspectionDispatcher
                     run.RunId, taskId, TaskAttempt.Max);
             var prm = o["params"]?.DeepClone() as JsonObject ?? new JsonObject();
             prm["attempt"] = attempt;
-            prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
+            if (o["liftFixed"]?.GetValue<bool>() != true)   // 리페어 정차 최적화가 고른 리프트는 영역 저장값으로 덮지 않는다
+                prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction

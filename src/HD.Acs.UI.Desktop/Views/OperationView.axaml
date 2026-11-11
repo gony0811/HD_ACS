@@ -84,6 +84,9 @@
                                 <Button x:Name="RepairFailedButton" Content="{Binding Mission.RepairFailedLabel}" FontSize="11" MinHeight="26"
                                         ToolTip.Tip="이 run에서 실패한 용접선만 모아 다시 검사합니다(리페어 run). 용접선 하나만 하려면 영역 행을 눌러 펼친 뒤 [재검사]."
                                         Command="{Binding Mission.RepairFailedCommand}" />
+                                <CheckBox Content="재검사 전 정차 최적화" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"
+                                          IsChecked="{Binding Mission.RepairOptimize}"
+                                          ToolTip.Tip="재검사할 용접선만 놓고 정차점·리프트를 다시 골라 그 자리에서 검사합니다(영역마다 수 초). 영역 검사 때의 정차는 영역의 모든 용접선에 맞춘 자리라 실패한 용접선에는 거리가 모자랐을 수 있습니다. 영역에 저장된 정차는 바뀌지 않습니다." />
                             </StackPanel>
                             <DataGrid Grid.Row="2" x:Name="WorkItemGrid" Margin="6,0,6,6"
                                       ItemsSource="{Binding Mission.WorkItems}"

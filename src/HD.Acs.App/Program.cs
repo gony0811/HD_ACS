@@ -846,13 +846,15 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 });
 
 // 리페어 run — 지정한 용접선(TASK)만 검사. 영역 검사에서 실패한 용접선을 골라 다시 돌린다(1개 이상).
+// 시작 전에 지정한 용접선만 놓고 정차점 최적화를 돌려 그 정차·리프트로 검사한다(optimize=false 로 끔, 응답 stops).
 // scenarioId 생략 = 그 선창의 가장 최근 run 시나리오. 가드는 미션 시작과 같다(활성 run·미연결·장치 알람 409).
 app.MapPost("/api/runs/repair", async (StartRepairRunRequest req, MissionService missions) =>
 {
     try
     {
-        var runId = await missions.StartRepairRunAsync(req.RobotId, req.TaskIds ?? new List<Guid>(), req.ScenarioId);
-        return Results.Ok(new { runId });
+        var r = await missions.StartRepairRunAsync(req.RobotId, req.TaskIds ?? new List<Guid>(), req.ScenarioId,
+            optimize: req.Optimize ?? true);
+        return Results.Ok(new { runId = r.RunId, stops = r.Stops });
     }
     catch (Exception ex) when (ex is RepairRequestException or CalibrationInvalidException or WeldPayloadSchemaException
                                    or InvalidOperationException)
@@ -1242,7 +1244,7 @@ static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
 app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
-public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null);
+public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);

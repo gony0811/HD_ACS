@@ -66,6 +66,17 @@ public sealed record WorkItemDto(
     string Status,
     int Attempts);
 
+/// <summary>POST /api/runs/repair 응답 — 재검사 run + 시작 전 정차 최적화 결과(영역마다 1건, 구서버·최적화 끔이면 없음).</summary>
+public sealed record RepairRunStartedDto(Guid RunId, List<RepairStopDto>? Stops = null);
+
+/// <summary>재검사 정차 하나 — 지정한 용접선만 보고 고른 정차(도면)·리프트. Applied = false 면 저장된 정차 그대로.</summary>
+public sealed record RepairStopDto(Guid AreaId, string AreaName, double X, double Y, double Yaw, double LiftMm, bool Applied,
+    int Welds, int ClearBefore, int ClearAfter, int ReachBefore, int ReachAfter, double MovedM, double SavedLiftMm, string? Note)
+{
+    /// <summary>운영자 안내 한 줄 — 예: "L2-R02C05: 정차 0.42 m 이동 · 리프트 0 → 500 mm (간섭 없이 닿음 0 → 2 / 2)".</summary>
+    public string Summary => $"{AreaName}: {Note} (간섭 없이 닿음 {ClearBefore} → {ClearAfter} / {Welds})";
+}
+
 /// <summary>GET /api/runs/resumable — 로봇의 가장 최근 재개 가능 run(미종결 작업 보유).</summary>
 public sealed record ResumableRunDto(
     Guid RunId, Guid ScenarioId, string State, DateTimeOffset StartedAt,

@@ -22,26 +22,31 @@ public sealed class MissionService
     private readonly InspectionDispatcher _dispatcher;
     private readonly OrderBuilder _orderBuilder = new();
     private readonly ILogger<MissionService> _log;
+    private readonly ReachSimService? _reach;   // 재검사 전 정차 최적화(없으면 저장된 정차 그대로)
 
-    public MissionService(AcsDbContext db, Vda5050MasterClient vda, InspectionDispatcher dispatcher, ILogger<MissionService> log)
+    public MissionService(AcsDbContext db, Vda5050MasterClient vda, InspectionDispatcher dispatcher, ILogger<MissionService> log,
+        ReachSimService? reach = null)
     {
-        _db = db; _vda = vda; _dispatcher = dispatcher; _log = log;
+        _db = db; _vda = vda; _dispatcher = dispatcher; _log = log; _reach = reach;
     }
 
     /// <summary>
     /// 시나리오 → Run 생성. 선창 영역을 작업 큐로 전개(층별 미션 포함)한 뒤 첫 정차를 greedy 최근접 배차.
     /// 검사 순서는 고정 시퀀스가 아니라 "현재 층 미검사 중 로봇 최근접"으로 동적 결정된다.
     /// </summary>
-    public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
-        => StartRunCoreAsync(scenarioId, robotId, null, ct);
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
+        => (await StartRunCoreAsync(scenarioId, robotId, null, false, ct)).RunId;
 
     /// <summary>
     /// 리페어 run — 지정한 용접선(TASK)만 검사한다(1개 이상). 영역 검사에서 실패한 용접선을 골라 다시 돌릴 때 쓴다.
     /// 일반 run과 같은 큐·배차·재시도·기록 경로를 타며, 정차는 그 용접선이 속한 영역의 정차점 그대로다.
     /// 시나리오는 run 기록의 소속 표시용 — 지정이 없으면 그 선창의 가장 최근 run 시나리오, 그것도 없으면 선창의 첫 시나리오.
+    /// <paramref name="optimize"/>(기본) — 영역 검사 때의 정차는 영역의 모든 용접선을 보고 고른 자리라 실패한 용접선에는
+    /// 거리·리프트가 모자랐을 수 있다. 시작 전에 **지정한 용접선만** 놓고 정차점 최적화를 돌려 그 정차·리프트로 검사한다
+    /// (이 run의 정차에만 적용 — 영역에 저장된 정차는 바꾸지 않는다).
     /// </summary>
-    public async Task<Guid> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
-        CancellationToken ct = default)
+    public async Task<RepairRunStarted> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
+        CancellationToken ct = default, bool optimize = true)
     {
         var ids = taskIds.Distinct().ToList();
         if (ids.Count == 0) throw new RepairRequestException("검사할 용접선을 1개 이상 지정하세요.");
@@ -78,10 +83,28 @@ public sealed class MissionService
             if (sid is null) throw new RepairRequestException($"선창 {tankId}에 시나리오가 없습니다 — 계획 ▸ 시나리오에서 먼저 만드세요.");
         }
 
-        return await StartRunCoreAsync(sid.Value, robotId, ids, ct);
+        return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct);
     }
 
-    private async Task<Guid> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, CancellationToken ct)
+    /// <summary>리페어 run의 정차 최적화 — 실패해도 재검사는 저장된 정차로 진행한다(빈 목록).</summary>
+    private async Task<IReadOnlyList<RepairStop>> RepairStopsAsync(string tankId, HashSet<Guid> taskIds, CancellationToken ct,
+        IReadOnlySet<Guid>? onlyAreas = null)
+    {
+        if (_reach is null) return Array.Empty<RepairStop>();
+        try { return await _reach.RepairStopsAsync(tankId, taskIds, ct, onlyAreas); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "재검사 정차 최적화 실패 — 저장된 정차로 진행합니다.");
+            return Array.Empty<RepairStop>();
+        }
+    }
+
+    private static Dictionary<Guid, InspectionDispatcher.StopOverride> Overrides(IEnumerable<RepairStop> stops) =>
+        stops.Where(s => s.Applied).ToDictionary(s => s.AreaId, s => new InspectionDispatcher.StopOverride(s.X, s.Y, s.Yaw, s.LiftMm));
+
+    private async Task<RepairRunStarted> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, bool optimize,
+        CancellationToken ct)
     {
         var what = repairTaskIds is null ? "미션 시작" : "용접선 재검사";
         // 활성 run 가드 — 같은 로봇에 RUNNING/WAITING_FLOOR_TRANSFER run이 있으면 새 시작 거부 (유령 run 누적 방지)
@@ -108,8 +131,11 @@ public sealed class MissionService
             StartedAt = DateTimeOffset.UtcNow,
             TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
         };
+        // 재검사 — 지정한 용접선만 놓고 정차·리프트를 다시 고른다(가드를 모두 통과한 뒤 계산: 수 초 걸린다)
+        IReadOnlyList<RepairStop> stops = repairTaskIds is not null && optimize
+            ? await RepairStopsAsync(scenario.TankId, repairTaskIds.ToHashSet(), ct) : Array.Empty<RepairStop>();
         _db.ScenarioRuns.Add(run);
-        await _dispatcher.BuildQueueAsync(run, scenario.TankId, ct);   // 영역→작업 큐 + 층별 미션
+        await _dispatcher.BuildQueueAsync(run, scenario.TankId, ct, Overrides(stops));   // 영역→작업 큐 + 층별 미션
         if (repairTaskIds is not null && run.TotalTasks is null or 0)
         {
             // 갈 수 있는 정차가 하나도 없다(층 캘리브레이션 없음·면 미등록) — 빈 run을 남기지 않는다
@@ -117,10 +143,19 @@ public sealed class MissionService
             throw new RepairRequestException(
                 "지정한 용접선을 검사 큐에 넣을 수 없습니다 — 그 층의 맵 캘리브레이션(T_W_D)과 면 등록을 확인하세요.");
         }
+        if (repairTaskIds is not null)
+            _db.AuditLogs.Add(new AuditLogEntity
+            {
+                UserId = "", Action = "REPAIR_RUN_START",
+                Target = $"{robotId} run {run.RunId} 용접선 {repairTaskIds.Count}개"
+                         + (stops.Count == 0 ? (optimize ? " · 정차 최적화 없음" : " · 정차 최적화 끔")
+                             : " · " + string.Join(" / ", stops.Select(s =>
+                                 $"{s.AreaName}: {s.Note} → ({s.X:F2},{s.Y:F2}) 리프트 {s.LiftMm:0} · 간섭 없이 {s.ClearBefore}→{s.ClearAfter}/{s.Welds}"))),
+            });
         await _db.SaveChangesAsync(ct);
 
         await _dispatcher.DispatchNextAsync(run.RunId, ct, commanded: true);   // 첫 정차 배차(로봇 층 일치 시, 불일치면 FLOOR_MISMATCH 알람)
-        return run.RunId;
+        return new RepairRunStarted(run.RunId, stops);
     }
 
     /// <summary>
@@ -190,7 +225,16 @@ public sealed class MissionService
         }
 
         // 남은 정차의 좌표·액션을 현재 계획/캘리브레이션으로 다시 계산 — 시작 시점 스냅샷으로 움직이지 않는다
-        var (refreshed, skipped) = await _dispatcher.RefreshOpenItemsAsync(run, open, ct);
+        // 리페어 run은 남은 정차를 다시 계산할 때도 그 용접선만 놓고 정차를 고른다
+        Dictionary<Guid, InspectionDispatcher.StopOverride>? overrides = null;
+        if (InspectionDispatcher.RepairFilter(run) is { } only)
+        {
+            var tank = await _db.Scenarios.AsNoTracking().Where(s => s.ScenarioId == run.ScenarioId)
+                .Select(s => s.TankId).FirstOrDefaultAsync(ct);
+            if (tank is not null)
+                overrides = Overrides(await RepairStopsAsync(tank, only, ct, open.Select(w => w.AreaId).ToHashSet()));
+        }
+        var (refreshed, skipped) = await _dispatcher.RefreshOpenItemsAsync(run, open, ct, overrides);
 
         run.State = "RUNNING";
         run.EndedAt = null;
@@ -452,6 +496,9 @@ public sealed class RunStateException(string message) : Exception(message);
 
 /// <summary>리페어 run 요청이 잘못됨(용접선 없음·선창 혼재·시나리오 없음·큐에 넣을 수 없음) — 400.</summary>
 public sealed class RepairRequestException(string message) : Exception(message);
+
+/// <summary>리페어 run 시작 결과 — run + 재검사 전 정차 최적화 결과(영역마다 1건, 최적화를 안 했으면 빈 목록).</summary>
+public sealed record RepairRunStarted(Guid RunId, IReadOnlyList<RepairStop> Stops);
 
 /// <summary>재개 결과 — 현재 계획으로 다시 계산한 정차 수 / 재계산 불가로 건너뛴 정차 수.</summary>
 public sealed record ResumeSummary(int Refreshed, int Skipped);

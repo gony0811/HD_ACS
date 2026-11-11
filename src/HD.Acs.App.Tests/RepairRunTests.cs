@@ -76,7 +76,7 @@ public class RepairRunTests
         var f = await Seed();
         var weld = f.A.Tasks.Single(t => t.Seq == 2);
 
-        var runId = await f.Missions.StartRepairRunAsync("AMR-01", new[] { weld.TaskId });
+        var runId = (await f.Missions.StartRepairRunAsync("AMR-01", new[] { weld.TaskId })).RunId;
 
         var run = await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId);
         Assert.Equal(f.ScenarioId, run.ScenarioId);                 // 시나리오 지정 없음 → 선창의 시나리오
@@ -101,7 +101,7 @@ public class RepairRunTests
         var f = await Seed();
         var ids = new[] { f.A.Tasks[0].TaskId, f.A.Tasks[2].TaskId, f.B.Tasks[0].TaskId };   // B는 시나리오 대상이 아님
 
-        var runId = await f.Missions.StartRepairRunAsync("AMR-01", ids, f.ScenarioId);
+        var runId = (await f.Missions.StartRepairRunAsync("AMR-01", ids, f.ScenarioId)).RunId;
 
         var items = await f.Db.WorkItems.AsNoTracking().Where(w => w.RunId == runId).ToListAsync();
         Assert.Equal(2, items.Count);                               // 영역마다 정차 1곳
@@ -145,12 +145,70 @@ public class RepairRunTests
         await Assert.ThrowsAsync<RunConflictException>(() => f.Missions.StartRepairRunAsync("AMR-01", new[] { f.A.Tasks[0].TaskId }));
     }
 
+    /// <summary>정차 최적화를 붙인 서비스(운영 구성) — 정차 최적화는 지정한 용접선만 놓고 돈다.</summary>
+    private static MissionService WithReach(Fixture f) => new(f.Db, new Vda5050MasterClient("localhost"), f.Dispatcher,
+        NullLogger<MissionService>.Instance, new ReachSimService(f.Db, f.Dispatcher));
+
+    [Fact]
+    public async Task Repair_OptimizesStationForTheChosenWeld_AndUsesItForThisRunOnly()
+    {
+        var f = await Seed();
+        var weld = f.A.Tasks.Single(t => t.Seq == 2);
+        f.A.StationStandoffM = 3.5;                                 // 저장된 정차가 벽에서 너무 멀다 — 코봇이 닿지 않는다
+        await f.Db.SaveChangesAsync();
+        var planned = (await f.Dispatcher.GetPlannedStationsAsync(f.ScenarioId, default))!.Stations.Single(s => s.AreaId == f.A.AreaId);
+
+        var started = await WithReach(f).StartRepairRunAsync("AMR-01", new[] { weld.TaskId });
+
+        var stop = Assert.Single(started.Stops);
+        Assert.Equal((f.A.AreaId, 1), (stop.AreaId, stop.Welds));
+        Assert.True(stop.Applied, stop.Note);
+        Assert.Equal(0, stop.ReachBefore);                          // 저장된 정차(3.5 m)에서는 닿지 않는다
+        Assert.Equal(1, stop.ReachAfter);                           // 이 용접선만 보고 고른 정차에서는 닿는다
+        Assert.True(stop.MovedM > 0.3, $"moved {stop.MovedM}");
+
+        // 큐의 정차 = 고른 정차에 T_W_D(이 픽스처는 평행이동만) 적용, 액션 리프트 = 고른 리프트
+        var wi = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == started.RunId);
+        Assert.Equal(stop.X + 9.35, wi.X, 3);
+        Assert.Equal(stop.Y + 12.3, wi.Y, 3);
+        Assert.NotEqual(planned.X + 9.35, wi.X, 2);
+        var action = JsonNode.Parse(wi.Actions!)![0]!;
+        Assert.Equal(stop.LiftMm, action["params"]!["liftStrokeMm"]!.GetValue<double>());
+        Assert.True(action["liftFixed"]!.GetValue<bool>());         // 발행 때 영역 리프트로 덮지 않음
+
+        // 영역에 저장된 정차·리프트는 그대로(다른 용접선에 맞춘 자리)
+        var area = await f.Db.InspectionAreas.AsNoTracking().SingleAsync(a => a.AreaId == f.A.AreaId);
+        Assert.Equal((null, null, null, 3.5), (area.StationX, area.StationY, area.StationLiftMm, area.StationStandoffM));
+        Assert.Contains("REPAIR_RUN_START", (await f.Db.AuditLogs.AsNoTracking().ToListAsync()).Select(a => a.Action));
+
+        // 이어하기로 정차를 다시 계산해도 같은 방식(지정 용접선만 놓고 최적화)
+        await f.Missions.AbortRunAsync(started.RunId);
+        await WithReach(f).ResumeRunAsync(started.RunId);
+        var again = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == started.RunId);
+        Assert.Equal(wi.X, again.X, 3);
+        Assert.Equal(wi.Y, again.Y, 3);
+    }
+
+    [Fact]
+    public async Task Repair_OptimizeOff_UsesSavedStation()
+    {
+        var f = await Seed();
+        var planned = (await f.Dispatcher.GetPlannedStationsAsync(f.ScenarioId, default))!.Stations.Single(s => s.AreaId == f.A.AreaId);
+
+        var started = await WithReach(f).StartRepairRunAsync("AMR-01", new[] { f.A.Tasks[0].TaskId }, optimize: false);
+
+        Assert.Empty(started.Stops);
+        var wi = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == started.RunId);
+        Assert.Equal(planned.X + 9.35, wi.X, 3);
+        Assert.Null(JsonNode.Parse(wi.Actions!)![0]!["liftFixed"]);
+    }
+
     [Fact]
     public async Task Resume_OfRepairRun_KeepsOnlyTheChosenWeld()
     {
         var f = await Seed();
         var weld = f.A.Tasks[1];
-        var runId = await f.Missions.StartRepairRunAsync("AMR-01", new[] { weld.TaskId });
+        var runId = (await f.Missions.StartRepairRunAsync("AMR-01", new[] { weld.TaskId })).RunId;
         await f.Missions.AbortRunAsync(runId);
 
         await f.Missions.ResumeRunAsync(runId);   // 남은 정차를 현재 계획으로 다시 계산

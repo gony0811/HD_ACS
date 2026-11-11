@@ -253,6 +253,22 @@ public sealed partial class MissionViewModel : ObservableObject
     /// <summary>"실패 용접선 재검사" 버튼 문구 — 실패 수 포함.</summary>
     [ObservableProperty] private string _repairFailedLabel = "실패 용접선 재검사";
 
+    /// <summary>재검사 전 정차 최적화(기본 켬) — 재검사할 용접선만 놓고 정차·리프트를 다시 골라 그 자리에서 검사한다.
+    /// 영역 검사 때의 정차는 영역의 모든 용접선을 보고 고른 자리라, 실패한 용접선에는 거리가 모자랐을 수 있다.</summary>
+    [ObservableProperty] private bool _repairOptimize = true;
+
+    /// <summary>재검사 시작이 진행 중인가(정차 최적화는 영역마다 수 초 걸린다).</summary>
+    [ObservableProperty] private bool _repairStarting;
+
+    /// <summary>정차 최적화 결과 → 상태줄 문구. 영역 3곳까지 나열하고 나머지는 수로.</summary>
+    public static string DescribeStops(IReadOnlyList<RepairStopDto>? stops, bool optimize)
+    {
+        if (!optimize) return "정차 최적화 끔 — 저장된 정차 그대로";
+        if (stops is null || stops.Count == 0) return "정차 최적화 결과 없음 — 저장된 정차 그대로";
+        var head = string.Join(" / ", stops.Take(3).Select(s => s.Summary));
+        return "정차 최적화 — " + head + (stops.Count > 3 ? $" 외 {stops.Count - 3}곳" : "");
+    }
+
     private bool CanRepairTask(TaskRow? task) => task is not null && !RunActive && !string.IsNullOrWhiteSpace(SelectedRobotId);
 
     /// <summary>용접선 1개만 재검사(작업 현황 드릴다운의 행 버튼).</summary>
@@ -275,18 +291,23 @@ public sealed partial class MissionViewModel : ObservableObject
     {
         if (taskIds.Count == 0) return;
         if (string.IsNullOrWhiteSpace(SelectedRobotId)) { StatusMessage = "로봇을 먼저 선택하세요."; return; }
+        if (RepairStarting) return;
+        var optimize = RepairOptimize;
+        RepairStarting = true;
+        StatusMessage = optimize ? $"재검사 준비: {what} — 정차 최적화 중(영역마다 수 초)…" : $"재검사 준비: {what}…";
         try
         {
             // 소속 표시용 시나리오 — 지금 보고 있는 run의 것, 없으면 서버가 그 선창의 최근 run 시나리오를 쓴다
-            var runId = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId);
-            if (runId is null) { StatusMessage = "재검사 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
-            await RefreshRunAsync(runId.Value);
-            StatusMessage = $"재검사 시작: {what} (run {runId})";
+            var r = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId, optimize);
+            if (r is null) { StatusMessage = "재검사 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
+            await RefreshRunAsync(r.RunId);
+            StatusMessage = $"재검사 시작: {what} · {DescribeStops(r.Stops, optimize)}";
         }
         catch (Exception ex)
         {
             StatusMessage = $"재검사 실패: {ex.Message}";
         }
+        finally { RepairStarting = false; }
     }
 
     private void NotifyRepairState()
