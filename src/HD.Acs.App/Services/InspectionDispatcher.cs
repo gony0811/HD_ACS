@@ -317,7 +317,7 @@ public sealed class InspectionDispatcher
                     $"TASK {t.TaskId} 검사 참조 누락: sectionDxfId/profileId를 등록한 뒤 RUN을 시작하세요.");
             var startD = pose.LocalToDrawing(t.StartU, t.StartV);
             var endD = pose.LocalToDrawing(t.EndU, t.EndV);
-            var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV);
+            var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV, t.EndU, t.EndV);
             var worldPos = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
             var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
             var taskParams = new JsonObject
@@ -717,7 +717,7 @@ public sealed class InspectionDispatcher
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         var startD = pose.LocalToDrawing(task.StartU, task.StartV);
         var endD = pose.LocalToDrawing(task.EndU, task.EndV);
-        var d = new WeldDrawingData(area.TankId, area.Level, area.WallCode, startD, endD, task.StartU, task.StartV);
+        var d = new WeldDrawingData(area.TankId, area.Level, area.WallCode, startD, endD, task.StartU, task.StartV, task.EndU, task.EndV);
         var position = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
         var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
 

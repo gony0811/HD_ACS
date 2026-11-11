@@ -158,6 +158,23 @@ public class WeldInspectionPayloadTests
         Assert.Equal(drawingZ, pos["drawingPos"]!["z"]!.GetValue<double>(), 6);
     }
 
+    /// <summary>끝점 면 좌표(uEnd/vEnd) [VDA 1.16] — 주면 싣고, 없으면 키 자체를 넣지 않는다(구 발행분과 같은 모양).</summary>
+    [Fact]
+    public void BuildPosition_EndUv_IsOptional()
+    {
+        var s = new[] { 3.120, 0.0, 1.420 };
+        var e = new[] { 3.920, 0.0, 1.420 };
+        var with = WeldInspectionPayload.BuildPosition(GoldenTransform,
+            new WeldDrawingData("CT1", 1, "PM", s, e, 3.120, 1.0, EndU: 3.480, EndV: 1.0), 0)["drawingPos"]!.AsObject();
+        Assert.Equal(3.480, with["uEnd"]!.GetValue<double>(), 6);
+        Assert.Equal(1.0, with["vEnd"]!.GetValue<double>(), 6);
+
+        var without = WeldInspectionPayload.BuildPosition(GoldenTransform,
+            new WeldDrawingData("CT1", 1, "PM", s, e, 3.120, 1.0), 0)["drawingPos"]!.AsObject();
+        Assert.False(without.ContainsKey("uEnd"));
+        Assert.False(without.ContainsKey("vEnd"));
+    }
+
     /// <summary>층 정의 없음·범위 밖은 0으로 폴백하지 않고 거부 — 조용한 z 오차 금지.</summary>
     [Fact]
     public void FloorZ_RejectsMissingOrOutOfRangeLevel()

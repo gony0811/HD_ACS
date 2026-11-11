@@ -15,7 +15,11 @@ public sealed record WeldDrawingData(
     double[] SeamStart,
     double[] SeamEnd,
     double U,
-    double V);
+    double V,
+    // 작업 끝점의 벽면-로컬 좌표 [VDA 1.16 — drawingPos.uEnd/vEnd, 선택]. AMR이 촬영 위치를 면 좌표로 환산할 때
+    // 면 위 용접선 방향을 여기서 얻는다(천장·바닥은 맵 좌표만으로 면 축을 알 수 없다). null이면 싣지 않는다.
+    double? EndU = null,
+    double? EndV = null);
 
 /// <summary>유효 T_W_D 부재/맵버전 불일치 — 릴리즈 거부 [PHASE2 §2.5].</summary>
 public sealed class CalibrationInvalidException(string message) : Exception(message);
@@ -56,21 +60,28 @@ public static class WeldInspectionPayload
         var (sx, sy) = t.DrawingToMap(d.SeamStart[0], d.SeamStart[1]);
         var (ex, ey) = t.DrawingToMap(d.SeamEnd[0], d.SeamEnd[1]);
 
+        var drawingPos = new JsonObject
+        {
+            ["tank"] = d.Tank,
+            ["level"] = d.Level,
+            ["wall_code"] = d.WallCode,
+            ["u"] = d.U,
+            ["v"] = d.V,
+            ["x"] = d.SeamStart[0],
+            ["y"] = d.SeamStart[1],
+            ["z"] = d.SeamStart[2],
+        };
+        if (d.EndU is { } eu && d.EndV is { } ev)
+        {
+            drawingPos["uEnd"] = eu;
+            drawingPos["vEnd"] = ev;
+        }
+
         return new JsonObject
         {
             ["seamStartW"] = Vec(sx, sy, d.SeamStart[2] - floorZ),
             ["seamEndW"] = Vec(ex, ey, d.SeamEnd[2] - floorZ),
-            ["drawingPos"] = new JsonObject
-            {
-                ["tank"] = d.Tank,
-                ["level"] = d.Level,
-                ["wall_code"] = d.WallCode,
-                ["u"] = d.U,
-                ["v"] = d.V,
-                ["x"] = d.SeamStart[0],
-                ["y"] = d.SeamStart[1],
-                ["z"] = d.SeamStart[2],
-            }
+            ["drawingPos"] = drawingPos,
         };
     }
 
