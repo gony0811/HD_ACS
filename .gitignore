@@ -396,3 +396,9 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# DB 덤프(데이터 포함 — 커밋하지 않음, tools/migrate_db.ps1)
+db/dump/
+
+# DB 폴더 압축본(덤프 포함 — 커밋하지 않음)
+db.zip

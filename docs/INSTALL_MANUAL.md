@@ -222,6 +222,16 @@ sc.exe start HDACS-App
   `C:\HDACS\backup\<시각>` 백업(최근 5개) → 교체 → App 기동 확인. 서버의 `appsettings.json`은 덮어쓰지 않는다.
   진행 중 run이 있으면 중단(`-Force`로 무시), `-Only app|ui`, DB 변경은 `-Sql db\migrations\<파일>.sql`.
   배포 버전은 서버 `C:\HDACS\VERSION.txt`.
+- **면 하나의 영역 격자 재분할**(용접선·검사 기록 유지): `py tools\regrid_wall_areas.py --wall T --win 1080`(미리보기) → `--apply`.
+  용접선(taskId·좌표)은 그대로 두고 소속 영역·순번만 바꾼다. 새 칸은 가장 많이 겹치는 옛 영역의 ID와 정차(영역 중심 기준 오프셋)를 물려받으며,
+  적용 전 원본을 `db\dump\regrid_*.json`에 남긴다. **정차는 초기값일 뿐이므로 적용 뒤 계획 ▸ 리치·간섭 ▸ 정차점 최적화를 그 면에 다시 돌릴 것.**
+- **DB 이전**(개발 PC의 DB를 서버로 통째로 옮기기): `tools\migrate_db.ps1`
+  1. `tools\migrate_db.ps1` — 개발 DB(docker `dev-postgres`)를 `db\dump\hdacs_<시각>.dump`로 덤프하고, 임시 DB에 복원해 건수를 대조한다(덤프 파일은 git에 올리지 않는다).
+  2. `tools\migrate_db.ps1 -Restore` — 미리보기. 서버의 현재 건수와 덤프 내용을 보여 주고 서버는 바꾸지 않는다.
+  3. `tools\migrate_db.ps1 -Restore -Apply` — 실제 복원. App 정지 → 서버 현재 DB를 `C:\HDACS\backup\db\`에 백업 → `hdacs` 삭제·재생성 → 복원 → 진행 중이던 run을 ABORTED로 정리 → App 시작.
+  - **서버 DB 전체가 교체된다.** 서버에서만 넣은 데이터(현장에서 캡처한 맵 캘리브레이션, 정차 덮어쓰기, 검사 이력)는 덤프에 없으면 사라진다. 되돌리기는 3의 백업 파일을 `pg_restore --clean --if-exists`로 복원.
+  - 서버 App이 덤프보다 옛 버전이면 먼저 `deploy_server.ps1`로 App을 배포한다(새 App은 추가 컬럼을 기동 때 스스로 넣는다).
+  - 서버에 직접 옮길 때(SSH 불가): 덤프 파일을 복사한 뒤 서버에서 `pg_restore -h 127.0.0.1 -U postgres -d hdacs --no-owner <파일>`(빈 `hdacs` DB에).
 
 ---
 
