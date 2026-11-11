@@ -665,12 +665,13 @@ public sealed partial class ReachSimViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 찾은 정차가 나은가 — 서버 순위와 같게 순회 여유 확보 수 → 간섭 없음 수 → 순회 최소 여유(목표까지, 0.5°).
+    /// 찾은 정차가 나은가 — 서버 순위와 같게 전부 도달(도달 불가 0) → 순회 여유 확보 수 → 간섭 없음 수 → 순회 최소 여유(목표까지, 0.5°).
     /// 구서버(여유 필드 없음)면 간섭 없음 수만 본다.
     /// </summary>
     public static bool IsImproved(ReachStationCandidateDto cur, ReachStationCandidateDto best)
     {
         if (cur.SafeClear is not { } cs || best.SafeClear is not { } bs) return best.Clear > cur.Clear;
+        if ((best.Unreachable == 0) != (cur.Unreachable == 0)) return best.Unreachable == 0;   // AMR 은 하나라도 불가면 정차 전체를 거부한다
         if (bs != cs) return bs > cs;
         if (best.Clear != cur.Clear) return best.Clear > cur.Clear;
         var target = best.MarginTargetDeg ?? 10;

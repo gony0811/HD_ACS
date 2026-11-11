@@ -88,6 +88,23 @@ public sealed record ReachRobotModel
     public double[] JointMaxDeg { get; init; } = { 175, 85, 170, 85, 175 };
     public double WristMarginDeg { get; init; } = 15;
     public double ElbowMarginDeg { get; init; } = 8;
+
+    /// <summary>
+    /// 플랜지가 검사면 쪽으로 최소한 나가 있어야 하는 거리 [mm] — HD_AMR <c>PostureLimits.MinFlangeReachMm</c>(실기 350, 실측 전 잠정값).
+    /// 플랜지 뻗음 = BASE 에서 면까지 법선 거리 − ② 접근 이격 − 공구 길이. 이보다 작으면 팔을 접은 자세가 되어 AMR 이 출발 전에 거부한다
+    /// (2026-11-11 천장 T: 리프트 100 mm 면 342 mm < 350 mm — 52건 전부 거부). 0 이면 보지 않는다.
+    /// </summary>
+    public double MinFlangeReachMm { get; init; }
+
+    /// <summary>
+    /// 팔 뻗음 상한 — 판정 자세·도면 순회에서 팔꿈치가 이 각도보다 펴지면(|J3| 가 작으면) 도달 불가로 본다 [도].
+    /// 관절 한계만 보면 팔을 거의 다 뻗는 먼 정차가 통과하지만, 실기 컨트롤러는 그 근처에서 IK 를 못 풀거나 검사 중 추가 이동
+    /// (경유점·피치 이동·비드 중심 맞춤)에서 막힌다(2026-11-11~12 천장 T 실적). 0 이면 <see cref="ElbowMarginDeg"/> 만 쓴다.
+    /// </summary>
+    public double MinElbowBendDeg { get; init; }
+
+    /// <summary>판정에 쓰는 팔꿈치 하한 [도] — 특이점 여유와 팔 뻗음 상한 중 큰 값.</summary>
+    public double ElbowLimitDeg => Math.Max(ElbowMarginDeg, MinElbowBendDeg);
     /// <summary>이 여유 미만이면 '주의' [m].</summary>
     public double WarnClearanceM { get; init; } = 0.05;
 
@@ -250,20 +267,22 @@ public sealed record ReachEntry(bool Ok, double[] StartTcp, double[]? Entry, dou
 /// <param name="BranchChange">출발 자세에서 ② 해로 가려면 팔꿈치·손목을 뒤집거나 관절을 크게 돌려야 하면 그 사유.</param>
 /// <param name="Entry">출발 자세가 있는 면의 진입 경로 판정(없는 면은 null).</param>
 /// <param name="ScanOnly">용접선 중간·끝점 — 판정은 초점 자세만(②·정렬 준비는 시작점에서만 하므로 참고로 실은 자세).</param>
+/// <param name="FlangeShort">플랜지 뻗음이 최소값 미만이면 그 사유(AMR 리치 사전 점검이 출발 전에 거부).</param>
 public sealed record ReachPointResult(ReachBody Body, double[] ColumnTop, IReadOnlyList<ReachStageResult> Stages,
-    string? BranchChange = null, ReachEntry? Entry = null, bool ScanOnly = false)
+    string? BranchChange = null, ReachEntry? Entry = null, bool ScanOnly = false, string? FlangeShort = null)
 {
     /// <summary>판정에 쓰는 자세 — 보통 세 자세, <see cref="ScanOnly"/> 면 초점 자세만.</summary>
     public IEnumerable<ReachStageResult> JudgedStages => ScanOnly ? Stages.Where(s => s.Stage == ReachStage.Focus) : Stages;
 
     /// <summary>판정 자세 모두 운영 선택 해가 있고 자세 한계 안이며, 가지 전환 없이 (출발 자세가 있으면) 진입 경로가 있는가.</summary>
-    public bool Reachable => JudgedStages.All(s => s.Chosen is { PostureOk: true }) && BranchChange is null && Entry?.Ok != false;
+    public bool Reachable => FlangeShort is null && JudgedStages.All(s => s.Chosen is { PostureOk: true })
+        && BranchChange is null && Entry?.Ok != false;
 
     /// <summary>도달하지 못하는 첫 사유(도달이면 null).</summary>
     public string? Blocker =>
         JudgedStages.FirstOrDefault(s => s.Chosen is not { PostureOk: true }) is { } bad
             ? $"{bad.Stage} {(bad.Chosen is { } c ? c.Limiting : "해 없음")}"
-            : BranchChange ?? (Entry is { Ok: false } e ? e.Summary : null);
+            : FlangeShort ?? BranchChange ?? (Entry is { Ok: false } e ? e.Summary : null);
 
     /// <summary>차체·판정 자세 운영 선택 해 부품 중 가장 작은 여유 [m]. 도달하지 못하면 차체만.</summary>
     public double MinClearanceM => JudgedStages.Select(s => s.Chosen?.MinClearanceM ?? double.PositiveInfinity)
@@ -388,7 +407,43 @@ public static partial class ReachSimulator
         if (start is not null && checkEntry && branchChange is null && stages.Count > 0
             && stages.All(s => s.Chosen is { PostureOk: true }))
             entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal);
-        return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null);
+        return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null,
+            FlangeShort: FlangeShortReason(model, station, strokeMm, seamPoint, wallNormal, offsetForwardMm, offsetLeftMm));
+    }
+
+    /// <summary>
+    /// 플랜지 뻗음(BASE→면 법선 거리 − ② 접근 이격 − 공구 길이) [mm] — HD_AMR <c>ApproachReach.Check</c> 와 같은 식.
+    /// 면이 평면이라 그 면의 어느 점으로 재도 같다.
+    /// </summary>
+    public static double FlangeReachMm(ReachRobotModel model, ReachStation station, double strokeMm, double[] facePoint,
+        double[] wallNormal, double offsetForwardMm = 0, double offsetLeftMm = 0)
+    {
+        var f = new BaseFrame(model, station, strokeMm, offsetForwardMm, offsetLeftMm);
+        var n = Vec3.Normalize(wallNormal) ?? new[] { 0.0, 0, 1 };
+        var normalM = Vec3.Dot(Vec3.Sub(f.BaseToDrawing(new[] { 0.0, 0, 0 }), facePoint), n);
+        return normalM * 1000 - model.StageStandoffsMm[0] - model.ToolZMm;
+    }
+
+    /// <summary>플랜지 뻗음이 <see cref="ReachRobotModel.MinFlangeReachMm"/> 미만이면 사유(아니거나 규칙이 꺼져 있으면 null).</summary>
+    public static string? FlangeShortReason(ReachRobotModel model, ReachStation station, double strokeMm, double[] facePoint,
+        double[] wallNormal, double offsetForwardMm = 0, double offsetLeftMm = 0)
+    {
+        if (model.MinFlangeReachMm <= 0 || model.StageStandoffsMm.Length == 0) return null;
+        var reach = FlangeReachMm(model, station, strokeMm, facePoint, wallNormal, offsetForwardMm, offsetLeftMm);
+        return reach < model.MinFlangeReachMm
+            ? $"플랜지 뻗음 부족 — {reach:0}mm < 최소 {model.MinFlangeReachMm:0}mm (면에 너무 가깝거나 리프트가 높음 — AMR 사전 점검이 거부)"
+            : null;
+    }
+
+    /// <summary>
+    /// 도면 순회 직전 자세 — 순회 높이(<see cref="ReachRobotModel.ScanStandoffMm"/> − Top 높이)에 가장 가까운 판정 자세의 해.
+    /// 순회를 ② 접근 높이에서 하면 ② 해, 초점 거리에서 하면(실기 2026-11-11 이후 — 레이저 WD 설정 뒤 점1 을 잡는다) 초점 해다.
+    /// </summary>
+    public static double[]? TraverseSeed(ReachPointResult r, ReachRobotModel model)
+    {
+        var height = model.ScanStandoffMm - ReachRobotModel.ScanTopZMm;
+        return r.Stages.Where(s => s.Chosen is not null).OrderBy(s => Math.Abs(s.StandoffMm - height))
+            .FirstOrDefault()?.Chosen?.JointsDeg;
     }
 
     /// <summary>
@@ -438,6 +493,12 @@ public static partial class ReachSimulator
         for (var yi = 0; yi < stations.Count; yi++)
             foreach (var h in strokesMm)
             {
+                // 플랜지 뻗음이 모자란 (정차, 리프트)는 IK 를 풀지 않는다 — AMR 이 출발 전에 거부한다
+                if (seamPoints.Count > 0 && FlangeShortReason(model, stations[yi], h, seamPoints[0], wallNormal) is { } shortReach)
+                {
+                    blocker ??= shortReach;
+                    continue;
+                }
                 var min = double.PositiveInfinity;
                 var reachable = true;
                 double[]? seed = null;   // 중간·끝점은 시작점 ② 해의 가지를 따라간다(운영과 같게)
@@ -447,7 +508,7 @@ public static partial class ReachSimulator
                     var r = Evaluate(model, planes, stations[yi], seamPoints[i], wallNormal, h, withGeometry: false,
                         wallCode: i == 0 ? wallCode : null, checkEntry: false, seedJoints: seed);
                     seed = ScanSeed(r);   // 다음 점은 이 점의 초점 자세에서 용접선을 따라 이어 간다
-                    if (i == 0) startSeed = TraverseSeed(r);
+                    if (i == 0) startSeed = TraverseSeed(r, model);
                     if (!r.Reachable)
                     {
                         reachable = false;
@@ -768,8 +829,8 @@ public static partial class ReachSimulator
         }
         var wrist = Math.Abs(j[4]) - m.WristMarginDeg;
         if (wrist < slack) { slack = wrist; why = "손목 특이점(|J5| 작음)"; }
-        var elbow = Math.Abs(j[2]) - m.ElbowMarginDeg;
-        if (elbow < slack) { slack = elbow; why = "팔꿈치 특이점(|J3| 작음)"; }
+        var elbow = Math.Abs(j[2]) - m.ElbowLimitDeg;
+        if (elbow < slack) { slack = elbow; why = m.MinElbowBendDeg > m.ElbowMarginDeg ? $"팔 뻗음 과다(|J3| {Math.Abs(j[2]):0}° < {m.ElbowLimitDeg:0}°)" : "팔꿈치 특이점(|J3| 작음)"; }
         return new PostureEval(slack > 0, slack, slack > 0 ? "여유 있음" : why);
     }
 

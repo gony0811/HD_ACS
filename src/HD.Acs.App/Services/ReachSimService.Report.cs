@@ -192,7 +192,7 @@ public sealed partial class ReachSimService
                 break;
             }
         }
-        var trav = ReachSimulator.TraverseSeam(_model, st, lift, pts, setup.Normal, ReachSimulator.TraverseSeed(points[0]));
+        var trav = ReachSimulator.TraverseSeam(_model, st, lift, pts, setup.Normal, ReachSimulator.TraverseSeed(points[0], _model));
 
         // 가장 가까운 부품 — 차체와 판정 자세 운영 선택 해의 부품.
         (double Mm, string Part, string Plane, string Pose)? nearest =

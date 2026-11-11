@@ -62,12 +62,12 @@ public static class AreaSplitPlanner
         var unreachable = Enumerable.Range(0, n).Where(i => table[i].All(s => s.Verdict == ReachVerdict.Unreachable)).ToHashSet();
 
         // 묶음 점수 — 판정표에서 묶음 전체가 같은 칸(정차·리프트)을 쓸 때 가장 좋은 칸.
-        var groupMemo = new Dictionary<int, (int Cell, (int Safe, int Clear, int Reach, double Margin) Score)>();
-        (int Cell, (int Safe, int Clear, int Reach, double Margin) Score) Group(int mask)
+        var groupMemo = new Dictionary<int, (int Cell, (int Safe, int Clear, int Reach, double Margin, int Miss) Score)>();
+        (int Cell, (int Safe, int Clear, int Reach, double Margin, int Miss) Score) Group(int mask)
         {
             if (groupMemo.TryGetValue(mask, out var hit)) return hit;
             var idx = Members(mask);
-            var best = (Cell: -1, Score: (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity));
+            var best = (Cell: -1, Score: (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity, Miss: int.MaxValue));
             for (var c = 0; c < cells.Count; c++)
             {
                 var s = StationOptimizer.Score(idx.Select(i => table[i][c]).ToList(), cap);

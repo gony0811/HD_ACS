@@ -62,12 +62,18 @@ public static class AreaLift
                 var reach = true;
                 string? blocker = null, entryBlocker = null;
                 double[]? seed = null, startSeed = null;
+                // 플랜지 뻗음이 모자란 리프트는 IK 를 풀지 않는다 — AMR 이 출발 전에 거부한다
+                if (pts.Count > 0 && ReachSimulator.FlangeShortReason(model, station, h, pts[0], wallNormal) is { } shortReach)
+                {
+                    pre[i][k] = (false, double.PositiveInfinity, shortReach, null);
+                    return;
+                }
                 for (var p = 0; p < pts.Count; p++)
                 {
                     var r = ReachSimulator.Evaluate(model, planes, station, pts[p], wallNormal, h, withGeometry: false,
                         wallCode: p == 0 ? wallCode : null, checkEntry: false, seedJoints: seed);
                     seed = ReachSimulator.ScanSeed(r);
-                    if (p == 0) startSeed = ReachSimulator.TraverseSeed(r);
+                    if (p == 0) startSeed = ReachSimulator.TraverseSeed(r, model);
                     if (!r.Reachable)
                     {
                         reach = false;
@@ -86,10 +92,10 @@ public static class AreaLift
 
         // 순위 — 여유 확보 간섭 없음(도면 순회 관절 여유 ≥ 목표) > 간섭 없음 > 도달 > 순회 최소 여유(목표에서 자름) > 낮은 높이.
         var cap = model.TraverseMarginTargetDeg;
-        var bestScore = (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity);
+        var bestScore = (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity, Miss: int.MaxValue);
         var bestStroke = double.PositiveInfinity;
         var bestRow = Array.Empty<ReachSeamSurvey>();
-        bool Better((int Safe, int Clear, int Reach, double Margin) s, double h)
+        bool Better((int Safe, int Clear, int Reach, double Margin, int Miss) s, double h)
         {
             var c = StationOptimizer.CompareScore(s, bestScore);
             return c > 0 || (c == 0 && h < bestStroke);
@@ -105,7 +111,7 @@ public static class AreaLift
             foreach (var u in ub.OrderByDescending(x => x.Clear).ThenByDescending(x => x.Reach).ThenBy(x => strokesMm[x.K]))
             {
                 var h = strokesMm[u.K];
-                if (!Better((u.Clear, u.Clear, u.Reach, cap), h)) continue;
+                if (!Better((u.Clear, u.Clear, u.Reach, cap, seams.Count - u.Reach), h)) continue;
                 int safeUb = u.Clear, clearUb = u.Clear, reachUb = u.Reach;
                 var minMargin = double.PositiveInfinity;
                 var row = new ReachSeamSurvey[seams.Count];
@@ -114,7 +120,7 @@ public static class AreaLift
                 {
                     if (!clearStays) { reachUb--; if (wasClear) clearUb--; }
                     if (wasClear) safeUb--;
-                    return !Better((safeUb, clearUb, reachUb, cap), h);
+                    return !Better((safeUb, clearUb, reachUb, cap, seams.Count - reachUb), h);
                 }
                 // 진입 경로·도면 순회 — 용접선마다 독립이라 먼저 병렬로 풀고, 집계·가지치기는 아래에서 순서대로 한다(결과는 순차 계산과 같다).
                 var gate = new (bool Blocked, string? Blocker, double? Margin)[seams.Count];
@@ -154,7 +160,7 @@ public static class AreaLift
                     row[i] = Row(p, h, margin);
                 }
                 if (aborted) continue;
-                var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap));
+                var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap), seams.Count - reachUb);
                 if (Better(score, h))
                 {
                     bestScore = score;

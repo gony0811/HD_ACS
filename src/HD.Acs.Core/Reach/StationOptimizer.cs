@@ -228,16 +228,17 @@ public static class StationOptimizer
     }
 
     /// <summary>
-    /// 영역 판정 점수 — (여유 확보 간섭 없음 수, 간섭 없음 수, 도달 수, 순회 최소 여유 키). 여유 확보 = Clear 이고 도면 순회 여유 ≥ 목표
+    /// 영역 판정 점수 — (여유 확보 간섭 없음 수, 간섭 없음 수, 도달 수, 순회 최소 여유 키, 도달 불가 수). 여유 확보 = Clear 이고 도면 순회 여유 ≥ 목표
     /// (순회 판정이 없으면 Clear 그대로). 최소 여유는 닿는 용접선 중 최소를 목표에서 자르고 0.5° 로 반올림한다(<see cref="MarginKey"/>).
     /// </summary>
-    public static (int Safe, int Clear, int Reach, double Margin) Score(IReadOnlyList<ReachSeamSurvey> seams, double marginTargetDeg)
+    public static (int Safe, int Clear, int Reach, double Margin, int Miss) Score(IReadOnlyList<ReachSeamSurvey> seams, double marginTargetDeg)
     {
         var margins = seams.Where(r => r.Verdict != ReachVerdict.Unreachable && r.TraverseMarginDeg is not null)
             .Select(r => r.TraverseMarginDeg!.Value).ToList();
         return (seams.Count(r => r.Verdict == ReachVerdict.Clear && (r.TraverseMarginDeg is not { } m || m >= marginTargetDeg)),
             seams.Count(r => r.Verdict == ReachVerdict.Clear), seams.Count(r => r.Verdict != ReachVerdict.Unreachable),
-            MarginKey(margins.Count == 0 ? null : margins.Min(), marginTargetDeg));
+            MarginKey(margins.Count == 0 ? null : margins.Min(), marginTargetDeg),
+            seams.Count(r => r.Verdict == ReachVerdict.Unreachable));
     }
 
     /// <summary>
@@ -263,10 +264,16 @@ public static class StationOptimizer
     public static double MarginKey(double? marginDeg, double targetDeg) =>
         marginDeg is { } m ? Math.Round(Math.Min(m, targetDeg) * 2, MidpointRounding.AwayFromZero) / 2 : targetDeg;
 
-    /// <summary>점수 사전식 비교 — 여유 확보 > 간섭 없음 > 도달 > 최소 여유.</summary>
-    public static int CompareScore((int Safe, int Clear, int Reach, double Margin) a, (int Safe, int Clear, int Reach, double Margin) b)
+    /// <summary>
+    /// 점수 사전식 비교 — 전부 도달(도달 불가 0) > 여유 확보 > 간섭 없음 > 도달 > 최소 여유.
+    /// 전부 도달을 맨 앞에 두는 이유: HD_AMR 리치 사전 점검은 정차의 용접선 중 한 점이라도 불가면 그 정차(Order) 전체를 실행하지 않는다
+    /// (2026-11-12 L4-R09C12 — 한 개 불가로 나머지 2개도 미실행). 닿는 수가 많아도 하나가 빠지는 정차는 실제로는 0 이다.
+    /// </summary>
+    public static int CompareScore((int Safe, int Clear, int Reach, double Margin, int Miss) a, (int Safe, int Clear, int Reach, double Margin, int Miss) b)
     {
-        var c = a.Safe.CompareTo(b.Safe);
+        var c = (a.Miss == 0).CompareTo(b.Miss == 0);
+        if (c != 0) return c;
+        c = a.Safe.CompareTo(b.Safe);
         if (c != 0) return c;
         c = a.Clear.CompareTo(b.Clear);
         if (c != 0) return c;
@@ -275,11 +282,13 @@ public static class StationOptimizer
     }
 
     /// <summary>
-    /// 순위 — 가능 &gt; 여유 확보 Clear 수 &gt; Clear 수 &gt; 순회 최소 관절 여유(목표까지, 0.5°) &gt; 면 간섭 여유(1 mm 단위) &gt; 덜 옮김(좌우·방향·거리).
+    /// 순위 — 가능 &gt; 전부 도달(도달 불가 0) &gt; 여유 확보 Clear 수 &gt; Clear 수 &gt; 순회 최소 관절 여유(목표까지, 0.5°) &gt; 면 간섭 여유(1 mm 단위) &gt; 덜 옮김(좌우·방향·거리).
     /// </summary>
     public static readonly IComparer<StationCandidate> Ranking = Comparer<StationCandidate>.Create((a, b) =>
     {
         var c = a.Feasible.CompareTo(b.Feasible);
+        if (c != 0) return c;
+        c = (a.Unreachable == 0).CompareTo(b.Unreachable == 0);
         if (c != 0) return c;
         c = a.SafeClear.CompareTo(b.SafeClear);
         if (c != 0) return c;

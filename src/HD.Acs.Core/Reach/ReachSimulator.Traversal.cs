@@ -189,6 +189,11 @@ public static partial class ReachSimulator
         var sameSign = Math.Sign(j[4]) == Math.Sign(seed[4]) || Math.Sign(seed[4]) == 0;
         var wrist = sameSign ? Math.Abs(j[4]) - m.PlanarWristMarginDeg : -Math.Abs(j[4]) - m.PlanarWristMarginDeg;
         if (wrist < margin) { margin = wrist; why = $"손목 특이점(J5 {seed[4]:0.0}° → {j[4]:0.0}°)"; }
+        if (m.MinElbowBendDeg > 0)
+        {
+            var elbow = Math.Abs(j[2]) - m.MinElbowBendDeg;
+            if (elbow < margin) { margin = elbow; why = $"팔 뻗음 과다(|J3| {Math.Abs(j[2]):0.0}° < {m.MinElbowBendDeg:0}°)"; }
+        }
         var j6 = j[5] + shift;
         var j6Slack = Math.Min(j6 - m.SafeJ6MinDeg, m.SafeJ6MaxDeg - j6);
         if (j6Slack < margin)

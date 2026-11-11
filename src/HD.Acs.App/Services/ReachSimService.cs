@@ -68,6 +68,8 @@ public sealed partial class ReachSimService
             ScanTiltDeg = config.GetValue("Acs:Reach:ScanTiltDeg", d.ScanTiltDeg),
             ScanTiltProfile = TiltProfileFrom(config.GetSection("Acs:Reach:ScanTiltProfile")),
             TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
+            MinFlangeReachMm = config.GetValue("Acs:Reach:MinFlangeReachMm", d.MinFlangeReachMm),
+            MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
         };
     }
 
@@ -186,9 +188,9 @@ public sealed partial class ReachSimService
         var r = ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[point],
             setup.Normal, h, offsetForwardMm, offsetLeftMm, wallCode: area.WallCode, seedJoints: seed);
         // 도면 순회 — 시작점 ② 접근 자세에서 용접선 끝까지(대상 점과 무관하게 같은 판정).
-        var startSeed = point == 0 ? ReachSimulator.TraverseSeed(r)
+        var startSeed = point == 0 ? ReachSimulator.TraverseSeed(r, _model)
             : ReachSimulator.TraverseSeed(ReachSimulator.Evaluate(_model, setup.Planes, setup.Stations[yawIndex], pts[0], setup.Normal, h,
-                offsetForwardMm, offsetLeftMm, withGeometry: false, wallCode: area.WallCode, checkEntry: false));
+                offsetForwardMm, offsetLeftMm, withGeometry: false, wallCode: area.WallCode, checkEntry: false), _model);
         var trav = ReachSimulator.TraverseSeam(_model, setup.Stations[yawIndex], h, pts, setup.Normal, startSeed, offsetForwardMm, offsetLeftMm);
 
         var seams = area.Tasks.OrderBy(t => t.Seq).Select(t =>

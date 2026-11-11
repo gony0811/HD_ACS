@@ -147,15 +147,19 @@ public class ReachTraversalTests
     }
 
     [Fact]
-    public void 점수는_여유_확보_수를_간섭_없음_수보다_먼저_본다()
+    public void 점수는_전부_도달을_먼저_그다음_여유_확보_수를_본다()
     {
         ReachSeamSurvey S(ReachVerdict v, double? m) => new(v, 0, 0.1, 0, TraverseMarginDeg: m);
-        // A: 간섭 없음 3개지만 여유 확보(≥10°) 1개, B: 간섭 없음 2개 모두 여유 확보 → B 가 낫다.
+        // A: 간섭 없음 3개지만 여유 확보(≥10°) 1개, B: 여유 확보 2개지만 하나는 도달 불가 → A 가 낫다
+        // (AMR 은 한 점이라도 불가면 정차 전체를 실행하지 않는다).
         var a = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 2), S(ReachVerdict.Clear, 3), S(ReachVerdict.Clear, 12) }, 10);
         var b = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Unreachable, null) }, 10);
-        Assert.Equal((1, 3, 3, 2.0), a);
-        Assert.Equal((2, 2, 2, 10.0), b);
-        Assert.True(StationOptimizer.CompareScore(b, a) > 0);
+        Assert.Equal((1, 3, 3, 2.0, 0), a);
+        Assert.Equal((2, 2, 2, 10.0, 1), b);
+        Assert.True(StationOptimizer.CompareScore(a, b) > 0);
+        // 둘 다 전부 도달이면 여유 확보 수가 먼저다.
+        var c = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Collision, 12) }, 10);
+        Assert.True(StationOptimizer.CompareScore(c, a) > 0);
         // 최소 여유는 목표에서 자르고 0.5° 단위 — 순회 판정이 없으면(null) 목표로 본다.
         Assert.Equal(10, StationOptimizer.MarginKey(23.4, 10));
         Assert.Equal(4.5, StationOptimizer.MarginKey(4.6, 10));
