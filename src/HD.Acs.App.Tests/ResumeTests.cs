@@ -209,6 +209,70 @@ public class ResumeTests
         var f = await Seed();
         var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
         Assert.Equal("RUNNING", (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).State);
+        Assert.DoesNotContain(await f.Db.Alarms.AsNoTracking().ToListAsync(), a => a.AlarmCode == "ROBOT_NOT_CONNECTED");
+    }
+
+    // ── 층 불일치 — AMR 보고 층에 보낼 작업이 없으면 Order를 보내지 않고 FLOOR_MISMATCH 경고 알람 ──
+
+    private static async Task SetFloor(Fixture f, string? mapId)
+    {
+        var ctx = await f.Db.RobotContexts.SingleAsync(c => c.RobotId == "AMR-01");
+        ctx.ReportedMapId = mapId; ctx.ReportedX = 0; ctx.ReportedY = 0;
+        await f.Db.SaveChangesAsync();
+    }
+
+    private static string Title(AlarmEntity a) =>
+        JsonDocument.Parse(a.Detail!).RootElement.GetProperty("title").GetString()!;
+
+    [Fact]
+    public async Task StartRun_RaisesFloorMismatchAlarm_WhenRobotIsOnAnotherFloor()
+    {
+        var f = await Seed();
+        await SetFloor(f, "CT1-L2");   // 작업은 L1에만 있다
+
+        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+
+        Assert.Equal("WAITING_FLOOR_TRANSFER", (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).State);
+        var wi = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId);
+        Assert.Equal(("PENDING", (string?)null), (wi.Status, wi.OrderId));   // Order 미발행
+        var alarm = Assert.Single(await f.Db.Alarms.AsNoTracking().ToListAsync());
+        Assert.Equal(("FLOOR_MISMATCH", "AMR-01"), (alarm.AlarmCode, alarm.RobotId));
+        Assert.Contains("AMR은 CT1-L2", Title(alarm));
+        Assert.Contains("작업은 CT1-L1", Title(alarm));
+
+        // 층을 안 옮기고 '다음 층 릴리스'를 누르면 다시 경고, 재접속 자동 재시도는 경고를 반복하지 않는다
+        await f.Missions.TryReleaseNextMissionAsync(runId);
+        Assert.Equal(2, await f.Db.Alarms.CountAsync());
+        await f.Missions.TryReleaseNextMissionAsync(runId, commanded: false);
+        Assert.Equal(2, await f.Db.Alarms.CountAsync());
+    }
+
+    [Fact]
+    public async Task StartRun_RaisesFloorMismatchAlarm_WhenRobotReportsNoFloor()
+    {
+        var f = await Seed();   // 보고 층 없음
+        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+
+        var alarm = Assert.Single(await f.Db.Alarms.AsNoTracking().ToListAsync());
+        Assert.Equal("FLOOR_MISMATCH", alarm.AlarmCode);
+        Assert.Contains("층 미확인", Title(alarm));
+        Assert.Equal("PENDING", (await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId)).Status);
+    }
+
+    [Fact]
+    public async Task FloorCompletedByStopOutcome_DoesNotRaiseFloorMismatchAlarm()
+    {
+        // 정차 완료 뒤 자동 호출(commanded=false) — 층 작업을 마친 정상 전환은 알람 없이 층 이동 대기만
+        var f = await Seed();
+        await SetFloor(f, "CT1-L2");
+        var run = new ScenarioRunEntity { RunId = Guid.NewGuid(), ScenarioId = f.ScenarioId, RobotId = "AMR-01", State = "RUNNING", StartedAt = DateTimeOffset.UtcNow };
+        f.Db.ScenarioRuns.Add(run);
+        await f.Dispatcher.BuildQueueAsync(run, "CT1", default);
+        await f.Db.SaveChangesAsync();
+
+        await f.Dispatcher.DispatchNextAsync(run.RunId, default);
+
+        Assert.Equal("WAITING_FLOOR_TRANSFER", (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == run.RunId)).State);
         Assert.Empty(await f.Db.Alarms.AsNoTracking().ToListAsync());
     }
 }

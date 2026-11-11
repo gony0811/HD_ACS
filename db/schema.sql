@@ -526,6 +526,7 @@ INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('RESUME_REJECTED',    'WARNING', '재개 거부', 'AMR이 재개 요청을 거부(비상정지·배터리·측위/mapId·운전 모드 중 불충족) — 사유 해소 후 다시 재개 [HD_AMR 통신단절 Fail-Safe §4.2]'),
   ('DEVICE_LINK_LOST',   'CRITICAL','장치 통신 두절(HEAVY) — 현장 RESET 필요', '장치 6종(비전·Depth·레이저·I/O·코봇·AMR) 중 통신 두절 — AMR이 HEAVY 래치·임무 중단. errors[]에서 사라질 때(현장 RESET)까지 배차 보류, 해제 시 자동 재개 [HD_AMR 장치통신 HEAVY알람 §5]'),
   ('ORDER_REJECTED_DEVICE_FAULT', 'WARNING', '장치 알람 — Order 거부', 'AMR이 장치 HEAVY 알람 중 Order 거부(WARNING, 기존 orderId 유지) — 실행 없음, ACS는 정차를 PENDING 복귀 후 RESET 뒤 재배차 [HD_AMR 장치통신 HEAVY알람 §4.2]'),
+  ('FLOOR_MISMATCH',     'WARNING', 'AMR 층 불일치 — 작업 지시 보류', '미션 시작·이어하기·다음 층 릴리스 때 AMR 보고 층(mapId)에 보낼 작업이 없음(작업이 다른 층에만 남았거나 AMR이 층을 보고하지 않음) — Order를 보내지 않음. AMR을 작업 층으로 옮기고 수동 층 변경 → 다음 층 릴리스'),
   ('EMERGENCY_STOP',     'WARNING', '비상정지 중', 'AMR측 기능 정지(emergencyStopActive) 보고 — 활성 run 자동 중단됨 [§6.4]'),
   ('SAIGE_UNREACHABLE',  'WARNING', 'SAIGE 전송 불가', '로봇 상태(robot-health-check) 전송이 임계 횟수 이상 연속 실패 — SAIGE 기동/네트워크 확인 [SAIGE §9.5]'),
   ('SAIGE_BAD_REQUEST',  'WARNING', 'SAIGE 형식 오류', 'SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]')

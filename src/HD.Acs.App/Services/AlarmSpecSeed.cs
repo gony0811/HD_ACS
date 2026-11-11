@@ -22,6 +22,8 @@ public static class AlarmSpecSeed
             "정차 검사(용접선) 실패 — 자동 재시도하지 않음. detail.items에 용접선별 실패 사유, 재실행 여부는 작업자가 결정"),
         ("ROBOT_NOT_CONNECTED", "WARNING", "AMR 미연결",
             "AMR 미연결(connection ≠ ONLINE 또는 state 수신 끊김) 상태에서 미션 시작·이어하기 요청 — 명령을 보내지 않고 차단됨. HD_AMR 실행·MQTT 연결 확인"),
+        ("FLOOR_MISMATCH", "WARNING", "AMR 층 불일치 — 작업 지시 보류",
+            "미션 시작·이어하기·다음 층 릴리스 때 AMR 보고 층(mapId)에 보낼 작업이 없음(작업이 다른 층에만 남았거나 AMR이 층을 보고하지 않음) — Order를 보내지 않음. AMR을 작업 층으로 옮기고 수동 층 변경 → 다음 층 릴리스"),
         ("SAIGE_BAD_REQUEST", "WARNING", "SAIGE 형식 오류",
             "SAIGE가 로봇 상태 페이로드를 형식 오류(40001)로 거부 — 재시도 없이 폐기됨, 규격 불일치 확인 [SAIGE §9.5]"),
         ("BATTERY_CRITICAL", "CRITICAL", "배터리 위험",

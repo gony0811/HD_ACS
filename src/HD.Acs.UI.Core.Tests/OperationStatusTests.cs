@@ -96,6 +96,31 @@ public class OperationStatusTests
     }
 
     [Fact]
+    public void FloorMismatch_ShowsWarningOnStatusCard()
+    {
+        // 작업은 L2에만 있는데 AMR은 L1 — 서버가 Order를 보류하고 run을 층 이동 대기로 둔다
+        var (vm, mission, mon) = Create(running: false);
+        mission.CurrentRun = new ScenarioRunDto(Run, Guid.NewGuid(), 1, "AMR-01", "WAITING_FLOOR_TRANSFER",
+            DateTimeOffset.Now, null, new List<MissionDto>());
+        mission.WorkItems.Add(new WorkItemRow(new WorkItemDto(Wi, Guid.NewGuid(), "PM-01", 2, "CT1-L2", 0, "PENDING", 0)));
+        mon.Robot(State());   // CT1-L1
+
+        Assert.Equal(("warn", "AMR 층 불일치 — 작업 지시 보류"), (vm.StatusKind, vm.StatusHeadline));
+        Assert.Contains("AMR 현재 층 CT1-L1", vm.StatusDetail);
+        Assert.Contains("남은 작업 층 CT1-L2", vm.StatusDetail);
+
+        // L1 작업을 마치고 넘어가는 정상 대기는 종전 문구(층 정보만 덧붙임)
+        mission.WorkItems.Add(new WorkItemRow(new WorkItemDto(Guid.NewGuid(), Guid.NewGuid(), "F-01", 1, "CT1-L1", 0, "DONE", 0)));
+        mon.Robot(State());
+        Assert.Equal("층 이동 대기", vm.StatusHeadline);
+        Assert.Contains("CT1-L2", vm.StatusDetail);
+
+        // AMR이 작업 층으로 오면 경고가 사라진다
+        mon.Robot(new RobotStateDto("AMR-01", "CT1-L2", 1, 2, 97, "o", null, false, 0, null, "AUTOMATIC", "NONE", Array.Empty<string>()));
+        Assert.DoesNotContain("AMR 현재 층", vm.StatusDetail);
+    }
+
+    [Fact]
     public void Describe_Completed_ReportsFailures()
     {
         var ok = new RunProgressDto(Run, 3, 3, 3, 3, 0, 0, 100);

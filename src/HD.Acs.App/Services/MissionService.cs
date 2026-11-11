@@ -61,7 +61,7 @@ public sealed class MissionService
         await _dispatcher.BuildQueueAsync(run, scenario.TankId, ct);   // 영역→작업 큐 + 층별 미션
         await _db.SaveChangesAsync(ct);
 
-        await _dispatcher.DispatchNextAsync(run.RunId, ct);            // 첫 정차 배차(로봇 층 일치 시)
+        await _dispatcher.DispatchNextAsync(run.RunId, ct, commanded: true);   // 첫 정차 배차(로봇 층 일치 시, 불일치면 FLOOR_MISMATCH 알람)
         return run.RunId;
     }
 
@@ -142,7 +142,7 @@ public sealed class MissionService
 
         _log.LogInformation("Run {Run} 재개 — DISPATCHED 리셋 {Stale}건, 현재 계획으로 재계산 {Refreshed}건, 재계산 불가 스킵 {Skipped}건.",
             runId, stale, refreshed, skipped);
-        await _dispatcher.DispatchNextAsync(runId, ct);
+        await _dispatcher.DispatchNextAsync(runId, ct, commanded: true);
         return new ResumeSummary(refreshed, skipped);
     }
 
@@ -169,12 +169,13 @@ public sealed class MissionService
     /// 다음 CREATED 미션 릴리즈. 층 검증 게이트: 로봇 보고 mapId == 미션 mapId 일 때만.
     /// 불일치 시 Run을 WAITING_FLOOR_TRANSFER로 두고 작업자 수동 절차를 기다린다 [Q9].
     /// </summary>
-    public async Task<bool> TryReleaseNextMissionAsync(Guid runId, CancellationToken ct = default)
+    /// <param name="commanded">운영자가 누른 '다음 층 릴리스'인가(기본). 재접속 자동 재시도는 false — 층 불일치 알람을 반복해서 내지 않는다.</param>
+    public async Task<bool> TryReleaseNextMissionAsync(Guid runId, CancellationToken ct = default, bool commanded = true)
     {
         // 영역 기반 run(greedy 배차)은 디스패처가 층 게이트·배차를 담당 — 수동 층 변경 후 재개도 이 경로.
         if (await _db.WorkItems.AnyAsync(w => w.RunId == runId, ct))
         {
-            await _dispatcher.DispatchNextAsync(runId, ct);
+            await _dispatcher.DispatchNextAsync(runId, ct, commanded);
             return true;
         }
 
@@ -195,6 +196,10 @@ public sealed class MissionService
             await _db.SaveChangesAsync(ct);
             _log.LogInformation("Run {Run}: 층 전환 대기 (로봇={Reported}, 미션={Required})",
                 runId, ctx?.ReportedMapId, next.MapId);
+            if (commanded)
+                await _dispatcher.RaiseAlarmAsync("FLOOR_MISMATCH", "WARNING",
+                    $"AMR 층 불일치 — AMR은 {ctx?.ReportedMapId ?? "(미확인)"}, 작업은 {next.MapId} — 작업 지시(Order) 보류",
+                    run.RobotId, next.MissionId, new { runId, robotMapId = ctx?.ReportedMapId, missionMapId = next.MapId }, ct);
             return false;
         }
 

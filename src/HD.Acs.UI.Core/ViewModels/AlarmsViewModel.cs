@@ -116,7 +116,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
                 Add("run", "작업 진행 시작");
                 break;
             case "WAITING_FLOOR_TRANSFER":
-                Add("warn", "현재 층 작업 완료 — 다음 층으로 이동 대기");
+                Add("warn", "층 이동 대기 — 남은 작업이 AMR 현재 층에 없음");
                 break;
             case "COMPLETED":
                 // 건수는 직후 RunProgress 푸시로 확정되므로 카드에서 표시 — 여기서는 스킵 발생 여부만
@@ -272,10 +272,27 @@ public sealed partial class AlarmsViewModel : ObservableObject
         }
 
         var current = Mission.WorkItems.FirstOrDefault(w => w.Status == "DISPATCHED");
+
+        // 층 불일치 — 진행 중 정차가 없고, 남은 작업이 AMR 보고 층에 하나도 없을 때(서버가 Order를 보류하는 조건과 같다)
+        string? floorMismatch = null;
+        bool floorWorked = false;
+        if (robot is not null && current is null)
+        {
+            var workFloors = Mission.WorkItems.Where(w => w.Status == "PENDING")
+                .Select(w => w.MapId).Distinct().OrderBy(m => m).ToList();
+            if (workFloors.Count > 0 && (robot.ReportedMapId is null || !workFloors.Contains(robot.ReportedMapId)))
+            {
+                floorMismatch = robot.ReportedMapId is null
+                    ? $"AMR이 층을 보고하지 않습니다 · 남은 작업 층 {string.Join(", ", workFloors)}"
+                    : $"AMR 현재 층 {robot.ReportedMapId} · 남은 작업 층 {string.Join(", ", workFloors)}";
+                floorWorked = robot.ReportedMapId is not null && Mission.WorkItems.Any(w => w.MapId == robot.ReportedMapId);
+            }
+        }
+
         var s = Describe(connection, robot, Mission.CurrentRun?.State,
             current?.AreaName, current?.Attempts ?? 0,
             current?.Tasks.Any(t => t.Status == "RUNNING") ?? false,
-            Mission.TaskProgress);
+            Mission.TaskProgress, floorMismatch, floorWorked);
         StatusKind = s.Kind;
         StatusHeadline = s.Headline;
         StatusDetail = s.Detail;
@@ -285,9 +302,12 @@ public sealed partial class AlarmsViewModel : ObservableObject
     /// <summary>
     /// 현재 단계 판정(순수 함수). 우선순위: 통신 두절 > 비상정지 > run 상태(대기/완료/중단/층 이동) >
     /// 진행 중 세부(수동 모드 > 로봇 오류 > 배차 대기 > 검사 중 > 주행 중 > 이동 준비).
+    /// floorMismatch = 남은 작업이 AMR 보고 층에 없을 때의 설명(없으면 null). floorWorked = 그 층에 이 run의 작업이 있었는가
+    /// (있었다면 층 작업을 마친 정상 대기, 없었다면 처음부터 층이 다른 것).
     /// </summary>
     public static StatusSnapshot Describe(string? connection, RobotStateDto? robot, string? runState,
-        string? currentArea, int currentAttempts, bool inspecting, RunProgressDto? progress)
+        string? currentArea, int currentAttempts, bool inspecting, RunProgressDto? progress,
+        string? floorMismatch = null, bool floorWorked = false)
     {
         if (connection is "OFFLINE" or "CONNECTIONBROKEN")
             return new("fail", "로봇 통신 두절", "HD_AMR 연결 상태를 확인하세요. 재연결되면 자동으로 이어집니다.");
@@ -334,6 +354,9 @@ public sealed partial class AlarmsViewModel : ObservableObject
             case "ABORTED":
                 return new("warn", "작업 중단됨", "완료된 작업은 보존됩니다. '이어하기'로 남은 작업을 재개하세요.");
             case "WAITING_FLOOR_TRANSFER":
+                if (floorMismatch is not null)
+                    return new("warn", floorWorked ? "층 이동 대기" : "AMR 층 불일치 — 작업 지시 보류",
+                        $"{floorMismatch}. 로봇을 작업 층으로 옮긴 뒤 '수동 층 변경' → '다음 층 릴리스'를 누르세요.");
                 return new("warn", "층 이동 대기",
                     "로봇을 다음 층으로 옮긴 뒤 '수동 층 변경' → '다음 층 릴리스'를 누르세요.");
         }
@@ -344,6 +367,9 @@ public sealed partial class AlarmsViewModel : ObservableObject
             return new("warn", "로봇 수동 모드 — 작업 진행 불가", "로봇을 자동(AUTOMATIC) 모드로 전환하세요.");
         if (robot?.ErrorDescriptions is { Length: > 0 } errs)
             return new("warn", "로봇 오류 보고 중", string.Join(" / ", errs));
+        if (currentArea is null && floorMismatch is not null)
+            return new("warn", "AMR 층 불일치 — 작업 지시 보류",
+                $"{floorMismatch}. AMR 층(맵)을 확인한 뒤 '다음 층 릴리스'를 누르세요.");
         if (currentArea is null)
             return new("run", "다음 작업 배차 대기", "로봇 위치·층 확인 후 다음 작업을 지시합니다.");
         if (inspecting)

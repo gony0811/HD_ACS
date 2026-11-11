@@ -453,7 +453,10 @@ public sealed class InspectionDispatcher
     /// 현재 층의 미검사 작업 중 로봇 최근접 1건을 단일 정차 Order로 발행. 후보 없으면 층 완료 처리
     /// (다른 층 남으면 WAITING_FLOOR_TRANSFER, 전부 소진이면 run COMPLETED).
     /// </summary>
-    public async Task DispatchNextAsync(Guid runId, CancellationToken ct)
+    /// <param name="commanded">운영자 명령(미션 시작·이어하기·다음 층 릴리스)으로 호출됐는가. true인데 AMR 보고 층에
+    /// 보낼 작업이 없으면(다른 층에만 남음·보고 층 없음) FLOOR_MISMATCH 경고 알람을 낸다 — 명령에 아무 반응이 없어 보이는 것을 막는다.
+    /// 정차 완료 뒤 자동 호출(층 작업을 방금 마친 정상 전환)은 false라 알람 없이 층 이동 대기로만 바뀐다.</param>
+    public async Task DispatchNextAsync(Guid runId, CancellationToken ct, bool commanded = false)
     {
         var run = await _db.ScenarioRuns.Include(r => r.Missions).FirstAsync(r => r.RunId == runId, ct);
         // 중단/완료된 run은 후속 배차·완료 전이 금지 — abort 후 진행 중이던 정차가 완주되어도
@@ -473,7 +476,12 @@ public sealed class InspectionDispatcher
         }
         var ctx = await _db.RobotContexts.FindAsync(new object[] { run.RobotId }, ct);
         var floor = ctx?.ReportedMapId;
-        if (floor is null) { _log.LogInformation("Run {Run}: 로봇 보고 층 미확인 — 배차 보류.", runId); return; }
+        if (floor is null)
+        {
+            _log.LogInformation("Run {Run}: 로봇 보고 층 미확인 — 배차 보류.", runId);
+            if (commanded) await RaiseFloorMismatchAsync(run, null, ct);
+            return;
+        }
 
         var pending = await _db.WorkItems
             .Where(w => w.RunId == runId && w.MapId == floor && w.Status == "PENDING")
@@ -494,6 +502,7 @@ public sealed class InspectionDispatcher
             await _db.SaveChangesAsync(ct);
             await PushRunStateAsync(run.RunId, run.State, ct);
             _log.LogInformation("Run {Run}: 층 {Floor} 검사 완료 → {State}", runId, floor, run.State);
+            if (anyLeft && commanded) await RaiseFloorMismatchAsync(run, floor, ct);
             return;
         }
 
@@ -505,6 +514,33 @@ public sealed class InspectionDispatcher
         var mission = run.Missions.First(m => m.MapId == floor);
 
         await PublishStopAsync(run, mission, wi, ct);
+    }
+
+    /// <summary>
+    /// AMR 보고 층 ≠ 남은 작업 층 — Order를 보내지 않았음을 경고 알람(FLOOR_MISMATCH)으로 알린다.
+    /// robotFloor null = AMR이 층(mapId)을 보고하지 않음.
+    /// </summary>
+    private async Task RaiseFloorMismatchAsync(ScenarioRunEntity run, string? robotFloor, CancellationToken ct)
+    {
+        var pending = await _db.WorkItems.AsNoTracking()
+            .Where(w => w.RunId == run.RunId && w.Status == "PENDING")
+            .GroupBy(w => w.MapId).Select(g => new { MapId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        if (pending.Count == 0) return;
+        var workFloors = string.Join(", ", pending.OrderBy(p => p.MapId).Select(p => p.MapId));
+        var title = robotFloor is null
+            ? $"AMR 층 미확인 — 작업 지시(Order) 보류 (작업 층 {workFloors})"
+            : $"AMR 층 불일치 — AMR은 {robotFloor}, 작업은 {workFloors} — 작업 지시(Order) 보류";
+        await RaiseAlarmAsync("FLOOR_MISMATCH", "WARNING", title, run.RobotId, null, new
+        {
+            runId = run.RunId, robotMapId = robotFloor,
+            pending = pending.Select(p => new { mapId = p.MapId, count = p.Count }),
+            action = robotFloor is null
+                ? "AMR이 보고하는 층(mapId)이 없습니다 — AMR 측위(맵 선택) 상태를 확인한 뒤 '다음 층 릴리스'를 누르세요."
+                : "AMR을 작업 층으로 옮기고(또는 AMR 맵을 그 층으로 맞추고) '수동 층 변경' → '다음 층 릴리스'를 누르세요.",
+        }, ct);
+        _log.LogWarning("Run {Run}: 층 불일치 — AMR {Robot} 보고 층 {Floor}, 남은 작업 층 {Work} — Order 보류·알람.",
+            run.RunId, run.RobotId, robotFloor ?? "(없음)", workFloors);
     }
 
     private async Task PublishStopAsync(ScenarioRunEntity run, MissionEntity mission, WorkItemEntity wi, CancellationToken ct)

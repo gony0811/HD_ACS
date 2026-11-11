@@ -71,7 +71,7 @@ public sealed class VdaBridgeService : BackgroundService
                         .Select(r => r.RunId).ToListAsync(ct);
                     var missions = svc.GetRequiredService<MissionService>();
                     foreach (var runId in waiting)
-                        await missions.TryReleaseNextMissionAsync(runId, ct);
+                        await missions.TryReleaseNextMissionAsync(runId, ct, commanded: false);
                 }
             }
             catch (Exception ex)
