@@ -105,6 +105,36 @@ public class TaskHistoryColorTests
         Assert.Equal("PENDING", vm.WorkItemStatusOf(HistoryApi.B));
     }
 
+    /// <summary>리페어 run은 영역의 용접선 일부만 돈다 — 영역 결과는 이번 결과 + 나머지 용접선의 지난 기록으로 본다.</summary>
+    [Fact]
+    public async Task RepairRun_AreaOutcomeUsesAllWelds_NotOnlyRepairedOnes()
+    {
+        var vm = await Load();
+
+        // B2(지난번 실패)만 재검사 → 성공. B1은 지난 기록이 성공 → 영역 성공
+        vm.ApplyWorkItemStatuses(new Dictionary<Guid, string> { [HistoryApi.B] = "RUNNING" },
+            new Dictionary<Guid, string> { [HistoryApi.B2] = "RUNNING" }, partialAreas: true);
+        Assert.Equal("RUNNING", vm.WorkItemStatusOf(HistoryApi.B));
+        vm.ApplyWorkItemStatuses(new Dictionary<Guid, string> { [HistoryApi.B] = "SUCCESS" },
+            new Dictionary<Guid, string> { [HistoryApi.B2] = "FINISHED" }, partialAreas: true);
+        Assert.Equal("SUCCESS", vm.WorkItemStatusOf(HistoryApi.B));
+
+        // B1만 재검사해 성공해도 B2가 실패로 남아 있으면 영역은 실패
+        vm.ApplyWorkItemStatuses(new Dictionary<Guid, string> { [HistoryApi.B] = "SUCCESS" },
+            new Dictionary<Guid, string> { [HistoryApi.B1] = "FINISHED" }, partialAreas: true);
+        Assert.Equal("FAILED", vm.WorkItemStatusOf(HistoryApi.B));
+
+        // C1만 재검사 성공 — C2는 한 번도 검사하지 않음 → 판정 안 함(대기색)
+        vm.ApplyWorkItemStatuses(new Dictionary<Guid, string> { [HistoryApi.C] = "SUCCESS" },
+            new Dictionary<Guid, string> { [HistoryApi.C1] = "FINISHED" }, partialAreas: true);
+        Assert.Equal("PENDING", vm.WorkItemStatusOf(HistoryApi.C));
+
+        // 일반 run이면 종전대로 run 결과가 곧 영역 결과
+        vm.ApplyWorkItemStatuses(new Dictionary<Guid, string> { [HistoryApi.B] = "SUCCESS" },
+            new Dictionary<Guid, string> { [HistoryApi.B1] = "FINISHED" });
+        Assert.Equal("SUCCESS", vm.WorkItemStatusOf(HistoryApi.B));
+    }
+
     [Fact]
     public async Task OldServer_NoHistory_KeepsPlanView()
     {

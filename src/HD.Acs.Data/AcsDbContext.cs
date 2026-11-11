@@ -132,6 +132,7 @@ public class AcsDbContext : DbContext
         // ═══ run ═══
         mb.Entity<ScenarioRunEntity>(e => { e.ToTable("scenario_run", "run");
             e.HasKey(x => x.RunId);
+            e.Property(x => x.TaskIds).HasColumnType("jsonb");
             e.HasMany(x => x.Missions).WithOne().HasForeignKey(m => m.RunId); });
 
         mb.Entity<MissionEntity>(e => { e.ToTable("mission", "run"); e.HasKey(x => x.MissionId);

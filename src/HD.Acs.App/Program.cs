@@ -845,6 +845,23 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
     catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 
+// 리페어 run — 지정한 용접선(TASK)만 검사. 영역 검사에서 실패한 용접선을 골라 다시 돌린다(1개 이상).
+// scenarioId 생략 = 그 선창의 가장 최근 run 시나리오. 가드는 미션 시작과 같다(활성 run·미연결·장치 알람 409).
+app.MapPost("/api/runs/repair", async (StartRepairRunRequest req, MissionService missions) =>
+{
+    try
+    {
+        var runId = await missions.StartRepairRunAsync(req.RobotId, req.TaskIds ?? new List<Guid>(), req.ScenarioId);
+        return Results.Ok(new { runId });
+    }
+    catch (Exception ex) when (ex is RepairRequestException or CalibrationInvalidException or WeldPayloadSchemaException
+                                   or InvalidOperationException)
+    { return Results.BadRequest(new { error = ex.Message }); }
+    catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
+    catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
+});
+
 // run 중단 — 상태만 ABORTED (진행 중 Order 미회수, 즉시 정지는 비상정지). 완료 이력 보존 → resume 가능.
 // 로봇이 통신 단절 일시정지 중이면 cancelOrder도 발행(PAUSE AMR은 Order를 쥐고 있음) [통신단절 Fail-Safe §4.1, VDA §4.5.3]
 app.MapPost("/api/runs/{runId:guid}/abort", async (Guid runId, CommLossService commLoss) =>
@@ -1225,6 +1242,7 @@ static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
 app.Run();
 
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
+public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);

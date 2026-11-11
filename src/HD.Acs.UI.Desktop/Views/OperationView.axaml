@@ -77,10 +77,15 @@
                             <TextBlock Text="작업 현황" FontSize="11" />
                         </TabItem.Header>
                         <!-- 실행 큐(work_item) 모니터링 — WorkItemProgress 푸시로 실시간 갱신 [INSPECTION_SCENARIO §3.1] -->
-                        <Grid RowDefinitions="Auto,*">
+                        <Grid RowDefinitions="Auto,Auto,*">
                             <TextBlock Grid.Row="0" Margin="12,10,12,6" FontWeight="Bold" FontSize="14"
                                        Text="{Binding Mission.WorkSummary}" />
-                            <DataGrid Grid.Row="1" x:Name="WorkItemGrid" Margin="6,0,6,6"
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="8,0,8,6">
+                                <Button x:Name="RepairFailedButton" Content="{Binding Mission.RepairFailedLabel}" FontSize="11" MinHeight="26"
+                                        ToolTip.Tip="이 run에서 실패한 용접선만 모아 다시 검사합니다(리페어 run). 용접선 하나만 하려면 영역 행을 눌러 펼친 뒤 [재검사]."
+                                        Command="{Binding Mission.RepairFailedCommand}" />
+                            </StackPanel>
+                            <DataGrid Grid.Row="2" x:Name="WorkItemGrid" Margin="6,0,6,6"
                                       ItemsSource="{Binding Mission.WorkItems}"
                                       AutoGenerateColumns="False" IsReadOnly="True" FontSize="11"
                                       RowDetailsVisibilityMode="VisibleWhenSelected">
@@ -90,7 +95,7 @@
                                         <ItemsControl ItemsSource="{Binding Tasks}" Margin="24,4,8,6">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid Margin="0,1" ColumnDefinitions="24,*,Auto,Auto">
+                                                    <Grid Margin="0,1" ColumnDefinitions="24,*,Auto,Auto,Auto">
                                                         <TextBlock Grid.Column="0" Text="{Binding Seq}" FontSize="10" FontWeight="Bold"
                                                                    Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
                                                         <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="11"
@@ -103,6 +108,10 @@
                                                         <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="9" MaxWidth="120"
                                                                    Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center"
                                                                    TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
+                                                        <Button Grid.Column="4" Content="재검사" FontSize="9" Padding="6,1" Margin="6,0,0,0" MinHeight="0"
+                                                                ToolTip.Tip="이 용접선 1개만 다시 검사(리페어 run). 진행 중인 run이 있으면 쓸 수 없습니다."
+                                                                Command="{Binding $parent[UserControl].DataContext.Mission.RepairTaskCommand}"
+                                                                CommandParameter="{Binding}" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>

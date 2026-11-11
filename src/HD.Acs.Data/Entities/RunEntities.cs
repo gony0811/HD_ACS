@@ -13,6 +13,9 @@ public class ScenarioRunEntity
     public DateTimeOffset? EndedAt { get; set; }
     public int? TotalTasks { get; set; }              // 진행률 분모 — 시작 시 큐 전개 시점 고정 [SAIGE §6.1]. null=구버전 run
     public int ExcludedTasks { get; set; }            // 큐에서 제외된 TASK 수 (T_W_D 부재 등, 분모 미포함) [SAIGE §6.4]
+    /// <summary>리페어 run의 검사 대상 용접선(taskId json 배열). null = 일반 run(시나리오 영역 전체).
+    /// 큐 전개와 재개(resume) 시 정차 재계산이 이 목록의 용접선만 싣는다.</summary>
+    public string? TaskIds { get; set; }
     public List<MissionEntity> Missions { get; set; } = new();
 }
 

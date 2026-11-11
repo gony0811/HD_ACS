@@ -34,13 +34,17 @@ public sealed partial class TankViewModel : ObservableObject
     // ── 실행 큐(work_item)·용접라인(액션) 상태색 — 운영 중 진행 표시 [INSPECTION_SCENARIO §3.1] ──
     private readonly Dictionary<Guid, string> _workStatusByArea = new();
     private readonly Dictionary<Guid, string> _workStatusByTask = new();
+    /// <summary>리페어 run — run이 영역의 용접선 일부만 검사한다. 영역 결과를 run 결과만으로 정하지 않는다.</summary>
+    private bool _partialAreas;
 
     /// <summary>현재 run의 영역별 work_item + 용접라인별 액션 상태 반영(초기 로드·푸시 갱신 시 Shell이 호출).
     /// null/빈=계획 보기(영역=기본 녹색, 용접선=주황).</summary>
     public void ApplyWorkItemStatuses(
         IReadOnlyDictionary<Guid, string>? statusByArea,
-        IReadOnlyDictionary<Guid, string>? statusByTask = null)
+        IReadOnlyDictionary<Guid, string>? statusByTask = null,
+        bool partialAreas = false)
     {
+        _partialAreas = partialAreas;
         _workStatusByArea.Clear();
         if (statusByArea is not null)
             foreach (var (areaId, status) in statusByArea) _workStatusByArea[areaId] = status;
@@ -92,6 +96,25 @@ public sealed partial class TankViewModel : ObservableObject
     public string? WorkItemStatusOf(Guid areaId)
     {
         bool inRun = _workStatusByArea.TryGetValue(areaId, out var run);
+        if (inRun && _partialAreas)
+        {
+            // 리페어 run은 영역의 용접선 일부만 돈다 — 영역 결과는 소속 용접선 전부(이번 결과 + 지난 기록)로 본다.
+            // 고친 용접선이 성공해도 다른 용접선이 실패로 남아 있으면 영역은 실패다.
+            if (run == "RUNNING") return run;
+            if (_tasksByArea.TryGetValue(areaId, out var all) && all.Length > 0)
+            {
+                int ok = 0;
+                foreach (var t in all)
+                {
+                    var s = TaskStatusOf(t);
+                    if (s == "FAILED") return "FAILED";
+                    if (s == "FINISHED") ok++;
+                }
+                if (ok == all.Length) return "SUCCESS";
+                return "PENDING";   // 아직 검사하지 않은 용접선이 있음 — 판정 안 함
+            }
+            return run;
+        }
         if (inRun && run is not ("PENDING" or "PLANNED" or "WAITING")) return run;
         if (ShowHistory && _historyByTask.Count > 0 && _tasksByArea.TryGetValue(areaId, out var tasks) && tasks.Length > 0)
         {

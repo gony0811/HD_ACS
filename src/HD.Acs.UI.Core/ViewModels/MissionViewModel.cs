@@ -244,6 +244,59 @@ public sealed partial class MissionViewModel : ObservableObject
         }
     }
 
+    // ── 용접선 재검사(리페어 run) — 지정한 용접선만 다시 검사 ──
+    private bool RunActive => CurrentRun?.State is "RUNNING" or "WAITING_FLOOR_TRANSFER";
+
+    /// <summary>현재 표시 중인 run에서 실패한 용접선.</summary>
+    private List<TaskRow> FailedTasks() => WorkItems.SelectMany(w => w.Tasks).Where(t => t.Status == "FAILED").ToList();
+
+    /// <summary>"실패 용접선 재검사" 버튼 문구 — 실패 수 포함.</summary>
+    [ObservableProperty] private string _repairFailedLabel = "실패 용접선 재검사";
+
+    private bool CanRepairTask(TaskRow? task) => task is not null && !RunActive && !string.IsNullOrWhiteSpace(SelectedRobotId);
+
+    /// <summary>용접선 1개만 재검사(작업 현황 드릴다운의 행 버튼).</summary>
+    [RelayCommand(CanExecute = nameof(CanRepairTask))]
+    private Task RepairTaskAsync(TaskRow? task) =>
+        task is null ? Task.CompletedTask : StartRepairAsync(new[] { task.TaskId }, $"용접선 '{task.Name}'");
+
+    private bool CanRepairFailed() => !RunActive && !string.IsNullOrWhiteSpace(SelectedRobotId) && FailedTasks().Count > 0;
+
+    /// <summary>현재 표시 중인 run에서 실패한 용접선을 모두 재검사.</summary>
+    [RelayCommand(CanExecute = nameof(CanRepairFailed))]
+    private Task RepairFailedAsync()
+    {
+        var failed = FailedTasks();
+        return StartRepairAsync(failed.Select(t => t.TaskId).ToList(), $"실패 용접선 {failed.Count}개");
+    }
+
+    /// <summary>리페어 run 시작 — 지정한 용접선만 검사한다. 계획 화면 등 다른 곳에서도 부른다.</summary>
+    public async Task StartRepairAsync(IReadOnlyCollection<Guid> taskIds, string what)
+    {
+        if (taskIds.Count == 0) return;
+        if (string.IsNullOrWhiteSpace(SelectedRobotId)) { StatusMessage = "로봇을 먼저 선택하세요."; return; }
+        try
+        {
+            // 소속 표시용 시나리오 — 지금 보고 있는 run의 것, 없으면 서버가 그 선창의 최근 run 시나리오를 쓴다
+            var runId = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId);
+            if (runId is null) { StatusMessage = "재검사 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
+            await RefreshRunAsync(runId.Value);
+            StatusMessage = $"재검사 시작: {what} (run {runId})";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"재검사 실패: {ex.Message}";
+        }
+    }
+
+    private void NotifyRepairState()
+    {
+        int n = FailedTasks().Count;
+        RepairFailedLabel = n > 0 ? $"실패 용접선 재검사 ({n})" : "실패 용접선 재검사";
+        RepairFailedCommand.NotifyCanExecuteChanged();
+        RepairTaskCommand.NotifyCanExecuteChanged();
+    }
+
     private bool CanResumeRun() => !string.IsNullOrWhiteSpace(SelectedRobotId);
 
     /// <summary>이어하기 — 로봇의 가장 최근 재개 가능 run을 찾아 resume (DONE/SKIPPED 보존, 잔여만 재배차).</summary>
@@ -345,6 +398,9 @@ public sealed partial class MissionViewModel : ObservableObject
                         // 다른 선창의 run이면 일괄 결과에 없다 — 그 영역만 개별 조회
                         IEnumerable<AreaTaskDto> areaTasks = byArea is not null && byArea.TryGetValue(w.AreaId, out var list)
                             ? list : await _api.GetAreaTasksAsync(w.AreaId);
+                        // 리페어 run은 지정한 용접선만 싣는다 — 나머지는 이 run의 대상이 아니다
+                        if (run.RepairTaskIds is { } only)
+                            areaTasks = areaTasks.Where(t => only.Contains(t.TaskId));
                         foreach (var t in areaTasks)
                             row.Tasks.Add(new TaskRow(t.TaskId, t.Seq, t.Name ?? $"라인 {t.Seq}"));
                     }
@@ -462,6 +518,7 @@ public sealed partial class MissionViewModel : ObservableObject
 
     private void RebuildWorkSummary()
     {
+        NotifyRepairState();
         if (WorkItems.Count == 0) { WorkSummary = "실행 중 작업 없음"; return; }
         // 영역 성공 = 소속 용접선 전부 성공 [WorkOutcome.Area]
         int ok = WorkItems.Count(w => w.DisplayStatus == "SUCCESS");
@@ -471,7 +528,8 @@ public sealed partial class MissionViewModel : ObservableObject
         var fail = failed > 0 ? $" · 실패 {failed}" : "";
         var tFail = tBad > 0 ? $" · 실패 {tBad}" : "";
         var line = tasks.Count > 0 ? $"  |  용접선 성공 {tOk}{tFail} / {tasks.Count}" : "";
-        WorkSummary = $"영역 성공 {ok}{fail} / {WorkItems.Count}{line}";
+        var repair = CurrentRun?.IsRepair == true ? "재검사 · " : "";
+        WorkSummary = $"{repair}영역 성공 {ok}{fail} / {WorkItems.Count}{line}";
     }
 
     /// <summary>TASK 진행률 스냅샷을 요약 문자열·진행바 값으로 반영.</summary>
@@ -533,6 +591,7 @@ public sealed partial class MissionViewModel : ObservableObject
     {
         StartRunCommand.NotifyCanExecuteChanged();
         ResumeRunCommand.NotifyCanExecuteChanged();
+        NotifyRepairState();
     }
     partial void OnNewScenarioNameChanged(string value) => CreateScenarioCommand.NotifyCanExecuteChanged();
     partial void OnCurrentRunChanged(ScenarioRunDto? value)
@@ -540,6 +599,7 @@ public sealed partial class MissionViewModel : ObservableObject
         ReleaseNextCommand.NotifyCanExecuteChanged();
         RefreshCurrentRunCommand.NotifyCanExecuteChanged();
         AbortRunCommand.NotifyCanExecuteChanged();
+        NotifyRepairState();
     }
 }
 

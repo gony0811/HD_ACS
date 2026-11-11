@@ -395,7 +395,8 @@ CREATE TABLE run.scenario_run (
   ended_at     timestamptz,
   -- 진행률 분모 고정 [SAIGE 연동 사양서 v2.6 §6.1/§6.4] — run 시작 시 큐 전개 시점에 1회 기록, 이후 불변.
   total_tasks    int,                     -- 전개된 TASK 총수 (NULL = 구버전 run → work_item 에서 폴백 산출)
-  excluded_tasks int NOT NULL DEFAULT 0   -- 유효 T_W_D 부재 등으로 큐에서 제외된 TASK 수 (분모 미포함)
+  excluded_tasks int NOT NULL DEFAULT 0,  -- 유효 T_W_D 부재 등으로 큐에서 제외된 TASK 수 (분모 미포함)
+  task_ids       jsonb                    -- 리페어 run 의 검사 대상 taskId 배열 (NULL = 일반 run)
 );
 
 -- 층 단위 미션 (한 미션의 모든 노드는 같은 map_id)

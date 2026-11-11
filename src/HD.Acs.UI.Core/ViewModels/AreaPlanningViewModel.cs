@@ -433,6 +433,24 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"코봇 이동 시험 실패: {ex.Message}"; }   // 409 run중/타층·404·400 사유
     }
 
+    /// <summary>선택 용접선 1개만 검사 실행(리페어 run) — 주행·촬영을 포함한 실제 검사이며 결과가 기록에 남는다.
+    /// 진행은 운영 화면이 run 시작 알림을 받아 이어서 보여준다. 로봇은 활성 로봇(단일) 사용.</summary>
+    [RelayCommand(CanExecute = nameof(CanUpdateTask))]
+    private async Task InspectTaskOnlyAsync()
+    {
+        if (SelectedTask is not { } task) return;
+        try
+        {
+            var robots = await _api.GetRobotsAsync();
+            if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
+            var runId = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId });
+            StatusMessage = runId is null
+                ? "검사 실행 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."
+                : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} (run {runId}) — 진행은 운영 화면에서 확인";
+        }
+        catch (Exception ex) { StatusMessage = $"검사 실행 실패: {ex.Message}"; }   // 409 진행 중 run·미연결, 400 사유
+    }
+
     /// <summary>
     /// 현재 AMR 위치를 정차점으로 — 로봇 보고 위치를 서버가 그 층 T_W_D로 도면 좌표화한 값을 정차 덮어쓰기 폼(오프셋·방향)에 채운다.
     /// 저장은 하지 않는다: 운영자가 [선택 영역 수정](또는 등록)으로 확정한다. 로봇이 영역과 다른 층이면 거부.
@@ -481,6 +499,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();
         TestSeamStartCommand.NotifyCanExecuteChanged();
+        InspectTaskOnlyCommand.NotifyCanExecuteChanged();
         AddTaskToSplitCommand.NotifyCanExecuteChanged();
         // 작업 재선택 = 진행 중 교차 그리기 버퍼 비움(섞임 방지)
         CrossDrawShape = null; CrossStep = 0; CrossStepText = "";

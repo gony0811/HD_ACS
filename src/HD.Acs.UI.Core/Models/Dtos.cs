@@ -165,7 +165,12 @@ public sealed record ScenarioRunDto(
     string State,
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt,
-    List<MissionDto> Missions);
+    List<MissionDto> Missions,
+    // 리페어 run이면 검사 대상 용접선(taskId), 일반 run이면 null
+    IReadOnlyList<Guid>? RepairTaskIds = null)
+{
+    public bool IsRepair => RepairTaskIds is not null;
+}
 
 /// <summary>run.mission — 한 미션 = 한 층(mapId).</summary>
 public sealed record MissionDto(

@@ -24,6 +24,8 @@ public static class SchemaEnsure
         "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_max_backward_mm double precision",
         // db/migrations/2026-11-04_area_station_lift_mm.sql — 영역별 정차 리프트 높이(0~1000mm, NULL=배차 기본 0)
         "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_lift_mm double precision",
+        // db/migrations/2026-11-11_run_task_ids.sql — 리페어 run의 검사 대상 용접선(NULL=일반 run)
+        "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS task_ids jsonb",
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

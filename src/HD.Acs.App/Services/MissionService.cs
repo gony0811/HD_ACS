@@ -32,8 +32,58 @@ public sealed class MissionService
     /// 시나리오 → Run 생성. 선창 영역을 작업 큐로 전개(층별 미션 포함)한 뒤 첫 정차를 greedy 최근접 배차.
     /// 검사 순서는 고정 시퀀스가 아니라 "현재 층 미검사 중 로봇 최근접"으로 동적 결정된다.
     /// </summary>
-    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
+    public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
+        => StartRunCoreAsync(scenarioId, robotId, null, ct);
+
+    /// <summary>
+    /// 리페어 run — 지정한 용접선(TASK)만 검사한다(1개 이상). 영역 검사에서 실패한 용접선을 골라 다시 돌릴 때 쓴다.
+    /// 일반 run과 같은 큐·배차·재시도·기록 경로를 타며, 정차는 그 용접선이 속한 영역의 정차점 그대로다.
+    /// 시나리오는 run 기록의 소속 표시용 — 지정이 없으면 그 선창의 가장 최근 run 시나리오, 그것도 없으면 선창의 첫 시나리오.
+    /// </summary>
+    public async Task<Guid> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
+        CancellationToken ct = default)
     {
+        var ids = taskIds.Distinct().ToList();
+        if (ids.Count == 0) throw new RepairRequestException("검사할 용접선을 1개 이상 지정하세요.");
+
+        var found = await (from t in _db.AreaTasks.AsNoTracking()
+                           join a in _db.InspectionAreas.AsNoTracking() on t.AreaId equals a.AreaId
+                           where ids.Contains(t.TaskId)
+                           select new { t.TaskId, a.TankId }).ToListAsync(ct);
+        var missing = ids.Except(found.Select(f => f.TaskId)).ToList();
+        if (missing.Count > 0)
+            throw new RepairRequestException($"등록되지 않은 용접선 {missing.Count}개: {string.Join(", ", missing.Take(5))}");
+        var tanks = found.Select(f => f.TankId).Distinct().ToList();
+        if (tanks.Count != 1)
+            throw new RepairRequestException("용접선이 서로 다른 선창에 속해 있습니다 — 선창 하나의 용접선만 지정하세요.");
+        var tankId = tanks[0];
+
+        Guid? sid = scenarioId;
+        if (sid is { } given)
+        {
+            var tank = await _db.Scenarios.AsNoTracking().Where(s => s.ScenarioId == given)
+                .Select(s => s.TankId).FirstOrDefaultAsync(ct);
+            if (tank is null) throw new RepairRequestException($"시나리오 '{given}' 없음");
+            if (tank != tankId) throw new RepairRequestException($"시나리오의 선창({tank})과 용접선의 선창({tankId})이 다릅니다.");
+        }
+        else
+        {
+            sid = await (from r in _db.ScenarioRuns.AsNoTracking()
+                         join s in _db.Scenarios.AsNoTracking() on r.ScenarioId equals s.ScenarioId
+                         where s.TankId == tankId
+                         orderby r.StartedAt descending
+                         select (Guid?)s.ScenarioId).FirstOrDefaultAsync(ct)
+                  ?? await _db.Scenarios.AsNoTracking().Where(s => s.TankId == tankId)
+                      .OrderBy(s => s.Name).Select(s => (Guid?)s.ScenarioId).FirstOrDefaultAsync(ct);
+            if (sid is null) throw new RepairRequestException($"선창 {tankId}에 시나리오가 없습니다 — 계획 ▸ 시나리오에서 먼저 만드세요.");
+        }
+
+        return await StartRunCoreAsync(sid.Value, robotId, ids, ct);
+    }
+
+    private async Task<Guid> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, CancellationToken ct)
+    {
+        var what = repairTaskIds is null ? "미션 시작" : "용접선 재검사";
         // 활성 run 가드 — 같은 로봇에 RUNNING/WAITING_FLOOR_TRANSFER run이 있으면 새 시작 거부 (유령 run 누적 방지)
         var active = await _db.ScenarioRuns.AsNoTracking()
             .Where(r => r.RobotId == robotId && (r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER"))
@@ -43,8 +93,8 @@ public sealed class MissionService
                 $"로봇 {robotId}에 진행 중인 run({active})이 있습니다 — 이어하기(resume) 또는 중단(abort) 후 시작하세요.");
 
         // AMR 미연결이면 run을 만들지 않고 알람 — 받을 로봇 없이 Order가 나가 "무반응"이 되는 것을 막는다
-        await _dispatcher.EnsureRobotConnectedAsync(robotId, "미션 시작", ct);
-        _dispatcher.EnsureNoDeviceFault(robotId, "미션 시작");   // 장치 HEAVY 알람 중 Order 금지 [장치통신 HEAVY알람 §5]
+        await _dispatcher.EnsureRobotConnectedAsync(robotId, what, ct);
+        _dispatcher.EnsureNoDeviceFault(robotId, what);   // 장치 HEAVY 알람 중 Order 금지 [장치통신 HEAVY알람 §5]
 
         var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
 
@@ -55,10 +105,18 @@ public sealed class MissionService
             ScenarioVer = scenario.Version,
             RobotId = robotId,
             State = "RUNNING",
-            StartedAt = DateTimeOffset.UtcNow
+            StartedAt = DateTimeOffset.UtcNow,
+            TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
         };
         _db.ScenarioRuns.Add(run);
         await _dispatcher.BuildQueueAsync(run, scenario.TankId, ct);   // 영역→작업 큐 + 층별 미션
+        if (repairTaskIds is not null && run.TotalTasks is null or 0)
+        {
+            // 갈 수 있는 정차가 하나도 없다(층 캘리브레이션 없음·면 미등록) — 빈 run을 남기지 않는다
+            _db.ChangeTracker.Clear();
+            throw new RepairRequestException(
+                "지정한 용접선을 검사 큐에 넣을 수 없습니다 — 그 층의 맵 캘리브레이션(T_W_D)과 면 등록을 확인하세요.");
+        }
         await _db.SaveChangesAsync(ct);
 
         await _dispatcher.DispatchNextAsync(run.RunId, ct, commanded: true);   // 첫 정차 배차(로봇 층 일치 시, 불일치면 FLOOR_MISMATCH 알람)
@@ -391,6 +449,9 @@ public sealed class RunConflictException(string message) : Exception(message);
 
 /// <summary>run 상태상 불가한 요청(완료 run 재개 등) — 400으로 매핑.</summary>
 public sealed class RunStateException(string message) : Exception(message);
+
+/// <summary>리페어 run 요청이 잘못됨(용접선 없음·선창 혼재·시나리오 없음·큐에 넣을 수 없음) — 400.</summary>
+public sealed class RepairRequestException(string message) : Exception(message);
 
 /// <summary>재개 결과 — 현재 계획으로 다시 계산한 정차 수 / 재계산 불가로 건너뛴 정차 수.</summary>
 public sealed record ResumeSummary(int Refreshed, int Skipped);

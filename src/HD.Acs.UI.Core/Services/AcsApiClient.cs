@@ -74,6 +74,17 @@ public sealed class AcsApiClient : IAcsApiClient
         return body?.RunId ?? Guid.Empty;
     }
 
+    public async Task<Guid?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/runs/repair",
+            new { RobotId = robotId, TaskIds = taskIds, ScenarioId = scenarioId }, ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<StartRunResult>(ct);
+        return body?.RunId;
+    }
+
     public async Task AbortRunAsync(Guid runId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsync($"/api/runs/{runId}/abort", null, ct);

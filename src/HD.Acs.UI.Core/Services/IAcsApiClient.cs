@@ -21,6 +21,9 @@ public interface IAcsApiClient
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);
+    /// <summary>리페어 run — 지정한 용접선(TASK)만 검사. null = 서버 미지원(구빌드). 거부(400·409)는 예외.</summary>
+    Task<Guid?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
+        CancellationToken ct = default) => Task.FromResult<Guid?>(null);
     Task AbortRunAsync(Guid runId, CancellationToken ct = default);
     Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
     Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);

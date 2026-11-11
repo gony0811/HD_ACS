@@ -194,6 +194,14 @@ public sealed class InspectionDispatcher
         }
     }
 
+    /// <summary>리페어 run의 검사 대상 용접선(run.task_ids). 일반 run이면 null.</summary>
+    public static HashSet<Guid>? RepairFilter(ScenarioRunEntity run)
+    {
+        if (string.IsNullOrWhiteSpace(run.TaskIds)) return null;
+        try { return JsonSerializer.Deserialize<List<Guid>>(run.TaskIds)?.ToHashSet(); }
+        catch (JsonException) { return null; }
+    }
+
     // ── Phase 0: 선창 영역 → 작업 큐 전개 + 층별 미션 생성 ──────────────────────────
     /// <summary>
     /// run의 선창(tank)에 속한 모든 영역을 작업항목으로 전개한다("미검사 영역을 모두 큐에").
@@ -202,8 +210,20 @@ public sealed class InspectionDispatcher
     /// </summary>
     public async Task BuildQueueAsync(ScenarioRunEntity run, string tankId, CancellationToken ct)
     {
+        var only = RepairFilter(run);
         var (areas, linkedCount, total) = await LoadScenarioAreasAsync(run.ScenarioId, tankId, ct);
-        if (linkedCount > 0)
+        if (only is not null)
+        {
+            // 리페어 run — 시나리오 대상과 무관하게 지정한 용접선이 속한 영역만, 그 용접선만 싣는다
+            areas = await _db.InspectionAreas.AsNoTracking()
+                .Include(a => a.Tasks.OrderBy(t => t.Seq))
+                .Where(a => a.TankId == tankId && a.Tasks.Any(t => only.Contains(t.TaskId)))
+                .OrderBy(a => a.Level).ThenBy(a => a.SortOrder)
+                .ToListAsync(ct);
+            foreach (var a in areas) a.Tasks = a.Tasks.Where(t => only.Contains(t.TaskId)).ToList();
+            _log.LogInformation("Run {Run}: 리페어 — 용접선 {N}개(영역 {A}개)만 전개.", run.RunId, only.Count, areas.Count);
+        }
+        else if (linkedCount > 0)
             _log.LogInformation("Run {Run}: 부분 검사 계획 — 시나리오 대상 {N}개 영역 전개 (선창 전체 {Total}개 중).",
                 run.RunId, areas.Count, total);
         else
@@ -367,6 +387,10 @@ public sealed class InspectionDispatcher
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
         var weldSchema = await WeldSchemaAsync(ct);
         var levelZ = await LevelZAsync(tankId, ct);
+
+        // 리페어 run은 재계산해도 지정한 용접선만 싣는다
+        if (RepairFilter(run) is { } only)
+            foreach (var a in areas.Values) a.Tasks = a.Tasks.Where(t => only.Contains(t.TaskId)).ToList();
 
         int refreshed = 0, skipped = 0;
         foreach (var wi in items)

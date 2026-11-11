@@ -49,7 +49,8 @@ public sealed class RunQueryService
             Utc(run.StartedAt), Utc(run.EndedAt),
             run.Missions.OrderBy(m => m.Seq).Select(m => new RunMission(
                 m.MissionId, m.RunId, m.Seq, SaigeUnits.LevelFromMapId(m.MapId), m.MapId, m.RobotId,
-                m.OrderId, m.OrderUpdateId, m.State, Utc(m.StartedAt), Utc(m.EndedAt))).ToList());
+                m.OrderId, m.OrderUpdateId, m.State, Utc(m.StartedAt), Utc(m.EndedAt))).ToList(),
+            InspectionDispatcher.RepairFilter(run)?.ToList());
     }
 
     /// <summary>
@@ -136,7 +137,9 @@ public sealed record RunSummary(Guid RunId, Guid ScenarioId, string? ScenarioNam
     string RobotId, string State, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? StartedAt, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? EndedAt);
 
 public sealed record RunDetail(Guid RunId, Guid ScenarioId, int ScenarioVer, string? TankId, string RobotId, string State,
-    [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? StartedAt, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? EndedAt, IReadOnlyList<RunMission> Missions);
+    [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? StartedAt, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? EndedAt, IReadOnlyList<RunMission> Missions,
+    // 리페어 run이면 검사 대상 용접선(taskId), 일반 run이면 null
+    IReadOnlyList<Guid>? RepairTaskIds = null);
 
 public sealed record RunMission(Guid MissionId, Guid RunId, int Seq, int? Level, string MapId, string RobotId,
     string OrderId, int OrderUpdateId, string State, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? StartedAt, [property: JsonConverter(typeof(UtcZConverter))] DateTimeOffset? EndedAt);
