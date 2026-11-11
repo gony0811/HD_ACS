@@ -66,7 +66,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
             // 첫 수신: 이미 작업을 막는 상태면 바로 알린다
             if (s.OperatingMode == "MANUAL") Add("warn", $"{s.RobotId} 수동(MANUAL) 모드 — 자동 작업 불가");
             if (IsEStop(s)) Add("fail", $"{s.RobotId} 비상정지 상태");
-            foreach (var e in errors) Add(ClassifyErrorKind(e), $"{s.RobotId} 오류 보고: {e}");
+            foreach (var e in errors)
+                Add(ClassifyErrorKind(e), IsManualBeadInput(e) ? $"{s.RobotId} {ManualBeadText(e)}" : $"{s.RobotId} 오류 보고: {e}");
         }
         else
         {
@@ -83,9 +84,14 @@ public sealed partial class AlarmsViewModel : ObservableObject
             {
                 // 배터리 관련은 kind를 세분 — critical=fail, 거부/저전력=warn 유지(사양서 §8: 거부는 WARNING, FATAL 아님)
                 var kind = ClassifyErrorKind(e);
-                Add(kind, $"{s.RobotId} 오류 보고: {e}");
+                // 수동 비드 입력 요청은 고장이 아니라 작업자 호출 — "오류 보고"로 적지 않는다.
+                Add(kind, IsManualBeadInput(e) ? $"{s.RobotId} {ManualBeadText(e)}" : $"{s.RobotId} 오류 보고: {e}");
             }
-            if (errors.Length == 0 && before.Length > 0) Add("info", $"{s.RobotId} 오류 해제");
+            if (before.Any(IsManualBeadInput) && !errors.Any(IsManualBeadInput))
+                Add("info", $"{s.RobotId} 수동 비드 입력 종료 — 검사 계속");
+            // "오류 해제"는 실제 오류가 모두 사라졌을 때만(입력 요청만 있다가 사라진 것은 위에서 따로 알림).
+            if (!errors.Any(e => !IsManualBeadInput(e)) && before.Any(e => !IsManualBeadInput(e)))
+                Add("info", $"{s.RobotId} 오류 해제");
         }
         Recompute();
     }
@@ -218,12 +224,32 @@ public sealed partial class AlarmsViewModel : ObservableObject
         descriptions?.Where(d => IsDeviceLinkLost(d.IndexOf(':') is > 0 and var c ? d[..c] : d)).ToList()
         ?? (IReadOnlyList<string>)Array.Empty<string>();
 
+    /// <summary>
+    /// 수동 비드 입력 요청 errorType [VDA §6.4] — AMR이 팝업을 띄운 동안 WARNING으로 싣는다. 고장이 아니라 작업자 호출이다.
+    /// 서버 <c>RobotErrorTracker.ManualBeadInputType</c>과 같은 값(UI.Core는 서버 코드를 참조하지 않아 여기 따로 둔다).
+    /// </summary>
+    public const string ManualBeadInputType = "manualBeadInputRequired";
+
+    /// <summary>ErrorDescriptions 항목("type: desc")이 수동 비드 입력 요청인가.</summary>
+    public static bool IsManualBeadInput(string errorText) =>
+        errorText.StartsWith(ManualBeadInputType + ":", StringComparison.OrdinalIgnoreCase)
+        || errorText.Trim().Equals(ManualBeadInputType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>이벤트 기록 문구 — "수동 비드 입력 요청 — {AMR 설명}".</summary>
+    public static string ManualBeadText(string errorText)
+    {
+        int c = errorText.IndexOf(':');
+        var desc = c > 0 ? errorText[(c + 1)..].Trim() : "";
+        return desc.Length > 0 ? $"수동 비드 입력 요청 — {desc}" : "수동 비드 입력 요청 — AMR 화면에서 비드선을 지정하세요";
+    }
+
     public static string ClassifyErrorKind(string errorText)
     {
         var head = errorText;
         int colon = errorText.IndexOf(':');
         if (colon > 0) head = errorText[..colon];
         var t = head.Trim();
+        if (t.Equals(ManualBeadInputType, StringComparison.OrdinalIgnoreCase)) return "warn";   // 작업자 입력 대기 — 실패 아님
         if (t.Equals("batteryCritical", StringComparison.OrdinalIgnoreCase)) return "fail";
         if (t.Equals("batteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
         if (t.Equals("orderRejectedBatteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
@@ -336,6 +362,12 @@ public sealed partial class AlarmsViewModel : ObservableObject
         if (robot is not null && HasErrorType(robot, "batteryLow"))
             return new("warn", "배터리 저전력",
                 "로봇을 현재 층 배터리 교체 장소로 보내려면 '배터리 교체 이동' 버튼을 누르세요. 교체 완료 후 '이어하기'로 재개.");
+
+        // 수동 비드 입력 대기 — AMR이 작업자를 기다리는 중(실패 아님). run 상태와 무관하게 알린다(AMR 화면 단독 실행 포함).
+        if (robot?.ErrorDescriptions?.FirstOrDefault(IsManualBeadInput) is { } bead)
+            return new("warn", currentArea is null ? "수동 비드 입력 대기" : $"수동 비드 입력 대기 — {currentArea}",
+                "AMR 화면의 팝업에서 비드선을 지정하세요(타워램프 녹색 점멸). 입력하면 검사가 이어집니다. " +
+                (bead.IndexOf(':') is > 0 and var bc ? bead[(bc + 1)..].Trim() : ""));
 
         bool manual = robot?.OperatingMode == "MANUAL";
         switch (runState)

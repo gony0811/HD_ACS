@@ -216,6 +216,10 @@ public sealed class RobotStateService
         if (clearedDevices.Count > 0)
             await ClearDeviceAlarmsAsync(robot.RobotId, clearedDevices, ct);
 
+        // 수동 비드 입력 팝업이 닫힘(입력 완료·시간 초과·중단) — 알람 해제 기록.
+        if (disappeared.Any(RobotErrorTracker.IsOperatorNotice))
+            await ClearManualBeadAlarmAsync(robot.RobotId, ct);
+
         if (state.Errors.Count == 0) return;
 
         // orderRejectedDeviceFault: 알람 직전 발행 Order가 경합으로 거부된 경우 — 실패 아님, 정차를 PENDING 복귀(멱등).
@@ -285,6 +289,12 @@ public sealed class RobotStateService
                     AddErrorAlarm("ORDER_REJECTED_DEVICE_FAULT", robot.RobotId,
                         "AMR이 장치 HEAVY 알람으로 Order 거부 — 현장 복구·RESET 후 배차 재개(같은 Order 재전송 안 함)", err);
                     break;
+                case var t when RobotErrorTracker.IsOperatorNotice(t):
+                    // 수동 비드 입력 팝업 — 실패 아님(작업자 입력 대기). 알람·로그만 남기고 배차·실패 집계는 건드리지 않는다.
+                    // 진행 액션은 RUNNING 그대로라 정차 종결 판정에 걸리지 않는다. 팝업이 닫히면 errors에서 사라진다.
+                    AddErrorAlarm("MANUAL_BEAD_INPUT_REQUIRED", robot.RobotId,
+                        "수동 비드 입력 대기 — AMR 화면의 팝업에서 비드선을 지정하세요(타워램프 녹색 점멸)", err);
+                    break;
                 case var t when DeviceFaults.IsLinkLost(t):
                     // 장치통신 HEAVY알람 §5.2: AMR이 이미 임무 중단(남은 액션 FAILED → 액션 종결 경로가 실패 집계).
                     // ACS는 알람만 — 배차 보류는 InspectionDispatcher 게이트가 tracker로 판단(errors에서 사라지면 재개).
@@ -336,6 +346,23 @@ public sealed class RobotStateService
 
         if (!_errorTracker.HasDeviceFault(robotId))
             await _dispatcher.ResumeAfterDeviceFaultAsync(robotId, ct);
+    }
+
+    /// <summary>수동 비드 입력 알람 해제 기록 — 팝업이 닫혀 errors에서 사라졌을 때 활성 알람에 cleared_at.</summary>
+    private async Task ClearManualBeadAlarmAsync(string robotId, CancellationToken ct)
+    {
+        var active = await _db.Alarms
+            .Where(a => a.RobotId == robotId && a.AlarmCode == "MANUAL_BEAD_INPUT_REQUIRED" && a.ClearedAt == null)
+            .ToListAsync(ct);
+        if (active.Count == 0) return;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var a in active)
+        {
+            a.ClearedAt = now;
+            a.ClearedBy = "AMR";
+        }
+        await _db.SaveChangesAsync(ct);
+        _log.LogInformation("수동 비드 입력 종료 — robot={Robot} (팝업 닫힘, 알람 {N}건 해제)", robotId, active.Count);
     }
 
     private static string? DeviceOfDetail(string? detail)

@@ -42,11 +42,21 @@ public sealed class RobotErrorTracker
         lock (active) return active.Where(DeviceFaults.IsLinkLost).OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용.</summary>
+    /// <summary>
+    /// 작업자 입력 요청 errorType — 수동 비드 입력 팝업이 떠 있는 동안 AMR이 WARNING으로 싣는다 [VDA §6.4].
+    /// 고장이 아니라 "사람을 기다리는 중"이므로 오류 상태 판정(<see cref="HasActiveErrors"/>)에서 뺀다.
+    /// </summary>
+    public const string ManualBeadInputType = "manualBeadInputRequired";
+
+    /// <summary>오류가 아닌 알림성 errorType인가(작업자 입력 요청).</summary>
+    public static bool IsOperatorNotice(string errorType) =>
+        string.Equals(errorType, ManualBeadInputType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용. 작업자 입력 요청은 세지 않는다.</summary>
     public bool HasActiveErrors(string robotId)
     {
         if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
-        lock (active) return active.Count > 0;
+        lock (active) return active.Any(t => !IsOperatorNotice(t));
     }
 
     /// <summary>로봇이 마지막 state에서 해당 errorType을 보고 중인가 (예: communicationLostPause — run 중단 시 cancelOrder 판정).</summary>

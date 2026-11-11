@@ -38,6 +38,8 @@ public static class AlarmSpecSeed
             "AMR이 재개 요청을 거부(비상정지·배터리·측위/mapId·운전 모드 중 불충족) — 사유 해소 후 다시 재개 [HD_AMR 통신단절 Fail-Safe §4.2]"),
         ("DEVICE_LINK_LOST", "CRITICAL", "장치 통신 두절(HEAVY) — 현장 RESET 필요",
             "장치 6종(비전·Depth·레이저·I/O·코봇·AMR) 중 통신 두절 — AMR이 HEAVY 래치·임무 중단. errors[]에서 사라질 때(현장 RESET)까지 배차 보류, 해제 시 자동 재개 [HD_AMR 장치통신 HEAVY알람 §5]"),
+        ("MANUAL_BEAD_INPUT_REQUIRED", "WARNING", "수동 비드 입력 대기",
+            "AMR이 비드 자동 검출 대신 작업자 입력을 기다림(팝업 표시 중, 타워램프 녹색 점멸) — 실패 아님. AMR 화면에서 비드선을 지정하면 검사가 이어지고 알람이 해제된다 [VDA §6.4 manualBeadInputRequired]"),
         ("ORDER_REJECTED_DEVICE_FAULT", "WARNING", "장치 알람 — Order 거부",
             "AMR이 장치 HEAVY 알람 중 Order 거부(WARNING, 기존 orderId 유지) — 실행 없음, ACS는 정차를 PENDING 복귀 후 RESET 뒤 재배차 [HD_AMR 장치통신 HEAVY알람 §4.2]"),
     };
