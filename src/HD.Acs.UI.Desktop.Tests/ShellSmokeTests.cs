@@ -107,11 +107,11 @@ public class ShellSmokeTests
         var (host, window, shell) = CreateShell();
         using (host)
         {
-            // 운영 ▸ 작업 현황 탭(2번째) → WorkItemGrid(5열, RowDetails)
+            // 운영 ▸ 작업 현황 탭(2번째) → WorkItemGrid(6열 — 용접선 집계 포함, RowDetails)
             Find<TabControl>(window, "LeftTabs").SelectedIndex = 1;
             Dispatcher.UIThread.RunJobs();
             var work = Find<DataGrid>(window, "WorkItemGrid");
-            Assert.Equal(5, work.Columns.Count);
+            Assert.Equal(6, work.Columns.Count);
             Assert.Equal(DataGridRowDetailsVisibilityMode.VisibleWhenSelected, work.RowDetailsVisibilityMode);
             Assert.NotNull(work.RowDetailsTemplate);
             // 알람·이벤트 패널 → 현재 상태 카드 + 이벤트 로그

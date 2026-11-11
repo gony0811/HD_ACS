@@ -357,9 +357,9 @@ public sealed partial class MissionViewModel : ObservableObject
                 {
                     var task = FindTask(a.WorkItemId, a.TaskId);
                     if (task is null) continue;
-                    task.Status = a.Status;
-                    task.Detail = ExtractResultDescription(a.Result);
+                    task.Apply(a.Status, ExtractResultDescription(a.Result));
                 }
+                foreach (var w in WorkItems) w.RefreshOutcome();
             }
         }
         catch { /* 작업 큐 조회 실패는 화면 흐름을 막지 않음 */ }
@@ -424,6 +424,7 @@ public sealed partial class MissionViewModel : ObservableObject
         if (p.Status == "DISPATCHED")
             foreach (var t in row.Tasks.Where(t => t.Status != "FINISHED"))
                 t.Status = "WAITING";
+        row.RefreshOutcome();
         RebuildWorkSummary();
         RebuildFloorProgress();   // 층 레일 실제 비율 갱신
         WorkItemsChanged?.Invoke(this, EventArgs.Empty);
@@ -435,8 +436,9 @@ public sealed partial class MissionViewModel : ObservableObject
         if (CurrentRun is null || p.RunId != CurrentRun.RunId) return;
         var task = FindTask(p.WorkItemId, p.TaskId);
         if (task is null) return;
-        task.Status = p.Status;
-        task.Detail = p.ResultDescription;
+        task.Apply(p.Status, p.ResultDescription);
+        WorkItems.FirstOrDefault(w => w.WorkItemId == p.WorkItemId)?.RefreshOutcome();
+        RebuildWorkSummary();
         WorkItemsChanged?.Invoke(this, EventArgs.Empty);   // TankView 용접선 색 갱신
     }
 
@@ -461,12 +463,15 @@ public sealed partial class MissionViewModel : ObservableObject
     private void RebuildWorkSummary()
     {
         if (WorkItems.Count == 0) { WorkSummary = "실행 중 작업 없음"; return; }
-        int done = WorkItems.Count(w => w.Status == "DONE");
-        int skipped = WorkItems.Count(w => w.Status == "SKIPPED");
-        int failed = WorkItems.Count(w => w.Status == "FAILED");
+        // 영역 성공 = 소속 용접선 전부 성공 [WorkOutcome.Area]
+        int ok = WorkItems.Count(w => w.DisplayStatus == "SUCCESS");
+        int failed = WorkItems.Count(w => w.DisplayStatus == "FAILED");
+        var tasks = WorkItems.SelectMany(w => w.Tasks).ToList();
+        int tOk = tasks.Count(t => t.Status == "FINISHED"), tBad = tasks.Count(t => t.Status == "FAILED");
         var fail = failed > 0 ? $" · 실패 {failed}" : "";
-        var skip = skipped > 0 ? $" · 스킵 {skipped}" : "";
-        WorkSummary = $"완료 {done} / 전체 {WorkItems.Count}{fail}{skip}";
+        var tFail = tBad > 0 ? $" · 실패 {tBad}" : "";
+        var line = tasks.Count > 0 ? $"  |  용접선 성공 {tOk}{tFail} / {tasks.Count}" : "";
+        WorkSummary = $"영역 성공 {ok}{fail} / {WorkItems.Count}{line}";
     }
 
     /// <summary>TASK 진행률 스냅샷을 요약 문자열·진행바 값으로 반영.</summary>
@@ -549,6 +554,7 @@ public sealed partial class WorkItemRow : ObservableObject
         WorkItemId = w.WorkItemId; AreaId = w.AreaId; AreaName = w.AreaName;
         Level = w.Level; MapId = w.MapId; Seq = w.Seq;
         _status = w.Status; _attempts = w.Attempts;
+        RefreshOutcome();
     }
 
     public Guid WorkItemId { get; }
@@ -561,6 +567,64 @@ public sealed partial class WorkItemRow : ObservableObject
     [ObservableProperty] private int _attempts;
 
     public ObservableCollection<TaskRow> Tasks { get; } = new();
+
+    /// <summary>화면 표시용 영역 결과 — <see cref="WorkOutcome.Area"/>(SUCCESS = 소속 용접선 전부 성공).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusLabel))]
+    private string _displayStatus = "PENDING";
+
+    /// <summary>용접선 집계 문구 — 예: "성공 3 · 실패 1 / 8".</summary>
+    [ObservableProperty] private string _taskSummary = "";
+
+    public string StatusLabel => WorkOutcome.Label(DisplayStatus);
+
+    partial void OnStatusChanged(string value) => RefreshOutcome();
+
+    /// <summary>용접선 상태가 바뀐 뒤 호출 — 영역 결과·집계를 다시 계산한다.</summary>
+    public void RefreshOutcome()
+    {
+        DisplayStatus = WorkOutcome.Area(Status, Tasks.Select(t => t.Status));
+        int ok = Tasks.Count(t => t.Status == "FINISHED"), bad = Tasks.Count(t => t.Status == "FAILED");
+        TaskSummary = Tasks.Count == 0 ? "" : bad > 0 ? $"성공 {ok} · 실패 {bad} / {Tasks.Count}" : $"성공 {ok} / {Tasks.Count}";
+    }
+}
+
+/// <summary>
+/// 운영 화면 진행 표시 규칙(순수 함수) — 작업 현황 표·전개도·3D가 같은 판정을 쓴다.
+/// 영역 결과: SUCCESS(소속 용접선 전부 성공) / FAILED / RUNNING / PENDING.
+/// </summary>
+public static class WorkOutcome
+{
+    /// <summary>실행 대상이 아닌 영역(run 진행 표시 중 그 run에 없는 영역).</summary>
+    public const string Excluded = "EXCLUDED";
+
+    /// <summary>work_item 상태 + 소속 용접선 상태 → 영역 결과.
+    /// 용접선이 하나라도 있으면 "전부 FINISHED"일 때만 SUCCESS. 용접선 정보가 없으면 work_item 상태를 따른다.</summary>
+    public static string Area(string? workItemStatus, IEnumerable<string> taskStatuses)
+    {
+        var tasks = taskStatuses as IReadOnlyCollection<string> ?? taskStatuses.ToList();
+        if (tasks.Count > 0 && tasks.All(s => s == "FINISHED")) return "SUCCESS";
+        return workItemStatus switch
+        {
+            "DISPATCHED" => "RUNNING",
+            "FAILED" or "SKIPPED" => "FAILED",
+            // DONE인데 성공하지 않은 용접선이 남아 있으면 성공으로 치지 않는다
+            "DONE" => tasks.Count == 0 ? "SUCCESS" : tasks.Any(s => s == "FAILED") ? "FAILED" : "RUNNING",
+            _ => "PENDING",
+        };
+    }
+
+    /// <summary>상태 → 화면 표기(영역·용접선 공용).</summary>
+    public static string Label(string? status) => status switch
+    {
+        "SUCCESS" or "DONE" or "FINISHED" => "성공",
+        "FAILED" => "실패",
+        "SKIPPED" => "건너뜀",
+        "RUNNING" or "DISPATCHED" => "검사 중",
+        "PENDING" or "WAITING" or "PLANNED" => "대기",
+        Excluded => "대상 아님",
+        _ => status ?? "",
+    };
 }
 
 /// <summary>시나리오 검사 대상 영역 행 [부분 검사 계획] — 풀/대상 소속이 곧 선택 상태.</summary>
@@ -574,6 +638,19 @@ public sealed partial class TaskRow : ObservableObject
     public Guid TaskId { get; }
     public int Seq { get; }
     public string Name { get; }
-    [ObservableProperty] private string _status = "PLANNED";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusLabel))]
+    private string _status = "PLANNED";
     [ObservableProperty] private string? _detail;   // 예: OK;anchor=FULL;jobRef=…
+
+    public string StatusLabel => WorkOutcome.Label(Status);
+
+    /// <summary>액션 상태 반영. 한 번 성공한 용접선은 성공으로 남는다 — 같은 정차를 다시 실행해 그 용접선이
+    /// 다시 돌거나 실패해도 최종 결과는 성공이다(서버 TASK 최종 결과 규칙과 같음, SAIGE §6.3).</summary>
+    public void Apply(string status, string? detail)
+    {
+        if (Status == "FINISHED" && status != "FINISHED") return;
+        Status = status;
+        Detail = detail;
+    }
 }

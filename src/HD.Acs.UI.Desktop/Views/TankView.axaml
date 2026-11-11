@@ -39,6 +39,27 @@
             </WrapPanel>
         </Border>
 
+        <!-- 진행 색 범례 — run 진행 표시 중에만. 색 정본 = TankViewModel.StatusColors -->
+        <Border DockPanel.Dock="Bottom" Padding="8,4" IsVisible="{Binding HasRunStatuses}" Background="{DynamicResource AppHeaderBrush}">
+            <StackPanel x:Name="StatusLegend" Orientation="Horizontal">
+                <StackPanel.Styles>
+                    <Style Selector="TextBlock"><Setter Property="FontSize" Value="11" /><Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Margin" Value="4,0,12,0" /></Style>
+                    <Style Selector="Rectangle"><Setter Property="Width" Value="18" /><Setter Property="Height" Value="4" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
+                    <Style Selector="Border"><Setter Property="Width" Value="14" /><Setter Property="Height" Value="12" /><Setter Property="BorderThickness" Value="1.5" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
+                </StackPanel.Styles>
+                <TextBlock Text="용접선" FontWeight="Bold" />
+                <Rectangle Fill="#808A94" /><TextBlock Text="대기" />
+                <Rectangle Fill="#2E86DE" /><TextBlock Text="검사 중" />
+                <Rectangle Fill="#2ECC71" /><TextBlock Text="성공" />
+                <Rectangle Fill="#E74C3C" /><TextBlock Text="실패" />
+                <TextBlock Text="영역" FontWeight="Bold" Margin="12,0,12,0" />
+                <Border Background="#802ECC71" BorderBrush="#2ECC71" /><TextBlock Text="성공 (용접선 전부 성공)" />
+                <Border Background="#38E74C3C" BorderBrush="#E74C3C" /><TextBlock Text="실패" />
+                <Border Background="#382E86DE" BorderBrush="#2E86DE" /><TextBlock Text="검사 중" />
+                <Border Background="#26808A94" BorderBrush="#808A94" /><TextBlock Text="대기" />
+            </StackPanel>
+        </Border>
+
         <TabControl x:Name="TankTabs">
             <TabItem Header="3D 뷰">
                 <!-- 소프트웨어 투영 렌더러 — 좌드래그 오빗 · 우/중드래그 팬 · 휠 줌 · 수동 이동 모드 위치→방향 드래그=goto -->

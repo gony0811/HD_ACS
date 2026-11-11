@@ -106,7 +106,7 @@ public sealed partial class ShellViewModel : ObservableObject
         // 실행 큐(work_item)·용접라인(액션) 상태 변화 → TankView 영역/용접선 상태색 갱신 (운영 진행 지도)
         Mission.WorkItemsChanged += (_, _) =>
             Tank.ApplyWorkItemStatuses(
-                Mission.WorkItems.ToDictionary(w => w.AreaId, w => w.Status),
+                Mission.WorkItems.ToDictionary(w => w.AreaId, w => w.DisplayStatus),   // 영역 성공 = 소속 용접선 전부 성공
                 Mission.WorkItems.SelectMany(w => w.Tasks).ToDictionary(t => t.TaskId, t => t.Status));
 
         _monitoring.StatusChanged += (_, status) => ConnectionText = ToText(status);

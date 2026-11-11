@@ -47,13 +47,19 @@ public sealed partial class TankViewModel : ObservableObject
         _workStatusByTask.Clear();
         if (statusByTask is not null)
             foreach (var (taskId, status) in statusByTask) _workStatusByTask[taskId] = status;
+        OnPropertyChanged(nameof(HasRunStatuses));
         BuildFacePlots();
         SceneInvalidated?.Invoke(this, EventArgs.Empty);   // 색만 바뀜 — 카메라는 유지(ViewChanged는 맞춤을 다시 함)
     }
 
-    /// <summary>영역의 현재 work_item 상태 (없으면 null = 계획 보기).</summary>
+    /// <summary>영역의 현재 결과 (run 표시 중이 아니면 null = 계획 보기).
+    /// run 표시 중인데 그 run에 없는 영역은 EXCLUDED(흐리게) — 계획 녹색이 "성공"으로 읽히지 않게 한다.</summary>
     public string? WorkItemStatusOf(Guid areaId) =>
-        _workStatusByArea.TryGetValue(areaId, out var s) ? s : null;
+        _workStatusByArea.TryGetValue(areaId, out var s) ? s
+        : _workStatusByArea.Count > 0 ? WorkOutcome.Excluded : null;
+
+    /// <summary>run 진행 표시 중인지(범례 표시용).</summary>
+    public bool HasRunStatuses => _workStatusByArea.Count > 0;
 
     /// <summary>용접라인의 현재 액션 상태 (없으면 null = 계획 보기, 기본 주황).</summary>
     public string? TaskStatusOf(Guid taskId) =>
@@ -61,9 +67,14 @@ public sealed partial class TankViewModel : ObservableObject
 
     /// <summary>상태 → (채움, 외곽선) 색 — 전개도(브러시 컨버터)·3D(material)·상태 배지가 공유하는 단일 매핑.
     /// 영역(work_item): null=계획(녹) / PENDING=회 / DISPATCHED=파랑 / DONE=녹(진) / SKIPPED·FAILED=빨강.
-    /// 용접라인(액션): PLANNED·WAITING=회 / RUNNING=파랑 / FINISHED=녹(진) / FAILED=빨강.</summary>
+    /// 용접라인(액션): PLANNED·WAITING=회 / RUNNING=파랑 / FINISHED=녹(진) / FAILED=빨강.
+    /// 영역 결과(WorkOutcome): SUCCESS=진한 녹 채움(소속 용접선 전부 성공) / EXCLUDED=흐린 회(실행 대상 아님).</summary>
     public static (Rgba Fill, Rgba Line) StatusColors(string? status) => status switch
     {
+        "SUCCESS" =>
+            (Rgba.FromArgb(0x80, 0x2E, 0xCC, 0x71), Rgba.FromRgb(0x2E, 0xCC, 0x71)),
+        WorkOutcome.Excluded =>
+            (Rgba.FromArgb(0x0D, 0x80, 0x8A, 0x94), Rgba.FromArgb(0x66, 0x80, 0x8A, 0x94)),
         "PENDING" or "PLANNED" or "WAITING" =>
             (Rgba.FromArgb(0x26, 0x80, 0x8A, 0x94), Rgba.FromRgb(0x80, 0x8A, 0x94)),
         "DISPATCHED" or "RUNNING" =>

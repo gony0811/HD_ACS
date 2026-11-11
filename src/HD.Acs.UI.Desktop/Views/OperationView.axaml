@@ -97,7 +97,7 @@
                                                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                         <Border Grid.Column="2" CornerRadius="3" Padding="6,1" Margin="4,0"
                                                                 Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
-                                                            <TextBlock Text="{Binding Status}" FontSize="9" FontWeight="Bold"
+                                                            <TextBlock Text="{Binding StatusLabel}" FontSize="9" FontWeight="Bold"
                                                                        Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
                                                         </Border>
                                                         <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="9" MaxWidth="120"
@@ -117,13 +117,15 @@
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Border CornerRadius="3" Padding="6,1" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                        Background="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
-                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold"
-                                                               Foreground="{Binding Status, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
+                                                        ToolTip.Tip="성공 = 이 영역의 용접선이 모두 성공"
+                                                        Background="{Binding DisplayStatus, Converter={StaticResource WorkStatusBrush}, ConverterParameter=fill}">
+                                                    <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="Bold"
+                                                               Foreground="{Binding DisplayStatus, Converter={StaticResource WorkStatusBrush}, ConverterParameter=stroke}" />
                                                 </Border>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="용접선" Binding="{Binding TaskSummary}" Width="Auto" />
                                     <DataGridTextColumn Header="재시도" Binding="{Binding Attempts}" Width="52" />
                                 </DataGrid.Columns>
                             </DataGrid>
