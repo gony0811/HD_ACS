@@ -231,6 +231,19 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
+// 배차 직전 정차 선택 미리보기(조회 전용) — 도면 (fromX, fromY)에서 가장 가까운 수행 가능한 정차. 배차(Acs:Dispatch:NearestStation)와 같은 계산.
+// 고를 곳이 없으면 picked=false(배차는 저장된 정차를 쓴다).
+app.MapGet("/api/reach-sim/areas/{areaId:guid}/nearest-station",
+    async (Guid areaId, double fromX, double fromY, double? fromYaw, bool? inPlace, double? robustM, int? maxEvaluations, IConfiguration cfg, ReachSimService sim, CancellationToken ct) =>
+    {
+        var opt = new HD.Acs.Core.Reach.NearestOptions(
+            robustM ?? cfg.GetValue("Acs:Dispatch:NearestStation:RobustM", cfg.GetValue("Acs:Dispatch:AllowedDevXy", 0.08)),
+            maxEvaluations ?? cfg.GetValue("Acs:Dispatch:NearestStation:MaxEvaluations", 600),
+            InPlace: inPlace ?? cfg.GetValue("Acs:Dispatch:NearestStation:InPlace", true));
+        var r = await sim.NearestStopAsync(areaId, fromX, fromY, opt, ct, fromYaw);
+        return Results.Ok(new { picked = r is not null, stop = r });
+    });
+
 // 영역 재분할 제안(조회 전용) — 한 정차로 도면 순회 관절 여유를 확보하지 못하는 영역을 묶음으로 나누고 묶음마다 정차·리프트를 고른다.
 // 정차·리치 시뮬레이션 보고서 백데이터 — 운영 조건(배차 정차점·저장 리프트)에서 TASK 별 검사 가능 여부·불가 사유·개선 제안·관절각과 IK 해 전부.
 // 기본은 JSON(TASK 요약·IK 해 목록 CSV 머리줄+본문), format=tasks|ik 면 그 표를 text/csv(UTF-8 BOM) 파일로 바로 내려준다.

@@ -314,6 +314,30 @@ public sealed partial class ReachSimService
     }
 
     /// <summary>
+    /// 배차 직전 정차 선택(조회 전용) — 로봇 현재 위치(도면 x·y)에서 가장 가까우면서 영역의 모든 용접선을 수행할 수 있는 정차·리프트
+    /// (<see cref="StationOptimizer.Nearest"/>). 고를 곳이 없으면(또는 영역·면·탐색 좌표가 없으면) null — 저장된 정차를 쓴다.
+    /// </summary>
+    public async Task<NearestStop?> NearestStopAsync(Guid areaId, double fromX, double fromY, NearestOptions options, CancellationToken ct,
+        double? fromYaw = null)
+    {
+        _model = _baseModel;   // 운영 가지 규칙
+        var a = await _db.InspectionAreas.AsNoTracking().Include(x => x.Tasks).FirstOrDefaultAsync(x => x.AreaId == areaId, ct);
+        if (a is null || a.Tasks.Count == 0) return null;
+        var ctx = await LoadTankAsync(a.TankId, ct);
+        if (ctx is null || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) return null;
+        var setup = Setup(ctx, a, wall);
+        if (SearchSpace(a, wall, setup) is not { } space) return null;
+        var seams = a.Tasks.OrderBy(t => t.Seq).Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var r = StationOptimizer.Nearest(_model, setup.Planes, space, seams, setup.Normal, Strokes, new[] { fromX, fromY }, options, ct, a.WallCode, fromYaw);
+        if (r is null) return null;
+        var p = r.Pick;
+        return new NearestStop(a.AreaId, a.Name, Math.Round(p.Station.X, 3), Math.Round(p.Station.Y, 3), Math.Round(p.Station.Yaw, 4),
+            p.StrokeMm ?? a.StationLiftMm ?? 0.0, r.Full, Math.Round(r.TravelM, 3), Math.Round(r.BaselineTravelM, 3),
+            r.Evaluated, sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>
     /// 영역 재분할 제안(조회 전용 — DB 를 바꾸지 않는다). 한 정차로 영역 모든 용접선에 도면 순회 관절 여유를 확보하지 못하면
     /// 용접선을 면 (u, v) 축 방향으로 잘라 최대 <paramref name="maxGroups"/> 묶음으로 나누고 묶음마다 정차·리프트를 고른다(<see cref="AreaSplitPlanner"/>).
     /// 묶음마다 새 영역 사각형(TASK 묶음 분리와 같은 자동 사각형)을 함께 싣는다. 영역이 없으면 null.
@@ -449,6 +473,13 @@ public sealed partial class ReachSimService
 /// </summary>
 public sealed record RepairStop(Guid AreaId, string AreaName, double X, double Y, double Yaw, double LiftMm, bool Applied,
     int Welds, int ClearBefore, int ClearAfter, int ReachBefore, int ReachAfter, double MovedM, double SavedLiftMm, string Note);
+
+/// <summary>
+/// 배차 직전에 고른 정차(도면 x·y·방향)·리프트. Full = 전부 간섭 없음·순회 여유 확보(false = 전부 도달만).
+/// TravelM / SavedTravelM = 로봇 현재 위치에서 고른 정차 / 저장된 정차까지 직선 거리.
+/// </summary>
+public sealed record NearestStop(Guid AreaId, string AreaName, double X, double Y, double Yaw, double LiftMm, bool Full,
+    double TravelM, double SavedTravelM, int Evaluated, long ElapsedMs);
 
 /// <summary>
 /// 조사 결과 — 영역 하나. 리프트 고정 조사(<c>lift=area</c>)면 <paramref name="FixedStrokeMm"/> = 영역 고정 높이,

@@ -41,6 +41,21 @@ public sealed record StationCandidate(
 /// <summary>최적화 결과 — 기본 정차와 찾은 정차, 평가한 후보 수.</summary>
 public sealed record StationOptimum(StationCandidate Baseline, StationCandidate Best, int Evaluated);
 
+/// <summary>배차 직전 정차 선택 조건.</summary>
+/// <param name="RobustM">도착 오차 [m] — 고른 정차에서 전후·좌우로 이만큼 어긋나도 전부 닿아야 한다(0 = 검사 안 함).</param>
+/// <param name="MaxEvaluations">조사할 후보 수 상한(계산 시간 상한).</param>
+/// <param name="StepFactor">후보 격자 간격 = 탐색 간격 × 이 값.</param>
+/// <param name="InPlace">제자리 회전 후보(로봇 현재 위치 그대로, 방향만 바꿈)를 볼지.</param>
+/// <param name="InPlaceMaxM">로봇이 영역 중심에서 이보다 멀면 제자리 회전 후보를 보지 않는다 [m].</param>
+public sealed record NearestOptions(double RobustM = 0.2, int MaxEvaluations = 600, int StepFactor = 2,
+    bool InPlace = true, double InPlaceMaxM = 2.5);
+
+/// <summary>
+/// 배차 직전 정차 선택 결과. Full = 전부 간섭 없음·순회 여유 확보(false 면 전부 도달만 만족). Travel = 로봇 현재 위치에서의 직선 거리 [m].
+/// </summary>
+public sealed record NearestStation(StationCandidate Pick, StationCandidate Baseline, bool Full, int Evaluated,
+    double TravelM, double BaselineTravelM);
+
 /// <summary>
 /// 영역 정차점 최적화 — 후보 정차마다 영역의 모든 용접선을 공통 리프트 높이(<see cref="AreaLift"/>)로 조사해
 /// ① 도면 순회 관절 여유를 목표 이상 확보하고 간섭 없이 닿는 용접선 수 ② 간섭 없이 닿는 수 ③ 순회 최소 관절 여유(목표까지)
@@ -136,6 +151,106 @@ public static class StationOptimizer
         var better = winner.Clear > 0 && Ranking.Compare(winner, baseline) > 0;
         if (!better) winner = baseline;
         return new StationOptimum(baseline, winner, cache.Count);
+    }
+
+    /// <summary>
+    /// 배차 직전 정차 선택 — 로봇 현재 위치(<paramref name="fromXY"/>, 도면 x·y)에서 **가장 가까운** 정차 중 AMR 이 실제로 수행할 수 있는 곳을 고른다.
+    /// 후보(저장된 정차 + 탐색 창 격자)를 가까운 순으로 보며 처음 통과하는 곳에서 멈춘다. 통과 조건:
+    /// ① 차체 가능 ② 용접선 전부 도달 ③ 전부 간섭 없음·순회 여유 목표 이상 ④ 도착 오차만큼 전후·좌우로 어긋나도(같은 리프트) 전부 도달.
+    /// ③ 을 만족하는 곳이 없으면, 저장된 정차가 전부 도달이 아닐 때에 한해 ①②④ 만 만족하는 가장 가까운 곳을 쓴다.
+    /// 그것도 없으면 null(저장된 정차 그대로).
+    /// </summary>
+    public static NearestStation? Nearest(
+        ReachRobotModel model, IReadOnlyList<ReachPlane> planes, StationSearchSpace space,
+        IReadOnlyList<IReadOnlyList<double[]>> seams, double[] wallNormal, IReadOnlyList<double> strokesMm,
+        double[] fromXY, NearestOptions? options = null, CancellationToken ct = default, string? wallCode = null,
+        double? fromYaw = null)
+    {
+        if (seams.Count == 0) return null;
+        var o = options ?? new NearestOptions();
+        double Travel(ReachStation s) => Math.Sqrt(Math.Pow(s.X - fromXY[0], 2) + Math.Pow(s.Y - fromXY[1], 2));
+
+        var baseline = Evaluate(model, planes, space, space.BaselineDistM, space.BaselineLateralM, space.BaselineYawDeg,
+            seams, wallNormal, strokesMm, surveyInfeasible: true, wallCode: wallCode);
+        var evaluated = 1;
+
+        // 후보 = 탐색 창 격자(최적화와 같은 창, 간격 × StepFactor). 수평면은 90° 간격 네 방향, 벽면은 정면만. 저장된 방향도 함께 본다.
+        var grid = new List<(double D, double L, double Y)>();
+        if (FirstBodyFeasible(model, planes, space) is { } start)
+        {
+            var dLo = space.MinDistM < 0 ? start.DistM + space.MinDistM : start.DistM;
+            var dHi = space.MinDistM < 0 ? start.DistM + space.MaxDistM : start.DistM + (space.MaxDistM - space.MinDistM);
+            var ds = space.DistStepM * Math.Max(1, o.StepFactor);
+            var ls = space.LateralStepM * Math.Max(1, o.StepFactor);
+            var yaws = (space.MaxYawDeg >= 90 ? new[] { 0.0, 90, -90, 180, space.BaselineYawDeg } : new[] { 0.0, space.BaselineYawDeg })
+                .Select(y => Math.Round(y, 3)).Distinct().ToArray();
+            for (var d = dLo; d <= dHi + 1e-9; d += ds)
+                for (var l = start.LateralM - space.MaxLateralM; l <= start.LateralM + space.MaxLateralM + 1e-9; l += ls)
+                    foreach (var y in yaws)
+                        grid.Add((d, l, y));
+        }
+        // 제자리 회전 후보 — 로봇이 지금 서 있는 자리 그대로, 방향만 바꾼다(주행 0). 영역에서 너무 멀면 보지 않는다.
+        var relX = fromXY[0] - space.CenterXY[0];
+        var relY = fromXY[1] - space.CenterXY[1];
+        if (o.InPlace && Math.Sqrt(relX * relX + relY * relY) <= o.InPlaceMaxM && space.YawStepDeg > 0)
+        {
+            var hereD = relX * space.InwardH[0] + relY * space.InwardH[1];
+            var hereL = -relX * space.InwardH[1] + relY * space.InwardH[0];
+            var span = Math.Min(space.MaxYawDeg, 180);
+            for (var y = -span; y <= span + 1e-9; y += space.YawStepDeg)
+                if (y > -180 + 1e-9 || span < 180) grid.Add((hereD, hereL, Math.Round(y, 3)));   // −180 = +180
+        }
+        // 같은 거리면 덜 도는 쪽(로봇 방향을 알 때) — 모르면 저장된 방향에 가까운 쪽
+        double Turn((double D, double L, double Y) c)
+        {
+            if (fromYaw is not { } fy) return Math.Abs(c.Y - space.BaselineYawDeg);
+            var d = space.FacingYaw + c.Y * Math.PI / 180 - fy;
+            return Math.Abs(Math.Atan2(Math.Sin(d), Math.Cos(d)));
+        }
+        var ordered = grid
+            .Select(c => (C: c, S: space.StationOf(c.D, c.L, c.Y), IsBase: false))
+            .Append((C: (baseline.DistM, baseline.LateralM, baseline.YawDeg), S: baseline.Station, IsBase: true))
+            .OrderBy(x => Math.Round(Travel(x.S), 3)).ThenBy(x => Turn(x.C));
+
+        bool Robust(StationCandidate c)
+        {
+            if (o.RobustM <= 0) return true;
+            var strokes = c.StrokeMm is { } s ? new[] { s } : strokesMm;
+            foreach (var (dd, dl) in new[] { (o.RobustM, 0.0), (-o.RobustM, 0.0), (0.0, o.RobustM), (0.0, -o.RobustM) })
+            {
+                ct.ThrowIfCancellationRequested();
+                var n = Evaluate(model, planes, space, c.DistM + dd, c.LateralM + dl, c.YawDeg, seams, wallNormal, strokes, wallCode: wallCode);
+                if (n.Feasible) evaluated++;
+                if (!n.Feasible || n.Unreachable > 0) return false;
+            }
+            return true;
+        }
+
+        NearestStation Result(StationCandidate c, bool full) =>
+            new(c, baseline, full, evaluated, Travel(c.Station), Travel(baseline.Station));
+
+        StationCandidate? relaxed = null;
+        foreach (var x in ordered)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (evaluated >= o.MaxEvaluations) break;
+            StationCandidate c;
+            if (x.IsBase) c = baseline;
+            else
+            {
+                c = Evaluate(model, planes, space, x.C.Item1, x.C.Item2, x.C.Item3, seams, wallNormal, strokesMm, wallCode: wallCode);
+                if (c.Feasible) evaluated++;
+            }
+            if (!c.Feasible || c.Unreachable > 0) continue;
+            var full = c.Collision == 0 && c.SafeClear == seams.Count;
+            if (!full && relaxed is not null) continue;
+            if (!Robust(c)) continue;
+            if (full) return Result(c, true);
+            relaxed = c;
+        }
+        // 조건을 다 채우는 곳이 없다 — 저장된 정차가 전부 도달이면 그대로 두고, 아니면 전부 닿는 가장 가까운 곳으로.
+        var baselineOk = baseline.Feasible && baseline.Unreachable == 0;
+        return relaxed is not null && !baselineOk ? Result(relaxed, false) : null;
     }
 
     private static readonly (int, int, int)[] Neighbors =

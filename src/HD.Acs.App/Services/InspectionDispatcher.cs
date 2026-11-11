@@ -32,9 +32,17 @@ public sealed class InspectionDispatcher
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
-        IConfiguration config, ILogger<InspectionDispatcher> log, RobotErrorTracker? tracker = null)
+        IConfiguration config, ILogger<InspectionDispatcher> log, RobotErrorTracker? tracker = null,
+        IServiceProvider? services = null)
     {
         _db = db; _vda = vda; _policy = policy; _hub = hub; _log = log;
+        _services = services;
+        _nearestEnabled = config.GetValue("Acs:Dispatch:NearestStation:Enabled", false);
+        _nearestTimeout = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:NearestStation:TimeoutSec", 30.0));
+        _nearestOptions = new HD.Acs.Core.Reach.NearestOptions(
+            config.GetValue("Acs:Dispatch:NearestStation:RobustM", config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08)),
+            config.GetValue("Acs:Dispatch:NearestStation:MaxEvaluations", 600),
+            InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true));
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
@@ -49,6 +57,70 @@ public sealed class InspectionDispatcher
             config.GetValue("Acs:Dispatch:StationAdjust:MaxBackwardMm", 400.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxLateralMm", 200.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxThetaDeg", 5.0));
+    }
+
+    // 배차 직전 정차 선택(Acs:Dispatch:NearestStation) — ReachSimService 가 이 클래스를 참조하므로 순환을 피해 늦게 꺼낸다.
+    private readonly IServiceProvider? _services;
+    private readonly bool _nearestEnabled;
+    private readonly TimeSpan _nearestTimeout;
+    private readonly HD.Acs.Core.Reach.NearestOptions _nearestOptions;
+
+    /// <summary>
+    /// 배차 직전 정차 선택 — 저장된 정차 대신, 로봇 현재 위치(맵 프레임)에서 가장 가까우면서 영역의 모든 용접선을 수행할 수 있는 정차·리프트를
+    /// 시뮬레이션으로 골라 이 정차(work_item)에만 쓴다. 영역에 저장된 정차는 바꾸지 않는다.
+    /// 설정이 꺼져 있거나, 리페어 run(자체 정차 최적화)이거나, 이미 고른 정차(재시도)거나, 고를 곳이 없거나, 계산이 실패·시간 초과면
+    /// 아무것도 바꾸지 않고 null 을 돌려준다(저장된 정차로 배차). 저장은 호출자가 한다.
+    /// </summary>
+    public async Task<NearestStop?> SelectNearestStopAsync(ScenarioRunEntity run, WorkItemEntity wi,
+        double robotMapX, double robotMapY, CancellationToken ct, double? robotMapTheta = null)
+    {
+        if (!_nearestEnabled || RepairFilter(run) is not null) return null;
+        if (_services?.GetService(typeof(ReachSimService)) is not ReachSimService sim) return null;
+        try
+        {
+            var actions = JsonNode.Parse(wi.Actions ?? "[]")!.AsArray();
+            if (actions.Count == 0 || actions.Any(a => a?["liftFixed"]?.GetValue<bool>() == true)) return null;
+
+            var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks)
+                .FirstOrDefaultAsync(a => a.AreaId == wi.AreaId, ct);
+            if (area is null) return null;
+            // 큐에 실린 용접선과 현재 계획이 다르면(run 도중 계획 수정) 실린 그대로 보낸다
+            var queued = actions.Select(a => a?["taskId"]?.GetValue<string>()).OrderBy(s => s).ToList();
+            if (!queued.SequenceEqual(area.Tasks.Select(t => t.TaskId.ToString()).OrderBy(s => s))) return null;
+            var wall = await _db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode, ct);
+            var tWd = await LoadTransformsAsync(area.TankId, new[] { area.Level }, run.RunId, ct);
+            if (wall is null || !tWd.TryGetValue(area.Level, out var lv)) return null;
+
+            var (fx, fy) = lv.T.MapToDrawing(robotMapX, robotMapY);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_nearestTimeout);
+            var pick = await sim.NearestStopAsync(area.AreaId, fx, fy, _nearestOptions, cts.Token,
+                robotMapTheta is double th ? lv.T.MapYawToDrawing(th) : null);
+            if (pick is null)
+            {
+                _log.LogInformation("Run {Run}: {Area} — 가까운 정차를 고르지 못함, 저장된 정차로 배차.", run.RunId, area.Name);
+                return null;
+            }
+
+            var stop = BuildStop(run.RunId, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct), await WeldSchemaAsync(ct),
+                new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm));
+            wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
+            _log.LogInformation(
+                "Run {Run}: {Area} 정차 선택 — 도면 ({X:F2}, {Y:F2}) 리프트 {Lift:F0} mm, 주행 {Travel:F2} m (저장된 정차 {Saved:F2} m){Relaxed} · 후보 {N}곳 {Ms} ms",
+                run.RunId, area.Name, pick.X, pick.Y, pick.LiftMm, pick.TravelM, pick.SavedTravelM,
+                (pick.TravelM < 0.005 ? " · 제자리 회전" : "") + (pick.Full ? "" : " · 여유 미확보"), pick.Evaluated, pick.ElapsedMs);
+            return pick;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning("Run {Run}: wi={Wi} 정차 선택 시간 초과({Sec:F0} s) — 저장된 정차로 배차.", run.RunId, wi.WorkItemId, _nearestTimeout.TotalSeconds);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Run {Run}: wi={Wi} 정차 선택 실패 — 저장된 정차로 배차.", run.RunId, wi.WorkItemId);
+            return null;
+        }
     }
 
     /// <summary>정차 온보드 보정 허용 범위 [VDA §4.4.2 / N23]. null = 꺼짐(필드 미발행). 발행 시점에 실어 설정 변경이 재개에도 반영된다.</summary>
@@ -545,6 +617,10 @@ public sealed class InspectionDispatcher
         if (pick is null) return;
         var wi = pending.First(w => w.WorkItemId == pick.Value.WorkItemId);
         var mission = run.Missions.First(m => m.MapId == floor);
+
+        // 배차 직전 정차 선택(설정 켬) — 로봇 현재 위치에서 가장 가까운 수행 가능한 정차로 바꾼다. 못 고르면 저장된 정차 그대로.
+        if (ctx.ReportedX is double rx && ctx.ReportedY is double ry)
+            await SelectNearestStopAsync(run, wi, rx, ry, ct, ctx.ReportedTheta);
 
         await PublishStopAsync(run, mission, wi, ct);
     }
