@@ -281,4 +281,116 @@ public class ReachSimServiceTests
         var other = (await sim.DetailAsync(SlArea, SlTask, 1, 0, 0, 0, 0, default))!;
         Assert.Null(other.Entry);   // SL 은 출발 자세 없음 — 종전 판정
     }
+
+    /// <summary>CSV 한 줄을 칸으로 나눈다(RFC 4180 — 따옴표 안 쉼표·겹따옴표).</summary>
+    private static List<string> Cells(string line)
+    {
+        var cells = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        var quoted = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (quoted)
+            {
+                if (c == '"' && i + 1 < line.Length && line[i + 1] == '"') { sb.Append('"'); i++; }
+                else if (c == '"') quoted = false;
+                else sb.Append(c);
+            }
+            else if (c == '"') quoted = true;
+            else if (c == ',') { cells.Add(sb.ToString()); sb.Clear(); }
+            else sb.Append(c);
+        }
+        cells.Add(sb.ToString());
+        return cells;
+    }
+
+    private static List<Dictionary<string, string>> Table(string header, string rows)
+    {
+        var cols = Cells(header);
+        return rows.Split("\r\n", StringSplitOptions.RemoveEmptyEntries).Select(l =>
+        {
+            var cells = Cells(l);
+            Assert.Equal(cols.Count, cells.Count);   // 모든 행이 머리줄과 같은 칸 수
+            return cols.Zip(cells).ToDictionary(t => t.First, t => t.Second);
+        }).ToList();
+    }
+
+    [Fact]
+    public async Task 보고서는_TASK_마다_판정_사유_제안_관절각을_내고_IK_해를_모두_싣는다()
+    {
+        var sim = await SeedAsync(traverse: true);
+        var r = (await sim.ReportAsync("CT1", null, null, null, optimize: false, default))!;
+        var tasks = Table(r.TaskHeader, r.TaskRows);
+        var ik = Table(r.IkHeader, r.IkRows);
+
+        Assert.Equal(3, r.Areas);
+        Assert.Equal(4, r.Tasks);
+        Assert.Equal(4, tasks.Count);
+        Assert.Equal(r.Tasks, r.Possible + r.Caution + r.Impossible);
+        Assert.Equal(r.Impossible, tasks.Count(t => t["검사가능"] == "불가"));
+
+        // 운영 조건(저장 리프트 없음 = 0)의 판정은 같은 리프트로 고정한 조사와 같다.
+        var survey = (await sim.SurveyAsync("CT1", null, null, default, strokeMm: 0))!.SelectMany(a => a.Seams).ToDictionary(s => s.TaskId);
+        foreach (var t in tasks)
+        {
+            Assert.Equal(survey[Guid.Parse(t["TASKID"])].Verdict, t["판정코드"]);
+            Assert.Equal("0", t["리프트[mm]"]);
+            Assert.Equal("기본 0", t["리프트출처"]);
+            if (t["검사가능"] == "가능")
+            {
+                Assert.Equal("", t["불가사유상세"]);
+                Assert.Equal("", t["개선제안"]);
+            }
+            else
+            {
+                Assert.NotEqual("", t["불가사유분류"]);
+                Assert.NotEqual("", t["불가사유상세"]);
+                Assert.NotEqual("", t["개선제안"]);
+            }
+        }
+
+        // 경사면 정차 — 검사 불가이고, 사유·제안이 있다.
+        var sl = tasks.Single(t => t["TASKID"] == SlTask.ToString());
+        Assert.Equal("불가", sl["검사가능"]);
+        Assert.Equal("SL", sl["면"]);
+        Assert.Equal("L1", sl["층"]);
+
+        // IK 표 — TASK 마다 시작·중간·끝 × 자세의 해가 있고, 요약의 관절각은 IK 표의 운영 선택 해와 같다.
+        var sm = tasks.Single(t => t["TASKID"] == SmTask.ToString());
+        var chosen = ik.Single(x => x["TASKID"] == SmTask.ToString() && x["용접선점"] == "시작" && x["자세"] == "초점 검사" && x["운영선택"] == "Y");
+        for (var k = 1; k <= 6; k++) Assert.Equal(chosen[$"J{k}[deg]"], sm[$"시작-초점 검사 J{k}[deg]"]);
+        Assert.NotEqual("", chosen["J1[deg]"]);
+        var approach = ik.Where(x => x["TASKID"] == SmTask.ToString() && x["용접선점"] == "시작" && x["자세"] == "② 접근").ToList();
+        Assert.Equal(sm["시작-② 접근 IK해수"], approach.Count.ToString());
+        Assert.True(approach.Count > 1);   // 해 전부(운영 선택 외 가지 포함)
+        Assert.Contains(ik, x => x["용접선점"] == "끝" && x["판정대상"] == "판정");
+    }
+
+    [Fact]
+    public async Task 보고서는_영역으로_거르고_최적화_제안_정차를_싣는다()
+    {
+        var sim = await SeedAsync();
+        var r = (await sim.ReportAsync("CT1", null, null, SlArea, optimize: true, default))!;
+        var t = Assert.Single(Table(r.TaskHeader, r.TaskRows));
+        Assert.Equal(SlArea.ToString(), t["영역ID"]);
+        Assert.NotEqual("가능", t["검사가능"]);
+
+        // 최적화가 경사면 정차를 옮겨 닿게 한다 — 제안 정차 좌표와 "정차를 … 옮기면" 문구.
+        var opt = (await sim.OptimizeAsync("CT1", null, null, SlArea, default))!.Single();
+        if (opt.Best.Clear > 0)
+        {
+            Assert.Equal(opt.Best.X.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), t["제안정차X[m]"]);
+            Assert.Equal("간섭 없음", t["제안정차판정"]);
+            Assert.Contains("옮기면 가능", t["개선제안"]);
+        }
+        Assert.Null(await sim.ReportAsync("NOPE", null, null, null, false, default));
+    }
+
+    [Fact]
+    public void CSV_칸은_쉼표와_따옴표를_감싼다()
+    {
+        Assert.Equal("a,\"b,c\",\"d\"\"e\",", ReachSimService.CsvLine(new[] { "a", "b,c", "d\"e", null }));
+        Assert.Equal(ReachSimService.ReportTaskColumns.Length, ReachSimService.ReportTaskColumns.Distinct().Count());
+    }
 }

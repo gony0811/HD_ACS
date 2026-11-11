@@ -104,7 +104,11 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
     public bool HasYawChoice => YawOptions.Count > 1;
 
-    public ReachSimViewModel(IAcsApiClient api) => _api = api;
+    public ReachSimViewModel(IAcsApiClient api, IProjectDialogService? dialogs = null)
+    {
+        _api = api;
+        _dialogs = dialogs;
+    }
 
     /// <summary>탱크 면을 읽고 현재 층·면을 조사한다.</summary>
     [RelayCommand]
@@ -450,6 +454,110 @@ public sealed partial class ReachSimViewModel : ObservableObject
         Scene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
         SceneChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    // ── 보고서 백데이터(CSV) ─────────────────────────────────────────
+
+    private readonly IProjectDialogService? _dialogs;
+    private CancellationTokenSource? _reportCts;
+    [ObservableProperty] private bool _isReporting;
+    /// <summary>켜면 선택 층·면이 아니라 선창 전체(모든 층·면)를 출력한다.</summary>
+    [ObservableProperty] private bool _reportWholeTank;
+    /// <summary>켜면 검사 가능이 아닌 용접선이 있는 영역마다 정차점 최적화를 돌려 제안 정차를 싣는다(느림).</summary>
+    [ObservableProperty] private bool _reportOptimize;
+    [ObservableProperty] private string _reportSummary = "";
+
+    /// <summary>IK 해 목록 파일 경로 — TASK 요약 파일 이름 뒤에 _IK 를 붙인다.</summary>
+    public static string IkReportPath(string taskCsvPath) => Path.Combine(Path.GetDirectoryName(taskCsvPath) ?? "",
+        Path.GetFileNameWithoutExtension(taskCsvPath) + "_IK" + (Path.GetExtension(taskCsvPath) is { Length: > 0 } ext ? ext : ".csv"));
+
+    /// <summary>
+    /// 정차·리치 시뮬레이션 보고서 백데이터를 CSV 두 개로 저장한다 — TASK 요약(정차·리프트·검사 가능 여부·불가 사유·개선 제안·판정 자세 J1~J6)과
+    /// IK 해 목록(<see cref="IkReportPath"/> — 용접선 점·자세마다 해 전부). 운영 조건(배차 정차점·저장된 영역 리프트)으로 서버가 계산하며 DB 를 바꾸지 않는다.
+    /// 영역마다 요청을 나눠 <see cref="OptimizeConcurrency"/>개씩 보내고, 영역 순서대로 파일에 이어 쓴다. <see cref="CancelReportCommand"/> 로 멈추면 그때까지 쓴 영역만 남는다.
+    /// </summary>
+    [RelayCommand]
+    public async Task ExportReportAsync()
+    {
+        if (IsReporting) return;
+        if (_dialogs is null) { StatusMessage = "이 화면에서는 파일 저장 대화상자를 쓸 수 없습니다."; return; }
+        var whole = ReportWholeTank;
+        var optimize = ReportOptimize;
+        var label = whole ? $"{TankId} 전체" : $"L{SelectedLevel} {SelectedWall}";
+        var path = await _dialogs.PickCsvSavePathAsync("정차·리치 보고서 백데이터 저장",
+            $"리치보고서_{TankId}_{(whole ? "전체" : $"L{SelectedLevel}-{SelectedWall}")}_{DateTime.Now:yyyyMMdd-HHmm}.csv");
+        if (path is null) return;
+        var ikPath = IkReportPath(path);
+
+        using var cts = new CancellationTokenSource();
+        _reportCts = cts;
+        IsReporting = true;
+        ReportSummary = "";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int written = 0, total = 0, tasks = 0, ok = 0, caution = 0, bad = 0;
+        try
+        {
+            var areas = (whole ? await _api.GetAreasAsync(TankId, ct: cts.Token)
+                    : await _api.GetAreasAsync(TankId, SelectedWall, SelectedLevel, cts.Token))
+                .Where(a => a.TaskCount > 0).OrderBy(a => a.Level).ThenBy(a => a.WallCode, StringComparer.Ordinal)
+                .ThenBy(a => a.Name, StringComparer.Ordinal).ToList();
+            total = areas.Count;
+            if (total == 0) { StatusMessage = $"{label} — 용접선이 있는 영역이 없습니다."; return; }
+
+            var bom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);   // Excel 이 한글을 읽도록 BOM
+            await using var taskFile = new StreamWriter(path, false, bom);
+            await using var ikFile = new StreamWriter(ikPath, false, bom);
+            var pending = new ReachReportDto?[total];
+            var headerWritten = false;
+            var finished = 0;
+            using var gate = new SemaphoreSlim(OptimizeConcurrency);
+            StatusMessage = $"{label} 보고서 계산 중… 영역 0/{total}";
+            await Task.WhenAll(areas.Select(async (a, i) =>
+            {
+                await gate.WaitAsync(cts.Token);
+                try
+                {
+                    var r = await _api.GetReachReportAsync(TankId, null, null, a.AreaId, optimize, cts.Token, Branch)
+                            ?? throw new InvalidOperationException("서버가 보고서 조회를 지원하지 않습니다 — 관제 서버를 재빌드·재시작하세요.");
+                    lock (pending)
+                    {
+                        pending[i] = r;
+                        finished++;
+                        // 영역 순서대로 이어 쓴다 — 앞 영역이 끝난 데까지만 쓰고 쓴 조각은 버린다(선창 전체도 메모리에 쌓지 않는다).
+                        while (written < total && pending[written] is { } c)
+                        {
+                            if (!headerWritten)
+                            {
+                                taskFile.Write(c.TaskHeader + "\r\n");
+                                ikFile.Write(c.IkHeader + "\r\n");
+                                headerWritten = true;
+                            }
+                            taskFile.Write(c.TaskRows);
+                            ikFile.Write(c.IkRows);
+                            tasks += c.Tasks; ok += c.Possible; caution += c.Caution; bad += c.Impossible;
+                            pending[written++] = null;
+                        }
+                        StatusMessage = $"{label} 보고서 계산 중… 영역 {finished}/{total} ({sw.Elapsed.TotalSeconds:0}초)";
+                    }
+                }
+                finally { gate.Release(); }
+            }));
+            StatusMessage = $"보고서 저장 완료 — {label} 영역 {total}개 · {sw.Elapsed.TotalSeconds:0}초";
+        }
+        catch (OperationCanceledException) { StatusMessage = $"보고서 출력 중지 — {label} 영역 {written}/{total}개까지 저장"; }
+        catch (Exception ex) { StatusMessage = $"보고서 출력 실패: {ex.Message}" + (written > 0 ? $" (영역 {written}/{total}개까지 저장)" : ""); }
+        finally
+        {
+            if (total > 0)
+                ReportSummary = $"TASK {tasks} — 가능 {ok} · 가능(주의) {caution} · 불가 {bad}" + (written < total ? $" (영역 {written}/{total}개만)" : "") +
+                                $"\nTASK 요약: {path}\nIK 해 목록: {ikPath}";
+            _reportCts = null;
+            IsReporting = false;
+        }
+    }
+
+    /// <summary>진행 중인 보고서 출력을 멈춘다 — 이미 쓴 영역은 파일에 남는다.</summary>
+    [RelayCommand]
+    private void CancelReport() => _reportCts?.Cancel();
 
     // ── 정차점 최적화 ────────────────────────────────────────────────
 

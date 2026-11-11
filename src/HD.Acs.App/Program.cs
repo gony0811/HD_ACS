@@ -232,6 +232,24 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
 // 영역 재분할 제안(조회 전용) — 한 정차로 도면 순회 관절 여유를 확보하지 못하는 영역을 묶음으로 나누고 묶음마다 정차·리프트를 고른다.
+// 정차·리치 시뮬레이션 보고서 백데이터 — 운영 조건(배차 정차점·저장 리프트)에서 TASK 별 검사 가능 여부·불가 사유·개선 제안·관절각과 IK 해 전부.
+// 기본은 JSON(TASK 요약·IK 해 목록 CSV 머리줄+본문), format=tasks|ik 면 그 표를 text/csv(UTF-8 BOM) 파일로 바로 내려준다.
+// optimize=true 면 가능이 아닌 용접선이 있는 영역마다 정차점 최적화를 돌려 제안 정차를 싣는다(느림 — 영역 단위 요청 권장).
+app.MapGet("/api/reach-sim/tanks/{tankId}/report",
+    async (string tankId, int? level, string? wallCode, Guid? areaId, bool? optimize, string? branch, string? format,
+           ReachSimService sim, CancellationToken ct) =>
+    {
+        var r = await sim.ReportAsync(tankId, level, wallCode, areaId, optimize == true, ct, BranchRuleOf(branch));
+        if (r is null) return Results.NotFound(new { error = $"선창 '{tankId}' 형상이 없습니다." });
+        if (string.IsNullOrEmpty(format)) return Results.Ok(r);
+        var ik = string.Equals(format, "ik", StringComparison.OrdinalIgnoreCase);
+        if (!ik && !string.Equals(format, "tasks", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "format 은 tasks 또는 ik 입니다." });
+        var csv = ik ? r.IkHeader + "\r\n" + r.IkRows : r.TaskHeader + "\r\n" + r.TaskRows;
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"reach-report-{tankId}-{(ik ? "ik" : "tasks")}.csv");
+    });
+
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/split-plan",
     async (Guid areaId, int? maxGroups, string? branch, ReachSimService sim, CancellationToken ct) =>
         await sim.SplitPlanAsync(areaId, maxGroups ?? 4, ct, BranchRuleOf(branch)) is { } r

@@ -13,6 +13,9 @@ public interface IProjectDialogService
     /// <summary>저장 위치 선택 대화상자. 취소 시 null.</summary>
     Task<string?> PickSavePathAsync(string? suggestedFileName = null);
 
+    /// <summary>CSV 내보내기 저장 위치 선택 대화상자. 취소·미지원 시 null.</summary>
+    Task<string?> PickCsvSavePathAsync(string title, string suggestedFileName) => Task.FromResult<string?>(null);
+
     /// <summary>열기 파일 선택 대화상자. 취소 시 null.</summary>
     Task<string?> PickOpenPathAsync();
 }

@@ -76,3 +76,10 @@ public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, s
 public sealed record ReachStationCandidateDto(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
     double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
     double? StrokeMm = null, int? SafeClear = null, double? TraverseMarginDeg = null, double? MarginTargetDeg = null);
+
+/// <summary>
+/// GET /api/reach-sim/tanks/{id}/report — 정차·리치 보고서 백데이터. Header = CSV 머리줄(줄바꿈 없음), Rows = CRLF 로 끝나는 CSV 본문
+/// (영역별 응답의 Rows 를 그대로 이어 붙인다). Possible·Caution·Impossible = 검사 가능 / 가능(주의) / 불가 TASK 수.
+/// </summary>
+public sealed record ReachReportDto(string TaskHeader, string TaskRows, string IkHeader, string IkRows,
+    int Areas, int Tasks, int Possible, int Caution, int Impossible);

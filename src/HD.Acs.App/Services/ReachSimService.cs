@@ -14,7 +14,7 @@ namespace HD.Acs.App.Services;
 /// 계산은 <see cref="ReachSimulator"/>(Core)가 하고, 여기서는 DB 의 선창·면·영역·작업을 도면 좌표로 엮는다.
 /// 조회 전용 — 코봇·DB 를 바꾸지 않는다.
 /// </summary>
-public sealed class ReachSimService
+public sealed partial class ReachSimService
 {
     /// <summary>리프트 조사 간격 [mm] — 0~스트로크 최대.</summary>
     public const double StrokeStepMm = 100;

@@ -299,6 +299,22 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<List<ReachStationOptimumDto>>(ct);
     }
 
+    public async Task<ReachReportDto?> GetReachReportAsync(string tankId, int? level, string? wallCode, Guid? areaId, bool optimize,
+        CancellationToken ct = default, string? branch = null)
+    {
+        var q = new List<string>();
+        if (branch is { Length: > 0 }) q.Add($"branch={Uri.EscapeDataString(branch)}");
+        if (level is { } lv) q.Add($"level={lv}");
+        if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
+        if (areaId is { } id) q.Add($"areaId={id}");
+        if (optimize) q.Add("optimize=true");
+        var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/report" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachReportDto>(ct);
+    }
+
     public async Task<ReachSplitPlanDto?> GetSplitPlanAsync(Guid areaId, int maxGroups = 4, CancellationToken ct = default, string? branch = null)
     {
         var url = $"/api/reach-sim/areas/{areaId}/split-plan?maxGroups={maxGroups}" + (branch is { Length: > 0 } ? $"&branch={Uri.EscapeDataString(branch)}" : "");

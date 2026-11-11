@@ -40,6 +40,21 @@ public sealed class AvaloniaProjectDialogService : IProjectDialogService
         return file?.TryGetLocalPath();
     }
 
+    public async Task<string?> PickCsvSavePathAsync(string title, string suggestedFileName)
+    {
+        var owner = AvaloniaDialogService.Owner;
+        if (owner is null) return null;
+        var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = title,
+            SuggestedFileName = suggestedFileName,
+            DefaultExtension = "csv",
+            FileTypeChoices = new[] { new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } } },
+            ShowOverwritePrompt = true,
+        });
+        return file?.TryGetLocalPath();
+    }
+
     public async Task<string?> PickOpenPathAsync()
     {
         var owner = AvaloniaDialogService.Owner;

@@ -114,6 +114,23 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 보고서 백데이터 -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="보고서 백데이터 (CSV)" FontWeight="SemiBold" />
+                        <TextBlock Text="운영 조건(배차 정차점 · 저장된 영역 리프트, 없으면 0)에서 면 · 영역 · TASK 마다 정차 위치, 검사 가능 여부, 불가 사유, 개선 제안, 판정 자세의 J1~J6 을 CSV 로 저장합니다. IK 해 전체 목록은 같은 이름 뒤에 _IK 를 붙인 파일로 함께 저장됩니다. 계산만 하고 DB 는 바꾸지 않습니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <CheckBox Content="선창 전체 (끄면 선택한 층 · 면만)" IsChecked="{Binding ReportWholeTank}" IsEnabled="{Binding !IsReporting}" FontSize="11.5" />
+                        <CheckBox Content="정차 최적화 제안 포함 (느림 — 불가 · 주의 영역마다 정차점 최적화 실행)" IsChecked="{Binding ReportOptimize}" IsEnabled="{Binding !IsReporting}" FontSize="11.5"
+                                  ToolTip.Tip="켜면 '정차를 (x, y)·방향·리프트로 옮기면 가능' 같은 구체 제안과 제안 정차 좌표 열이 채워집니다. 끄면 리프트 변경 제안과 사유별 일반 조치만 싣습니다." />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="ExportReportButton" Content="CSV 보고서 출력" Command="{Binding ExportReportCommand}" IsEnabled="{Binding !IsReporting}" />
+                            <Button Content="중지" Command="{Binding CancelReportCommand}" IsVisible="{Binding IsReporting}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding ReportSummary}" FontSize="11.5" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
                 <!-- 판정 -->
                 <Border BorderBrush="{Binding VerdictLevel, Converter={StaticResource LevelBrush}}" BorderThickness="1.5" CornerRadius="4" Padding="10">
                     <StackPanel Spacing="4">

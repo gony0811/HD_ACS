@@ -69,6 +69,9 @@ public interface IAcsApiClient
     /// <summary>정차점 최적화(계산만) — 층·면·영역 필터. 선창이 없으면 null.</summary>
     Task<IReadOnlyList<ReachStationOptimumDto>?> GetStationOptimaAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct = default, string? branch = null) => Task.FromResult<IReadOnlyList<ReachStationOptimumDto>?>(null);
+    /// <summary>정차·리치 보고서 백데이터(CSV 조각) — 층·면·영역 필터, optimize 면 정차점 최적화 제안 포함. 선창 없음·구서버면 null.</summary>
+    Task<ReachReportDto?> GetReachReportAsync(string tankId, int? level, string? wallCode, Guid? areaId, bool optimize,
+        CancellationToken ct = default, string? branch = null) => Task.FromResult<ReachReportDto?>(null);
     /// <summary>영역 재분할 제안(계산만, 수십 초) — 영역이 없으면 null.</summary>
     Task<ReachSplitPlanDto?> GetSplitPlanAsync(Guid areaId, int maxGroups = 4, CancellationToken ct = default, string? branch = null) =>
         Task.FromResult<ReachSplitPlanDto?>(null);
