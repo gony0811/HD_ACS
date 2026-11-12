@@ -138,7 +138,7 @@ public sealed class SaigeHealthReporter : BackgroundService
             Status: status.ToString(),
             Position: new SaigeRobotPosition(level, x, y, yaw),
             Battery: (int)Math.Round(Math.Clamp(ctx.BatteryPct ?? 0, 0, 100)),
-            Rssi: -1,   // 로봇 보고 항목에 통신 감도 없음 — 미측정 고정값 [§9.3]
+            Rssi: 100,  // 로봇 보고 항목에 통신 감도 없음 — 측정값이 아닌 고정값(현장 요청 2026-11-13, 종전 −1) [§9.3]
             Timestamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     }
 

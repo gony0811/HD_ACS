@@ -182,7 +182,7 @@ public class SaigeInterfaceTests
         var pos = j.GetProperty("position");
         Assert.Equal((2, 12480, 5120, 90.0), (pos.GetProperty("level").GetInt32(), pos.GetProperty("x").GetInt32(),
             pos.GetProperty("y").GetInt32(), pos.GetProperty("yaw").GetDouble()));
-        Assert.Equal((82, -1), (j.GetProperty("battery").GetInt32(), j.GetProperty("rssi").GetInt32()));
+        Assert.Equal((82, 100), (j.GetProperty("battery").GetInt32(), j.GetProperty("rssi").GetInt32()));
         Assert.True(j.GetProperty("timestamp").GetInt64() > 1_700_000_000_000);   // unix epoch ms
     }
 
