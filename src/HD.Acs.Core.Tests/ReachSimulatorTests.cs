@@ -432,6 +432,56 @@ public class ReachSimulatorTests
         }
     }
     [Fact]
+    public void 실기_20261112_PU_진입_거부를_J6_포함_판정으로_재현한다()
+    {
+        // 2026-11-12 21:30~21:42 현장 PU L4 — AMR 은 정차에 정확히 섰는데(오차 1~4 cm) "안전한 진입 경로 없음"으로 7건을 거부했다.
+        //  · R02C24 #1(정차 10.76, 5.353, 90°, 리프트 100): "면을 따라 768mm … 후퇴 평면: 진입 관절 이동 221° > 140° / 224° / 226° / 229°"
+        //  · R03C24 #1(정차 10.96, 4.982, 85°, 리프트 0):   "면을 따라 828mm … J6 안전 범위 밖 — J6 −179.7° → −155.2° / 자기 간섭"
+        // ACS 는 진입점의 J6 을 운영 값(180°)으로 덮어써 이 두 사유를 보지 못했다. AMR 처럼 ② 접근 자세를 유지한 채 6축을 풀면 같은 사유가 나온다.
+        var home2 = new[] { 0.158, 59.456, -140.907, 80.848, 90.048, -179.696 };
+        var m = ReachRobotModel.Default with
+        {
+            MountYawDeg = 180, ToolZMm = 365, StageStandoffsMm = new[] { 400.0, 300, 10 }, CheckTraversal = false,
+            StartJointsByWall = new Dictionary<string, double[]> { ["PU"] = home2 },
+        };
+        var pu = new WallPose(new[] { -15.48, 8.64, 10.304 }, new[] { 1.0, 0, 0 }, new[] { 0, -Math.Sqrt(0.5), Math.Sqrt(0.5) });
+        var n = new[] { 0, -Math.Sqrt(0.5), -Math.Sqrt(0.5) };
+        const double floor = 10.1175;
+        var planes = ReachSimulator.PlanesForLevel(new[]
+        {
+            new ReachPlane("PU", pu.Origin, n),
+            new ReachPlane("T", new[] { -15.48, -5.984, 12.96 }, new[] { 0.0, 0, -1 }),
+        }, floor, 4);
+
+        var c24 = ReachSimulator.Evaluate(m, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
+            pu.LocalToDrawing(25.74, 2.0054), n, 100, wallCode: "PU");
+        Assert.NotNull(c24.Entry);
+        Assert.False(c24.Entry!.Ok, c24.Entry.Summary);
+        Assert.False(c24.Reachable);
+        Assert.InRange(c24.Entry.InPlaneMm, 730, 790);                       // AMR 768 mm
+        var travel = System.Text.RegularExpressions.Regex.Match(c24.Entry.Rejects[0], @"진입 관절 이동 (\d+)°");
+        Assert.True(travel.Success, c24.Entry.Rejects[0]);
+        Assert.InRange(int.Parse(travel.Groups[1].Value), 214, 228);         // AMR 221°
+
+        var c03 = ReachSimulator.Evaluate(m, planes, new ReachStation(10.96, 4.982, 1.4835, floor),
+            pu.LocalToDrawing(25.74, 2.5146), n, 0, wallCode: "PU");
+        Assert.False(c03.Entry!.Ok, c03.Entry.Summary);
+        Assert.Contains("J6 안전 범위", c03.Entry.Rejects[0]);                // AMR 첫 후보와 같은 사유
+        Assert.Contains(c03.Entry.Rejects, x => x.Contains("자기 간섭"));
+
+        // 종전 판정(J6 미포함)은 두 건 모두 진입 경로가 있다고 봤다 — 그래서 이 정차가 골라졌다.
+        var old = m with { CheckEntryJ6 = false };
+        Assert.True(ReachSimulator.Evaluate(old, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
+            pu.LocalToDrawing(25.74, 2.0054), n, 100, wallCode: "PU").Entry!.Ok);
+
+        // 여유 기준을 0 으로 두면 마지막 후보(자기 간섭 여유 16 mm)가 통과한다 — 실기는 이 경계에서 거부했다.
+        var noMargin = ReachSimulator.Evaluate(m with { EntrySelfMarginMm = 0 }, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
+            pu.LocalToDrawing(25.74, 2.0054), n, 100, wallCode: "PU");
+        Assert.True(noMargin.Entry!.Ok);
+        Assert.Equal(5, noMargin.Entry.Rejects.Count);
+    }
+
+    [Fact]
     public void 조사의_진입_점검을_상위_후보로_줄여도_전수_판정과_같다()
     {
         // 실기 설정(장착 180°·홈 위치_2 출발·② 200)으로 SM L2 여러 높이·위치 용접선을 조사 — 시작점만 진입 점검·좋은 후보부터 보는

@@ -70,6 +70,8 @@ public sealed partial class ReachSimService
             TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
             MinFlangeReachMm = config.GetValue("Acs:Reach:MinFlangeReachMm", d.MinFlangeReachMm),
             MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
+            CheckEntryJ6 = config.GetValue("Acs:Reach:CheckEntryJ6", d.CheckEntryJ6),
+            EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
         };
     }
 

@@ -188,8 +188,23 @@ public sealed record ReachRobotModel
     /// </summary>
     public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
     public const double DefaultTraverseMarginTargetDeg = 10;
-    public double SafeJ6MinDeg { get; init; } = -300;
+    public double SafeJ6MinDeg { get; init; } = -310;
     public double SafeJ6MaxDeg { get; init; } = -160;
+
+    /// <summary>
+    /// 진입 경로 판정에 J6 를 넣는다(기본 켬) — HD_AMR 은 진입점·경로의 자세를 ② 접근점 자세(J6 = 운영 값)로 고정해 풀고,
+    /// 그때 달라지는 J6 를 관절 이동량(6축 모두)과 J6 안전 범위로 거른다. 끄면 종전처럼 J1~J5 만 본다.
+    /// <see cref="OperationJ6Deg"/> 가 없으면 J6 를 모르므로 꺼진 것과 같다.
+    /// </summary>
+    public bool CheckEntryJ6 { get; init; } = true;
+
+    /// <summary>
+    /// 진입 경로에서 요구하는 자기 간섭 여유 [mm] — 팔·툴이 차체·리프트 기둥·신호탑에서 이보다 가까우면 그 진입 후보를 쓰지 않는다.
+    /// HD_AMR 은 여유 0 으로 판정하지만 모델·정차 오차(도착 허용 0.2 m · 5.7°)로 경계가 흔들린다 — 실기 2026-11-12 PU 에서
+    /// ACS 여유 5~16 mm 였던 진입 4건 중 3건이 실기에서 "자기 간섭"으로 거부됐다. 자세 고정 진입 판정(<see cref="CheckEntryJ6"/>)에만 쓴다.
+    /// 설정 <c>Acs:Reach:EntrySelfMarginMm</c>.
+    /// </summary>
+    public double EntrySelfMarginMm { get; init; } = 30;
 
     public static ReachRobotModel Default { get; } = new();
 }
@@ -406,7 +421,7 @@ public static partial class ReachSimulator
         // 진입 경로는 세 자세가 닿고 가지 전환이 없을 때만 본다 — 앞에서 막히면 운영도 진입하지 않는다(IK 가 가장 많이 드는 단계).
         if (start is not null && checkEntry && branchChange is null && stages.Count > 0
             && stages.All(s => s.Chosen is { PostureOk: true }))
-            entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal);
+            entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal, stages[0].Chosen?.JointsDeg);
         return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null,
             FlangeShort: FlangeShortReason(model, station, strokeMm, seamPoint, wallNormal, offsetForwardMm, offsetLeftMm));
     }
@@ -562,7 +577,9 @@ public static partial class ReachSimulator
     }
 
     // ── 운영 ② 출발 자세·진입 경로(HD_AMR CobotInspectionMoveStep 평면 경유 접근과 같은 규칙) ──────────
-    // J6 은 보지 않는다 — 광축 둘레 회전은 J6 만 바꾸고 운영 roll 기준(벽면 수평·용접선 등)을 ACS 가 모르기 때문.
+    // ② 해를 고를 때는 J6 을 보지 않는다(광축 둘레 회전은 J6 만 바꾼다). 진입 경로는 J6 을 본다 — HD_AMR 은 진입점·경로를
+    // ② 접근점 자세(J6 = 운영 값) 그대로 풀기 때문에 위치가 달라지면 J6 이 달라지고, 그 값이 관절 이동량·J6 안전 범위에 걸린다
+    // (실기 2026-11-12 PU: 면 방향 536~828 mm 떨어진 용접선 7건이 "진입 관절 이동 221°"·"J6 안전 범위 밖"으로 거부).
     // 손목 반전 해는 J5 부호 반전으로 따로 거른다(HD_AMR IsWristFlip — 140° 완화로 이동 한계만으로는 통과할 수 있다).
 
     /// <summary>TCP(도면)에서 광축이 면을 바라보는 자세의 IK 해(범위 밖 관절은 ±360 감음).</summary>
@@ -634,8 +651,11 @@ public static partial class ReachSimulator
     /// 진입 해(같은 가지·관절 이동 ≤140°·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
     /// 관절 튐·팔꿈치 반전·손목 특이점·자기 간섭을 본다. 자세는 전 구간 ② 자세로 고정.
     /// </summary>
-    private static ReachEntry PlanEntry(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal)
+    private static ReachEntry PlanEntry(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
+        double[]? approachJoints = null)
     {
+        if (m.CheckEntryJ6 && m.OperationJ6Deg is not null && approachJoints is { Length: >= 6 } && start.Length >= 6)
+            return PlanEntryFixedPose(m, f, start, approach, normal, approachJoints);
         var fr = m.Kinematics.Frames(start);
         var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
         var r = m.PlanarRetreatMm / 1000.0;
@@ -689,6 +709,150 @@ public static partial class ReachSimulator
             return new ReachEntry(true, cur, cand, plunge, inPlaneMm, candidates.Count, rejects);
         }
         return new ReachEntry(false, cur, null, plunge, inPlaneMm, candidates.Count, rejects);
+    }
+
+    /// <summary>
+    /// 평면 경유 진입(자세 고정) — HD_AMR <c>PlanarApproachAsync</c> 와 같은 순서. 진입점·경로의 자세를 ② 접근 해의 플랜지 자세로
+    /// 고정해 6축 전부를 푼다. 진입점마다 해를 J6 감김 유지 순으로 보며 첫 통과 해를 쓴다(<c>EntryJointBlocker</c>: 관절 이동[6축] ≤ 한계,
+    /// 팔꿈치·손목 반전 없음, |J5| 여유, J6 안전 범위, 자기 간섭). 그 뒤 경로는 100 mm 간격으로 이어 풀어 관절 한계 근접·관절 튐[6축]·
+    /// 팔꿈치·손목·J6 안전 범위·자기 간섭을 본다.
+    /// </summary>
+    private static ReachEntry PlanEntryFixedPose(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
+        double[] approachJoints)
+    {
+        var fr = m.Kinematics.Frames(start);
+        var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
+        var r = m.PlanarRetreatMm / 1000.0;
+        var h = Vec3.Dot(Vec3.Sub(cur, approach), normal);
+        var projected = Vec3.Sub(cur, Vec3.Scale(normal, h - r));
+        var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
+        var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
+
+        var candidates = new List<(double[] P, bool Direct)>();
+        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
+        else
+        {
+            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
+            candidates.Add((projected, false));
+            var pts = Sample(projected, plunge, m.PlanarSampleMm);
+            var step = inPlaneMm / pts.Count;
+            for (var k = 0; k < pts.Count - 1; k++)
+                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
+        }
+
+        // ② 접근 해의 플랜지 자세(BASE) — 진입점·경로 전 구간에서 이 자세를 유지한다.
+        var pose = m.Kinematics.Frames(approachJoints)[6];
+        var axisZ = Mat4.AxisZ(pose);
+        double[,] Target(double[] tcpDrawing)
+        {
+            var o = Vec3.Sub(f.DrawingToBase(tcpDrawing), Vec3.Scale(axisZ, m.ToolZMm));
+            var t = (double[,])pose.Clone();
+            t[0, 3] = o[0]; t[1, 3] = o[1]; t[2, 3] = o[2];
+            return t;
+        }
+        List<double[]> Ik(double[] tcpDrawing, double[] reference) =>
+            WoundSolutions(m, m.Kinematics.InverseFlange(Target(tcpDrawing)), reference);
+        static double Travel6(double[] a, double[] b) => Enumerable.Range(0, 6).Max(i => Math.Abs(a[i] - b[i]));
+        static double Sum6(double[] a, double[] b) => Enumerable.Range(0, 6).Sum(i => Math.Abs(a[i] - b[i]));
+        var shift = J6WindingShift(m, start[5]);
+        string? J6Out(double j6) => j6 + shift >= m.SafeJ6MinDeg && j6 + shift <= m.SafeJ6MaxDeg
+            ? null
+            : $"J6 안전 범위({m.SafeJ6MinDeg:0}°~{m.SafeJ6MaxDeg:0}°) 밖 — J6 {start[5]:0.0}° → {j6:0.0}°";
+        string? EntryBlocker(double[] j)
+        {
+            var travel = Travel6(start, j);
+            if (travel > m.MaxEntryJointTravelDeg) return $"진입 관절 이동 {travel:0}° > {m.MaxEntryJointTravelDeg:0}°";
+            if (ElbowFlip(start, j)) return "팔꿈치 가지 전환";
+            if (WristFlip(start, j)) return $"손목 가지 전환(J5 {start[4]:0}° → {j[4]:0}°)";
+            if (Math.Abs(j[4]) < m.PlanarWristMarginDeg) return $"손목 특이점(|J5| {Math.Abs(j[4]):0.0}° < {m.PlanarWristMarginDeg:0}°)";
+            if (J6Out(j[5]) is { } j6) return j6;
+            if (SelfBlocker(j) is { } self) return self;
+            return null;
+        }
+        // 자기 간섭은 여유까지 본다 — 여유가 몇 mm 뿐인 진입은 모델·정차 오차로 실기에서 간섭으로 거부된다(EntrySelfMarginMm).
+        string? SelfBlocker(double[] j)
+        {
+            var sc = SelfClearance(m, f.BaseZMm, j);
+            if (sc.ClearanceMm < 0) return $"자기 간섭 ({sc.Part}–{sc.Obstacle})";
+            return sc.ClearanceMm < m.EntrySelfMarginMm
+                ? $"자기 간섭 여유 부족 ({sc.Part}–{sc.Obstacle} {sc.ClearanceMm:0}mm < {m.EntrySelfMarginMm:0}mm)"
+                : null;
+        }
+
+        string Fmt(double[] p) => string.Join(", ", f.DrawingToBase(p).Select(v => v.ToString("0")));
+        var rejects = new List<string>();
+        foreach (var (cand, direct) in candidates)
+        {
+            var label = direct ? "들어갈 점 직접" : $"후퇴 평면 [{Fmt(cand)}]";
+            // J6 감김 유지 순(HD_AMR KeepWristCost: J6 변화 × 8 + 관절 변위 합 + 팔꿈치 반전 벌점)
+            var sols = Ik(cand, start)
+                .OrderBy(j => 8.0 * Math.Abs(j[5] - start[5]) + Sum6(j, start) + (ElbowFlip(start, j) ? 10000 : 0)).ToList();
+            if (sols.Count == 0) { rejects.Add($"{label}: 도달 불가"); continue; }
+            double[]? jc = null;
+            string? firstWhy = null;
+            foreach (var sol in sols)
+            {
+                var whySol = EntryBlocker(sol);
+                if (whySol is null) { jc = sol; break; }
+                firstWhy ??= whySol;
+            }
+            if (jc is null) { rejects.Add($"{label}: {firstWhy}{(sols.Count > 1 ? $" (해 {sols.Count}개 모두)" : "")}"); continue; }
+
+            var path = new List<double[]>();
+            if (!direct) path.AddRange(Sample(cand, plunge, m.PlanarSampleMm));
+            if (m.PlanarRetreatMm > 0.5) path.AddRange(Sample(plunge, approach, m.PlanarSampleMm));
+            var seed = jc;
+            string? why = null;
+            foreach (var pt in path)
+            {
+                var near = Ik(pt, seed).MinBy(j => Sum6(j, seed));
+                if (near is null) { why = $"[{Fmt(pt)}] 도달 불가"; break; }
+                var limit = Enumerable.Range(0, Math.Min(5, m.JointMinDeg.Length))
+                    .Where(i => near[i] < m.JointMinDeg[i] + m.PathJointLimitMarginDeg || near[i] > m.JointMaxDeg[i] - m.PathJointLimitMarginDeg)
+                    .Select(i => (int?)i).FirstOrDefault();
+                if (limit is { } li) { why = $"[{Fmt(pt)}] J{li + 1} 관절 한계 근접({near[li]:0.0}°)"; break; }
+                var jump = Travel6(seed, near);
+                if (jump > m.MaxPathJointStepDeg) { why = $"[{Fmt(pt)}] 관절이 {jump:0}° 튐"; break; }
+                if (ElbowFlip(jc, near)) { why = $"[{Fmt(pt)}] 팔꿈치 가지 전환"; break; }
+                if (Math.Sign(near[4]) != Math.Sign(jc[4]) || Math.Abs(near[4]) < m.PlanarWristMarginDeg) { why = $"[{Fmt(pt)}] 손목 특이점(J5 {near[4]:0.0}°)"; break; }
+                if (J6Out(near[5]) is { } j6p) { why = $"[{Fmt(pt)}] {j6p}"; break; }
+                if (SelfBlocker(near) is { } sp) { why = $"[{Fmt(pt)}] {sp}"; break; }
+                seed = near;
+            }
+            if (why is not null) { rejects.Add($"{label}: 경로 {why}"); continue; }
+            return new ReachEntry(true, cur, cand, plunge, inPlaneMm, candidates.Count, rejects);
+        }
+        return new ReachEntry(false, cur, null, plunge, inPlaneMm, candidates.Count, rejects);
+    }
+
+    /// <summary>
+    /// IK 해를 기준 자세 쪽으로 감아 푼다 — J1~J5 는 ±360 중 관절 범위 안에서 기준에 가장 가까운 값(범위 안 값이 없으면 그 해는 버림),
+    /// J6 은 기준에 가장 가까운 감김(HD_AMR SolveIkCandidates 의 감아 풀기).
+    /// </summary>
+    private static List<double[]> WoundSolutions(ReachRobotModel m, IReadOnlyList<double[]> sols, double[] reference)
+    {
+        var list = new List<double[]>(sols.Count);
+        foreach (var raw in sols)
+        {
+            var j = new double[raw.Length];
+            var ok = true;
+            for (var i = 0; i < raw.Length && ok; i++)
+            {
+                if (i >= m.JointMinDeg.Length)
+                {
+                    j[i] = raw[i] + 360.0 * Math.Round((reference[i] - raw[i]) / 360.0);
+                    continue;
+                }
+                double? pick = null;
+                foreach (var c in new[] { raw[i], raw[i] - 360, raw[i] + 360 })
+                    if (c >= m.JointMinDeg[i] && c <= m.JointMaxDeg[i] && (pick is null || Math.Abs(c - reference[i]) < Math.Abs(pick.Value - reference[i])))
+                        pick = c;
+                if (pick is null) ok = false;
+                else j[i] = pick.Value;
+            }
+            if (ok) list.Add(j);
+        }
+        return list;
     }
 
     /// <summary>from→to 직선을 stepMm 이하 간격으로 나눈 점(시작 제외, 끝 포함). 좌표 m.</summary>
