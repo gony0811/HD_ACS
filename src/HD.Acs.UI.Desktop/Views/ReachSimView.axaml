@@ -203,6 +203,8 @@
                 <ToggleButton Content="단면 자르기" IsChecked="{Binding ClipSection}" Margin="6,0,0,0" IsVisible="{Binding !AreaMapMode}" />
                 <Button x:Name="AreaMapButton" Content="검사 가능 지도" Margin="12,0,0,0" Command="{Binding ShowAreaMapCommand}" IsEnabled="{Binding !IsMapping}"
                         ToolTip.Tip="선택한 층의 모든 면에서 용접선마다 검사 가능 여부를 3D 에 그립니다(가능 = 초록 · 불가 = 빨강). 저장된 정차·리프트 기준이며, 영역은 옅은 음영으로만 표시합니다. 임시 제외한 용접선은 회색입니다." />
+                <ComboBox x:Name="AreaMapScopeCombo" Width="84" ItemsSource="{Binding AreaMapScopes}" SelectedIndex="{Binding AreaMapScopeIndex}" Margin="4,0,0,0"
+                          ToolTip.Tip="지도에 보일 층 — 전체 또는 한 층. 계산은 전체 층을 한 번 하고, 여기서 고르면 바로 걸러서 보여 줍니다." />
                 <Button Content="지도 닫기" Command="{Binding CloseAreaMapCommand}" IsVisible="{Binding AreaMapMode}" />
             </StackPanel>
             <Border Margin="10,46,10,10" HorizontalAlignment="Left" VerticalAlignment="Top" Padding="8,4" CornerRadius="4" MaxWidth="900"

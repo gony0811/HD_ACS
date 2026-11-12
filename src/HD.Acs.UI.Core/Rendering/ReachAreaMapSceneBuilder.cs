@@ -26,7 +26,7 @@ public static class ReachAreaMapSceneBuilder
     public static Rgba SeamColor(bool? ok) => ok switch { true => Green, false => Red, _ => NoTarget };
 
     public static Scene3 Build(IReadOnlyList<WallDto> walls, TankGeometryDto? geometry, IReadOnlyList<ReachAreaVerdictDto> areas,
-        double? deckZ = null)
+        IReadOnlyList<double>? deckZs = null)
     {
         var scene = new Scene3();
         var byCode = walls.GroupBy(w => w.WallCode).ToDictionary(g => g.Key, g => g.First());
@@ -41,17 +41,20 @@ public static class ReachAreaMapSceneBuilder
             scene.ExtentPoints.AddRange(outline);
         }
 
-        // 층 발판 윤곽(그 높이의 선창 단면) — 어느 층에서 본 지도인지 보이게
-        if (deckZ is { } z && geometry is not null
+        // 층 발판 윤곽(그 높이의 선창 단면) — 지도에 실린 층마다
+        if (deckZs is { Count: > 0 } && geometry is not null
             && byCode.TryGetValue("F", out var f) && byCode.TryGetValue("A", out var a)
             && f.Origin is { Length: 3 } fo && a.Origin is { Length: 3 } ao)
         {
-            var hw = TankShape.HalfWidth(geometry, z);
             var oy = geometry.OriginOy;
-            AddLoop(scene, new[]
+            foreach (var z in deckZs)
             {
-                new Pt3(ao[0], oy - hw, z), new Pt3(fo[0], oy - hw, z), new Pt3(fo[0], oy + hw, z), new Pt3(ao[0], oy + hw, z),
-            }, Deck, 1.0);
+                var hw = TankShape.HalfWidth(geometry, z);
+                AddLoop(scene, new[]
+                {
+                    new Pt3(ao[0], oy - hw, z), new Pt3(fo[0], oy - hw, z), new Pt3(fo[0], oy + hw, z), new Pt3(ao[0], oy + hw, z),
+                }, Deck, 1.0);
+            }
         }
 
         foreach (var area in areas)

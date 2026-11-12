@@ -43,8 +43,8 @@ public class ReachAreaMapTests
     private static WallDto Wall(string code, double[] origin, double[] u, double[] v, double[] n) =>
         new("CT1", code, origin, u, v, n, 10, 3, 0, true, null);
 
-    private static ReachAreaVerdictDto Verdict(string wall, string name, bool? possible, double u0) =>
-        new(Guid.NewGuid(), name, wall, 4, new[] { new[] { u0, 0.5 }, new[] { u0 + 1, 0.5 }, new[] { u0 + 1, 1.5 }, new[] { u0, 1.5 } },
+    private static ReachAreaVerdictDto Verdict(string wall, string name, bool? possible, double u0, int level = 4) =>
+        new(Guid.NewGuid(), name, wall, level, new[] { new[] { u0, 0.5 }, new[] { u0 + 1, 0.5 }, new[] { u0 + 1, 1.5 }, new[] { u0, 1.5 } },
             possible is null ? 0 : 3, possible == true ? 3 : possible == false ? 2 : 0, possible is null ? 3 : 0, possible, 0, null,
             // 용접선 3개 — 가능 영역은 전부 가능, 불가 영역은 3번만 불가, 대상 없음 영역은 전부 임시 제외
             Enumerable.Range(1, 3).Select(i => new ReachWeldVerdictDto(Guid.NewGuid(), i, u0 + 0.1, 0.5 + 0.25 * i, u0 + 0.9, 0.5 + 0.25 * i,
@@ -102,6 +102,47 @@ public class ReachAreaMapTests
         Assert.Contains("전부 가능한 영역 1 · 하나라도 불가인 영역 1", vm.AreaMapSummary);
         Assert.NotEmpty(vm.Scene.ExtentPoints);                                          // 선창 윤곽
         Assert.Contains(vm.Scene.Labels, l => l.Text.StartsWith("PU") && l.Text.Contains("5 / 6"));
+    }
+
+    [Fact]
+    public async Task 전체_층을_한_번_계산하고_층을_골라_걸러_본다()
+    {
+        var (vm, api) = await SetupAsync();
+        // L1 에도 영역이 있는 선창
+        api.Walls.Add(Wall("SM", new[] { 0.0, -4, 2 }, new[] { 1.0, 0, 0 }, new[] { 0.0, 0, 1 }, new[] { 0.0, 1, 0 }));
+        api.Areas.Add(new(Guid.NewGuid(), "CT1", "SM", 1, "c", 0, 0, 1, 1, null, null, null, 0, 3));
+        api.Map["SM"] = new() { Verdict("SM", "L1-R01C01", true, 1, level: 1) };
+        await vm.LoadAsync();
+        Assert.Equal(new[] { "전체", "L1", "L2", "L3", "L4" }, vm.AreaMapScopes);
+
+        await vm.ShowAreaMapAsync();
+
+        Assert.Equal(new (int?, string?)[] { (1, "SM"), (4, "PU"), (4, "T") }, api.MapRequests);   // 모든 층, 영역이 있는 면만
+        Assert.Equal(4, vm.Scene.Faces.Count);
+        Assert.Contains("전체 층 용접선 9개 — 검사 가능 8 · 불가 1", vm.AreaMapSummary);
+        Assert.Contains("층별 가능/대상: L1 3/3 · L4 5/6", vm.AreaMapSummary);
+
+        var changes = 0;
+        vm.SceneChanged += (_, _) => changes++;
+        vm.AreaMapScopeIndex = 1;                                                        // L1 만
+        Assert.Equal(1, vm.AreaMapLevel);
+        Assert.Single(vm.Scene.Faces);
+        Assert.Equal(3, Seams(vm.Scene).Count);
+        Assert.StartsWith("L1 용접선 3개 — 검사 가능 3 · 불가 0", vm.AreaMapSummary);
+        Assert.DoesNotContain("층별", vm.AreaMapSummary);
+        Assert.True(changes >= 1);
+
+        vm.AreaMapScopeIndex = 4;                                                        // L4 만
+        Assert.Equal(3, vm.Scene.Faces.Count);
+        Assert.Contains("PU 5/6", vm.AreaMapSummary);
+
+        vm.AreaMapScopeIndex = 2;                                                        // 영역이 없는 층
+        Assert.Empty(vm.Scene.Faces);
+        Assert.StartsWith("L2 용접선 0개", vm.AreaMapSummary);
+
+        vm.AreaMapScopeIndex = 0;                                                        // 다시 전체
+        Assert.Equal(4, vm.Scene.Faces.Count);
+        Assert.Equal(3, api.MapRequests.Count);                                          // 층을 바꿔도 서버에 다시 묻지 않는다
     }
 
     [Fact]

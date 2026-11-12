@@ -129,6 +129,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 if (!Levels.Contains(SelectedLevel)) SelectedLevel = Levels[^1];
                 _suppress = false;
                 OnPropertyChanged(nameof(LevelIndex));
+                OnPropertyChanged(nameof(AreaMapScopes));
             }
             try { ApplyAreaWalls(await _api.GetAreasAsync(TankId)); }
             catch { ApplyAreaWalls(Array.Empty<AreaDto>()); }   // 면 필터 없이 계속
@@ -464,30 +465,51 @@ public sealed partial class ReachSimViewModel : ObservableObject
     private TankGeometryDto? _geometry;
     private Scene3? _mapScene;
     private List<ReachAreaVerdictDto> _mapAreas = new();
-    private int _mapLevel;
+    private List<int> _mapLevels = new();
     /// <summary>켜면 3D 가 리치 상세 대신 영역 검사 가능 지도를 보인다.</summary>
     [ObservableProperty] private bool _areaMapMode;
+    /// <summary>지도에 보일 층 — 0 = 전체, n = <see cref="Levels"/>[n − 1]. 계산은 전체 층을 한 번 하고 표시만 거른다.</summary>
+    [ObservableProperty] private int _areaMapScopeIndex;
+    /// <summary>층 선택 목록 — "전체", "L1", "L2", …</summary>
+    public IReadOnlyList<string> AreaMapScopes => new[] { "전체" }.Concat(Levels.Select(l => $"L{l}")).ToList();
+    /// <summary>지금 보이는 층(전체면 null).</summary>
+    public int? AreaMapLevel => AreaMapScopeIndex >= 1 && AreaMapScopeIndex <= Levels.Count ? Levels[AreaMapScopeIndex - 1] : null;
     [ObservableProperty] private bool _isMapping;
     [ObservableProperty] private string _areaMapSummary = "";
 
     /// <summary>지도에 실린 영역 판정.</summary>
     public IReadOnlyList<ReachAreaVerdictDto> AreaMapAreas => _mapAreas;
 
-    /// <summary>선택 층의 영역 검사 가능 지도를 만든다 — 그 층에 영역이 있는 면을 하나씩 서버에 묻는다.</summary>
+    /// <summary>계산할 (층, 면) — 모든 층에서 영역이 있는 면(영역 목록을 못 읽었으면 모든 면).</summary>
+    private List<(int Level, string Wall)> AreaMapTargets()
+    {
+        var list = new List<(int, string)>();
+        foreach (var lv in Levels.ToList())
+        {
+            IEnumerable<string> walls = _areaWalls.Count == 0 ? WallOrder
+                : _areaWalls.TryGetValue(lv, out var set)
+                    ? WallOrder.Where(set.Contains).Concat(set.Except(WallOrder).Order())
+                    : Array.Empty<string>();
+            list.AddRange(walls.Select(w => (lv, w)));
+        }
+        return list;
+    }
+
+    /// <summary>검사 가능 지도를 만든다 — 모든 층의 면을 하나씩 서버에 묻는다. 보일 층은 <see cref="AreaMapScopeIndex"/> 로 고른다.</summary>
     [RelayCommand]
     public async Task ShowAreaMapAsync()
     {
         if (IsMapping) return;
         IsMapping = true;
-        var level = SelectedLevel;
-        var walls = WallCodes.ToList();
+        var targets = AreaMapTargets();
         var all = new List<ReachAreaVerdictDto>();
         try
         {
-            for (var i = 0; i < walls.Count; i++)
+            for (var i = 0; i < targets.Count; i++)
             {
-                AreaMapSummary = $"L{level} 검사 가능 지도 계산 중… {walls[i]} ({i + 1}/{walls.Count})";
-                var part = await _api.GetReachAreaMapAsync(TankId, level, walls[i]);
+                var (level, wall) = targets[i];
+                AreaMapSummary = $"검사 가능 지도 계산 중… L{level} {wall} ({i + 1}/{targets.Count})";
+                var part = await _api.GetReachAreaMapAsync(TankId, level, wall);
                 if (part is null)
                 {
                     AreaMapSummary = "영역 지도 실패: 선창 형상이 없거나 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요.";
@@ -496,7 +518,6 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 all.AddRange(part);
             }
             _mapAreas = all;
-            _mapLevel = level;
             RebuildAreaMap();
             if (AreaMapMode) { SceneChanged?.Invoke(this, EventArgs.Empty); ViewReset?.Invoke(this, EventArgs.Empty); }
             else AreaMapMode = true;
@@ -515,18 +536,36 @@ public sealed partial class ReachSimViewModel : ObservableObject
         ViewReset?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>보일 층을 바꾸면 이미 계산한 결과에서 걸러 다시 그린다(서버에 다시 묻지 않는다).</summary>
+    partial void OnAreaMapScopeIndexChanged(int value)
+    {
+        if (value < 0) { AreaMapScopeIndex = 0; return; }   // 목록이 바뀌는 순간 콤보가 −1 을 넣는 경우
+        if (_mapScene is null) return;
+        RebuildAreaMap();
+        SceneChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private void RebuildAreaMap()
     {
-        double? deckZ = _geometry?.LevelZ is { } z && _mapLevel >= 1 && _mapLevel <= z.Length ? z[_mapLevel - 1] : null;
-        _mapScene = ReachAreaMapSceneBuilder.Build(_walls, _geometry, _mapAreas, deckZ);
-        int welds = _mapAreas.Sum(a => a.Welds), weldsOk = _mapAreas.Sum(a => a.Ok), disabled = _mapAreas.Sum(a => a.Disabled);
-        var perWall = _mapAreas.GroupBy(a => a.WallCode).OrderBy(g => Array.IndexOf(WallOrder, g.Key))
+        // 보일 층만 거른다 — 전체면 그대로
+        var shown = AreaMapLevel is { } only ? _mapAreas.Where(a => a.Level == only).ToList() : _mapAreas;
+        _mapLevels = AreaMapLevel is { } one ? new List<int> { one } : _mapAreas.Select(a => a.Level).Distinct().OrderBy(x => x).ToList();
+        var deckZs = _geometry?.LevelZ is { } z
+            ? _mapLevels.Where(lv => lv >= 1 && lv <= z.Length).Select(lv => z[lv - 1]).ToList()
+            : new List<double>();
+        _mapScene = ReachAreaMapSceneBuilder.Build(_walls, _geometry, shown, deckZs);
+        int welds = shown.Sum(a => a.Welds), weldsOk = shown.Sum(a => a.Ok), disabled = shown.Sum(a => a.Disabled);
+        var perWall = shown.GroupBy(a => a.WallCode).OrderBy(g => Array.IndexOf(WallOrder, g.Key))
             .Select(g => $"{g.Key} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}");
-        int areaOk = _mapAreas.Count(a => a.Possible == true), areaBad = _mapAreas.Count(a => a.Possible == false);
-        AreaMapSummary = $"L{_mapLevel} 용접선 {welds}개 — 검사 가능 {weldsOk} · 불가 {welds - weldsOk}"
+        var perLevel = shown.GroupBy(a => a.Level).OrderBy(g => g.Key)
+            .Select(g => $"L{g.Key} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}").ToList();
+        int areaOk = shown.Count(a => a.Possible == true), areaBad = shown.Count(a => a.Possible == false);
+        var scope = AreaMapLevel is { } lvOnly ? $"L{lvOnly} " : "전체 층 ";
+        AreaMapSummary = $"{scope}용접선 {welds}개 — 검사 가능 {weldsOk} · 불가 {welds - weldsOk}"
             + (disabled > 0 ? $" · 임시 제외 {disabled}(판정 안 함)" : "")
+            + (perLevel.Count > 1 ? $"  |  층별 가능/대상: {string.Join(" · ", perLevel)}" : "")
             + $"  |  면별 가능/대상: {string.Join(" · ", perWall)}"
-            + $"  |  영역 {_mapAreas.Count}개 중 용접선이 전부 가능한 영역 {areaOk} · 하나라도 불가인 영역 {areaBad}"
+            + $"  |  영역 {shown.Count}개 중 용접선이 전부 가능한 영역 {areaOk} · 하나라도 불가인 영역 {areaBad}"
             + "  — 저장된 정차·리프트 기준";
     }
 
