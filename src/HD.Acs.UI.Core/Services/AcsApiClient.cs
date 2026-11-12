@@ -266,6 +266,18 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<PlannedStationsDto>(ct);
     }
 
+    public async Task<IReadOnlyList<ReachAreaVerdictDto>?> GetReachAreaMapAsync(string tankId, int? level, string? wallCode, CancellationToken ct = default)
+    {
+        var q = new List<string>();
+        if (level is { } lv) q.Add($"level={lv}");
+        if (wallCode is { Length: > 0 }) q.Add($"wallCode={Uri.EscapeDataString(wallCode)}");
+        var url = $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/area-map" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;   // 선창 없음 또는 구빌드 서버
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<ReachAreaVerdictDto>>(ct);
+    }
+
     public async Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
         CancellationToken ct = default, string? branch = null, bool areaLift = false)
     {

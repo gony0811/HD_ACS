@@ -96,7 +96,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     [ObservableProperty] private string _optimumDetail = "";
 
     /// <summary>현재 3D 씬. 바뀌면 <see cref="SceneChanged"/>.</summary>
-    public Scene3 Scene { get; private set; } = new();
+    public Scene3 Scene => AreaMapMode && _mapScene is not null ? _mapScene : _detailScene;
+    private Scene3 _detailScene = new();
     /// <summary>씬만 바뀜(카메라 유지).</summary>
     public event EventHandler? SceneChanged;
     /// <summary>정차가 바뀌어 카메라를 다시 맞춰야 함.</summary>
@@ -119,7 +120,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
             StatusMessage = "선창 면 조회 중…";
             _walls.Clear();
             _walls.AddRange(await _api.GetWallsAsync(TankId));
-            if (await _api.GetTankGeometryAsync(TankId) is { LevelZ: { Length: > 0 } z })
+            _geometry = await _api.GetTankGeometryAsync(TankId);
+            if (_geometry is { LevelZ: { Length: > 0 } z })
             {
                 _suppress = true;
                 Levels.Clear();
@@ -362,7 +364,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (d is null)
         {
             VerdictTitle = "—"; VerdictDetail = ""; VerdictLevel = "na";
-            Scene = new Scene3();
+            _detailScene = new Scene3();
             SceneChanged?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -451,8 +453,81 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 ? "참고 자세 — 중간·끝점은 초점 자세로만 판정합니다(②·정렬 준비는 시작점에서만, 그 뒤는 용접선 따라 스캔). "
                 : "중간·끝점 — 앞 점 초점 자세에서 용접선을 따라 이어 간 해입니다. ") + VerdictDetail;
 
-        Scene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
+        _detailScene = ReachSimSceneBuilder.Build(new ReachSceneInput(_walls, d, StageIndex, SolutionIndex, ClipSection));
         SceneChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // ── 영역 검사 가능 지도 ─────────────────────────────────────────
+    // 선택한 층의 모든 면에서, 운영 조건(저장된 정차·리프트)으로 용접선마다 검사 가능 여부를 3D 에 그린다.
+    // 용접선: 가능 = 초록 · 불가 = 빨강 · 임시 제외 = 회색. 영역은 판정 색 없이 옅은 음영만.
+
+    private TankGeometryDto? _geometry;
+    private Scene3? _mapScene;
+    private List<ReachAreaVerdictDto> _mapAreas = new();
+    private int _mapLevel;
+    /// <summary>켜면 3D 가 리치 상세 대신 영역 검사 가능 지도를 보인다.</summary>
+    [ObservableProperty] private bool _areaMapMode;
+    [ObservableProperty] private bool _isMapping;
+    [ObservableProperty] private string _areaMapSummary = "";
+
+    /// <summary>지도에 실린 영역 판정.</summary>
+    public IReadOnlyList<ReachAreaVerdictDto> AreaMapAreas => _mapAreas;
+
+    /// <summary>선택 층의 영역 검사 가능 지도를 만든다 — 그 층에 영역이 있는 면을 하나씩 서버에 묻는다.</summary>
+    [RelayCommand]
+    public async Task ShowAreaMapAsync()
+    {
+        if (IsMapping) return;
+        IsMapping = true;
+        var level = SelectedLevel;
+        var walls = WallCodes.ToList();
+        var all = new List<ReachAreaVerdictDto>();
+        try
+        {
+            for (var i = 0; i < walls.Count; i++)
+            {
+                AreaMapSummary = $"L{level} 검사 가능 지도 계산 중… {walls[i]} ({i + 1}/{walls.Count})";
+                var part = await _api.GetReachAreaMapAsync(TankId, level, walls[i]);
+                if (part is null)
+                {
+                    AreaMapSummary = "영역 지도 실패: 선창 형상이 없거나 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요.";
+                    return;
+                }
+                all.AddRange(part);
+            }
+            _mapAreas = all;
+            _mapLevel = level;
+            RebuildAreaMap();
+            if (AreaMapMode) { SceneChanged?.Invoke(this, EventArgs.Empty); ViewReset?.Invoke(this, EventArgs.Empty); }
+            else AreaMapMode = true;
+        }
+        catch (Exception ex) { AreaMapSummary = $"영역 지도 실패: {ex.Message}"; }
+        finally { IsMapping = false; }
+    }
+
+    /// <summary>지도를 닫고 리치 상세 3D 로 돌아간다.</summary>
+    [RelayCommand]
+    private void CloseAreaMap() => AreaMapMode = false;
+
+    partial void OnAreaMapModeChanged(bool value)
+    {
+        SceneChanged?.Invoke(this, EventArgs.Empty);
+        ViewReset?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RebuildAreaMap()
+    {
+        double? deckZ = _geometry?.LevelZ is { } z && _mapLevel >= 1 && _mapLevel <= z.Length ? z[_mapLevel - 1] : null;
+        _mapScene = ReachAreaMapSceneBuilder.Build(_walls, _geometry, _mapAreas, deckZ);
+        int welds = _mapAreas.Sum(a => a.Welds), weldsOk = _mapAreas.Sum(a => a.Ok), disabled = _mapAreas.Sum(a => a.Disabled);
+        var perWall = _mapAreas.GroupBy(a => a.WallCode).OrderBy(g => Array.IndexOf(WallOrder, g.Key))
+            .Select(g => $"{g.Key} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}");
+        int areaOk = _mapAreas.Count(a => a.Possible == true), areaBad = _mapAreas.Count(a => a.Possible == false);
+        AreaMapSummary = $"L{_mapLevel} 용접선 {welds}개 — 검사 가능 {weldsOk} · 불가 {welds - weldsOk}"
+            + (disabled > 0 ? $" · 임시 제외 {disabled}(판정 안 함)" : "")
+            + $"  |  면별 가능/대상: {string.Join(" · ", perWall)}"
+            + $"  |  영역 {_mapAreas.Count}개 중 용접선이 전부 가능한 영역 {areaOk} · 하나라도 불가인 영역 {areaBad}"
+            + "  — 저장된 정차·리프트 기준";
     }
 
     // ── 보고서 백데이터(CSV) ─────────────────────────────────────────

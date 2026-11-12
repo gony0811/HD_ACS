@@ -13,6 +13,15 @@ public sealed record ReachSurveySeamDto(Guid TaskId, int Seq, double ZMin, doubl
     double? StrokeMm, double? MinClearanceM, int YawIndex, string? Blocker = null,
     string? BestVerdict = null, double? BestStrokeMm = null, double? TraverseMarginDeg = null);
 
+/// <summary>영역 검사 가능 지도 — 영역 하나. Possible = 검사 대상 용접선이 전부 가능(null = 검사 대상 용접선 없음).
+/// Corners = 면 (u, v) [m], Welds = 검사 대상(임시 제외를 뺀) 용접선 수, Ok = 그중 가능 수.</summary>
+public sealed record ReachAreaVerdictDto(Guid AreaId, string Name, string WallCode, int Level, double[][] Corners,
+    int Welds, int Ok, int Disabled, bool? Possible, double LiftMm, int[]? BadSeqs = null,
+    List<ReachWeldVerdictDto>? Seams = null);
+
+/// <summary>용접선 하나의 검사 가능 판정 — 면 (u, v) [m] 시작·끝, Ok = 가능 여부(null = 임시 제외라 판정하지 않음).</summary>
+public sealed record ReachWeldVerdictDto(Guid TaskId, int Seq, double StartU, double StartV, double EndU, double EndV, bool? Ok);
+
 public sealed record ReachSeamLineDto(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);
 /// <summary>부품 — 캡슐(A·B·반경) 또는 상자(Corners 8개: 아래 4 → 위 4, 반경 0). 도면 m.</summary>

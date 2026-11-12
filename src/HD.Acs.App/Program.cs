@@ -210,6 +210,13 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/survey",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
+// 영역 검사 가능 지도 — 운영 조건(저장된 정차·리프트)에서 영역의 용접선이 전부 가능한지. 하나라도 불가면 그 영역은 불가.
+app.MapGet("/api/reach-sim/tanks/{tankId}/area-map",
+    async (string tankId, int? level, string? wallCode, ReachSimService sim, CancellationToken ct) =>
+        await sim.AreaMapAsync(tankId, level, wallCode, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
+
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
     async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw, string? branch,
            ReachSimService sim, CancellationToken ct) =>

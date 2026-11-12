@@ -67,6 +67,9 @@ public interface IAcsApiClient
     /// <summary>리치 조사 — areaLift 면 영역마다 리프트를 한 높이로 고정(고정 높이·용접선별 최적과 비교 포함).</summary>
     Task<IReadOnlyList<ReachSurveyAreaDto>?> GetReachSurveyAsync(string tankId, int? level, string? wallCode,
         CancellationToken ct = default, string? branch = null, bool areaLift = false) => Task.FromResult<IReadOnlyList<ReachSurveyAreaDto>?>(null);
+    /// <summary>영역 검사 가능 지도 — 운영 조건(저장된 정차·리프트)에서 영역의 용접선이 전부 가능한지. 선창 없음·구서버면 null.</summary>
+    Task<IReadOnlyList<ReachAreaVerdictDto>?> GetReachAreaMapAsync(string tankId, int? level, string? wallCode, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ReachAreaVerdictDto>?>(null);
     Task<ReachDetailDto?> GetReachDetailAsync(Guid areaId, Guid taskId, int point, double? strokeMm,
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct = default, string? branch = null) =>
         Task.FromResult<ReachDetailDto?>(null);

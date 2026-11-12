@@ -200,10 +200,27 @@
                 <Button Content="정면" Click="OnPresetFront" />
                 <Button Content="위" Click="OnPresetTop" />
                 <Button Content="3D" Click="OnPresetIso" />
-                <ToggleButton Content="단면 자르기" IsChecked="{Binding ClipSection}" Margin="6,0,0,0" />
+                <ToggleButton Content="단면 자르기" IsChecked="{Binding ClipSection}" Margin="6,0,0,0" IsVisible="{Binding !AreaMapMode}" />
+                <Button x:Name="AreaMapButton" Content="검사 가능 지도" Margin="12,0,0,0" Command="{Binding ShowAreaMapCommand}" IsEnabled="{Binding !IsMapping}"
+                        ToolTip.Tip="선택한 층의 모든 면에서 용접선마다 검사 가능 여부를 3D 에 그립니다(가능 = 초록 · 불가 = 빨강). 저장된 정차·리프트 기준이며, 영역은 옅은 음영으로만 표시합니다. 임시 제외한 용접선은 회색입니다." />
+                <Button Content="지도 닫기" Command="{Binding CloseAreaMapCommand}" IsVisible="{Binding AreaMapMode}" />
             </StackPanel>
+            <Border Margin="10,46,10,10" HorizontalAlignment="Left" VerticalAlignment="Top" Padding="8,4" CornerRadius="4" MaxWidth="900"
+                    Background="#CC12181D" IsVisible="{Binding AreaMapSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBlock x:Name="AreaMapSummaryText" Text="{Binding AreaMapSummary}" Foreground="#ECF0F1" FontSize="11.5" TextWrapping="Wrap" />
+            </Border>
             <Border Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" Padding="8,4" CornerRadius="4"
-                    Background="#CC12181D">
+                    Background="#CC12181D" IsVisible="{Binding AreaMapMode}">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Text="━ 검사 가능 용접선" Foreground="#2ECC71" FontSize="11.5" />
+                    <TextBlock Text="━ 검사 불가 용접선" Foreground="#E74C3C" FontSize="11.5" />
+                    <TextBlock Text="━ 임시 제외" Foreground="#7F8C8D" FontSize="11.5" />
+                    <TextBlock Text="■ 영역" Foreground="#9FB4C8" FontSize="11.5" />
+                    <TextBlock Text="좌드래그 회전 · 우드래그 이동 · 휠 확대" Foreground="#9AA0A6" FontSize="11.5" />
+                </StackPanel>
+            </Border>
+            <Border Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" Padding="8,4" CornerRadius="4"
+                    Background="#CC12181D" IsVisible="{Binding !AreaMapMode}">
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <TextBlock Text="■ 코봇" Foreground="#2F9CA6" FontSize="11.5" />
                     <TextBlock Text="■ 여유 &lt; 50 mm" Foreground="#E3A23B" FontSize="11.5" />
@@ -213,6 +230,7 @@
                 </StackPanel>
             </Border>
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" VerticalAlignment="Top" Height="3" Margin="0" />
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsMapping}" VerticalAlignment="Top" Height="3" Margin="0" />
         </Grid>
     </Grid>
 </UserControl>

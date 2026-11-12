@@ -79,6 +79,20 @@ public sealed class ReachSim3DControl : Control
 
     private void ApplyPresetNow(double width, double height)
     {
+        if (_vm is { AreaMapMode: true } && _vm.Scene.ExtentPoints.Count > 0)
+        {
+            // 영역 검사 가능 지도 — 선창 전체를 본다(정차 기준이 없으므로 선체 축 기준)
+            (_camera.YawDeg, _camera.PitchDeg) = _preset switch
+            {
+                Preset.Section => (90.0, 5.0),     // 선수 쪽에서 단면 방향
+                Preset.Front => (0.0, 10.0),       // 옆에서
+                Preset.Top => (0.0, 85.0),
+                _ => (35.0, 28.0),
+            };
+            _camera.ZoomExtents(_vm.Scene.ExtentPoints, width, height, 1.1);
+            _needsPreset = false;
+            return;
+        }
         if (_vm?.Detail is not { } d || _vm.Scene.ExtentPoints.Count == 0) return;
         var psi = d.StationYaw * 180 / Math.PI;
         (_camera.YawDeg, _camera.PitchDeg) = _preset switch
