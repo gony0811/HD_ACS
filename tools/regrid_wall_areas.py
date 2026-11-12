@@ -58,6 +58,11 @@ def main():
     ap.add_argument('--wall', required=True, help='면 코드 (예: T)')
     ap.add_argument('--win', type=float, required=True, help='AREA 최대 크기 mm (가로·세로 같은 값, 예: 1080)')
     ap.add_argument('--win-v', type=float, help='세로(v) 최대 크기 mm (생략 = --win)')
+    ap.add_argument('--cut-v', help='세로 띠 경계 mm 목록(쉼표, 예: 1950,2515,3024) — 주면 --win-v 대신 이 경계로 나눈다. '
+                                    '경계는 5 mm 안의 용접선 끝점에 맞춘다(리프트 높이가 같은 용접선끼리 묶을 때)')
+    ap.add_argument('--unreachable', help='닿지 않는 용접선 taskId 목록 파일(한 줄에 하나) — 칸마다 따로 영역(이름 끝 X)으로 뗀다. '
+                                          'X 영역은 시나리오 검사 대상에서 빼야 한다')
+    ap.add_argument('--dump', help='나눈 결과(영역 이름·ID·용접선 taskId)를 JSON 으로 저장 — 적용 전 리치 평가 대조용')
     ap.add_argument('--psql', default='docker exec -i dev-postgres psql -U postgres -d hdacs')
     ap.add_argument('--backup', default=str(pathlib.Path(__file__).resolve().parent.parent / 'db' / 'dump'))
     ap.add_argument('--apply', action='store_true', help='실제 적용 (없으면 미리보기)')
@@ -95,6 +100,10 @@ select json_build_object(
             p.append((q[0], q[1]))
         return p
 
+    unreach = set()
+    if a.unreachable:
+        unreach = {s.strip().lower() for s in pathlib.Path(a.unreachable).read_text(encoding='utf-8-sig').splitlines() if s.strip()}
+    wv_cut = 0.0
     levels = sorted({old_by_id[t['area_id']]['level'] for t in tasks})
     new_areas, problems = [], []
     for level in levels:
@@ -109,6 +118,17 @@ select json_build_object(
             if abs(t['start_u'] - t['end_u']) > EDGE: bu.update((r4(t['start_u']), r4(t['end_u'])))
             if abs(t['start_v'] - t['end_v']) > EDGE: bv.update((r4(t['start_v']), r4(t['end_v'])))
         uw, vw = windows(sorted(bu), wu), windows(sorted(bv), wv)
+        if a.cut_v:
+            ends = sorted(bv)
+            cuts = []
+            for c in sorted(float(x) / 1000.0 for x in a.cut_v.split(',')):
+                near = min(ends, key=lambda e: abs(e - c))
+                c = near if abs(near - c) <= 0.005 else c
+                if vlo + EDGE < c < vhi - EDGE: cuts.append(c)
+            edges = [vlo] + cuts + [vhi]
+            vw = list(zip(edges[:-1], edges[1:]))
+            wv = max(wv_cut, max(hi - lo for lo, hi in vw))
+            wv_cut = wv
         cells = defaultdict(list)
         for t in ts:
             us, vs = [p[0] for p in pts(t)], [p[1] for p in pts(t)]
@@ -118,7 +138,13 @@ select json_build_object(
                 problems.append(f"용접선 {t['task_id']} ({min(us):.3f}~{max(us):.3f}, {min(vs):.3f}~{max(vs):.3f}) 이 창 하나에 들어가지 않음")
                 continue
             cells[(cj, ci)].append(t)
+        parts = []   # 칸마다 닿는 용접선 / 닿지 않는 용접선(이름 끝 X)을 따로 영역으로
         for (cj, ci), ct in sorted(cells.items()):
+            ok = [t for t in ct if t['task_id'] not in unreach]
+            no = [t for t in ct if t['task_id'] in unreach]
+            if ok: parts.append((cj, ci, '', ok))
+            if no: parts.append((cj, ci, 'X', no))
+        for cj, ci, suffix, ct in parts:
             (ua, ub), (va, vb) = uw[ci], vw[cj]
             allp = [p for t in ct for p in pts(t)]
             umin = r4(max(ua, 0.0, min(p[0] for p in allp) - PAD)); umax = r4(min(ub, ulen, max(p[0] for p in allp) + PAD))
@@ -130,7 +156,7 @@ select json_build_object(
                 if du <= EDGE: return (1, r4(t['start_u']), min(t['start_v'], t['end_v']))
                 return (2, min(t['start_v'], t['end_v']), min(t['start_u'], t['end_u']))
             ct.sort(key=line_key)
-            new_areas.append(dict(level=level, name=f"L{level}-R{cj + 1:02d}C{ci + 1:02d}", tasks=ct,
+            new_areas.append(dict(level=level, name=f"L{level}-R{cj + 1:02d}C{ci + 1:02d}{suffix}", tasks=ct, unreachable=bool(suffix),
                                   u_min=umin, u_max=umax, v_min=vmin, v_max=vmax,
                                   votes=Counter(t['area_id'] for t in ct)))
 
@@ -171,6 +197,15 @@ select json_build_object(
     print(f"  영역 크기 u {min(spans_u):.3f}~{max(spans_u):.3f} m · v {min(spans_v):.3f}~{max(spans_v):.3f} m · 영역당 용접선 {min(per)}~{max(per)}개 (평균 {sum(per) / n_new:.1f})")
     print(f"  옛 영역이 갈라지는 칸 수: " + ', '.join(f"{k}칸 {v}개" for k, v in sorted(split.items())))
     print(f"  정차 물려받기: 영역 중심 이동 평균 {sum(na['shift'] for na in new_areas) / n_new:.2f} m · 최대 {max(na['shift'] for na in new_areas):.2f} m")
+    if unreach:
+        xs = [na for na in new_areas if na['unreachable']]
+        print(f"  닿지 않는 용접선 영역(이름 끝 X) {len(xs)}개 · 용접선 {sum(len(na['tasks']) for na in xs)}개 — 시나리오 검사 대상에서 뺄 것"
+              f" / 검사 영역 {n_new - len(xs)}개 · 용접선 {sum(per) - sum(len(na['tasks']) for na in xs)}개")
+    if a.dump:
+        pathlib.Path(a.dump).write_text(json.dumps([dict(name=na['name'], area_id=na['area_id'], reused=na['reused'], level=na['level'],
+            unreachable=na['unreachable'], u_min=na['u_min'], u_max=na['u_max'], v_min=na['v_min'], v_max=na['v_max'],
+            task_ids=[t['task_id'] for t in na['tasks']]) for na in new_areas], ensure_ascii=False), encoding='utf-8')
+        print(f"  구성 저장: {a.dump}")
     if data['active']:
         print(f"  ⚠ 진행 중 run 이 이 면의 정차 {data['active']}곳을 아직 검사하지 않았습니다.")
         if a.apply and not a.force: sys.exit('중단: 진행 중 run 을 끝내거나 중단한 뒤 적용하세요(-force 로 무시).')
