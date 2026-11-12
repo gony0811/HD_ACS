@@ -20,7 +20,7 @@
 #     이 스크립트는 두 줄이 있으면 빼고 적용한다(복원 중 보호용일 뿐 데이터와 무관).
 param(
     [Parameter(Mandatory = $true)] [string]$DumpFile,
-    [string]$Db = "hdacs",
+    [string]$DbName = "hdacs",
     [string]$PgHost = "127.0.0.1",
     [int]$PgPort = 5432,
     [string]$PgUser = "postgres",
@@ -58,7 +58,7 @@ function Q([string]$database, [string]$sql) {
 }
 
 $ts = Get-Date -Format "yyyyMMdd_HHmmss"
-$renamed = "${Db}_backup_$ts"
+$renamed = "${DbName}_backup_$ts"
 Write-Host "==> psql: $psql ($(& $psql --version))"
 Write-Host "==> 덤프: $DumpFile ($([math]::Round((Get-Item $DumpFile).Length / 1MB, 1)) MB)"
 
@@ -70,17 +70,17 @@ $kept = $lines | Where-Object { -not ($_.StartsWith('\restrict ') -or $_.StartsW
 [System.IO.File]::WriteAllLines($clean, [string[]]$kept, $utf8)
 if ($lines.Count -ne @($kept).Count) { Write-Host "    \restrict/\unrestrict $($lines.Count - @($kept).Count)줄 제거" }
 
-$exists = (Q "postgres" "select count(*) from pg_database where datname = '$Db'") -eq "1"
+$exists = (Q "postgres" "select count(*) from pg_database where datname = '$DbName'") -eq "1"
 if ($exists) {
-    $info = (Q "postgres" "select pg_encoding_to_char(encoding) || '|' || datcollate || '|' || datctype from pg_database where datname = '$Db'").Split("|")
+    $info = (Q "postgres" "select pg_encoding_to_char(encoding) || '|' || datcollate || '|' || datctype from pg_database where datname = '$DbName'").Split("|")
     $enc, $collate, $ctype = $info[0], $info[1], $info[2]
     $runs = $null
-    try { $runs = Q $Db "select count(*) from run.scenario_run where state in ('RUNNING','WAITING_FLOOR_TRANSFER')" } catch { }
-    Write-Host "==> 기존 DB '$Db' 있음 — 인코딩 $enc, 로케일 $collate / $ctype, 진행 중 run $runs"
+    try { $runs = Q $DbName "select count(*) from run.scenario_run where state in ('RUNNING','WAITING_FLOOR_TRANSFER')" } catch { }
+    Write-Host "==> 기존 DB '$DbName' 있음 — 인코딩 $enc, 로케일 $collate / $ctype, 진행 중 run $runs"
     if ($runs -and [int]$runs -gt 0) { Write-Warning "진행 중인 run 이 $runs 건 있습니다 — 적용하면 그 run 은 덤프 시점 상태로 바뀝니다." }
 } else {
     $enc, $collate, $ctype = "UTF8", $null, $null
-    Write-Host "==> 기존 DB '$Db' 없음 — 새로 만든다"
+    Write-Host "==> 기존 DB '$DbName' 없음 — 새로 만든다"
 }
 if ($WhatIf) { Write-Host "==> -WhatIf: 여기까지 확인만 했습니다. 바꾼 것 없음."; Remove-Item $clean; exit 0 }
 
@@ -94,25 +94,25 @@ if ($svc -and $svc.Status -ne "Stopped") {
 try {
     if ($exists) {
         New-Item -ItemType Directory -Force $BackupDir | Out-Null
-        $bak = Join-Path $BackupDir "${Db}_$ts.dump"
+        $bak = Join-Path $BackupDir "${DbName}_$ts.dump"
         Write-Host "==> 기존 DB 백업: $bak"
-        & $pgdump @conn -d $Db -Fc -f $bak
+        & $pgdump @conn -d $DbName -Fc -f $bak
         if ($LASTEXITCODE -ne 0) { throw "백업 실패 (exit $LASTEXITCODE) — 아무것도 바꾸지 않았습니다." }
-        Write-Host "==> 기존 DB 이름 변경: $Db → $renamed"
-        Q "postgres" "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$Db' and pid <> pg_backend_pid()" | Out-Null
-        Q "postgres" "ALTER DATABASE `"$Db`" RENAME TO `"$renamed`"" | Out-Null
+        Write-Host "==> 기존 DB 이름 변경: $DbName → $renamed"
+        Q "postgres" "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$DbName' and pid <> pg_backend_pid()" | Out-Null
+        Q "postgres" "ALTER DATABASE `"$DbName`" RENAME TO `"$renamed`"" | Out-Null
     }
 
     $locale = if ($collate) { " LC_COLLATE '$collate' LC_CTYPE '$ctype'" } else { "" }
-    Write-Host "==> 빈 DB 생성: $Db (ENCODING $enc$locale)"
-    Q "postgres" "CREATE DATABASE `"$Db`" WITH TEMPLATE template0 ENCODING '$enc'$locale" | Out-Null
+    Write-Host "==> 빈 DB 생성: $DbName (ENCODING $enc$locale)"
+    Q "postgres" "CREATE DATABASE `"$DbName`" WITH TEMPLATE template0 ENCODING '$enc'$locale" | Out-Null
 
     Write-Host "==> 덤프 적용(한 트랜잭션)"
     $log = Join-Path $BackupDir "apply_$ts.log"
     New-Item -ItemType Directory -Force $BackupDir | Out-Null
     # 외부 프로그램의 stderr 를 리다이렉트하면 PS 5.1 이 경고까지 오류로 감싸므로 이 구간만 Continue 로 두고 종료 코드로 판정한다.
     $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    & $psql @conn -d $Db -v ON_ERROR_STOP=1 --single-transaction -q -f $clean 2>&1 | Out-File -FilePath $log -Encoding utf8
+    & $psql @conn -d $DbName -v ON_ERROR_STOP=1 --single-transaction -q -f $clean 2>&1 | Out-File -FilePath $log -Encoding utf8
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prev
     if ($code -ne 0) { throw "덤프 적용 실패 (exit $code) — 로그: $log" }
@@ -120,10 +120,10 @@ try {
 catch {
     Write-Warning $_
     if ($exists -and ((Q "postgres" "select count(*) from pg_database where datname = '$renamed'") -eq "1")) {
-        Write-Host "==> 원상 복구: 새 $Db 삭제, $renamed → $Db"
-        Q "postgres" "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$Db' and pid <> pg_backend_pid()" | Out-Null
-        Q "postgres" "DROP DATABASE IF EXISTS `"$Db`"" | Out-Null
-        Q "postgres" "ALTER DATABASE `"$renamed`" RENAME TO `"$Db`"" | Out-Null
+        Write-Host "==> 원상 복구: 새 $DbName 삭제, $renamed → $DbName"
+        Q "postgres" "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$DbName' and pid <> pg_backend_pid()" | Out-Null
+        Q "postgres" "DROP DATABASE IF EXISTS `"$DbName`"" | Out-Null
+        Q "postgres" "ALTER DATABASE `"$renamed`" RENAME TO `"$DbName`"" | Out-Null
     }
     if ($svc) { Start-Service -Name $Service }
     Remove-Item $clean -ErrorAction SilentlyContinue
@@ -133,7 +133,7 @@ catch {
 Write-Host "==> 적용 완료 — 주요 테이블 행 수"
 foreach ($t in "ref.tank_geometry", "ref.wall", "ref.inspection_area", "ref.area_task", "ref.map", "ref.map_calibration",
                 "ref.map_calibration_point", "ref.scenario", "ref.scenario_area", "ref.robot", "run.scenario_run", "sys.audit_log") {
-    Write-Host ("    {0,-28} {1}" -f $t, (Q $Db "select count(*) from $t"))
+    Write-Host ("    {0,-28} {1}" -f $t, (Q $DbName "select count(*) from $t"))
 }
 Remove-Item $clean -ErrorAction SilentlyContinue
 if ($svc) {
