@@ -42,6 +42,18 @@ public static class WallIds
 }
 
 /// <summary>대외 단위 환산 [부록 A.4] — HD_ACS 내부 m(실수) → SAIGE 연동 mm(정수).</summary>
+/// <summary>
+/// SAIGE 조회 응답의 taskId 표기. 비전 S/W·SAIGE 는 촬영 요청의 taskId 16바이트를 RFC 4122 순서로 읽어 문자열로 만들고,
+/// HD_AMR 은 그 바이트를 리틀엔디안(.NET <c>Guid.ToByteArray</c> 배치)으로 싣는다 — 그래서 SAIGE 가 가진 ID 는
+/// ACS 내부 ID 의 앞 세 묶음(4·2·2바이트)이 뒤집힌 표기다. 조회 응답을 그 표기로 내보내 양쪽 문자열을 맞춘다.
+/// ACS 내부(DB·VDA payload·운영 UI)는 바꾸지 않는다. 두 번 적용하면 원래 값(자기 역변환).
+/// </summary>
+public static class SaigeTaskId
+{
+    public static Guid Flip(Guid id) => new(id.ToByteArray(bigEndian: true));
+    public static Guid ToWire(Guid id, bool littleEndian) => littleEndian ? Flip(id) : id;
+}
+
 public static class SaigeUnits
 {
     public static int ToMm(double meters) => (int)Math.Round(meters * 1000.0, MidpointRounding.AwayFromZero);

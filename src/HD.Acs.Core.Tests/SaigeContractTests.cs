@@ -124,4 +124,16 @@ public class SaigeContractTests
     [InlineData(-3, 1)]
     public void TaskAttempt_AccumulatesAndSaturates(int alreadyIssued, int expected) =>
         Assert.Equal(expected, TaskAttempt.Next(alreadyIssued));
+
+    [Fact]
+    public void SAIGE_조회_taskId는_앞_세_묶음을_뒤집은_표기이고_두_번_뒤집으면_원래_값이다()
+    {
+        var id = Guid.Parse("8e9b34ae-0625-5779-b31e-84d2d78738a7");
+        var wire = SaigeTaskId.Flip(id);
+        Assert.Equal(Guid.Parse("ae349b8e-2506-7957-b31e-84d2d78738a7"), wire);
+        Assert.Equal(id, SaigeTaskId.Flip(wire));
+        Assert.Equal(id, SaigeTaskId.ToWire(id, littleEndian: false));
+        // HD_AMR 이 싣는 바이트(.NET 배치)를 RFC 4122 순서로 읽은 값과 같다
+        Assert.Equal(wire, new Guid(id.ToByteArray(), bigEndian: true));
+    }
 }

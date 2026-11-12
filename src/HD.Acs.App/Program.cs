@@ -365,9 +365,14 @@ app.MapGet("/api/tanks/{tankId}/walls", async (string tankId, int? level, TankSh
 app.MapGet("/api/areas", async (string? tankId, int? level, int? wallId, TankShapeQueryService shape) =>
     Results.Ok(await shape.GetAreasAsync(tankId, level, wallId)));
 
+// SAIGE 조회 응답의 taskId 표기 — true(기본)면 앞 세 묶음을 뒤집은 리틀엔디안 표기(SaigeTaskId). 대상: 아래 두 TASK 조회와
+// /api/runs/{id}/results. ACS 내부 ID·VDA payload·/api/internal/… 은 그대로다.
+bool saigeTaskIdLe = app.Configuration.GetValue("Acs:Saige:TaskIdLittleEndian", true);
+
 app.MapGet("/api/areas/{areaId:guid}/tasks", async (Guid areaId, TankShapeQueryService shape) =>
     await shape.GetAreaTasksAsync(areaId) is { } tasks
-        ? Results.Ok(tasks) : Results.NotFound(new { error = $"area '{areaId}' 없음" }));
+        ? Results.Ok(tasks.Select(t => t with { TaskId = SaigeTaskId.ToWire(t.TaskId, saigeTaskIdLe) }))
+        : Results.NotFound(new { error = $"area '{areaId}' 없음" }));
 
 // 면·층 단위 TASK 목록 [이노로보틱스 개선 요청 2026-09-22 — SAIGE §4.6.4 반영 요청분].
 // 위 영역 단건 조회는 호출 수가 영역 수에 비례해(선창 1개 ≈ 1만 회) 화면 1장에 수백 회가 필요했다 → 화면 단위 1회.
@@ -385,7 +390,8 @@ app.MapGet("/api/tasks", async (string? tankId, int? wallId, int? level, int? li
     if (offset is < 0) return Results.BadRequest(new { error = "offset 은 0 이상이어야 합니다." });
 
     return await shape.GetTasksAsync(tankId, wallId, level, limit, offset) is { } tasks
-        ? Results.Ok(tasks) : Results.NotFound(new { error = $"tank '{tankId}' 없음" });
+        ? Results.Ok(tasks.Select(t => t with { TaskId = SaigeTaskId.ToWire(t.TaskId, saigeTaskIdLe) }))
+        : Results.NotFound(new { error = $"tank '{tankId}' 없음" });
 });
 
 app.MapGet("/api/internal/tanks/{tankId}/geometry", async (string tankId, TankGeometryService svc) =>
@@ -959,7 +965,8 @@ app.MapGet("/api/runs/{runId:guid}", async (Guid runId, RunQueryService runs) =>
     await runs.GetRunAsync(runId) is { } run ? Results.Ok(run) : Results.NotFound(new { error = $"run '{runId}' 없음" }));
 
 // TASK별 결과 상세 — 종결 TASK의 최종 결과, taskId당 1건 [§5.6]
-app.MapGet("/api/runs/{runId:guid}/results", async (Guid runId, string? status, int? limit, int? offset, RunQueryService runs) =>
+// taskId 는 SAIGE 표기(Acs:Saige:TaskIdLittleEndian)로 내보낸다. 운영 UI 는 canonical=true 로 ACS 내부 ID 를 받는다.
+app.MapGet("/api/runs/{runId:guid}/results", async (Guid runId, string? status, int? limit, int? offset, bool? canonical, RunQueryService runs) =>
 {
     if (status is not null && !RunQueryService.TaskStatuses.Contains(status))
         return Results.BadRequest(new { error = $"status '{status}' 는 허용값이 아닙니다 — {string.Join(" | ", RunQueryService.TaskStatuses)}" });
@@ -967,8 +974,10 @@ app.MapGet("/api/runs/{runId:guid}/results", async (Guid runId, string? status, 
         return Results.BadRequest(new { error = "limit 은 1~1000 이어야 합니다." });
     if (offset is < 0)
         return Results.BadRequest(new { error = "offset 은 0 이상이어야 합니다." });
-    return await runs.GetResultsAsync(runId, status, limit ?? 100, offset ?? 0) is { } r
-        ? Results.Ok(r) : Results.NotFound(new { error = $"run '{runId}' 없음" });
+    if (await runs.GetResultsAsync(runId, status, limit ?? 100, offset ?? 0) is not { } r)
+        return Results.NotFound(new { error = $"run '{runId}' 없음" });
+    bool flip = saigeTaskIdLe && canonical != true;
+    return Results.Ok(flip ? r with { Items = r.Items.Select(i => i with { TaskId = SaigeTaskId.Flip(i.TaskId) }).ToList() } : r);
 });
 
 // 검사 작업 큐 조회 (greedy 배차 상태 — 운영 화면 층 진행/오버레이 소스)
