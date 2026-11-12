@@ -496,9 +496,42 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"현재 AMR 위치 조회 실패: {ex.Message}"; }   // 409 층/위치 없음·400 T_W_D 무효·404
     }
 
+    /// <summary>선택 용접선을 다시 검사 대상으로(ENABLE).</summary>
+    [RelayCommand(CanExecute = nameof(CanEnableTask))]
+    private Task EnableTaskAsync() => SetTaskEnabledAsync(true);
+
+    /// <summary>선택 용접선을 검사에서 임시 제외(DISABLE) — 계획·taskId·검사 기록은 그대로 두고 배차에서만 빠진다.</summary>
+    [RelayCommand(CanExecute = nameof(CanDisableTask))]
+    private Task DisableTaskAsync() => SetTaskEnabledAsync(false);
+
+    private bool CanEnableTask() => SelectedTask is { Enabled: false };
+    private bool CanDisableTask() => SelectedTask is { Enabled: true };
+
+    private async Task SetTaskEnabledAsync(bool enabled)
+    {
+        if (SelectedTask is not { } task) return;
+        try
+        {
+            if (!await _api.SetAreaTasksEnabledAsync(new[] { task.TaskId }, enabled, _operatorId))
+            {
+                StatusMessage = "임시 제외 설정 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요.";
+                return;
+            }
+            await LoadTasksAndProjectAsync();
+            await RefreshAreasAsync();
+            int off = AreaTasks.Count(t => !t.Enabled);
+            var text = enabled ? $"용접선 seq {task.Seq} 검사 대상으로 복귀"
+                : $"용접선 seq {task.Seq} 임시 제외 — 다음 run 부터 이 용접선은 검사하지 않습니다";
+            StatusMessage = $"{text} (이 영역 제외 {off}개 / {AreaTasks.Count}개)";
+        }
+        catch (Exception ex) { StatusMessage = $"임시 제외 설정 실패: {ex.Message}"; }
+    }
+
     partial void OnSelectedTaskChanged(AreaTaskDto? value)
     {
         UpdateTaskCommand.NotifyCanExecuteChanged();
+        EnableTaskCommand.NotifyCanExecuteChanged();
+        DisableTaskCommand.NotifyCanExecuteChanged();
         TestSeamStartCommand.NotifyCanExecuteChanged();
         InspectTaskOnlyCommand.NotifyCanExecuteChanged();
         AddTaskToSplitCommand.NotifyCanExecuteChanged();

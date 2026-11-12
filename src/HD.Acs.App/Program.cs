@@ -634,7 +634,7 @@ app.MapPost("/api/areas/{areaId:guid}/tasks", async (Guid areaId, CreateAreaTask
         SeamType = AreaTaskRules.Normalize(req.SeamType),   // canonical 저장(대문자+legacy 별칭 매핑) — 소문자/legacy 저장 시 run 시작 때 param_schema 위반
         StartU = req.StartU, StartV = req.StartV, EndU = req.EndU, EndV = req.EndV,
         Points = req.Points is { Length: > 0 } ? JsonSerializer.Serialize(req.Points) : null,   // CROSS 가지 끝점 [VDA §8.5.1]
-        SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId
+        SectionDxfId = req.SectionDxfId ?? "", ProfileId = req.ProfileId ?? "", CreatedBy = req.UserId, Enabled = req.Enabled ?? true
     };
     db.AreaTasks.Add(task);
     await db.SaveChangesAsync();
@@ -667,7 +667,7 @@ app.MapGet("/api/internal/areas/{areaId:guid}/tasks", async (Guid areaId, AcsDbC
     return Results.Ok(tasks.Select(t => new
     {
         t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
-        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
+        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points), t.Enabled
     }));
 });
 
@@ -684,7 +684,7 @@ app.MapGet("/api/internal/area-tasks", async (string? tankId, AcsDbContext db) =
     return Results.Ok(tasks.Select(t => new
     {
         t.AreaId, t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId,
-        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points)
+        Points = t.Points is null ? null : JsonSerializer.Deserialize<double[][]>(t.Points), t.Enabled
     }));
 });
 
@@ -739,7 +739,29 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
     });
     await db.SaveChangesAsync();
     return Results.Ok(new
-    { t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId });
+    { t.TaskId, t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV, t.SectionDxfId, t.ProfileId, t.Enabled });
+});
+
+// 용접선 임시 제외/복귀 — enabled=false 인 용접선은 큐 전개·재개·재검사에서 싣지 않는다(계획·taskId·검사 기록은 그대로).
+// 진행 중 run 은 시작 때 만든 큐를 쓰므로 다음 run(또는 이어하기의 남은 정차)부터 반영된다.
+app.MapPut("/api/area-tasks/enabled", async (SetAreaTasksEnabledRequest req, AcsDbContext db) =>
+{
+    var ids = (req.TaskIds ?? Array.Empty<Guid>()).Distinct().ToList();
+    if (ids.Count == 0) return Results.BadRequest(new { error = "taskIds 가 비어 있습니다." });
+    var tasks = await db.AreaTasks.Where(t => ids.Contains(t.TaskId)).ToListAsync();
+    if (tasks.Count != ids.Count)
+        return Results.NotFound(new { error = $"등록되지 않은 용접선 {ids.Count - tasks.Count}개" });
+    var changed = tasks.Where(t => t.Enabled != req.Enabled).ToList();
+    foreach (var t in changed) t.Enabled = req.Enabled;
+    if (changed.Count > 0)
+        db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+        {
+            UserId = req.UserId ?? "", Action = req.Enabled ? "AREA_TASK_ENABLE" : "AREA_TASK_DISABLE",
+            Target = changed.Count == 1 ? changed[0].TaskId.ToString() : $"{changed.Count} tasks",
+            Detail = System.Text.Json.JsonSerializer.Serialize(new { taskIds = changed.Select(t => t.TaskId), req.Enabled }),
+        });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { enabled = req.Enabled, changed = changed.Count });
 });
 
 app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext db) =>
@@ -1303,7 +1325,10 @@ public sealed record UpdateAreaRequest(string Name, double[][] Corners,
 public sealed record CreateAreaTaskRequest(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
     Guid? TaskId = null,    // (선택) 영구 식별자 보존 등록 [SAIGE §2.5] — .hdacs 재적재용. 미지정=서버 발급
-    double[][]? Points = null);   // (선택) CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+    double[][]? Points = null,    // (선택) CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=Start [VDA §8.5.1]
+    bool? Enabled = null);        // (선택) false = 임시 제외. 미지정 = 검사 대상
+// 용접선 임시 제외/복귀
+public sealed record SetAreaTasksEnabledRequest(Guid[]? TaskIds, bool Enabled, string? UserId = null);
 // 검사 작업 수정(PUT) — 좌표 4값 필수, 나머지 null=기존값 유지. taskId·areaId는 바뀌지 않는다.
 public sealed record UpdateAreaTaskRequest(double StartU, double StartV, double EndU, double EndV,
     int? Seq = null, string? Name = null, string? SeamType = null, string? SectionDxfId = null, string? ProfileId = null,

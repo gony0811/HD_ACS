@@ -234,6 +234,8 @@ public sealed partial class ReachSimService
         if (wallCode is { Length: > 0 }) q = q.Where(a => a.WallCode == wallCode);
         var areas = await q.OrderBy(a => a.Level).ThenBy(a => a.WallCode).ThenBy(a => a.Name).ToListAsync(ct);
 
+        // 임시 제외(enabled = false) 용접선은 정차를 고를 때 보지 않는다 — 배차가 싣지 않는 용접선이 정차를 좌우하지 않게
+        foreach (var a in areas) a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();
         var list = new List<ReachStationOptimum>();
         foreach (var a in areas)
         {
@@ -276,7 +278,7 @@ public sealed partial class ReachSimService
         foreach (var a in areas)
         {
             if (onlyAreas is not null && !onlyAreas.Contains(a.AreaId)) continue;
-            var tasks = a.Tasks.Where(t => taskIds.Contains(t.TaskId)).OrderBy(t => t.Seq).ToList();
+            var tasks = a.Tasks.Where(t => t.Enabled && taskIds.Contains(t.TaskId)).OrderBy(t => t.Seq).ToList();
             if (tasks.Count == 0 || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) continue;
             var setup = Setup(ctx, a, wall);
             var saved = setup.Stations[0];
@@ -322,7 +324,9 @@ public sealed partial class ReachSimService
     {
         _model = _baseModel;   // 운영 가지 규칙
         var a = await _db.InspectionAreas.AsNoTracking().Include(x => x.Tasks).FirstOrDefaultAsync(x => x.AreaId == areaId, ct);
-        if (a is null || a.Tasks.Count == 0) return null;
+        if (a is null) return null;
+        a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();   // 임시 제외 용접선은 배차가 싣지 않는다
+        if (a.Tasks.Count == 0) return null;
         var ctx = await LoadTankAsync(a.TankId, ct);
         if (ctx is null || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) return null;
         var setup = Setup(ctx, a, wall);

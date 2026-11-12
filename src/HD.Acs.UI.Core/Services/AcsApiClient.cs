@@ -534,6 +534,14 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
     }
 
+    public async Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync("/api/area-tasks/enabled", new { TaskIds = taskIds, Enabled = enabled, UserId = userId }, ct);
+        if (IsUnsupportedRoute(resp)) return false;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return true;
+    }
+
     public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/internal/areas/{areaId}/tasks", ct) ?? new();
 

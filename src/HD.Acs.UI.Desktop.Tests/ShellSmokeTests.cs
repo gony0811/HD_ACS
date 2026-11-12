@@ -119,11 +119,11 @@ public class ShellSmokeTests
             Assert.NotNull(Find<Border>(window, "StationPanel"));   // 로봇 카드 ▸ 계획 정차점까지 거리
             Assert.False(string.IsNullOrEmpty(Find<TextBlock>(window, "StatusHeadline").Text));   // 바인딩 연결 확인
 
-            // 계획 ▸ 영역·작업(기본 탭) → AreaGrid 8열 / TaskGrid 7열(유형 포함), 시나리오 탭 → ScenarioGrid 5열, 캘리브레이션 → PointGrid 5열
+            // 계획 ▸ 영역·작업(기본 탭) → AreaGrid 8열 / TaskGrid 8열(유형·검사 포함), 시나리오 탭 → ScenarioGrid 5열, 캘리브레이션 → PointGrid 5열
             shell.CurrentMode = AppMode.Planning;
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(8, Find<DataGrid>(window, "AreaGrid").Columns.Count);
-            Assert.Equal(7, Find<DataGrid>(window, "TaskGrid").Columns.Count);
+            Assert.Equal(8, Find<DataGrid>(window, "TaskGrid").Columns.Count);
 
             var tabs = Find<TabControl>(window, "Tabs");
             tabs.SelectedIndex = 1; Dispatcher.UIThread.RunJobs();

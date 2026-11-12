@@ -20,6 +20,8 @@ public static class SchemaEnsure
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS excluded_tasks int NOT NULL DEFAULT 0",
         // db/migrations/2026-10-07_area_task_points.sql — CROSS3/4 교차 가지 끝점(VDA §8.5.1 N13)
         "ALTER TABLE ref.area_task ADD COLUMN IF NOT EXISTS points jsonb",
+        // db/migrations/2026-11-12_area_task_enabled.sql — 용접선 임시 제외
+        "ALTER TABLE ref.area_task ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true",
         // db/migrations/2026-10-31_area_station_max_backward.sql — 영역별 정차 보정 후진 상한(VDA §4.4.2 N23)
         "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_max_backward_mm double precision",
         // db/migrations/2026-11-04_area_station_lift_mm.sql — 영역별 정차 리프트 높이(0~1000mm, NULL=배차 기본 0)

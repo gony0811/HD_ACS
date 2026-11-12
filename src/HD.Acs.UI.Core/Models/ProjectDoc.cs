@@ -51,4 +51,5 @@ public sealed record TaskDoc(
     double StartU, double StartV, double EndU, double EndV,
     string SectionDxfId, string ProfileId,
     Guid? SourceId = null,
-    double[][]? Points = null);          // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m [VDA §8.5.1]. 구파일=null
+    double[][]? Points = null,           // CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m [VDA §8.5.1]. 구파일=null
+    bool? Enabled = null);               // false = 임시 제외. null(구파일·검사 대상) = 검사 대상

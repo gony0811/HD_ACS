@@ -358,6 +358,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/internal/area-tasks?tankId=` | 선창 전 작업 일괄 조회(단건 작업 조회 필드 + `areaId`) — UI 파일 ▸ 저장이 사용 |
 | `PUT /api/areas/{areaId}` | 영역 수정 — **areaId·소속 작업(taskId) 유지**. `{ name, corners, stationX/Y/Theta, stationStandoffM }` 전체 교체(정차 null=수동 지정 해제), 면은 변경 불가·층은 재유도. 면 범위/크기 상한(u 1.44m · v 1.44m, 경사면·수직벽 v 2.9m)/층 유도 실패·**기존 작업이 새 영역 밖**이면 400, 이름 중복 409, 없음 404. 화면: 계획 ▸ 영역·작업에서 영역 행 선택 → 폼에 값 채워짐 → [선택 영역 수정] |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
+| `PUT /api/area-tasks/enabled` | 용접선 임시 제외/복귀 `{taskIds[], enabled, userId}` — `enabled=false` 인 용접선은 검사(큐 전개·이어하기의 남은 정차·재검사)에서 빠진다. 계획·taskId·검사 기록은 그대로. 화면: 계획 ▸ 영역·작업 ▸ 작업 목록의 [ENABLE]/[DISABLE] |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |

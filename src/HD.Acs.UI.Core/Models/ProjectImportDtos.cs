@@ -14,7 +14,7 @@ public sealed record ProjectImportGeometryDto(
 /// <summary>작업 1개 — 서버 CreateAreaTaskRequest와 같은 필드.</summary>
 public sealed record ProjectImportTaskDto(int? Seq, string? Name, string? SeamType,
     double StartU, double StartV, double EndU, double EndV, string? SectionDxfId, string? ProfileId, string? UserId,
-    Guid? TaskId, double[][]? Points);
+    Guid? TaskId, double[][]? Points, bool? Enabled = null);
 
 /// <summary>영역 1개 + 소속 작업.</summary>
 public sealed record ProjectImportAreaDto(string WallCode, string Name, double[][]? Corners,
@@ -32,7 +32,7 @@ public sealed record ProjectImportResultDto(string TankId, int Areas, int Tasks,
 /// <summary>선창 전 작업 일괄 조회 행 — <see cref="AreaTaskDto"/> + 소속 영역.</summary>
 public sealed record TankAreaTaskDto(Guid AreaId, Guid TaskId, int Seq, string? Name, string SeamType,
     double StartU, double StartV, double EndU, double EndV, string SectionDxfId, string ProfileId,
-    double[][]? Points = null)
+    double[][]? Points = null, bool Enabled = true)
 {
-    public AreaTaskDto ToAreaTask() => new(TaskId, Seq, Name, SeamType, StartU, StartV, EndU, EndV, SectionDxfId, ProfileId, Points);
+    public AreaTaskDto ToAreaTask() => new(TaskId, Seq, Name, SeamType, StartU, StartV, EndU, EndV, SectionDxfId, ProfileId, Points, Enabled);
 }

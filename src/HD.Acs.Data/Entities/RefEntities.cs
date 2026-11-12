@@ -225,6 +225,8 @@ public class AreaTaskEntity
     public string? Points { get; set; }
     public string SectionDxfId { get; set; } = "";
     public string ProfileId { get; set; } = "";
+    /// <summary>검사 대상 여부. false = 임시 제외 — 큐 전개·재개·재검사에서 이 용접선을 싣지 않는다(계획·기록은 그대로).</summary>
+    public bool Enabled { get; set; } = true;
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

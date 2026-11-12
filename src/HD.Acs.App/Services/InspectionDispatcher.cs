@@ -86,7 +86,7 @@ public sealed class InspectionDispatcher
             if (area is null) return null;
             // 큐에 실린 용접선과 현재 계획이 다르면(run 도중 계획 수정) 실린 그대로 보낸다
             var queued = actions.Select(a => a?["taskId"]?.GetValue<string>()).OrderBy(s => s).ToList();
-            if (!queued.SequenceEqual(area.Tasks.Select(t => t.TaskId.ToString()).OrderBy(s => s))) return null;
+            if (!queued.SequenceEqual(area.Tasks.Where(t => t.Enabled).Select(t => t.TaskId.ToString()).OrderBy(s => s))) return null;
             var wall = await _db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode, ct);
             var tWd = await LoadTransformsAsync(area.TankId, new[] { area.Level }, run.RunId, ct);
             if (wall is null || !tWd.TryGetValue(area.Level, out var lv)) return null;
@@ -305,6 +305,23 @@ public sealed class InspectionDispatcher
         else
             _log.LogInformation("Run {Run}: 시나리오에 연결된 영역 없음 — 선창 전체 {Total}개 영역 전개.", run.RunId, areas.Count);
 
+        // 임시 제외(enabled = false) 용접선은 싣지 않는다. 용접선이 모두 제외된 영역은 정차 자체를 만들지 않는다.
+        int disabledTasks = 0;
+        var allDisabled = new HashSet<Guid>();
+        foreach (var a in areas)
+        {
+            var before = a.Tasks.Count;
+            a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();
+            disabledTasks += before - a.Tasks.Count;
+            if (before > 0 && a.Tasks.Count == 0) allDisabled.Add(a.AreaId);
+        }
+        if (disabledTasks > 0)
+        {
+            areas = areas.Where(a => !allDisabled.Contains(a.AreaId)).ToList();
+            _log.LogInformation("Run {Run}: 임시 제외된 용접선 {N}개는 싣지 않음(전부 제외된 영역 {A}개는 정차 없음).",
+                run.RunId, disabledTasks, allDisabled.Count);
+        }
+
         if (areas.Count == 0)
         {
             _log.LogWarning("Run {Run}: 선창 {Tank}에 전개할 영역이 없어 작업 큐가 비었습니다.", run.RunId, tankId);
@@ -322,7 +339,8 @@ public sealed class InspectionDispatcher
 
         var seq = 0;
         var missionMaps = new HashSet<string>();
-        int totalTasks = 0, excludedTasks = 0;   // 진행률 분모/제외 수 — 이 시점에 고정 [SAIGE §6.1/§6.4]
+        // 진행률 분모/제외 수 — 이 시점에 고정 [SAIGE §6.1/§6.4]. 임시 제외 용접선도 제외 수에 넣는다(리페어 run 은 지정분만 보므로 제외).
+        int totalTasks = 0, excludedTasks = only is null ? disabledTasks : 0;
         foreach (var area in areas)
         {
             // 층 T_W_D 없음(또는 면 미등록) → 로봇 좌표 산출 불가로 큐에서 제외. 분모에 넣지 않고 별도 보고한다.
@@ -469,6 +487,8 @@ public sealed class InspectionDispatcher
         var weldSchema = await WeldSchemaAsync(ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
+        // 임시 제외(enabled = false) 용접선은 재계산에서도 싣지 않는다
+        foreach (var a in areas.Values) a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();
         // 리페어 run은 재계산해도 지정한 용접선만 싣는다
         if (RepairFilter(run) is { } only)
             foreach (var a in areas.Values) a.Tasks = a.Tasks.Where(t => only.Contains(t.TaskId)).ToList();

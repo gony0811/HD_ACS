@@ -341,6 +341,7 @@ CREATE TABLE ref.area_task (
   points         jsonb,                     -- CROSS3/4 교차 가지 끝점 [[u,v],...] 면-로컬 m, 중심=start (VDA §8.5.1). LINE/CORNER=NULL
   section_dxf_id text NOT NULL DEFAULT '',
   profile_id     text NOT NULL DEFAULT '',
+  enabled        boolean NOT NULL DEFAULT true,  -- false = 임시 제외(큐 전개·재개·재검사에서 싣지 않음)
   created_by     text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   UNIQUE (area_id, seq)

@@ -52,7 +52,7 @@ public sealed class ProjectService : IProjectService
             else tasks = tasksByArea.TryGetValue(a.AreaId, out var list) ? list : Array.Empty<AreaTaskDto>();
             var taskDocs = tasks.Select(t => new TaskDoc(
                 t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                t.SectionDxfId, t.ProfileId, t.TaskId, t.Points)).ToArray();
+                t.SectionDxfId, t.ProfileId, t.TaskId, t.Points, t.Enabled ? null : false)).ToArray();
             areaDocs.Add(new AreaDoc(a.WallCode, a.Level, a.Name,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, taskDocs, a.Corners,
                 a.StationStandoffM, a.AreaId, a.StationMaxBackwardMm, a.StationLiftMm));
@@ -141,7 +141,7 @@ public sealed class ProjectService : IProjectService
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM,
                 null, a.SourceId,
                 a.Tasks.Select(t => new ProjectImportTaskDto(t.Seq, t.Name, t.SeamType, t.StartU, t.StartV, t.EndU, t.EndV,
-                    t.SectionDxfId, t.ProfileId, _operatorId, t.SourceId, t.Points)).ToArray(),
+                    t.SectionDxfId, t.ProfileId, _operatorId, t.SourceId, t.Points, t.Enabled)).ToArray(),
                 a.StationMaxBackwardMm, a.StationLiftMm)).ToArray(),
             _operatorId);
         var result = await _api.ImportProjectAsync(doc.TankId, request, ct);

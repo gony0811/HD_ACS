@@ -223,11 +223,18 @@
             </DockPanel>
 
             <DockPanel Grid.Row="2" MinHeight="120">
-                <TextBlock DockPanel.Dock="Top" Text="선택 영역 작업 목록 (선택 시 수정)" FontWeight="Bold" Margin="0,0,0,4" />
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" Text="선택 영역 작업 목록 (선택 시 수정)" FontWeight="Bold" VerticalAlignment="Center" />
+                    <Button DockPanel.Dock="Right" Classes="form" Content="DISABLE (임시 제외)" MinWidth="130" Margin="6,0,0,0" Command="{Binding DisableTaskCommand}"
+                            ToolTip.Tip="선택한 용접선을 검사에서 임시로 뺍니다. 계획·taskId·검사 기록은 그대로이며, 다음 run(또는 이어하기의 남은 정차)부터 이 용접선은 진행하지 않습니다." />
+                    <Button DockPanel.Dock="Right" Classes="form" Content="ENABLE (검사 대상)" MinWidth="130" Command="{Binding EnableTaskCommand}"
+                            ToolTip.Tip="임시 제외한 용접선을 다시 검사 대상으로 되돌립니다." />
+                </DockPanel>
                 <DataGrid x:Name="TaskGrid" ItemsSource="{Binding AreaTasks}" SelectedItem="{Binding SelectedTask, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="순번" Binding="{Binding Seq}" Width="Auto" MinWidth="52" />
                         <DataGridTextColumn Header="유형" Binding="{Binding TypeLabel}" Width="Auto" MinWidth="72" />
+                        <DataGridTextColumn Header="검사" Binding="{Binding EnabledLabel}" Width="Auto" MinWidth="48" />
                         <DataGridTextColumn Header="시작 u(m)" Binding="{Binding StartU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="시작 v(m)" Binding="{Binding StartV, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="끝 u(m)" Binding="{Binding EndU, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />

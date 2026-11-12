@@ -123,7 +123,7 @@ public sealed class ProjectImportService
                     SeamType = AreaTaskRules.Normalize(t.SeamType),
                     StartU = t.StartU, StartV = t.StartV, EndU = t.EndU, EndV = t.EndV,
                     Points = t.Points is { Length: > 0 } ? JsonSerializer.Serialize(t.Points) : null,
-                    SectionDxfId = t.SectionDxfId ?? "", ProfileId = t.ProfileId ?? "", CreatedBy = req.UserId,
+                    SectionDxfId = t.SectionDxfId ?? "", ProfileId = t.ProfileId ?? "", CreatedBy = req.UserId, Enabled = t.Enabled ?? true,
                 });
             }
         }
