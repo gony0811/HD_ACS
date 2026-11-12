@@ -33,6 +33,7 @@ public class ManualBeadInputTests
         db.Robots.Add(new RobotEntity { RobotId = RobotId, Manufacturer = "HD", SerialNumber = "AMR-01", Name = RobotId, VdaVersion = "2.0", IsActive = true });
         db.AlarmSpecs.AddRange(
             new AlarmSpecEntity { AlarmCode = "MANUAL_BEAD_INPUT_REQUIRED", Severity = "WARNING", Title = "" },
+            new AlarmSpecEntity { AlarmCode = "COBOT_ZONE_OBSTACLE", Severity = "WARNING", Title = "" },
             new AlarmSpecEntity { AlarmCode = "EQUIPMENT_ERROR", Severity = "WARNING", Title = "" });
         db.SaveChanges();
 
@@ -132,6 +133,42 @@ public class ManualBeadInputTests
 
         await env.States.HandleStateAsync(Robot, new Vda5050State());
         Assert.False(env.Tracker.HasActiveErrors(RobotId));
+    }
+
+    /// <summary>
+    /// 코봇 반경 장애물(cobotZoneObstacle, WARNING) [VDA §6.4] — AMR이 주행 중 장애물을 보고 선 동안만 싣는다.
+    /// 알람 1건·사라지면 해제, 정차·run·오류 상태 판정은 그대로(AMR이 기다렸다가 다시 출발한다).
+    /// </summary>
+    [Fact]
+    public async Task 코봇_반경_장애물은_경고_알람만_남기고_사라지면_해제된다()
+    {
+        var env = Build();
+        await SeedDispatchedRunAsync(env.Db);
+        Vda5050State Held() => new()
+        {
+            Errors = { new VdaError { ErrorType = "cobotZoneObstacle", ErrorLevel = "WARNING",
+                ErrorDescription = "코봇 반경 장애물 감지 — 주행 정지: 전방 0.62m (방향 +3°, 점 5개)" } },
+        };
+
+        await env.States.HandleStateAsync(Robot, Held());
+        await env.States.HandleStateAsync(Robot, Held());   // 반복 보고 — 중복 없음
+
+        var alarm = await env.Db.Alarms.AsNoTracking().SingleAsync();
+        Assert.Equal("COBOT_ZONE_OBSTACLE", alarm.AlarmCode);
+        Assert.Null(alarm.ClearedAt);
+        Assert.Contains("전방 0.62m", DescriptionOf(alarm));
+        Assert.False(env.Tracker.HasActiveErrors(RobotId));   // 고장이 아니다 — SAIGE 로봇 상태가 ERROR로 가지 않는다
+        var wi = await env.Db.WorkItems.AsNoTracking().SingleAsync();
+        Assert.Equal(("DISPATCHED", 0), (wi.Status, wi.Attempts));
+        Assert.Equal("RUNNING", (await env.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);
+
+        await env.States.HandleStateAsync(Robot, new Vda5050State());   // 장애물이 비켜나 다시 출발
+
+        var cleared = await env.Db.Alarms.AsNoTracking().SingleAsync();
+        Assert.NotNull(cleared.ClearedAt);
+        Assert.Equal("AMR", cleared.ClearedBy);
+        Assert.True(RobotErrorTracker.IsObstacleHold("COBOTZONEOBSTACLE"));
+        Assert.False(RobotErrorTracker.IsOperatorNotice("cobotZoneObstacle"));
     }
 
     [Theory]

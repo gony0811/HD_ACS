@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.16** |
+| 문서 버전 | **1.17** |
 | 작성일 | 2026-08-27 (최종 개정 2026-11-12) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
@@ -22,6 +22,7 @@
 | 개정 1.12 (초안) | 2026-10-31 — **정차 온보드 보정 허용 범위 `params.stationAdjust` 제안 `[N23]`**(§4.4.2 신설·§8.1·§10). AMR이 도착 후 리치를 위해 `nodePosition`에서 옮겨 설 수 있는 한계(전진·후진·횡·각)를 ACS가 정차마다 준다. `allowedDeviation*`(도착 판정)은 의미 무변경. **선택 필드·기본 꺼짐 → 계약 하위 호환**. ACS 발행 구현 완료, AMR 회신·사인오프 대기 |
 | 개정 1.13 | 2026-11-03 — **run 중단 시 진행 중 Order 취소**(§4.5.3·§5.4): `cancelOrder` 발행 조건을 "통신 단절 PAUSE 중"에서 "**중단 시 그 run의 정차가 실행 중이거나 PAUSE 중**"으로 확장. 취소·비상정지로 FAILED 보고된 정차는 실패 집계 없이 PENDING(이어하기 대상). AMR 요구 동작은 무변경(HD_AMR `CancelOrderAsync`는 PAUSE 여부와 무관하게 주행 정지·검사 중단·잔여 액션 FAILED) |
 | 개정 1.14 | 2026-11-09 — **정차 리프트 높이 `params.liftStrokeMm` 명문화**(§8.1·§8.7). 정차점 최적화로 찾은 영역 공통 리프트 높이(0~1000 mm, 미지정 0)를 `startWeldInspection` 의 모든 액션에 싣는 것(ACS 구현 2026-11-04)을 표에 반영하고, **시험 액션 `moveToSeamStart` 에도 같은 값을 `params.liftStrokeMm` 으로 싣는다**(종전엔 `params` 없음 → 시험이 리프트 없이 수행돼 운영 자세와 달랐다). 선택 필드라 하위 호환(부재 = 0). HD_AMR 쪽 리프트 구동 반영 여부는 확인 필요 |
+| 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.16 | 2026-11-12 — **`position.drawingPos`에 용접선 끝점 면 좌표 `uEnd`·`vEnd` 추가(선택 필드, §8.1) [N15]**. AMR은 `u,v`(시작점)를 원점으로, `uEnd,vEnd − u,v`의 큰 축을 면 위 용접선 방향으로 삼아 촬영 위치(CAPTURE_REQ `PosX/PosY`)를 면 좌표로 환산한다(작업물 좌표계 X+ = 시작→끝, 면의 손잡이는 `wall_code`로 판정 — T·SM·SL·SU는 왼손). 종전에는 용접선 시작점 기준 좌표가 그대로 나가 CROSS4 교차 팔의 음수 좌표를 비전이 `ERR_POSITION`으로 거부했다(실기 11-12 03:53, 56점 중 17점). 끝점이 없거나(구버전 ACS) 면 축에서 10° 넘게 비스듬하면 AMR은 종전 방식으로 보낸다. 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기. 높이 `h`가 음수인 경유점(교차 중심, 프로필 Z −12)은 그대로 음수로 나가므로 비전 측 수용 여부 협의 필요 |
 | 개정 1.15 | 2026-11-12 — **작업자 입력 요청 errorType `manualBeadInputRequired` 추가**(§6.4). AMR이 비드 자동 검출 대신 작업자 입력 팝업을 띄운 동안 `errors[]`에 WARNING으로 싣고, 팝업이 닫히면 뺀다. **고장·실패가 아니다** — 진행 액션은 `RUNNING` 그대로이며 ACS는 알람(`MANUAL_BEAD_INPUT_REQUIRED`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. AMR은 같은 동안 타워램프 녹색을 1초 주기로 점멸한다(AMR 로컬). 추가 필드라 하위 호환(구버전 ACS는 일반 경고로 표시). 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.7 | 2026-10-07 — **`seamType` enum CROSS3 회전 4종 확장 `[N13 연장]`**: AMR 측이 CROSS3(T자 3갈래)를 면 자세별 5종에서 **회전별 4종**(`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`, 면 자세 무관)으로 재설계한 데 맞춰, enum을 5값 → **canonical 8값**(`LINE`/`CROSS3_R0`/`R90`/`R180`/`R270`/`CROSS4`/`CORNER2`/`CORNER3`)으로 확장. §8.1·§8.2 `param_schema`·등록 게이트(`AreaTaskRules`)·계획 UI 드롭다운·§10 N13 반영. ACS는 canonical 발행, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 `AreaTaskRules.Normalize` 가 저장 시 정규화(기존 DB 행도 마이그레이션 `2026-10-07_seamtype_cross3_rotation.sql` 로 1회 치환). **잔여 합의: CROSS3 의 0° 기준·회전 부호(CW/CCW)(§10 N13).** ※ AMR 보유본의 중간 개정 1.7(N17 seam z 기준면)·1.8(N18 거리 파라미터 정리)은 **본 ACS 사본에 미반영**(별도 추적) |
@@ -486,6 +487,7 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 | `visionLinkLost` · `depthCameraLinkLost` · `laserSensorLinkLost` · `ioModuleLinkLost` · `cobotLinkLost` · `amrLinkLost` | **장치 통신 HEAVY 알람**(검사 비전·Depth 카메라·3점 레이저·I/O 모듈·코봇·AMR 플랫폼) — 3 s 이상 지속된 통신 두절. 장치마다 1건, `errorReferences` `device`=`vision`/`depthCamera`/`laserSensor`/`ioModule`/`cobot`/`amr`. description `"{장치} 통신 두절 t0=HH:mm:ss — {사유}"`, 복구 후 `"… — 복구됨, RESET 대기"`. **현장 RESET 전까지 유지**(래치) (1.10, §9.6) | **FATAL** |
 | `orderRejectedDeviceFault` | 장치 알람 중 Order 거부 — 기존 orderId 유지, `errorReferences` orderId·actionId·device (1.10, §4.5.2) | WARNING |
 | `resumeRejected` | `stopPause` 재개 거부 — description에 사유(비상정지·배터리·측위/mapId·모드) (1.9, §5.3) | WARNING |
+| `cobotZoneObstacle` | **코봇 반경 장애물로 주행 정지** — ACS 지령 주행 중 라이다 점이 코봇 외곽(바닥 투영) + 여유 안에 들어와 AMR이 선 동안만 싣는다(고장·실패 아님). description `"코봇 반경 장애물 감지 — 주행 정지: {방향} {거리}m (방향 n°, 점 n개), 감시 영역 …"`, `errorReferences` `distanceMm`·`bearingDeg`(0 = 정면, + = 왼쪽). 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목이 사라진다. 주행 제한 시간까지 남아 있으면 주행 실패로 종결 (1.17) | WARNING |
 | `manualBeadInputRequired` | **수동 비드 입력 대기** — 비드 자동 검출 대신 작업자 입력 팝업이 떠 있는 동안만 싣는다(고장·실패 아님). description `"{단계}: 수동 비드 입력 대기 — {사유} (… HH:mm:ss 까지)"`, `errorReferences` `stage`·`deadline`(UTC). 진행 액션은 `RUNNING` 그대로이고, 입력 확정·자동 결과 사용·실패 처리·시간 초과·중단으로 팝업이 닫히면 사라진다 (1.15) | WARNING |
 
 - ACS 정책: 액션 FAILED·errors 기준 **재시도 N회 → 스킵 → 알람** (§9.5).
@@ -500,6 +502,8 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 
 - **`errorReferences` (개정 1.10)**: `[{ "referenceKey": "...", "referenceValue": "..." }]`. AMR은 모든 errors의 errorReferences를 그대로 발행한다(종전 누락 정정 — `orderRejectedBatteryLow`의 orderId·actionId 참조도 이제 전달). ACS는 선택 필드로 파싱하며 참조 없는 errors도 종전대로 처리한다.
 
+> ※구현(2026-11-12, 1.17): `cobotZoneObstacle`→`COBOT_ZONE_OBSTACLE` 알람(WARNING, 등장 시 1건·사라지면 해제 시각 기록). 실패 집계·재시도·배차와 무관하고 로봇 오류 상태 판정에도 세지 않는다. AMR 쪽은 `CobotObstacleGuard`(주행 대기 구간에서만 `GET /robot/pose` 를 0.4초마다 읽음, 2회 연속 감지 시 정지·5회 연속 비면 해소), 감시 중 타워램프 황색·부저, 화면 배너·운영 로그. AMR 파라미터 `cobotGuard.enabled`·`radiusMm`(0 = 코봇 외곽)·`marginMm`(100)·`minPoints`(3)·`pollMs`(400).
+>
 > ※구현(2026-11-12, 1.15): `manualBeadInputRequired`→`MANUAL_BEAD_INPUT_REQUIRED` 알람(WARNING, 등장 시 1건·사라지면 해제 시각 기록). **실패 집계·재시도·배차와 무관**하고, 로봇 오류 상태 판정(SAIGE 로봇 상태 ERROR)에도 세지 않는다. 운영 UI 현재 상태 카드에 "수동 비드 입력 대기", 이벤트 기록에 "수동 비드 입력 요청 — …"/"수동 비드 입력 종료". AMR은 같은 동안 타워램프 녹색을 1초 주기로 점멸한다(알람 적색·일시정지 황색이 우선, AMR 로컬).
 
 > ※구현(2026-10-13, 1.10): `*LinkLost`→`DEVICE_LINK_LOST` 알람(edge 1회, Latched 설명 변경은 중복 없음 — 사라지면 그 장치 알람에 해제 시각 기록), 알람 중 배차 보류·order 명령 409, `orderRejectedDeviceFault`→정차 PENDING 복귀 + `ORDER_REJECTED_DEVICE_FAULT` 알람. 운영 UI 로봇 상태 카드에 적색 배너 "장치 통신 두절 — 현장 RESET 필요".
