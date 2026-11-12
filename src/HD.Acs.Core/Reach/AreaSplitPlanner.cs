@@ -190,7 +190,7 @@ public static class AreaSplitPlanner
                 foreach (var y in yaws)
                 {
                     var st = space.StationOf(d, l, y);
-                    if (ReachSimulator.BodyAt(model, planes, st).ClearanceM >= space.MinBodyClearanceM) list.Add((st, d, l, y));
+                    if (space.BodyAllowed(model, planes, d, l, y, out _)) list.Add((st, d, l, y));
                 }
         return list;
     }

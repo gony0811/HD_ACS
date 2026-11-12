@@ -52,6 +52,43 @@ public class StationOptimizerTests
     }
 
     [Fact]
+    public void 벽_최소_거리를_주면_그보다_가까운_정차는_쓰지_않는다()
+    {
+        // A 면 가운데 — 차체 중심이 벽에서 1.5 m 이상 떨어져야 한다.
+        var a = Ct1.GenerateWalls().Single(w => w.WallCode == "A");
+        var c = a.To3D(a.ULen / 2, 5.5);
+        var near = new StationSearchSpace(new[] { c[0], c[1] }, new[] { a.Normal[0], a.Normal[1] }, a.FacingYaw!.Value, 0, 1.2);
+        var far = near with { MinWallDistM = 1.5 };
+        var m = ReachRobotModel.Default with { CheckTraversal = false };
+
+        var d0 = StationOptimizer.FirstBodyFeasible(m, Planes, near)!.Value.DistM;
+        Assert.True(d0 < 1.5, $"제한 없는 첫 가능 거리 {d0:0.00}");
+        Assert.Equal(1.5, StationOptimizer.FirstBodyFeasible(m, Planes, far)!.Value.DistM, 6);
+
+        Assert.True(near.BodyAllowed(m, Planes, 1.4, 0, 0, out var cl));
+        Assert.False(far.BodyAllowed(m, Planes, 1.4, 0, 0, out var cl2));
+        Assert.Equal(cl, cl2, 9);                        // 보고하는 차체 여유는 그 자리 값 그대로
+        Assert.True(far.BodyAllowed(m, Planes, 1.5, 0, 0, out _));
+
+        var seams = new IReadOnlyList<double[]>[] { new[] { a.To3D(a.ULen / 2 - 0.3, 5.5), c, a.To3D(a.ULen / 2 + 0.3, 5.5) } };
+        Assert.False(StationOptimizer.Evaluate(m, Planes, far, 1.2, 0, 0, seams, a.Normal, Strokes).Feasible);
+        var r = StationOptimizer.Optimize(m, Planes, far, seams, a.Normal, Strokes);   // 지금 정차 1.2 m — 제한보다 가깝다
+        Assert.False(r.Baseline.Feasible);
+        if (r.Best.Feasible) Assert.True(r.Best.DistM >= 1.5 - 1e-9, $"거리 {r.Best.DistM:0.00}");
+    }
+
+    [Fact]
+    public void 수평면_탐색에는_벽_최소_거리를_쓰지_않는다()
+    {
+        var t = Ct1.GenerateWalls().Single(w => w.WallCode == "T");
+        var c = t.To3D(10, 3);
+        var space = new StationSearchSpace(new[] { c[0], c[1] }, new[] { t.Pose.U[0], t.Pose.U[1] }, 0, 10.53, 0,
+            MinDistM: -1.2, MaxDistM: 1.2, MinWallDistM: 1.5);
+        var planes = ReachSimulator.PlanesForLevel(Ct1.GenerateWalls().Select(w => new ReachPlane(w.WallCode, w.Pose.Origin, w.Normal)), 10.53, 4);
+        Assert.True(space.BodyAllowed(ReachRobotModel.Default, planes, 0, 0, 0, out _));
+    }
+
+    [Fact]
     public void 하부경사면에_걸친_횡격벽_끝_영역은_옆으로_비켜_선다()
     {
         // A 면 u = 4 m(SL 쪽 끝) — 1.2 m 이격 정차는 차체가 SL 밑. 벽에서 멀어져도 안 빠지고 선창 가운데(좌측 +)로 비켜야 한다.

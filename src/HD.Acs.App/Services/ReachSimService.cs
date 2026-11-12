@@ -23,6 +23,8 @@ public sealed partial class ReachSimService
     private readonly InspectionDispatcher _dispatcher;
     private readonly ReachRobotModel _baseModel;
     private ReachRobotModel _model;
+    /// <summary>면 코드 → 차체 중심과 검사 면 사이 최소 거리 [m] (<c>Acs:Reach:WallMinDistMm</c>). 정차 최적화·배차 직전 정차 선택·분리 제안이 쓴다.</summary>
+    private readonly IReadOnlyDictionary<string, double> _wallMinDistM;
 
     /// <param name="config">
     /// HD_AMR 실기 값과 맞추는 설정 — <c>Acs:Reach:MountYawDeg</c>(T_A_B rz) · <c>ToolZMm</c>(공구 #1 z) ·
@@ -39,7 +41,18 @@ public sealed partial class ReachSimService
         _dispatcher = dispatcher;
         _baseModel = ModelFrom(config);
         _model = _baseModel;
+        _wallMinDistM = WallMinDistFrom(config);
     }
+
+    /// <summary><c>Acs:Reach:WallMinDistMm:{면 코드}</c> [mm] → m. 0 이하·숫자가 아닌 값은 버린다.</summary>
+    public static IReadOnlyDictionary<string, double> WallMinDistFrom(IConfiguration? config) =>
+        config is null
+            ? new Dictionary<string, double>()
+            : config.GetSection("Acs:Reach:WallMinDistMm").GetChildren()
+                .Select(s => (s.Key, Ok: double.TryParse(s.Value, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v), V: v))
+                .Where(x => x.Ok && x.V > 0)
+                .ToDictionary(x => x.Key, x => x.V / 1000.0, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>설정에서 장착 yaw·면별 출발 관절각을 읽어 로봇 모델을 만든다. 6개가 아닌 값은 버린다.</summary>
     public static ReachRobotModel ModelFrom(IConfiguration? config)
@@ -396,7 +409,7 @@ public sealed partial class ReachSimService
     /// 탐색 좌표계 — 영역 중심(수평)·면 안쪽 수평 방향. 지금 정차(덮어쓰기 포함)를 그 좌표로 바꿔 시작점으로 둔다.
     /// 법선에 수평 성분이 없는 바닥·천장(T·B)은 면 U축 수평 방향을 기준으로 중심 주위 전후·좌우·전 방향(±180°)을 본다.
     /// </summary>
-    private static StationSearchSpace? SearchSpace(InspectionAreaEntity area, WallEntity wall, AreaSetup setup)
+    private StationSearchSpace? SearchSpace(InspectionAreaEntity area, WallEntity wall, AreaSetup setup)
     {
         var (uc, vc) = AreaGeometry.Centroid(Json<double[][]>(area.Corners));
         var c = setup.Pose.LocalToDrawing(uc, vc);
@@ -425,7 +438,8 @@ public sealed partial class ReachSimService
         var facing = wall.FacingYaw.Value;
         var dyaw = Math.Atan2(Math.Sin(st.Yaw - facing), Math.Cos(st.Yaw - facing)) * 180 / Math.PI;
         return new StationSearchSpace(new[] { c[0], c[1] }, new[] { nx, ny }, facing, setup.FloorZ,
-            dx * nx + dy * ny, -dx * ny + dy * nx, dyaw);
+            dx * nx + dy * ny, -dx * ny + dy * nx, dyaw,
+            MinWallDistM: _wallMinDistM.GetValueOrDefault(area.WallCode));
     }
 
     private static ReachStationCandidate Candidate(StationCandidate c) => new(

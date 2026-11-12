@@ -8,14 +8,26 @@ namespace HD.Acs.Core.Reach;
 /// <param name="InwardH">면 안쪽 법선의 수평 단위벡터(도면 x·y).</param>
 /// <param name="FacingYaw">면 정면 방향(차체가 벽을 보는 방향) [rad].</param>
 /// <param name="MinDistM">거리 탐색 시작 하한. 실제 시작은 차체가 면에서 떨어지는 첫 거리이고, 폭은 MaxDistM − MinDistM 이다.</param>
+/// <param name="MinWallDistM">차체 중심과 검사 면 사이 최소 수평 거리 [m]. 0 보다 크면 그보다 가까운 정차는 쓰지 않는다
+/// (영역 중심에서 면 안쪽 수평 방향으로 잰 거리 — 수직벽이면 벽면까지 거리). 수평면(MinDistM &lt; 0)에는 쓰지 않는다.</param>
 public sealed record StationSearchSpace(
     double[] CenterXY, double[] InwardH, double FacingYaw, double FloorZ,
     double BaselineDistM, double BaselineLateralM = 0, double BaselineYawDeg = 0,
     double MinDistM = 0.4, double MaxDistM = 2.4, double DistStepM = 0.1,
     double MaxLateralM = 0.8, double LateralStepM = 0.1,
     double MaxYawDeg = 15, double YawStepDeg = 5,
-    double MinBodyClearanceM = 0.05)
+    double MinBodyClearanceM = 0.05, double MinWallDistM = 0)
 {
+    /// <summary>차체가 설 수 있는 자리인가 — 면에서 <see cref="MinBodyClearanceM"/> 이상 떨어지고,
+    /// <see cref="MinWallDistM"/> 가 있으면 차체 중심이 검사 면에서 그 거리 이상 떨어져야 한다.</summary>
+    public bool BodyAllowed(ReachRobotModel model, IReadOnlyList<ReachPlane> planes, double distM, double lateralM, double yawDeg,
+        out double clearanceM)
+    {
+        clearanceM = ReachSimulator.BodyAt(model, planes, StationOf(distM, lateralM, yawDeg)).ClearanceM;
+        if (clearanceM < MinBodyClearanceM) return false;
+        return MinWallDistM <= 0 || MinDistM < 0 || distM >= MinWallDistM - 1e-9;
+    }
+
     /// <summary>후보 좌표 → 정차(도면). 좌측 = 정면 방향을 반시계 90°.</summary>
     public ReachStation StationOf(double distM, double lateralM, double yawDeg)
     {
@@ -278,7 +290,7 @@ public static class StationOptimizer
                            orderby Math.Abs(d) + Math.Abs(l), Math.Abs(l), Math.Abs(d)
                            select (d, l);
             foreach (var (d, l) in centered)
-                if (ReachSimulator.BodyAt(model, planes, space.StationOf(d, l, 0)).ClearanceM >= space.MinBodyClearanceM)
+                if (space.BodyAllowed(model, planes, d, l, 0, out _))
                     return (d, l);
             return null;
         }
@@ -291,7 +303,7 @@ public static class StationOptimizer
                     orderby (d - space.MinDistM) + Math.Abs(l), Math.Abs(l)
                     select (d, l);
         foreach (var (d, l) in order)
-            if (ReachSimulator.BodyAt(model, planes, space.StationOf(d, l, 0)).ClearanceM >= space.MinBodyClearanceM)
+            if (space.BodyAllowed(model, planes, d, l, 0, out _))
                 return (d, l);
         return null;
     }
@@ -312,8 +324,7 @@ public static class StationOptimizer
         bool surveyInfeasible = false, string? wallCode = null, bool areaLift = true)
     {
         var station = space.StationOf(distM, lateralM, yawDeg);
-        var body = ReachSimulator.BodyAt(model, planes, station).ClearanceM;
-        var feasible = body >= space.MinBodyClearanceM;
+        var feasible = space.BodyAllowed(model, planes, distM, lateralM, yawDeg, out var body);
         if (!feasible && !surveyInfeasible)
             return new StationCandidate(distM, lateralM, yawDeg, station, body, false, 0, 0, seams.Count, 0,
                 Array.Empty<ReachSeamSurvey>());
