@@ -217,6 +217,26 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/area-map",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
+// 현장 실적 대조(조회 전용) — 본문 = HD_AMR 앱 로그 텍스트(app-yyyy-MM-dd.log, 관련 줄만 추려 보내도 된다).
+// 로그의 실제 도착 자세·리프트로 시뮬레이터를 다시 돌려 현장 결과와 판정이 같은지 본다. date = 시각 앞에 붙일 날짜(표시용),
+// wallCode = 그 면만, format=csv 면 건별 표를 text/csv(UTF-8 BOM)로 내려준다. tools/compare_field_reach.ps1 이 쓴다.
+app.MapPost("/api/reach-sim/tanks/{tankId}/field-compare",
+    async (string tankId, string? wallCode, string? date, string? format, HttpRequest req, ReachSimService sim, CancellationToken ct) =>
+    {
+        var lines = new List<string>();
+        using (var reader = new StreamReader(req.Body, System.Text.Encoding.UTF8))
+            while (await reader.ReadLineAsync(ct) is { } line) lines.Add(line);
+        var parsed = HD.Acs.Core.Reach.AmrFieldLog.Parse(lines, date);
+        if (parsed.Attempts.Count == 0)
+            return Results.BadRequest(new { error = "로그에서 startWeldInspection 실적을 찾지 못했습니다 — HD_AMR 앱 로그(UTF-8)인지 확인하세요." });
+        var r = await sim.FieldCompareAsync(tankId, parsed.Attempts, wallCode, ct, parsed.Warnings);
+        if (r is null) return Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" });
+        if (!string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase)) return Results.Ok(r);
+        var csv = ReachSimService.FieldCompareCsvHeader + "\r\n" + string.Join("\r\n", r.Rows.Select(ReachSimService.FieldCompareCsvRow));
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"field-compare-{tankId}.csv");
+    });
+
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
     async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw, string? branch,
            ReachSimService sim, CancellationToken ct) =>
