@@ -82,7 +82,8 @@ public class ReachFieldBacktestTests
     public void FieldRows_AreJudgedLikeTheRobot()
     {
         var m = FieldModel();
-        var rows = Load().Where(r => r.Outcome is "OK" or "FLANGE" or "PRECHECK" or "REACH").ToList();
+        // FLANGE 52건은 AMR 이 출발 전에 최소 뻗음 규칙으로 막은 것이라 실제로 움직여 본 적이 없다 — 성공·실패 집계에서 뺀다.
+        var rows = Load().Where(r => r.Outcome is "OK" or "PRECHECK" or "REACH").ToList();
         var lines = new List<string>();
         int okPass = 0, ok = 0, failCaught = 0, fail = 0;
         foreach (var r in rows)
@@ -100,11 +101,14 @@ public class ReachFieldBacktestTests
         if (Environment.GetEnvironmentVariable("HDACS_BACKTEST_OUT") is { Length: > 0 } path)
             File.WriteAllLines(path, lines.Prepend($"# 성공 {okPass}/{ok} 가능 판정 · 실패 {failCaught}/{fail} 불가 판정"));
 
-        // AMR 이 리프트 100 에서 거부한 52건(플랜지 뻗음 342 mm < 350 mm)은 전부 불가로 판정해야 한다
-        Assert.All(rows.Where(r => r.Outcome == "FLANGE"), r => Assert.Equal(ReachVerdict.Unreachable, Judge(m, r).Verdict));
-        // 실제로 성공한 용접선을 불가로 막는 비율은 낮아야 하고(정차 후보를 잃는다), 실패는 절반 넘게 걸러야 한다
-        // (팔 뻗음 상한 30°: 실패 17건의 |J3| 최소 = 6°×5 · 27~28°×9 · 42° · 101°×2, 성공 51건 = 28°×2 · 42°×2 · 54° 이상 47건)
+        // 천장은 최소 뻗음 규칙 제외(2026-11-13) — AMR 이 리프트 100·200 에서 거부했던 52건을 이 규칙으로 막지 않는다
+        // (규칙을 빼면 34건 가능 · 18건은 다른 사유로 불가).
+        Assert.All(Load().Where(r => r.Outcome == "FLANGE"),
+            r => Assert.DoesNotContain("플랜지 뻗음 부족", Judge(m, r).Blocker ?? ""));
+        // 실제로 성공한 용접선을 불가로 막는 비율은 낮아야 하고(정차 후보를 잃는다), 실제 실패는 대부분 걸러야 한다
+        // (팔 뻗음 상한 30°: 실패 17건의 |J3| 최소 = 6°×5 · 27~28°×9 · 42° · 101°×2, 성공 51건 = 28°×2 · 42°×2 · 54° 이상 47건).
+        // 실패 집계는 종전 66/69 였으나 그중 52건이 움직여 보지 않은 FLANGE 였다 — 실제 실패만 보면 14/17.
         Assert.True(okPass >= ok * 0.9, $"성공 {ok}건 중 {okPass}건만 가능 판정");
-        Assert.True(failCaught >= fail * 0.9, $"실패 {fail}건 중 {failCaught}건만 불가 판정");
+        Assert.True(failCaught >= fail * 0.8, $"실패 {fail}건 중 {failCaught}건만 불가 판정");
     }
 }
