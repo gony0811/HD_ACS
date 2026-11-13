@@ -424,11 +424,22 @@ public static partial class ReachSimulator
         return normalM * 1000 - model.StageStandoffsMm[0] - model.ToolZMm;
     }
 
-    /// <summary>플랜지 뻗음이 <see cref="ReachRobotModel.MinFlangeReachMm"/> 미만이면 사유(아니거나 규칙이 꺼져 있으면 null).</summary>
+    /// <summary>
+    /// 이 면에 최소 플랜지 뻗음 규칙을 적용하는가 — 천장(안쪽 법선이 아래)만 뺀다(2026-11-13). HD_AMR
+    /// <c>ApproachReach.AppliesTo</c>(wall_code ≠ T)와 같은 규칙이다 — 바꾸면 함께 맞출 것.
+    /// 근거 실측(뻗음 230mm 손목 특이점 3회)은 수직벽이었다. 천장은 툴이 위를 향해 ② 자세 J5 가 90° 근처에 머물러
+    /// 접힌 팔에서도 손목 특이점이 생기지 않고(리프트를 올려 뻗음 143mm 까지 자세 여유 유지 — 더 가까우면 상완–리프트
+    /// 기둥 간섭·가지 전환이 따로 막는다), 이 규칙은 리프트를 올린 정차만 막아 먼 용접선의 팔 뻗음 실패를 풀 수단을 없앴다.
+    /// 경사면은 단독으로 막는 경우가 없고 바닥은 걸리지 않아 그대로 둔다.
+    /// </summary>
+    public static bool FlangeRuleApplies(double[] wallNormal)
+        => !(Vec3.Normalize(wallNormal) is { } n && n[2] < -0.99);
+
+    /// <summary>플랜지 뻗음이 <see cref="ReachRobotModel.MinFlangeReachMm"/> 미만이면 사유(아니거나 규칙이 꺼져 있거나 천장이면 null).</summary>
     public static string? FlangeShortReason(ReachRobotModel model, ReachStation station, double strokeMm, double[] facePoint,
         double[] wallNormal, double offsetForwardMm = 0, double offsetLeftMm = 0)
     {
-        if (model.MinFlangeReachMm <= 0 || model.StageStandoffsMm.Length == 0) return null;
+        if (model.MinFlangeReachMm <= 0 || model.StageStandoffsMm.Length == 0 || !FlangeRuleApplies(wallNormal)) return null;
         var reach = FlangeReachMm(model, station, strokeMm, facePoint, wallNormal, offsetForwardMm, offsetLeftMm);
         return reach < model.MinFlangeReachMm
             ? $"플랜지 뻗음 부족 — {reach:0}mm < 최소 {model.MinFlangeReachMm:0}mm (면에 너무 가깝거나 리프트가 높음 — AMR 사전 점검이 거부)"
