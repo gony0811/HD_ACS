@@ -85,8 +85,17 @@ public sealed partial class ReachSimService
             MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
             CheckEntryJ6 = config.GetValue("Acs:Reach:CheckEntryJ6", d.CheckEntryJ6),
             EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
+            PlanarEntryWalls = PlanarEntryWallsFrom(config.GetSection("Acs:Reach:PlanarEntryWalls")),
+            EntryPathMarginMm = config.GetValue("Acs:Reach:EntryPathMarginMm", d.EntryPathMarginMm),
         };
     }
+
+    /// <summary>평면 경유 진입을 쓰는 면 — 설정이 없으면 null(모든 면, 종전), 빈 배열이면 어느 면도 쓰지 않는다.</summary>
+    private static IReadOnlySet<string>? PlanarEntryWallsFrom(IConfigurationSection section) =>
+        section.Exists()
+            ? section.GetChildren().Select(c => c.Value).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
 
     /// <summary>
     /// 도면 순회 실제 경유점 — [[거리 mm, 기울기 도(, Z mm)], …]. 없거나 비면 null(±ScanTiltDeg 포괄 근사). 값이 2~3개가 아닌 항목은 버린다.

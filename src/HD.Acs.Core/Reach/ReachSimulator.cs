@@ -138,6 +138,20 @@ public sealed record ReachRobotModel
     public double PlanarRetreatMm { get; init; } = 100;
     /// <summary>진입 MoveJ 가 출발 TCP 투영점에서 면을 따라 갈 수 있는 최대 거리 [mm] — MaxEntryInPlaneMm.</summary>
     public double MaxEntryInPlaneMm { get; init; } = 500;
+    /// <summary>
+    /// 평면 경유 진입(후퇴 평면·<see cref="MaxEntryInPlaneMm"/> 제한)을 쓰는 면 코드. null 이면 모든 면(종전).
+    /// 여기에 없는 면은 <b>직접 진입</b>이다 — 들어갈 점까지 면 방향 거리 제한 없이 MoveJ 한 번에 가되, 그 관절 이동 경로를
+    /// <see cref="EntryPathStepDeg"/> 간격으로 따라가며 면·자기 간섭을 본다(<see cref="ReachSimulator.JointPathBlocker"/>).
+    /// HD_AMR <c>inspection.planarEntryWalls</c>(기본 PU,SU)와 같은 값이어야 한다. 설정 <c>Acs:Reach:PlanarEntryWalls</c>.
+    /// </summary>
+    public IReadOnlySet<string>? PlanarEntryWalls { get; init; }
+    /// <summary>직접 진입 MoveJ 경로 점검 간격 — 관절별 최대 변화 [도]. HD_AMR <c>EntryPathStepDeg</c>.</summary>
+    public double EntryPathStepDeg { get; init; } = 5;
+    /// <summary>
+    /// 직접 진입 MoveJ 경로가 지켜야 할 탱크 면 여유 [mm](자기 간섭은 닿는지만 본다). 출발·도착 자세의 여유가 이보다 작으면 그 작은 쪽을 기준으로 삼는다
+    /// (경로가 양 끝보다 더 가까워지지 않을 것). HD_AMR <c>EntryPathMarginMm</c>.
+    /// </summary>
+    public double EntryPathMarginMm { get; init; } = 100;
     /// <summary>직선 경로 검증 간격 [mm] — PlanarSampleMm.</summary>
     public double PlanarSampleMm { get; init; } = 100;
     /// <summary>면 방향 거리가 이보다 짧으면 들어갈 점으로 바로 진입 [mm] — PlanarSkipMm.</summary>
@@ -421,7 +435,8 @@ public static partial class ReachSimulator
         // 진입 경로는 세 자세가 닿고 가지 전환이 없을 때만 본다 — 앞에서 막히면 운영도 진입하지 않는다(IK 가 가장 많이 드는 단계).
         if (start is not null && checkEntry && branchChange is null && stages.Count > 0
             && stages.All(s => s.Chosen is { PostureOk: true }))
-            entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal, stages[0].Chosen?.JointsDeg);
+            entry = PlanEntry(model, planes, frame, start, stages[0].TcpTarget, wallNormal, stages[0].Chosen?.JointsDeg,
+                UsesPlanarEntry(model, wallCode));
         return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null,
             FlangeShort: FlangeShortReason(model, station, strokeMm, seamPoint, wallNormal, offsetForwardMm, offsetLeftMm));
     }
@@ -662,11 +677,74 @@ public static partial class ReachSimulator
     /// 진입 해(같은 가지·관절 이동 ≤140°·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
     /// 관절 튐·팔꿈치 반전·손목 특이점·자기 간섭을 본다. 자세는 전 구간 ② 자세로 고정.
     /// </summary>
-    private static ReachEntry PlanEntry(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
-        double[]? approachJoints = null)
+    /// <summary>이 면이 평면 경유 진입을 쓰는가 — <see cref="ReachRobotModel.PlanarEntryWalls"/> 가 없으면 모든 면.</summary>
+    public static bool UsesPlanarEntry(ReachRobotModel m, string? wallCode) =>
+        m.PlanarEntryWalls is null || (wallCode is not null && m.PlanarEntryWalls.Contains(wallCode));
+
+    /// <summary>
+    /// 진입점 후보 — 평면 경유면 ① 들어갈 점 직접(면 방향 <see cref="ReachRobotModel.MaxEntryInPlaneMm"/> 이내일 때만) ② 투영점부터
+    /// 100 mm 간격(같은 제한까지). 직접 진입이면 제한 없이 ① 들어갈 점 직접 ② 투영점부터 들어갈 점 앞까지 전부.
+    /// </summary>
+    private static List<(double[] P, bool Direct)> EntryCandidates(ReachRobotModel m, double[] projected, double[] plunge,
+        double inPlaneMm, bool planar)
+    {
+        var candidates = new List<(double[] P, bool Direct)>();
+        if (inPlaneMm < m.PlanarSkipMm) { candidates.Add((plunge, true)); return candidates; }
+        var cap = planar ? m.MaxEntryInPlaneMm : double.PositiveInfinity;
+        if (inPlaneMm <= cap) candidates.Add((plunge, true));
+        candidates.Add((projected, false));
+        var pts = Sample(projected, plunge, m.PlanarSampleMm);
+        var step = inPlaneMm / pts.Count;
+        for (var k = 0; k < pts.Count - 1; k++)
+            if ((k + 1) * step <= cap + 1e-6) candidates.Add((pts[k], false));
+        return candidates;
+    }
+
+    /// <summary>
+    /// 직접 진입 MoveJ(관절 보간) 경로가 막히는 사유, 지나갈 수 있으면 null. <paramref name="from"/> → <paramref name="to"/> 를
+    /// 관절별 최대 <see cref="ReachRobotModel.EntryPathStepDeg"/> 간격으로 나눠, 중간 자세마다 자기 간섭이 없고 탱크 면 여유가
+    /// min(<see cref="ReachRobotModel.EntryPathMarginMm"/>, 출발 여유, 도착 여유) 아래로 내려가지 않는지 본다.
+    /// 평면 경유가 하던 "팔이 면 쪽으로 휘둘리지 않는가"를 경로 자체로 확인한다.
+    /// </summary>
+    public static string? JointPathBlocker(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, ReachStation station, double strokeMm,
+        double[] from, double[] to) => JointPathBlocker(m, planes, new BaseFrame(m, station, strokeMm, 0, 0), from, to);
+
+    private static string? JointPathBlocker(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] from, double[] to)
+    {
+        var n = Math.Min(from.Length, to.Length);
+        var travel = Enumerable.Range(0, n).Max(i => Math.Abs(to[i] - from[i]));
+        var steps = (int)Math.Ceiling(travel / Math.Max(0.5, m.EntryPathStepDeg));
+        if (steps <= 1) return null;
+        // 면 여유는 팔 캡슐·툴 상자를 탱크 면과만 잰다. 자기 간섭(차체·기둥·신호탑)은 닿는지만 본다 — 홈 자세는 원래
+        // 기둥·차체에 가까워 "양 끝보다 가까워지지 않을 것"을 자기 간섭에 쓰면 실기에서 늘 하던 진입까지 막는다.
+        (double Mm, string Part, string Near) Wall(double[] j)
+        {
+            var fr = m.Kinematics.Frames(j);
+            var segs = ArmSegments(m, fr);
+            var worst = segs[..^1].Select(q => Part(q.Name, f.BaseToDrawing(q.A), f.BaseToDrawing(q.B), q.RadiusMm, planes))
+                .Concat(m.ToolBoxes.Select(t => ToolBoxPart(m, t, fr[6], f, planes)))
+                .MinBy(q => q.ClearanceM)!;
+            return (worst.ClearanceM * 1000, worst.Name, worst.NearestPlane);
+        }
+        double[] At(double t) => to.Select((v, i) => i < n ? from[i] + (v - from[i]) * t : v).ToArray();
+        var floor = Math.Min(m.EntryPathMarginMm, Math.Min(Wall(At(0)).Mm, Wall(to).Mm)) - 1.0;
+        for (var k = 1; k < steps; k++)
+        {
+            var j = At((double)k / steps);
+            if (SelfClearance(m, f.BaseZMm, j) is { ClearanceMm: < 0 } self)
+                return $"관절 이동 경로 {100.0 * k / steps:0}% 지점 자기 간섭 ({self.Part}–{self.Obstacle})";
+            var w = Wall(j);
+            if (w.Mm < floor)
+                return $"관절 이동 경로 {100.0 * k / steps:0}% 지점 면 여유 {w.Mm:0}mm < {floor + 1:0}mm ({w.Part}–{w.Near})";
+        }
+        return null;
+    }
+
+    private static ReachEntry PlanEntry(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] start,
+        double[] approach, double[] normal, double[]? approachJoints = null, bool planar = true)
     {
         if (m.CheckEntryJ6 && m.OperationJ6Deg is not null && approachJoints is { Length: >= 6 } && start.Length >= 6)
-            return PlanEntryFixedPose(m, f, start, approach, normal, approachJoints);
+            return PlanEntryFixedPose(m, planes, f, start, approach, normal, approachJoints, planar);
         var fr = m.Kinematics.Frames(start);
         var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
         var r = m.PlanarRetreatMm / 1000.0;
@@ -675,17 +753,7 @@ public static partial class ReachSimulator
         var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
         var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
 
-        var candidates = new List<(double[] P, bool Direct)>();
-        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
-        else
-        {
-            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
-            candidates.Add((projected, false));
-            var pts = Sample(projected, plunge, m.PlanarSampleMm);
-            var step = inPlaneMm / pts.Count;
-            for (var k = 0; k < pts.Count - 1; k++)
-                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
-        }
+        var candidates = EntryCandidates(m, projected, plunge, inPlaneMm, planar);
 
         string Fmt(double[] p) => string.Join(", ", f.DrawingToBase(p).Select(v => v.ToString("0")));
         var rejects = new List<string>();
@@ -700,6 +768,7 @@ public static partial class ReachSimulator
             if (ElbowFlip(start, jc)) { rejects.Add($"{label}: 팔꿈치 가지 전환"); continue; }
             if (WristFlip(start, jc)) { rejects.Add($"{label}: 손목 가지 전환(J5 {start[4]:0}° → {jc[4]:0}°)"); continue; }
             if (SelfClearance(m, f.BaseZMm, jc) is { ClearanceMm: < 0 } sc) { rejects.Add($"{label}: 자기 간섭 ({sc.Part}–{sc.Obstacle})"); continue; }
+            if (!planar && JointPathBlocker(m, planes, f, start, jc) is { } jp) { rejects.Add($"{label}: {jp}"); continue; }
 
             var path = new List<double[]>();
             if (!direct) path.AddRange(Sample(cand, plunge, m.PlanarSampleMm));
@@ -728,8 +797,8 @@ public static partial class ReachSimulator
     /// 팔꿈치·손목 반전 없음, |J5| 여유, J6 안전 범위, 자기 간섭). 그 뒤 경로는 100 mm 간격으로 이어 풀어 관절 한계 근접·관절 튐[6축]·
     /// 팔꿈치·손목·J6 안전 범위·자기 간섭을 본다.
     /// </summary>
-    private static ReachEntry PlanEntryFixedPose(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
-        double[] approachJoints)
+    private static ReachEntry PlanEntryFixedPose(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] start,
+        double[] approach, double[] normal, double[] approachJoints, bool planar)
     {
         var fr = m.Kinematics.Frames(start);
         var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
@@ -739,17 +808,7 @@ public static partial class ReachSimulator
         var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
         var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
 
-        var candidates = new List<(double[] P, bool Direct)>();
-        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
-        else
-        {
-            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
-            candidates.Add((projected, false));
-            var pts = Sample(projected, plunge, m.PlanarSampleMm);
-            var step = inPlaneMm / pts.Count;
-            for (var k = 0; k < pts.Count - 1; k++)
-                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
-        }
+        var candidates = EntryCandidates(m, projected, plunge, inPlaneMm, planar);
 
         // ② 접근 해의 플랜지 자세(BASE) — 진입점·경로 전 구간에서 이 자세를 유지한다.
         var pose = m.Kinematics.Frames(approachJoints)[6];
@@ -803,7 +862,8 @@ public static partial class ReachSimulator
             string? firstWhy = null;
             foreach (var sol in sols)
             {
-                var whySol = EntryBlocker(sol);
+                // 직접 진입(평면 경유를 쓰지 않는 면)은 진입 MoveJ 가 길 수 있다 — 그 관절 이동 경로의 면·자기 간섭을 본다.
+                var whySol = EntryBlocker(sol) ?? (planar ? null : JointPathBlocker(m, planes, f, start, sol));
                 if (whySol is null) { jc = sol; break; }
                 firstWhy ??= whySol;
             }

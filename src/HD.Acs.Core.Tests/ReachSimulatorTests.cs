@@ -330,6 +330,55 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 평면_경유를_쓰지_않는_면은_면_방향_거리_제한_없이_들어갈_점부터_본다()
+    {
+        // 위 테스트와 같은 배치(면 방향 600 mm)에서 SM 을 직접 진입 면으로 두면 들어갈 점 직접이 후보에 들어간다(6 → 7개).
+        var (sm, v, floor) = MidWall();
+        var h = ClearStroke(sm, v, floor);
+        var mount = ReachRobotModel.Default with { MountYawDeg = 180 };
+        var same = mount with
+        {
+            StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = ApproachJoints(mount, sm, 12, v, floor, h) },
+        };
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var start = ReachSimulator.Evaluate(same, planes, StationFor(sm, 12, v, 1.2, 2),
+            sm.To3D(12.6, v), sm.Normal, h, wallCode: "SM", checkEntry: false).Stages[0].Chosen!.JointsDeg;
+        var m = mount with
+        {
+            StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = start },
+            PlanarEntryWalls = new HashSet<string> { "PU", "SU" },
+        };
+
+        Assert.False(ReachSimulator.UsesPlanarEntry(m, "SM"));
+        Assert.True(ReachSimulator.UsesPlanarEntry(m, "PU"));
+        Assert.True(ReachSimulator.UsesPlanarEntry(mount, "SM"));   // 설정이 없으면 모든 면이 평면 경유(종전)
+
+        var r = ReachSimulator.Evaluate(m, planes, StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, h, wallCode: "SM");
+        Assert.True(r.Entry is not null, r.Blocker ?? "진입 경로를 보지 않음");
+        Assert.Equal(7, r.Entry!.Candidates);   // 이 배치는 들어갈 점에서 전완이 기둥에 닿아 진입 자체는 거부된다 — 후보 구성만 본다
+    }
+
+    [Fact]
+    public void 직접_진입_경로가_양_끝보다_면에_가까워지면_막는다()
+    {
+        // 초점 자세(툴 끝이 면에서 약 0.1 m)를 J1 로 ±60° 돌린 두 자세 사이 MoveJ — 가운데에서 툴이 면 앞을 스친다.
+        var (sm, v, floor) = MidWall();
+        var h = ClearStroke(sm, v, floor);
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var station = StationFor(sm, 12, v, 1.2, 2);
+        var focus = ReachSimulator.Evaluate(NoTraverse, planes, station, sm.To3D(12, v), sm.Normal, h).Stages[^1].Chosen!.JointsDeg;
+        double[] Turn(double d) => focus.Select((x, i) => i == 0 ? x + d : x).ToArray();
+
+        var wide = NoTraverse with { EntryPathMarginMm = 300 };
+        var why = ReachSimulator.JointPathBlocker(wide, planes, station, h, Turn(-60), Turn(60));
+        Assert.True(why is not null && why.Contains("면 여유"), why ?? "막지 않음");
+        // 움직임이 없으면 볼 경로가 없다.
+        Assert.Null(ReachSimulator.JointPathBlocker(wide, planes, station, h, focus, focus));
+        // 지켜야 할 여유가 작으면(50 mm) 같은 이동이 통과한다 — 가운데에서도 툴은 면에서 약 0.1 m 떨어져 있다.
+        Assert.Null(ReachSimulator.JointPathBlocker(NoTraverse with { EntryPathMarginMm = 50 }, planes, station, h, Turn(-60), Turn(60)));
+    }
+
+    [Fact]
     public void 진입_경로가_없으면_자세가_닿아도_도달불가다()
     {
         // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·140° 안의 진입점이 없다.
