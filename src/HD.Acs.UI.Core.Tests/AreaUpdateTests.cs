@@ -58,6 +58,20 @@ public class AreaUpdateTests
         Assert.Equal(JsonValueKind.Null, body.GetProperty("stationMaxBackwardMm").ValueKind);
     }
 
+    /// <summary>리프트 높이 — 입력값을 그대로 보내고, 빈값이면 null(서버가 기존 값 유지).</summary>
+    [Fact]
+    public async Task UpdateArea_SendsLiftHeight_AndNullWhenBlank()
+    {
+        var (vm, server) = await BuildAsync();
+        vm.StationLiftMm = 300;
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Equal(300, server.Writes[^1].Item3.GetProperty("stationLiftMm").GetDouble());
+
+        vm.StationLiftMm = null;
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Equal(JsonValueKind.Null, server.Writes[^1].Item3.GetProperty("stationLiftMm").ValueKind);
+    }
+
     [Fact]
     public async Task NoSelection_UpdateDisabled()
     {

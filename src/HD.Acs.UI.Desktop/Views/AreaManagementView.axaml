@@ -83,6 +83,11 @@
                             <TextBlock Text="후진 상한[mm]" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Increment="50" Value="{Binding StationMaxBackwardMm}" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4"
+                                    ToolTip.Tip="이 영역을 검사할 때 AMR 리프트를 맞출 높이(0~1000 mm, 완전 하강 = 0). 모든 검사 지령에 실려 갑니다. 빈값 = 새 영역은 0, 기존 영역은 저장된 값 유지. 리치·간섭의 정차점 최적화를 적용하면 이 값도 함께 바뀝니다.">
+                            <TextBlock Text="리프트 높이[mm]" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Maximum="1000" Increment="50" Value="{Binding StationLiftMm}" />
+                        </StackPanel>
                         <TextBlock Text="{Binding AutoStationText}" FontSize="12" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <CheckBox Content="정차 위치 조정 (자동 정차점 기준 오프셋)" IsChecked="{Binding StationOverride}" Margin="0,0,0,4"
                                   ToolTip.Tip="자동 정차점에서 도면 축으로 얼마나 옮길지 입력합니다. +x=선수 방향, +y=좌현 방향(m). 영역 코너를 고치면 정차점도 같은 오프셋으로 따라 움직입니다." />

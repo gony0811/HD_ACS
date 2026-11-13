@@ -121,6 +121,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // 정차 보정 후진 상한 [mm] — AMR 이 리치 부족 시 물러나도 되는 최대 거리 [VDA §4.4.2 N23]. null(빈값)=서버 설정 기본(400),
     // 0=이 영역은 후진 금지. 정차점 뒤 공간(맞은편 구조물·층 경계)이 좁은 영역만 줄인다 — 뒤 범퍼는 중심 뒤 365 + 이 값까지 간다.
     [ObservableProperty] private double? _stationMaxBackwardMm;
+    /// <summary>정차 리프트 높이 [mm, 0~1000] — 이 영역을 검사할 때 AMR 리프트를 맞출 높이. 빈값=등록 시 배차 기본 0, 수정 시 기존 값 유지.</summary>
+    [ObservableProperty] private double? _stationLiftMm;
 
     /// <summary>서버 <c>Acs:Area:StationStandoffM</c>(경사면) 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
     public const double DefaultStandoffM = 0.8;
@@ -301,7 +303,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var (areaId, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
-                _operatorId, StationStandoffM, stationMaxBackwardMm: StationMaxBackwardMm);
+                _operatorId, StationStandoffM, stationMaxBackwardMm: StationMaxBackwardMm, stationLiftMm: StationLiftMm);
             StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 L{level}";
             await RefreshAreasAsync(select: areaId);   // 새 영역을 선택 → 바로 작업 등록·수정 가능
         }
@@ -346,7 +348,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             int level = await _api.UpdateAreaAsync(area.AreaId, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
-                StationStandoffM, _operatorId, StationMaxBackwardMm);
+                StationStandoffM, _operatorId, StationMaxBackwardMm, StationLiftMm);
             StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 L{level} — areaId·작업 유지"
                 + (SelectedLevel is { } l && l.Level != level ? $" (층이 L{level}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
             await RefreshAreasAsync(select: area.AreaId);
@@ -822,6 +824,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         for (int i = 0; i < 4; i++) SetCorner(i, c[i][0], c[i][1]);
         StationStandoffM = a.StationStandoffM;   // 이격이 자동 정차점을 바꾸므로 오프셋 환산보다 먼저
         StationMaxBackwardMm = a.StationMaxBackwardMm;
+        StationLiftMm = a.StationLiftMm;
         StationOverride = a.StationX is not null && a.StationY is not null;
         // 저장된 절대 좌표 → 자동 정차점 기준 오프셋(0.1mm 반올림 — 부동소수 먼지 제거)
         var auto = AutoStation ?? (0, 0);

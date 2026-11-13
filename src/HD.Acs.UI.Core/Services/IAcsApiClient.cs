@@ -111,11 +111,11 @@ public interface IAcsApiClient
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
         double? stationStandoffM = null, Guid? areaId = null, double? stationMaxBackwardMm = null,
-        CancellationToken ct = default);
+        double? stationLiftMm = null, CancellationToken ct = default);
     /// <summary>영역 수정(PUT) — areaId·면 유지, 이름·코너(면-전체 v)·정차 전체 교체. 반환=재유도된 층.</summary>
     Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
-        double? stationMaxBackwardMm = null, CancellationToken ct = default);
+        double? stationMaxBackwardMm = null, double? stationLiftMm = null, CancellationToken ct = default);
     /// <summary>선택 작업들을 묶어 새 영역으로 분리·이동(taskId 유지). corners 미지정 시 서버가 작업 외접 사각형을 자동 생성.</summary>
     Task<(Guid AreaId, int Level, int MovedCount)> SplitTasksToNewAreaAsync(
         string tankId, string wallCode, string name, IReadOnlyList<Guid> taskIds, double[][]? corners,
