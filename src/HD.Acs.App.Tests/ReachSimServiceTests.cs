@@ -211,6 +211,32 @@ public class ReachSimServiceTests
     }
 
     [Fact]
+    public void J6_안전_범위_설정을_읽고_잘못된_값은_기본값으로()
+    {
+        static ReachRobotModel From(string? min, string? max) => ReachSimService.ModelFrom(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Acs:Reach:SafeJ6MinDeg"] = min, ["Acs:Reach:SafeJ6MaxDeg"] = max,
+            }).Build());
+
+        // 설정이 없으면 기본 −320°~−140° (2026-11-14 실제 기구 확인값, HD_AMR 파라미터 기본값과 같다)
+        var d = ReachSimService.ModelFrom(null);
+        Assert.Equal((-320.0, -140.0), (d.SafeJ6MinDeg, d.SafeJ6MaxDeg));
+
+        var m = From("-330", "-130");
+        Assert.Equal((-330.0, -130.0), (m.SafeJ6MinDeg, m.SafeJ6MaxDeg));
+
+        var half = From("-300", null);                       // 한쪽만 있으면 나머지는 기본값
+        Assert.Equal((-300.0, -140.0), (half.SafeJ6MinDeg, half.SafeJ6MaxDeg));
+
+        var swapped = From("-140", "-320");                  // 뒤바뀜 → 통째로 기본값
+        Assert.Equal((-320.0, -140.0), (swapped.SafeJ6MinDeg, swapped.SafeJ6MaxDeg));
+
+        var noIdle = From("-170", "-100");                   // 대기 자세 −180° 미포함 → 기본값
+        Assert.Equal((-320.0, -140.0), (noIdle.SafeJ6MinDeg, noIdle.SafeJ6MaxDeg));
+    }
+
+    [Fact]
     public void 도면_순회_설정을_읽는다()
     {
         var m = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

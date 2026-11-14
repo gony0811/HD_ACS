@@ -202,8 +202,21 @@ public sealed record ReachRobotModel
     /// </summary>
     public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
     public const double DefaultTraverseMarginTargetDeg = 10;
-    public double SafeJ6MinDeg { get; init; } = -320;   // 2026-11-14 실제 기구 확인으로 −310 → −320 (HD_AMR 과 동기)
-    public double SafeJ6MaxDeg { get; init; } = -145;   // 2026-11-14 −160 → −145
+    public const double DefaultSafeJ6MinDeg = -320, DefaultSafeJ6MaxDeg = -140;
+    /// <summary>J6 안전 범위 [도] — 2026-11-14 실제 기구 확인으로 −320°~−140°. 설정 <c>Acs:Reach:SafeJ6MinDeg</c>·<c>SafeJ6MaxDeg</c>.
+    /// HD_AMR 파라미터 <c>inspection.safeJ6MinDeg</c>·<c>safeJ6MaxDeg</c> 와 같게 둘 것.</summary>
+    public double SafeJ6MinDeg { get; init; } = DefaultSafeJ6MinDeg;
+    public double SafeJ6MaxDeg { get; init; } = DefaultSafeJ6MaxDeg;
+
+    /// <summary>설정 값 → 적용할 J6 안전 범위. 하한 ≥ 상한·대기 자세 −180° 미포함·폭 360° 이상·무한대면 기본값으로 되돌린다
+    /// (HD_AMR <c>WObjAttitude.ResolveSafeJ6Range</c> 와 같은 규칙).</summary>
+    public static (double Min, double Max, bool Ok) ResolveSafeJ6Range(double? min, double? max)
+    {
+        var lo = min ?? DefaultSafeJ6MinDeg;
+        var hi = max ?? DefaultSafeJ6MaxDeg;
+        var ok = double.IsFinite(lo) && double.IsFinite(hi) && lo < hi && hi - lo < 360.0 && lo <= -180.0 && hi >= -180.0;
+        return ok ? (lo, hi, true) : (DefaultSafeJ6MinDeg, DefaultSafeJ6MaxDeg, false);
+    }
 
     /// <summary>
     /// 진입 경로 판정에 J6 를 넣는다(기본 켬) — HD_AMR 은 진입점·경로의 자세를 ② 접근점 자세(J6 = 운영 값)로 고정해 풀고,

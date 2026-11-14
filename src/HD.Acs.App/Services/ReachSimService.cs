@@ -87,6 +87,10 @@ public sealed partial class ReachSimService
             EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
             PlanarEntryWalls = PlanarEntryWallsFrom(config.GetSection("Acs:Reach:PlanarEntryWalls")),
             EntryPathMarginMm = config.GetValue("Acs:Reach:EntryPathMarginMm", d.EntryPathMarginMm),
+            SafeJ6MinDeg = ReachRobotModel.ResolveSafeJ6Range(
+                config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Min,
+            SafeJ6MaxDeg = ReachRobotModel.ResolveSafeJ6Range(
+                config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Max,
         };
     }
 
