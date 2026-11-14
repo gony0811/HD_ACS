@@ -492,6 +492,8 @@ public class ReachSimulatorTests
         {
             MountYawDeg = 180, ToolZMm = 365, StageStandoffsMm = new[] { 400.0, 300, 10 }, CheckTraversal = false,
             StartJointsByWall = new Dictionary<string, double[]> { ["PU"] = home2 },
+            // 그날 AMR 의 J6 안전 범위(−310°~−160°)로 재현한다 — 2026-11-14 에 −320°~−145° 로 넓혔다(기본값).
+            SafeJ6MinDeg = -310, SafeJ6MaxDeg = -160,
         };
         var pu = new WallPose(new[] { -15.48, 8.64, 10.304 }, new[] { 1.0, 0, 0 }, new[] { 0, -Math.Sqrt(0.5), Math.Sqrt(0.5) });
         var n = new[] { 0, -Math.Sqrt(0.5), -Math.Sqrt(0.5) };
@@ -502,7 +504,7 @@ public class ReachSimulatorTests
             new ReachPlane("T", new[] { -15.48, -5.984, 12.96 }, new[] { 0.0, 0, -1 }),
         }, floor, 4);
 
-        var c24 = ReachSimulator.Evaluate(m, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
+        var c24 =ReachSimulator.Evaluate(m, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
             pu.LocalToDrawing(25.74, 2.0054), n, 100, wallCode: "PU");
         Assert.NotNull(c24.Entry);
         Assert.False(c24.Entry!.Ok, c24.Entry.Summary);

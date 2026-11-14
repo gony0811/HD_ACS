@@ -202,8 +202,8 @@ public sealed record ReachRobotModel
     /// </summary>
     public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
     public const double DefaultTraverseMarginTargetDeg = 10;
-    public double SafeJ6MinDeg { get; init; } = -310;
-    public double SafeJ6MaxDeg { get; init; } = -160;
+    public double SafeJ6MinDeg { get; init; } = -320;   // 2026-11-14 실제 기구 확인으로 −310 → −320 (HD_AMR 과 동기)
+    public double SafeJ6MaxDeg { get; init; } = -145;   // 2026-11-14 −160 → −145
 
     /// <summary>
     /// 진입 경로 판정에 J6 를 넣는다(기본 켬) — HD_AMR 은 진입점·경로의 자세를 ② 접근점 자세(J6 = 운영 값)로 고정해 풀고,
