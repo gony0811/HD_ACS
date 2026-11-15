@@ -237,6 +237,19 @@ public class ReachSimServiceTests
     }
 
     [Fact]
+    public void d6_설정을_읽는다_범위_밖이면_기본값()
+    {
+        static double D6(string? v) => ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Acs:Reach:D6Mm"] = v, ["Acs:Reach:MountYawDeg"] = "180" }).Build()).Kinematics.D6;
+
+        Assert.Equal(160, D6("160"));
+        Assert.Equal(106, D6("106"));
+        Assert.Equal(Fr5Kinematics.DefaultD6Mm, D6(null));
+        Assert.Equal(Fr5Kinematics.DefaultD6Mm, D6("10"));    // 범위(50~250) 밖
+        Assert.Equal(Fr5Kinematics.DefaultD6Mm, ReachSimService.ModelFrom(null).Kinematics.D6);
+    }
+
+    [Fact]
     public void 도면_순회_설정을_읽는다()
     {
         var m = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

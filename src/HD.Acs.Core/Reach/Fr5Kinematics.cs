@@ -5,15 +5,39 @@ namespace HD.Acs.Core.Reach;
 /// HD_AMR <c>Fr5Kinematics</c> 와 같은 식·같은 치수다(장비 STEP 축선 실측, 2026-10-31). 길이 mm, 각도 도.
 ///
 /// 관절 규약은 UR 과 같다고 <b>가정</b>한다(전 관절 0 = 팔 수평으로 펴짐). 링크 치수는 STEP 으로 검증했지만
-/// 관절 0점·부호는 실물 <c>GetForwardKin</c> 대조 전이다.
+/// 관절 0점·부호와 <b>d6(J5 → 플랜지 면)</b>은 실물 <c>GetForwardKin</c> 대조 전이다 — <see cref="Fr5FkCheck"/> 와
+/// HD_AMR <c>tools/fr5_fk_capture.py</c> 로 대조한다.
 /// </summary>
 public sealed record Fr5Kinematics(double D1, double A2, double A3, double D4, double D5, double D6)
 {
     private const double Deg2Rad = Math.PI / 180.0;
     private static readonly double[] Alpha = { Math.PI / 2, 0, 0, Math.PI / 2, -Math.PI / 2, 0 };
 
+    /// <summary>d6 후보 — 장비 STEP 축선에서 잰 값 [mm]. FAIRINO 공식 표에서는 FR10 의 값이다.</summary>
+    public const double D6StepMm = 106;
+    /// <summary>d6 후보 — FAIRINO 공식 FR5 DH 표 값 [mm].</summary>
+    public const double D6DatasheetMm = 160;
+    /// <summary>
+    /// 지금 쓰는 d6 [mm] — <b>미확정</b>. 실물 대조 결과가 나오기 전까지 종전 값(STEP 106)을 유지한다. 160 이면 플랜지 면이
+    /// 54 mm 달라지고 관절각이 최대 약 17°(J4) 달라진다. 실제로 쓰는 값은 설정 <c>Acs:Reach:D6Mm</c> 이 정한다
+    /// (HD_AMR 파라미터 <c>cobot.kinematics.d6Mm</c> 와 같게 둘 것 — AMR 이 프로필 전송 때 자기 값을 알려 주면 ACS 가 다르면 경고한다).
+    /// </summary>
+    public const double DefaultD6Mm = D6StepMm;
+    /// <summary>설정으로 받는 d6 허용 범위 [mm] — 밖이면 기본값을 쓴다.</summary>
+    public const double MinD6Mm = 50, MaxD6Mm = 250;
+
     /// <summary>FR5-WML — d4 = 어깨 가로 185 − 팔꿈치 가로 140 + 손목 114.</summary>
-    public static Fr5Kinematics Fr5Wml { get; } = new(180, -970, -816, 159, 114, 106);
+    public static Fr5Kinematics Fr5Wml { get; } = new(180, -970, -816, 159, 114, DefaultD6Mm);
+
+    /// <summary>d6 만 바꾼 기구학.</summary>
+    public Fr5Kinematics WithD6(double d6Mm) => this with { D6 = d6Mm };
+
+    /// <summary>설정 값 → 쓸 d6. 없거나 범위(<see cref="MinD6Mm"/>~<see cref="MaxD6Mm"/>) 밖·무한대면 기본값.</summary>
+    public static (double D6Mm, bool Ok) ResolveD6(double? configured) =>
+        configured is { } v && double.IsFinite(v) && v >= MinD6Mm && v <= MaxD6Mm ? (v, true) : (DefaultD6Mm, configured is null);
+
+    /// <summary>순기구학 — 관절각[도] → BASE 기준 플랜지 동차변환(mm).</summary>
+    public double[,] ForwardFlange(double[] jointsDeg) => Frames(jointsDeg)[6];
 
     private double[] A => new[] { 0, A2, A3, 0, 0, 0 };
     private double[] D => new[] { D1, 0, 0, D4, D5, D6 };

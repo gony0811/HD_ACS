@@ -52,6 +52,7 @@ builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 T
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<TankShapeQueryService>();
+builder.Services.AddSingleton<AmrRobotModelStore>();   // AMR 이 알려 준 코봇 모델 값(d6 등) 대조 결과
 builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<RobotStateService>();
@@ -858,13 +859,24 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 // 용접선 임시 제외/복귀 — enabled=false 인 용접선은 큐 전개·재개·재검사에서 싣지 않는다(계획·taskId·검사 기록은 그대로).
 // 진행 중 run 은 시작 때 만든 큐를 쓰므로 다음 run(또는 이어하기의 남은 정차)부터 반영된다.
 // HD_AMR 검사 프로필 사본 — AMR 이 프로필을 저장할 때 전체 목록을 올려 보낸다(계획용 참조 데이터, 로봇 지령 아님).
-app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDbContext db, CancellationToken ct) =>
+app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDbContext db, IConfiguration cfg,
+    AmrRobotModelStore robotModels, ILoggerFactory logs, CancellationToken ct) =>
 {
-    try { return Results.Ok(await InspectionProfileService.SyncAsync(db, req, ct)); }
+    try
+    {
+        var result = await InspectionProfileService.SyncAsync(db, req, ct);
+        if (req.Robot is not { } robot) return Results.Ok(result);
+        // AMR 과 ACS 가 같은 코봇 모델 값(d6·손목 여유·초점 거리)을 쓰는지 대조 — 다르면 시뮬레이션과 실제 동작이 어긋난다
+        var mismatch = RobotModelCheck.Compare(ReachSimService.ModelFrom(cfg), robot);
+        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        if (robotModels.Report(source, robot, mismatch) && mismatch.Count > 0)
+            logs.CreateLogger("RobotModelCheck").LogWarning("코봇 모델 값이 {Source} 와 다르다 — {Mismatch}", source, string.Join(" / ", mismatch));
+        return Results.Ok(result with { RobotModelMismatch = mismatch.Count > 0 ? mismatch : null });
+    }
     catch (ProfileSyncException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, AcsDbContext db, CancellationToken ct) =>
+app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, AcsDbContext db, AmrRobotModelStore robotModels, CancellationToken ct) =>
 {
     var reachName = cfg["Acs:Reach:ScanProfileName"];
     var rows = await db.InspectionProfiles.AsNoTracking().OrderBy(x => x.Source).ThenBy(x => x.Name).ToListAsync(ct);
@@ -892,6 +904,8 @@ app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, 
             a.Source, a.SeamType, a.WallCode, a.Direction, a.AmrProfileId,
             profileName = names.TryGetValue((a.Source, a.AmrProfileId), out var n) ? n : null,
         }),
+        // AMR 이 마지막으로 알려 준 코봇 모델 값과 ACS 설정의 차이(서버 기동 후 받은 것만)
+        robotModels = robotModels.All.Select(e => new { e.Source, e.Model.D6Mm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
     });
 });
 

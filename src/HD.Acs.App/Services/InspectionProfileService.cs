@@ -22,12 +22,14 @@ public sealed record ProfileAssignment(string? SeamType, string? WallCode, strin
 /// <summary>
 /// 프로필 동기화 요청. Full = 보낸 목록이 그 AMR 의 전체다(목록에 없는 프로필은 삭제된 것으로 표시).
 /// Assignments = 지정표 전체(주면 그 AMR 의 표를 통째로 바꾼다, null = 건드리지 않는다).
+/// Robot = AMR 이 쓰는 코봇 모델 값(d6·손목 여유·초점 거리) — ACS 설정과 다르면 응답과 로그로 알린다(저장·적용하지 않는다).
 /// </summary>
 public sealed record ProfileSyncRequest(string? Source, bool Full, IReadOnlyList<ProfileUpload>? Profiles,
-    IReadOnlyList<ProfileAssignment>? Assignments = null);
+    IReadOnlyList<ProfileAssignment>? Assignments = null, AmrRobotModel? Robot = null);
 
+/// <param name="RobotModelMismatch">AMR 이 보낸 코봇 모델 값이 ACS 설정과 다른 항목(같거나 보내지 않았으면 null).</param>
 public sealed record ProfileSyncResult(int Added, int Changed, int Unchanged, int Removed, IReadOnlyList<string> ChangedNames,
-    int Assignments = 0, bool AssignmentsChanged = false);
+    int Assignments = 0, bool AssignmentsChanged = false, IReadOnlyList<string>? RobotModelMismatch = null);
 
 /// <summary>용접선에 쓸 순회 프로필 — 경유점과 어느 프로필인지(이름·버전).</summary>
 public sealed record SeamScanProfile(string Name, int Version, IReadOnlyList<ScanWaypoint> Waypoints);
