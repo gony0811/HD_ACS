@@ -232,10 +232,11 @@ public sealed partial class MissionViewModel : ObservableObject
     // ── 가스검사 회차 ── 가스검사 선창에서만 보이고 지령 params.round 로 나간다(용접검사 선창은 서버가 무시).
     /// <summary>현재 선창이 가스검사인지 — Shell 이 선창의 검사 종류로 맞춘다.</summary>
     [ObservableProperty] private bool _isGasTank;
-    public IReadOnlyList<string> RoundOptions { get; } = new[] { "회차 없음", "1회차", "2회차" };
-    /// <summary>회차 선택(0 = 없음, 1·2 = 그 회차).</summary>
+    public IReadOnlyList<string> RoundOptions { get; } = new[] { "1회차", "2회차" };
+    /// <summary>회차 선택(0 = 1회차, 1 = 2회차). 가스검사는 회차가 필수라 "없음"은 두지 않는다(세이지가 회차 없는 결과를 거부).</summary>
     [ObservableProperty] private int _roundIndex;
-    private int? Round => IsGasTank && RoundIndex is 1 or 2 ? RoundIndex : null;
+    /// <summary>미션·재검사 시작에 실을 회차 — 가스검사 선창이면 1 또는 2, 아니면 null.</summary>
+    public int? Round => IsGasTank ? (RoundIndex == 1 ? 2 : 1) : null;
 
     [RelayCommand(CanExecute = nameof(CanStartRun))]
     private async Task StartRunAsync()
@@ -306,7 +307,7 @@ public sealed partial class MissionViewModel : ObservableObject
         try
         {
             // 소속 표시용 시나리오 — 지금 보고 있는 run의 것, 없으면 서버가 그 선창의 최근 run 시나리오를 쓴다
-            var r = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId, optimize);
+            var r = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId, optimize, Round, default);
             if (r is null) { StatusMessage = "재검사 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
             await RefreshRunAsync(r.RunId);
             StatusMessage = $"재검사 시작: {what} · {DescribeStops(r.Stops, optimize)}";

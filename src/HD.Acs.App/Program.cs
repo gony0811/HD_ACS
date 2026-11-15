@@ -76,6 +76,8 @@ builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
 // 가스 측정 결과 전송(가스검사) — Acs:Saige:Gas:Enabled=false(기본)면 저장만 하고 보내지 않는다.
+builder.Services.AddSingleton<GasLinkTracker>();            // 가스 센서 상태·임계값 적용 확인(state.information)
+builder.Services.AddScoped<GasThresholdService>();          // SAIGE → ACS → AMR 임계값 전달
 builder.Services.AddSingleton<SaigeGasResultSender>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeGasResultSender>());
 
@@ -157,6 +159,32 @@ app.MapGet("/api/integrations/saige", (SaigeHealthReporter saige) => Results.Ok(
 // 가스 측정 결과 전송 상태(보낼 것·보낸 것·거부된 것 수, 마지막 오류)
 app.MapGet("/api/integrations/saige/gas", async (SaigeGasResultSender gas, AcsDbContext db, CancellationToken ct) =>
     Results.Ok(await gas.StatusAsync(db, ct)));
+// 거부된(REJECTED) 가스 결과를 다시 보낼 것으로 되돌린다 — 세이지에서 검사를 시작하지 않아 409 로 거부된 결과 등.
+// runId·resultIds 로 범위를 줄일 수 있다(둘 다 없으면 거부된 것 전부).
+app.MapPost("/api/integrations/saige/gas/resend", async (GasResendRequest? req, AcsDbContext db, CancellationToken ct) =>
+{
+    var q = db.GasResults.Where(g => g.SendState == "REJECTED");
+    if (req?.RunId is Guid runId) q = q.Where(g => g.RunId == runId);
+    if (req?.ResultIds is { Count: > 0 } ids) q = q.Where(g => ids.Contains(g.ResultId));
+    var rows = await q.ToListAsync(ct);
+    foreach (var g in rows) { g.SendState = "PENDING"; g.LastError = null; }
+    if (rows.Count > 0)
+        db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+        {
+            UserId = req?.UserId ?? "", Action = "GAS_RESULT_RESEND", Target = req?.RunId?.ToString(),
+            Detail = System.Text.Json.JsonSerializer.Serialize(new { count = rows.Count }),
+        });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { requeued = rows.Count });
+});
+// 임계값 전달 SAIGE → ACS → AMR [포밍가스 규격 §3]. 200 = AMR 이 적용을 확인함(받은 값 그대로 반환) /
+// 400 = 값 검증 실패(AMR 이 거부한 경우 포함) / 503 = AMR 에 전달하지 못함(미연결·응답 없음).
+app.MapPut("/api/gas/threshold", async (GasThresholdRequest req, GasThresholdService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.ApplyAsync(req, ct)); }
+    catch (GasThresholdInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (GasThresholdUndeliveredException ex) { return Results.Json(new { error = ex.Message }, statusCode: 503); }
+});
 // run 의 가스 측정 결과 목록(받은 순) — 판정·회차·세이지 전송 상태. body=true 면 AMR 본문 포함.
 app.MapGet("/api/runs/{runId:guid}/gas-results", async (Guid runId, bool? body, AcsDbContext db, CancellationToken ct) =>
 {
@@ -975,7 +1003,7 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 {
     if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
     try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId, round: req.Round) }); }
-    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
+    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException or RunRequestInvalidException)
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -995,7 +1023,7 @@ app.MapPost("/api/runs/repair", async (StartRepairRunRequest req, MissionService
         return Results.Ok(new { runId = r.RunId, stops = r.Stops });
     }
     catch (Exception ex) when (ex is RepairRequestException or CalibrationInvalidException or WeldPayloadSchemaException
-                                   or InvalidOperationException)
+                                   or InvalidOperationException or RunRequestInvalidException)
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -1386,6 +1414,7 @@ app.Run();
 
 // Round = 가스검사 회차(1|2, 선택) — 가스검사 선창의 지령 params.round 로 나간다. 용접검사 선창은 무시.
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null);
+public sealed record GasResendRequest(Guid? RunId = null, List<Guid>? ResultIds = null, string? UserId = null);
 public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null, int? Round = null);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);

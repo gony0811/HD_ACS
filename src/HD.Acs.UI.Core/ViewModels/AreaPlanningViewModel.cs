@@ -455,7 +455,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var robots = await _api.GetRobotsAsync();
             if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
             StatusMessage = $"용접선 seq {task.Seq} 검사 준비 — 이 용접선에 맞춰 정차 최적화 중…";
-            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId });
+            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId }, null, true, RoundProvider?.Invoke(), default);
             StatusMessage = r is null
                 ? "검사 실행 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."
                 : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} · {MissionViewModel.DescribeStops(r.Stops, true)} — 진행은 운영 화면에서 확인";
@@ -804,6 +804,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RenameTankCommand))]
     private string _newTankId = "";
+
+    /// <summary>가스검사 회차(운영 화면에서 고른 값 — Shell 이 연결). 용접검사 선창이면 null.</summary>
+    public Func<int?>? RoundProvider { get; set; }
 
     /// <summary>변경 전에 묻는 확인 창(Shell 이 연결). 없으면 묻지 않는다(테스트).</summary>
     public Func<string, string, Task<bool>>? ConfirmAsync { get; set; }

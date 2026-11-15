@@ -28,6 +28,9 @@ public interface IAcsApiClient
     /// null = 서버 미지원(구빌드). 거부(400·409)는 예외.</summary>
     Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
         bool optimize = true, CancellationToken ct = default) => Task.FromResult<RepairRunStartedDto?>(null);
+    /// <summary>리페어 run + 가스검사 회차(1|2, null = 용접검사). 기본 구현 = 회차 없이 시작(기존 대역 무수정).</summary>
+    Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId,
+        bool optimize, int? round, CancellationToken ct) => StartRepairRunAsync(robotId, taskIds, scenarioId, optimize, ct);
     Task AbortRunAsync(Guid runId, CancellationToken ct = default);
     Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
     Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);

@@ -82,14 +82,16 @@ public class GasCommandTests
         Assert.Equal(round, (await new RunQueryService(f.Db).GetRunAsync(runId))!.Round);
     }
 
+    /// <summary>가스검사는 회차가 필수 — 세이지가 회차 없는 결과를 거부하고 재전송도 받지 않으므로 시작 자체를 막는다.</summary>
     [Fact]
-    public async Task GasTank_WithoutRound_OmitsTheField()
+    public async Task GasTank_WithoutRound_IsRefused_BeforeAnyRun()
     {
         var f = await Seed("GAS");
 
-        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        var ex = await Assert.ThrowsAsync<RunRequestInvalidException>(() => f.Missions.StartRunAsync(f.ScenarioId, "AMR-01"));
 
-        Assert.False((await FirstAction(f.Db, runId))["params"]!.AsObject().ContainsKey("round"));   // AMR: 없으면 결과에서 생략
+        Assert.Contains("회차", ex.Message);
+        Assert.Empty(await f.Db.ScenarioRuns.ToListAsync());
     }
 
     [Fact]

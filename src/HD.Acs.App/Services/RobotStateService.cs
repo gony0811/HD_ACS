@@ -29,11 +29,15 @@ public sealed class RobotStateService
 
     public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
         InspectionDispatcher dispatcher, ProgressService progress,
-        RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log)
+        RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log,
+        GasLinkTracker? gasLink = null)
     {
         _db = db; _hub = hub; _dispatcher = dispatcher; _progress = progress;
         _errorTracker = errorTracker; _missions = missions; _log = log;
+        _gasLink = gasLink;
     }
+
+    private readonly GasLinkTracker? _gasLink;   // 가스 센서 상태·임계값 적용 확인(state.information)
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
     {
@@ -55,6 +59,7 @@ public sealed class RobotStateService
         // errorType 에지 갱신을 **액션 대조보다 먼저** — 장치 HEAVY 알람(*LinkLost)이 처음 실린 state에서
         // AMR이 중단한 정차(액션 FAILED)가 종결되면 곧바로 DispatchNext가 불리는데, 그 배차 게이트가
         // 이번 state의 알람을 알아야 거부→재배차 연쇄가 생기지 않는다 [HD_AMR 장치통신 HEAVY알람 §5].
+        _gasLink?.Update(robot.RobotId, state.Information);
         var edges = _errorTracker.UpdateEdges(robot.RobotId, state.Errors.Select(e => e.ErrorType));
 
         // ── 2. 활성 미션 대조 (orderId 기준)

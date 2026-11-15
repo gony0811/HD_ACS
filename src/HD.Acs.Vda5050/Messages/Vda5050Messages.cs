@@ -114,6 +114,16 @@ public sealed class VdaInformation
     [JsonPropertyName("infoType")] public string InfoType { get; set; } = "";
     [JsonPropertyName("infoLevel")] public string InfoLevel { get; set; } = "INFO";   // INFO | DEBUG
     [JsonPropertyName("infoDescription")] public string? InfoDescription { get; set; }
+    /// <summary>VDA 5050 infoReferences — 가스검사 AMR 의 gasSensor·gasThreshold 값이 여기에 실린다. 없으면 null.</summary>
+    [JsonPropertyName("infoReferences")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<VdaInfoReference>? InfoReferences { get; set; }
+}
+
+public sealed class VdaInfoReference
+{
+    [JsonPropertyName("referenceKey")] public string ReferenceKey { get; set; } = "";
+    [JsonPropertyName("referenceValue")] public string ReferenceValue { get; set; } = "";
 }
 
 public sealed class AgvPosition

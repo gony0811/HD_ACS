@@ -106,6 +106,17 @@ public sealed class SaigeGasResultSender : BackgroundService
         foreach (var row in pending)
         {
             var body = await BuildBodyAsync(db, row, ct);
+            // 규격 검사 — 보내면 세이지가 400 으로 거부할 본문은 보내지 않고 사유를 남긴다(재전송 API 로 되살릴 수 있다)
+            if (SaigeGasResult.Violations(body) is { Count: > 0 } violations)
+            {
+                row.SendState = "REJECTED";
+                row.LastError = "규격 위반(전송 안 함): " + string.Join("; ", violations);
+                _lastError = row.LastError; _lastErrorAt = DateTimeOffset.UtcNow;
+                db.Alarms.Add(RejectAlarm(row, row.LastError));
+                _log.LogWarning("가스 결과가 세이지 규격에 맞지 않아 보내지 않음 — task={Task}: {Error}", row.TaskId, row.LastError);
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
             row.SendAttempts++;
             HttpStatusCode? status = null;
             string? error = null;
@@ -139,16 +150,7 @@ public sealed class SaigeGasResultSender : BackgroundService
             {
                 // 본문을 세이지가 거부 — 다시 보내도 같다. 이 건만 빼고 다음 건을 계속 보낸다.
                 row.SendState = "REJECTED";
-                db.Alarms.Add(new AlarmEntity
-                {
-                    AlarmId = Guid.NewGuid(), AlarmCode = "SAIGE_BAD_REQUEST", RobotId = row.RobotId,
-                    Detail = JsonSerializer.Serialize(new
-                    {
-                        severity = "WARNING", title = "SAIGE 가 가스 측정 결과를 거부",
-                        taskId = row.TaskId, round = row.Round, result = row.Result, error,
-                    }),
-                    RaisedAt = DateTimeOffset.UtcNow,
-                });
+                db.Alarms.Add(RejectAlarm(row, error));
                 _log.LogWarning("SAIGE 가 가스 결과를 거부 — task={Task} round={Round}: {Error}", row.TaskId, row.Round, error);
                 await db.SaveChangesAsync(ct);
                 continue;
@@ -163,6 +165,17 @@ public sealed class SaigeGasResultSender : BackgroundService
         }
         return sent;
     }
+
+    private static AlarmEntity RejectAlarm(GasResultEntity row, string error) => new()
+    {
+        AlarmId = Guid.NewGuid(), AlarmCode = "SAIGE_BAD_REQUEST", RobotId = row.RobotId,
+        Detail = JsonSerializer.Serialize(new
+        {
+            severity = "WARNING", title = "가스 측정 결과가 세이지로 전달되지 않음",
+            taskId = row.TaskId, round = row.Round, result = row.Result, error,
+        }),
+        RaisedAt = DateTimeOffset.UtcNow,
+    };
 
     /// <summary>세이지로 보낼 본문 — taskId 는 세이지 조회 API 와 같은 표기, tankId·round 는 본문에 없을 때만 채운다.</summary>
     internal async Task<JsonObject> BuildBodyAsync(AcsDbContext db, GasResultEntity row, CancellationToken ct)

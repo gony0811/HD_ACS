@@ -130,6 +130,12 @@ public sealed class MissionService
             throw new RunConflictException(
                 $"선창 {scenario.TankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다 — 용접검사(WELD) 선창만 {what}할 수 있습니다.");
 
+        // 가스검사는 회차가 필수 — 세이지가 회차 없는 결과를 거부한다(재전송도 안 됨) [포밍가스 규격 §2 round 필수]
+        bool isGas = string.Equals(kind, HD.Acs.Core.Planning.InspectionKinds.Gas, StringComparison.OrdinalIgnoreCase);
+        if (isGas && round is null)
+            throw new RunRequestInvalidException(
+                $"선창 {scenario.TankId}는 가스검사입니다 — 검사 회차(1 또는 2)를 골라야 {what}할 수 있습니다.");
+
         var run = new ScenarioRunEntity
         {
             RunId = Guid.NewGuid(),
@@ -140,7 +146,7 @@ public sealed class MissionService
             StartedAt = DateTimeOffset.UtcNow,
             TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
             // 회차는 가스검사 선창에서만 쓴다(지령 params.round) — 용접검사 run 에는 남기지 않는다
-            Round = string.Equals(kind, HD.Acs.Core.Planning.InspectionKinds.Gas, StringComparison.OrdinalIgnoreCase) ? round : null,
+            Round = isGas ? round : null,
         };
         // 재검사 — 지정한 용접선만 놓고 정차·리프트를 다시 고른다(가드를 모두 통과한 뒤 계산: 수 초 걸린다)
         IReadOnlyList<RepairStop> stops = repairTaskIds is not null && optimize
@@ -501,6 +507,9 @@ public sealed class MissionService
 
 /// <summary>run 시작/재개 충돌(동일 로봇 활성 run 존재) — 409로 매핑.</summary>
 public sealed class RunConflictException(string message) : Exception(message);
+
+/// <summary>run 시작 요청이 잘못됨(가스검사 회차 누락 등) — 400.</summary>
+public sealed class RunRequestInvalidException(string message) : Exception(message);
 
 /// <summary>run 상태상 불가한 요청(완료 run 재개 등) — 400으로 매핑.</summary>
 public sealed class RunStateException(string message) : Exception(message);

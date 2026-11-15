@@ -102,6 +102,7 @@ public sealed partial class ShellViewModel : ObservableObject
         AreaPlanning.ConfirmAsync = (message, caption) => _dialog.ConfirmAsync(message, caption);
         AreaPlanning.TankRenamed += (_, tankId) => _ = OnTankRenamedAsync(tankId);
 
+        AreaPlanning.RoundProvider = () => Mission.Round;   // 계획 화면의 "선택 작업만 검사 실행"도 같은 회차로
         // 선창의 검사 종류 → 운영 화면의 가스검사 회차 선택 표시
         AreaPlanning.PropertyChanged += (_, e) =>
         {

@@ -59,4 +59,49 @@ public static class SaigeGasResult
         if (RoundOf(copy) is null && round is int r) copy["round"] = r;
         return copy;
     }
+
+    /// <summary>
+    /// 세이지 규격 검사 [포밍가스 연동 규격 초안 v0.1 §2 필드 표·값 규칙] — 보내면 400 으로 거부될 본문을 미리 가려낸다
+    /// (거부된 결과는 재전송되지 않으므로, 무엇이 틀렸는지 ACS 쪽에 남기려는 것). 문제 없으면 빈 목록.
+    /// </summary>
+    public static IReadOnlyList<string> Violations(JsonObject body)
+    {
+        var v = new List<string>();
+        static bool Str(JsonNode? n) => n is JsonValue x && x.TryGetValue<string>(out var s) && s.Length > 0;
+        static bool Num(JsonNode? n) => n is JsonValue x && x.GetValueKind() == JsonValueKind.Number;
+        static bool Int(JsonNode? n, out long value)
+        {
+            value = 0;
+            return n is JsonValue x && x.GetValueKind() == JsonValueKind.Number && x.TryGetValue(out value);
+        }
+        static bool Verdict(JsonNode? n) => n is JsonValue x && x.TryGetValue<string>(out var s) && s is "OK" or "NG";
+
+        if (!Str(body["tankId"])) v.Add("tankId 없음");
+        if (!Str(body["taskId"])) v.Add("taskId 없음");
+        if (!Int(body["round"], out var round) || round is not (1 or 2)) v.Add("round 는 1 또는 2 (필수)");
+        if (!Int(body["startedAt"], out _)) v.Add("startedAt 없음");
+        if (!Int(body["finishedAt"], out _)) v.Add("finishedAt 없음");
+        if (body["threshold"] is not JsonObject th || !Num(th["value"]) || !Str(th["unit"])) v.Add("threshold.value·unit 없음");
+        if (!Verdict(body["result"])) v.Add($"result 는 OK·NG 만 (받은 값 '{ResultOf(body)}')");
+        if (body["points"] is not JsonArray points || points.Count == 0) { v.Add("points 없음"); return v; }
+        foreach (var p in points)
+        {
+            if (p is not JsonObject point) { v.Add("points 항목이 객체가 아님"); continue; }
+            string at = Int(point["pointSeq"], out var seq) && seq >= 1 ? $"point {seq}" : "point ?";
+            if (at == "point ?") v.Add("pointSeq 는 1 이상 정수");
+            if (!Verdict(point["result"])) v.Add($"{at}: result 는 OK·NG 만");
+            if (point["scans"] is not JsonArray scans || scans.Count is < 1 or > 3) { v.Add($"{at}: scans 는 1~3건"); continue; }
+            foreach (var sc in scans)
+            {
+                if (sc is not JsonObject scan) { v.Add($"{at}: scans 항목이 객체가 아님"); continue; }
+                if (!Int(scan["retry"], out var retry) || retry is < 0 or > 2) v.Add($"{at}: retry 는 0~2");
+                if (!Int(scan["u"], out _) || !Int(scan["v"], out _)) v.Add($"{at}: u·v 는 정수(mm)");
+                if (!Num(scan["value"])) v.Add($"{at}: value 없음");
+                if (!Verdict(scan["result"])) v.Add($"{at}: scan result 는 OK·NG 만");
+                if (!Int(scan["measuredAt"], out _)) v.Add($"{at}: measuredAt 없음");
+            }
+            if (v.Count >= 10) break;
+        }
+        return v;
+    }
 }
