@@ -7,10 +7,10 @@ namespace HD.Acs.App.Services;
 /// HD_AMR 이 프로필 전송 때 함께 알려 주는 자기 코봇 모델 값 — ACS 리치 시뮬레이터가 같은 값을 쓰는지 대조하는 데만 쓴다
 /// (ACS 는 이 값으로 자기 설정을 바꾸지 않는다). 모르는 값은 null.
 /// </summary>
-/// <param name="D6Mm">J5 → 플랜지 면 [mm] (AMR <c>cobot.kinematics.d6Mm</c>).</param>
+/// <param name="LinksMm">링크 치수 [d1, a2, a3, d4, d5, d6] mm (AMR <c>cobot.kinematics.linksMm</c> — 컨트롤러 DH 보정 반영).</param>
 /// <param name="WristMarginDeg">경로 손목 특이점 여유 |J5| [도] (AMR <c>PostureLimits.DefaultWristMarginDeg</c>).</param>
 /// <param name="ToolLengthMm">플랜지 면 → 검사 초점 [mm] (AMR <c>Fr5Kinematics.InspectionTool</c> z).</param>
-public sealed record AmrRobotModel(double? D6Mm, double? WristMarginDeg, double? ToolLengthMm);
+public sealed record AmrRobotModel(double[]? LinksMm, double? WristMarginDeg, double? ToolLengthMm);
 
 /// <summary>AMR 이 알려 준 값과 ACS 설정의 차이.</summary>
 public static class RobotModelCheck
@@ -19,8 +19,14 @@ public static class RobotModelCheck
     public static IReadOnlyList<string> Compare(ReachRobotModel acs, AmrRobotModel amr)
     {
         var list = new List<string>();
-        if (amr.D6Mm is { } d6 && Math.Abs(d6 - acs.Kinematics.D6) > 0.05)
-            list.Add($"d6(J5→플랜지): AMR {d6:0.#} mm ≠ ACS {acs.Kinematics.D6:0.#} mm (Acs:Reach:D6Mm) — 플랜지 위치·관절각이 달라진다");
+        if (amr.LinksMm is { Length: 6 } links)
+        {
+            var mine = acs.Kinematics.LinksMm;
+            var names = new[] { "d1", "a2", "a3", "d4", "d5", "d6" };
+            var diff = Enumerable.Range(0, 6).Where(i => Math.Abs(links[i] - mine[i]) > 0.01)
+                .Select(i => $"{names[i]} AMR {links[i]:0.###} ≠ ACS {mine[i]:0.###}").ToList();
+            if (diff.Count > 0) list.Add($"링크 치수[mm]: {string.Join(", ", diff)} (Acs:Reach:LinksMm)");
+        }
         if (amr.WristMarginDeg is { } w && Math.Abs(w - acs.PlanarWristMarginDeg) > 0.05)
             list.Add($"손목 여유 |J5|: AMR {w:0.#}° ≠ ACS {acs.PlanarWristMarginDeg:0.#}° (Acs:Reach:WristMarginDeg)");
         var focus = acs.ToolZMm + (acs.StageStandoffsMm.Length > 0 ? acs.StageStandoffsMm[^1] : 0);

@@ -135,17 +135,38 @@ public class Fr5FkCheckTests
     }
 
     [Fact]
-    public void 설정_d6_해석()
+    public void 설정_링크_치수_해석()
     {
-        Assert.Equal((Fr5Kinematics.DefaultD6Mm, true), Fr5Kinematics.ResolveD6(null));
-        Assert.Equal((160.0, true), Fr5Kinematics.ResolveD6(160));
-        Assert.Equal((Fr5Kinematics.DefaultD6Mm, false), Fr5Kinematics.ResolveD6(10));
-        Assert.Equal((Fr5Kinematics.DefaultD6Mm, false), Fr5Kinematics.ResolveD6(double.NaN));
+        Assert.Equal((Fr5Kinematics.Fr5Wml, true), Fr5Kinematics.FromLinks(null));
+        var (cal, ok) = Fr5Kinematics.FromLinks(Fr5Kinematics.WeldAmrLinksMm);
+        Assert.True(ok);
+        Assert.Equal(Fr5Kinematics.WeldAmrLinksMm, cal.LinksMm);
+        Assert.Equal((Fr5Kinematics.Fr5Wml, false), Fr5Kinematics.FromLinks(new[] { 180.0, -970, -816, 159, 114 }));
+        Assert.Equal((Fr5Kinematics.Fr5Wml, false), Fr5Kinematics.FromLinks(new[] { 180.0, -970, -816, 159, 114, 160 }));   // d6 160 은 받지 않는다
+        Assert.Equal((Fr5Kinematics.Fr5Wml, false), Fr5Kinematics.FromLinks(new[] { 180.0, -970, double.NaN, 159, 114, 106 }));
+    }
+
+    [Fact]
+    public void 실물_보정_치수는_공칭과_1mm_안팎_차이다()
+    {
+        // 2026-11-16 실물 대조: 공칭 치수는 컨트롤러와 최대 1.34 mm(RMS 0.94) 차이였고, DH 보정값을 넣으면 0.000 mm 였다.
+        // 보정값을 '컨트롤러'로 놓고 공칭을 대조하면 같은 크기의 오차가 나와야 한다(d6 160 은 50 mm 넘게 어긋난다).
+        var (cal, _) = Fr5Kinematics.FromLinks(Fr5Kinematics.WeldAmrLinksMm);
+        var v = Fr5FkCheck.Check(Fr5Kinematics.Fr5Wml, Controller(cal));
+        _out.WriteLine(v.Summary());
+        Assert.True(v.Configured.Matches);                       // 공칭도 판정 기준(2 mm·0.5°) 안
+        Assert.InRange(v.Configured.PosMaxMm, 0.5, 2.0);
+        Assert.Equal(Fr5Kinematics.D6StepMm, v.MatchingCandidateMm);
+        Assert.False(v.Candidates[Fr5Kinematics.D6DatasheetMm].Matches);
+        Assert.True(v.Candidates[Fr5Kinematics.D6DatasheetMm].PosMaxMm > 50);
+        Assert.True(v.Convention.IsIdentity);                    // 관절 0점·부호는 컨트롤러와 같다
+        Assert.True(Fr5FkCheck.Residual(cal, Controller(cal)).PosMaxMm < 1e-9);
     }
 
     /// <summary>
-    /// 현장 표본(Data/fr5_fk_samples.json)과 지금 기본 d6 를 대조한다. 표본이 아직 없으면 건너뛴다.
-    /// 표본이 들어온 뒤 실패하면 — 요약에 나온 d6(또는 관절 규약)로 <see cref="Fr5Kinematics.DefaultD6Mm"/> 과 설정을 고칠 것.
+    /// 현장 표본(Data/fr5_fk_samples.json)과 공칭 치수를 대조한다. 표본 파일이 비어 있으면 건너뛴다
+    /// (2026-11-16 대조는 다른 PC 에서 했고 그 표본 파일은 이 저장소에 없다 — 결과 수치는 <see cref="Fr5Kinematics.NominalLinksMm"/> 주석).
+    /// 다른 장비·펌웨어에서 다시 받은 표본을 넣었을 때 실패하면 요약에 나온 d6·관절 규약을 확인할 것.
     /// </summary>
     [Fact]
     public void 현장_표본이_있으면_기본_d6와_관절_규약이_실물과_맞아야_한다()
@@ -154,13 +175,13 @@ public class Fr5FkCheckTests
         var samples = Fr5FkCheck.LoadSamples(File.ReadAllText(path));
         if (samples.Count == 0)
         {
-            _out.WriteLine("현장 표본 없음 — d6 는 미확정(지금 기본값 " + Fr5Kinematics.DefaultD6Mm + " mm).");
+            _out.WriteLine("표본 파일 없음 — 대조를 건너뛴다(2026-11-16 실물 대조 결과: d6 106 mm 확인).");
             return;
         }
         Assert.True(samples.Count >= 5, $"표본이 {samples.Count}개 — 서로 다른 자세 5개 이상이 필요하다");
         var v = Fr5FkCheck.Check(Fr5Kinematics.Fr5Wml, samples);
         _out.WriteLine(v.Summary());
-        Assert.True(v.Configured.Matches, "기본 d6·관절 규약이 실물과 다르다:" + Environment.NewLine + v.Summary());
+        Assert.True(v.Configured.Matches, "공칭 치수·관절 규약이 실물과 다르다:" + Environment.NewLine + v.Summary());
     }
 
     private static double Wrap(double d)

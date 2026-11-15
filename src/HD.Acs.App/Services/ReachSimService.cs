@@ -112,8 +112,8 @@ public sealed partial class ReachSimService
         stages[^1] = config.GetValue("Acs:Reach:FocusStandoffMm", stages[^1]);   // 공구 TCP 가 초점보다 짧으면 그 차만큼 띄운다
         return d with
         {
-            // d6 는 실물 대조 전이라 설정으로 둔다(HD_AMR cobot.kinematics.d6Mm 와 같은 값) — 범위 밖이면 기본값
-            Kinematics = d.Kinematics.WithD6(Fr5Kinematics.ResolveD6(config.GetValue<double?>("Acs:Reach:D6Mm")).D6Mm),
+            // 링크 치수 [d1,a2,a3,d4,d5,d6] — 장비 컨트롤러의 DH 보정값(HD_AMR cobot.kinematics.linksMm 와 같은 값). 없거나 잘못되면 공칭
+            Kinematics = Fr5Kinematics.FromLinks(config.GetSection("Acs:Reach:LinksMm").Get<double[]>()).Kinematics,
             MountYawDeg = config.GetValue("Acs:Reach:MountYawDeg", 0.0),
             ToolZMm = config.GetValue("Acs:Reach:ToolZMm", d.ToolZMm),
             StageStandoffsMm = stages,

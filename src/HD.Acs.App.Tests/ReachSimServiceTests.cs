@@ -237,16 +237,18 @@ public class ReachSimServiceTests
     }
 
     [Fact]
-    public void d6_설정을_읽는다_범위_밖이면_기본값()
+    public void 링크_치수_설정을_읽는다_잘못된_값이면_공칭()
     {
-        static double D6(string? v) => ReachSimService.ModelFrom(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Acs:Reach:D6Mm"] = v, ["Acs:Reach:MountYawDeg"] = "180" }).Build()).Kinematics.D6;
+        static double[] Links(params string[] v) => ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddInMemoryCollection(v.Select((x, i) => ($"Acs:Reach:LinksMm:{i}", x)).Append(("Acs:Reach:MountYawDeg", "180"))
+                .ToDictionary(x => x.Item1, x => (string?)x.Item2)).Build()).Kinematics.LinksMm;
 
-        Assert.Equal(160, D6("160"));
-        Assert.Equal(106, D6("106"));
-        Assert.Equal(Fr5Kinematics.DefaultD6Mm, D6(null));
-        Assert.Equal(Fr5Kinematics.DefaultD6Mm, D6("10"));    // 범위(50~250) 밖
-        Assert.Equal(Fr5Kinematics.DefaultD6Mm, ReachSimService.ModelFrom(null).Kinematics.D6);
+        // 2026-11-16 실물 컨트롤러 DH 보정값
+        Assert.Equal(Fr5Kinematics.WeldAmrLinksMm, Links("180", "-970.317", "-815.788", "159.25", "114.077", "105.0"));
+        Assert.Equal(Fr5Kinematics.NominalLinksMm, Links());                                          // 없으면 공칭
+        Assert.Equal(Fr5Kinematics.NominalLinksMm, Links("180", "-970", "-816", "159", "114"));       // 6개가 아님
+        Assert.Equal(Fr5Kinematics.NominalLinksMm, Links("180", "-970", "-816", "159", "114", "160")); // 공칭에서 5 mm 넘게 벗어남
+        Assert.Equal(Fr5Kinematics.NominalLinksMm, ReachSimService.ModelFrom(null).Kinematics.LinksMm);
     }
 
     [Fact]

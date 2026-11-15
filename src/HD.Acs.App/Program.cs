@@ -905,7 +905,7 @@ app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, 
             profileName = names.TryGetValue((a.Source, a.AmrProfileId), out var n) ? n : null,
         }),
         // AMR 이 마지막으로 알려 준 코봇 모델 값과 ACS 설정의 차이(서버 기동 후 받은 것만)
-        robotModels = robotModels.All.Select(e => new { e.Source, e.Model.D6Mm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
+        robotModels = robotModels.All.Select(e => new { e.Source, e.Model.LinksMm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
     });
 });
 
