@@ -68,11 +68,15 @@ builder.Services.AddScoped<RobotPoseService>();          // 로봇 보고 위치
 builder.Services.AddHostedService<VdaBridgeService>();
 
 // SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
+// SAIGE 송수신 기록 — 보낸 본문과 응답(코드·본문)을 전용 파일(logs/saige-날짜.log)과 앱 로그에 남긴다
+builder.Services.AddSingleton<SaigeTrafficLog>();
+builder.Services.AddTransient<SaigeTrafficHandler>();
 builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["Acs:Saige:BaseUrl"] ?? "http://localhost:8080");
     c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Acs:Saige:TimeoutSec", 3));
-});
+})
+    .AddHttpMessageHandler<SaigeTrafficHandler>();
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
 // 가스 측정 결과 전송(가스검사) — Acs:Saige:Gas:Enabled=false(기본)면 저장만 하고 보내지 않는다.
@@ -179,11 +183,29 @@ app.MapPost("/api/integrations/saige/gas/resend", async (GasResendRequest? req, 
 });
 // 임계값 전달 SAIGE → ACS → AMR [포밍가스 규격 §3]. 200 = AMR 이 적용을 확인함(받은 값 그대로 반환) /
 // 400 = 값 검증 실패(AMR 이 거부한 경우 포함) / 503 = AMR 에 전달하지 못함(미연결·응답 없음).
-app.MapPut("/api/gas/threshold", async (GasThresholdRequest req, GasThresholdService svc, CancellationToken ct) =>
+app.MapPut("/api/gas/threshold", async (GasThresholdRequest req, GasThresholdService svc, SaigeTrafficLog traffic,
+    HttpContext http, CancellationToken ct) =>
 {
-    try { return Results.Ok(await svc.ApplyAsync(req, ct)); }
-    catch (GasThresholdInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
-    catch (GasThresholdUndeliveredException ex) { return Results.Json(new { error = ex.Message }, statusCode: 503); }
+    // SAIGE → ACS 요청과 ACS 의 응답도 송수신 기록에 남긴다
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+    string url = $"{http.Request.Path}{http.Request.QueryString} (from {http.Connection.RemoteIpAddress})";
+    string reqBody = System.Text.Json.JsonSerializer.Serialize(req, json);
+    IResult Reply(int status, object body)
+    {
+        traffic.Record("IN", "PUT", url, reqBody, status, System.Text.Json.JsonSerializer.Serialize(body, json), sw.ElapsedMilliseconds);
+        return Results.Json(body, statusCode: status);
+    }
+    try { return Reply(200, await svc.ApplyAsync(req, ct)); }
+    catch (GasThresholdInvalidException ex) { return Reply(400, new { error = ex.Message }); }
+    catch (GasThresholdUndeliveredException ex) { return Reply(503, new { error = ex.Message }); }
+});
+// SAIGE 송수신 기록 — 최근 200건(오래된 것부터). 전체는 서버의 logs/saige-날짜.log 파일.
+app.MapGet("/api/integrations/saige/traffic", (int? limit, SaigeTrafficLog traffic) =>
+{
+    var all = traffic.Recent;
+    int n = Math.Clamp(limit ?? 50, 1, SaigeTrafficLog.RecentCapacity);
+    return Results.Ok(new { file = traffic.FilePath, items = all.Skip(Math.Max(0, all.Count - n)) });
 });
 // run 의 가스 측정 결과 목록(받은 순) — 판정·회차·세이지 전송 상태. body=true 면 AMR 본문 포함.
 app.MapGet("/api/runs/{runId:guid}/gas-results", async (Guid runId, bool? body, AcsDbContext db, CancellationToken ct) =>

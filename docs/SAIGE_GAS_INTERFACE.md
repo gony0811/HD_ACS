@@ -27,6 +27,7 @@ INFICON 센서 → AMR ──(Task 완료 시 결과 JSON, startWeldInspection r
 | `Acs:Saige:Gas:ResultPath` | `/admin/v3/external/gas/results` | |
 | `Acs:Saige:Gas:ThresholdAckTimeoutSec` | `5` | 임계값을 AMR 이 확인해 줄 때까지 기다리는 시간 |
 | `Acs:Api:ListenPort` | `5100` | 규격 §3 의 ACS 포트. ACS 기본은 5199 — 현장에서 맞추거나 SAIGE 쪽 주소를 5199 로 |
+| `Acs:Saige:TrafficLogDir` | (기본 실행 폴더의 `logs`) | 세이지 송수신 기록 파일 위치. `TrafficLogEnabled=false` 면 파일을 만들지 않는다 |
 
 ## 3. 규격 대조
 
@@ -87,4 +88,5 @@ ACS 는 임계값을 저장하지 않는다 — AMR 이 받아 보관하고(재�
 | run 의 결과·판정·전송 상태 | `GET /api/runs/{runId}/gas-results` (`?body=true` 면 AMR 본문 포함) |
 | 상태 전송 | `GET /api/integrations/saige` |
 | 임계값 변경 기록 | 감사로그 `GAS_THRESHOLD_SET`·`GAS_THRESHOLD_FAILED` |
+| 세이지와 주고받은 본문·응답 | 서버 `logs/saige-날짜.log`(전부) · 앱 로그(정상 상태 전송 제외) · `GET /api/integrations/saige/traffic?limit=50`(최근 200건) |
 | AMR 없이 흐름 보기 | 시뮬레이터 `SIM_GAS=1`(결과 JSON 보고) — 임계값 확인·센서 상태는 흉내 내지 않는다 |
