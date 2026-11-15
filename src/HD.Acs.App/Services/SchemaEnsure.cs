@@ -8,7 +8,7 @@ namespace HD.Acs.App.Services;
 /// 컬럼이 DB에 없으면 그 테이블을 읽는 모든 API가 500이 된다 — 현장 이동식 서버(폐쇄망)에서
 /// db/migrations 수동 적용을 잊어도 바이너리 배포만으로 뜨도록 하는 최소 안전망이다.
 ///
-/// 범위 제한: <c>ADD COLUMN IF NOT EXISTS</c>(기본값 있는 추가)만. 삭제·타입 변경·데이터 환산은
+/// 범위 제한: <c>ADD COLUMN IF NOT EXISTS</c>(기본값 있는 추가)와 <c>CREATE TABLE IF NOT EXISTS</c>(새 테이블)만. 삭제·타입 변경·데이터 환산은
 /// 여기 넣지 않는다(일반 마이그레이션 러너는 별도 결정 사항). 각 항목은 db/migrations 의 동일 구문과 짝을 이룬다.
 /// </summary>
 public static class SchemaEnsure
@@ -30,6 +30,36 @@ public static class SchemaEnsure
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS task_ids jsonb",
         // db/migrations/2026-11-15_tank_inspection_kind.sql — 선창의 검사 종류(WELD 용접 / GAS 가스)
         "ALTER TABLE ref.tank_geometry ADD COLUMN IF NOT EXISTS inspection_kind text NOT NULL DEFAULT 'WELD'",
+        // db/migrations/2026-11-15_inspection_profile.sql — HD_AMR 검사 프로필 사본(새 테이블 — 없을 때만 만든다)
+        """
+        CREATE TABLE IF NOT EXISTS ref.inspection_profile (
+          source         text NOT NULL,
+          amr_profile_id int  NOT NULL,
+          name           text NOT NULL,
+          seam_type      text NOT NULL DEFAULT 'LINE',
+          pose_absolute  boolean NOT NULL DEFAULT false,
+          waypoints      jsonb NOT NULL DEFAULT '[]',
+          point_count    int  NOT NULL DEFAULT 0,
+          version        int  NOT NULL DEFAULT 1,
+          content_hash   text NOT NULL DEFAULT '',
+          amr_updated_at timestamptz,
+          received_at    timestamptz NOT NULL DEFAULT now(),
+          changed_at     timestamptz NOT NULL DEFAULT now(),
+          deleted        boolean NOT NULL DEFAULT false,
+          PRIMARY KEY (source, amr_profile_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_inspection_profile_name ON ref.inspection_profile (name)",
+        """
+        CREATE TABLE IF NOT EXISTS ref.inspection_profile_assignment (
+          source         text NOT NULL,
+          seam_type      text NOT NULL,
+          wall_code      text NOT NULL,
+          direction      text NOT NULL,
+          amr_profile_id int  NOT NULL,
+          PRIMARY KEY (source, seam_type, wall_code, direction)
+        )
+        """,
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

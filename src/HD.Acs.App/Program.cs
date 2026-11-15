@@ -790,6 +790,44 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 
 // 용접선 임시 제외/복귀 — enabled=false 인 용접선은 큐 전개·재개·재검사에서 싣지 않는다(계획·taskId·검사 기록은 그대로).
 // 진행 중 run 은 시작 때 만든 큐를 쓰므로 다음 run(또는 이어하기의 남은 정차)부터 반영된다.
+// HD_AMR 검사 프로필 사본 — AMR 이 프로필을 저장할 때 전체 목록을 올려 보낸다(계획용 참조 데이터, 로봇 지령 아님).
+app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDbContext db, CancellationToken ct) =>
+{
+    try { return Results.Ok(await InspectionProfileService.SyncAsync(db, req, ct)); }
+    catch (ProfileSyncException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, AcsDbContext db, CancellationToken ct) =>
+{
+    var reachName = cfg["Acs:Reach:ScanProfileName"];
+    var rows = await db.InspectionProfiles.AsNoTracking().OrderBy(x => x.Source).ThenBy(x => x.Name).ToListAsync(ct);
+    var assigned = await db.InspectionProfileAssignments.AsNoTracking()
+        .OrderBy(x => x.Source).ThenBy(x => x.SeamType).ThenBy(x => x.WallCode).ThenBy(x => x.Direction).ToListAsync(ct);
+    var names = rows.ToDictionary(x => (x.Source, x.AmrProfileId), x => x.Name);
+    var profiles = rows.Select(x =>
+    {
+        var (tilt, reason) = InspectionProfileService.ToTiltProfile(x);
+        return new
+        {
+            x.Source, x.AmrProfileId, x.Name, x.SeamType, x.PoseAbsolute, x.PointCount, x.Version, x.AmrUpdatedAt,
+            x.ReceivedAt, x.ChangedAt, x.Deleted,
+            reachUsable = tilt is not null, reachUnusableReason = reason,
+            usedForReach = !x.Deleted && tilt is not null && !string.IsNullOrWhiteSpace(reachName) && x.Name == reachName,
+            assignedCount = assigned.Count(a => a.Source == x.Source && a.AmrProfileId == x.AmrProfileId),
+            waypoints = detail == true ? InspectionProfileService.WaypointsOf(x) : null,
+        };
+    });
+    return Results.Ok(new
+    {
+        profiles,
+        assignments = assigned.Select(a => new
+        {
+            a.Source, a.SeamType, a.WallCode, a.Direction, a.AmrProfileId,
+            profileName = names.TryGetValue((a.Source, a.AmrProfileId), out var n) ? n : null,
+        }),
+    });
+});
+
 app.MapPut("/api/area-tasks/enabled", async (SetAreaTasksEnabledRequest req, AcsDbContext db) =>
 {
     var ids = (req.TaskIds ?? Array.Empty<Guid>()).Distinct().ToList();

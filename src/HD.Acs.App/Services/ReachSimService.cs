@@ -21,7 +21,9 @@ public sealed partial class ReachSimService
 
     private readonly AcsDbContext _db;
     private readonly InspectionDispatcher _dispatcher;
-    private readonly ReachRobotModel _baseModel;
+    private ReachRobotModel _baseModel;
+    private readonly string? _scanProfileName;
+    private bool _scanProfileResolved;
     private ReachRobotModel _model;
     /// <summary>면 코드 → 차체 중심과 검사 면 사이 최소 거리 [m] (<c>Acs:Reach:WallMinDistMm</c>). 정차 최적화·배차 직전 정차 선택·분리 제안이 쓴다.</summary>
     private readonly IReadOnlyDictionary<string, double> _wallMinDistM;
@@ -42,6 +44,47 @@ public sealed partial class ReachSimService
         _baseModel = ModelFrom(config);
         _model = _baseModel;
         _wallMinDistM = WallMinDistFrom(config);
+        _scanProfileName = config?["Acs:Reach:ScanProfileName"];
+        _useAmrProfiles = config?.GetValue("Acs:Reach:UseAmrProfiles", true) ?? true;
+    }
+
+    private readonly bool _useAmrProfiles;
+    private Func<string, string, string, SeamScanProfile?> _profileOf = (_, _, _) => null;
+    /// <summary>영역 → 면 코드(용접선의 프로필을 찾을 때 쓴다) — <see cref="Setup"/> 이 채운다.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, string> _areaWall = new();
+    /// <summary>용접선 점 목록(객체) → 그 용접선의 순회 프로필 — <see cref="SeamPoints"/> 가 채우고 모델의 SeamProfile 이 읽는다.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<IReadOnlyList<double[]>, SeamScanProfile> _seamProfiles =
+        new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>이 용접선 점 목록에 붙은 순회 프로필(이름·버전) — 없으면 null(설정값·포괄 근사로 판정).</summary>
+    public SeamScanProfile? ProfileOf(IReadOnlyList<double[]> seamPoints) =>
+        _seamProfiles.TryGetValue(seamPoints, out var p) ? p : null;
+
+    /// <summary>순회 프로필이 어디서 왔는지 — "AMR {이름} v{버전}" 또는 "설정"(appsettings · 포괄 근사).</summary>
+    public string ScanProfileSource { get; private set; } = "설정";
+
+    /// <summary>
+    /// 기준 모델 — 설정 <c>Acs:Reach:ScanProfileName</c> 의 프로필을 HD_AMR 이 올려 보냈고 직선 프로필이면 그 경유점으로 순회를 판정한다.
+    /// 이름이 없거나, 받은 적이 없거나, 직선 프로필이 아니면 설정값(<c>ScanTiltProfile</c>) 그대로다. 요청마다 한 번만 조회한다.
+    /// </summary>
+    private async Task<ReachRobotModel> BaseAsync(CancellationToken ct)
+    {
+        if (_scanProfileResolved) return _baseModel;
+        _scanProfileResolved = true;
+        if (_useAmrProfiles)
+        {
+            // HD_AMR 지정표 — 용접선의 유형·면·방향마다 AMR 이 실제로 쓰는 프로필(6축 경유점)로 순회를 판정한다
+            _profileOf = await InspectionProfileService.LoadSeamProfilesAsync(_db, ct);
+            _baseModel = _baseModel with { SeamProfile = pts => _seamProfiles.TryGetValue(pts, out var p) ? p.Waypoints : null };
+        }
+        if (string.IsNullOrWhiteSpace(_scanProfileName)) return _baseModel;
+        var e = await InspectionProfileService.FindByNameAsync(_db, _scanProfileName.Trim(), ct);
+        if (e is null) return _baseModel;
+        var (tilt, _) = InspectionProfileService.ToTiltProfile(e);
+        if (tilt is null) return _baseModel;
+        _baseModel = _baseModel with { ScanTiltProfile = tilt };
+        ScanProfileSource = $"AMR {e.Name} v{e.Version}";
+        return _baseModel;
     }
 
     /// <summary><c>Acs:Reach:WallMinDistMm:{면 코드}</c> [mm] → m. 0 이하·숫자가 아닌 값은 버린다.</summary>
@@ -129,7 +172,7 @@ public sealed partial class ReachSimService
         ReachBranchRule branch = ReachBranchRule.MaxMargin, double? strokeMm = null, bool areaLift = false)
     {
         var strokes = strokeMm is { } fixedStroke ? new[] { fixedStroke } : Strokes;
-        _model = _baseModel with { BranchRule = branch };
+        _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -189,7 +232,7 @@ public sealed partial class ReachSimService
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = _baseModel with { BranchRule = branch };
+        _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         var task = area?.Tasks.FirstOrDefault(t => t.TaskId == taskId);
         if (area is null || task is null) return null;
@@ -253,7 +296,7 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<ReachStationOptimum>?> OptimizeAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin, bool areaLift = true)
     {
-        _model = _baseModel with { BranchRule = branch };
+        _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -296,7 +339,7 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<RepairStop>> RepairStopsAsync(string tankId, IReadOnlySet<Guid> taskIds, CancellationToken ct,
         IReadOnlySet<Guid>? onlyAreas = null)
     {
-        _model = _baseModel;   // 운영 가지 규칙(MaxMargin)
+        _model = (await BaseAsync(ct));   // 운영 가지 규칙(MaxMargin)
         var list = new List<RepairStop>();
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return list;
@@ -350,7 +393,7 @@ public sealed partial class ReachSimService
     public async Task<NearestStop?> NearestStopAsync(Guid areaId, double fromX, double fromY, NearestOptions options, CancellationToken ct,
         double? fromYaw = null)
     {
-        _model = _baseModel;   // 운영 가지 규칙
+        _model = (await BaseAsync(ct));   // 운영 가지 규칙
         var a = await _db.InspectionAreas.AsNoTracking().Include(x => x.Tasks).FirstOrDefaultAsync(x => x.AreaId == areaId, ct);
         if (a is null) return null;
         a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();   // 임시 제외 용접선은 배차가 싣지 않는다
@@ -377,7 +420,7 @@ public sealed partial class ReachSimService
     public async Task<ReachSplitPlan?> SplitPlanAsync(Guid areaId, int maxGroups, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = _baseModel with { BranchRule = branch };
+        _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         if (area is null) return null;
         var ctx = await LoadTankAsync(area.TankId, ct);
@@ -480,6 +523,7 @@ public sealed partial class ReachSimService
     /// <summary>영역의 정차 후보 — 배차와 같은 정차점. 정차 방향이 없는 바닥·천장은 네 방향을 후보로 둔다.</summary>
     private AreaSetup Setup(TankCtx ctx, InspectionAreaEntity area, WallEntity wall)
     {
+        _areaWall[area.AreaId] = wall.WallCode;
         var floorZ = area.Level >= 1 && area.Level <= ctx.LevelZ.Length ? ctx.LevelZ[area.Level - 1] : 0;
         var (x, y, yaw) = InspectionDispatcher.StationDrawingOf(area, wall, _dispatcher.DefaultStandoffM(wall));
         var yaws = yaw is { } v ? new[] { v } : new[] { 0, Math.PI / 2, Math.PI, -Math.PI / 2 };
@@ -490,11 +534,15 @@ public sealed partial class ReachSimService
     }
 
     /// <summary>용접선 시작·중간·끝(도면 m).</summary>
-    private static double[][] SeamPoints(WallPose pose, AreaTaskEntity t)
+    private double[][] SeamPoints(WallPose pose, AreaTaskEntity t)
     {
         var a = pose.LocalToDrawing(t.StartU, t.StartV);
         var b = pose.LocalToDrawing(t.EndU, t.EndV);
-        return new[] { a, Vec3.Scale(Vec3.Add(a, b), 0.5), b };
+        var pts = new[] { a, Vec3.Scale(Vec3.Add(a, b), 0.5), b };
+        if (_areaWall.TryGetValue(t.AreaId, out var wall)
+            && _profileOf(t.SeamType, wall, InspectionProfileService.DirectionOf(t.StartU, t.StartV, t.EndU, t.EndV)) is { } profile)
+            _seamProfiles[pts] = profile;
+        return pts;
     }
 
     private static T Json<T>(string s) => JsonSerializer.Deserialize<T>(s)!;

@@ -365,6 +365,8 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/internal/tanks` | 등록된 선창 ID 목록(등록 순) — 운영 UI 가 시작할 때 지금 선창을 찾는다 |
 | `GET /api/reach-sim/tanks/{id}/area-map?level=&wallCode=` | 검사 가능 지도 — 저장된 정차·리프트에서 용접선마다 검사 가능 여부(`seams[].ok` true/false, 임시 제외 = null)와 영역 집계(`possible` = 용접선 전부 가능). 화면: 계획 ▸ 리치·간섭 ▸ 3D 위 [검사 가능 지도] — 용접선 가능 = 초록 · 불가 = 빨강, 영역은 음영 |
 | `PUT /api/area-tasks/enabled` | 용접선 임시 제외/복귀 `{taskIds[], enabled, userId}` — `enabled=false` 인 용접선은 검사(큐 전개·이어하기의 남은 정차·재검사)에서 빠진다. 계획·taskId·검사 기록은 그대로. 화면: 계획 ▸ 영역·작업 ▸ 작업 목록의 [ENABLE]/[DISABLE] |
+| `PUT /api/inspection-profiles/sync` | HD_AMR 이 검사 프로필(순회 경유점) 전체 목록을 올려 보낸다 `{source, full, profiles[], assignments[]}` — 내용이 바뀐 프로필만 버전 +1, 지정표(유형 × 면 × 방향 → 프로필)는 통째로 교체. 운영자가 부르는 주소가 아니다(AMR 이 프로필 저장 때·5분마다 자동 전송) [ADR-014] |
+| `GET /api/inspection-profiles?detail=true` | 받은 검사 프로필과 지정표 `{profiles[], assignments[]}` — 버전·경유점 수·받은 시각·몇 조합에 지정됐는지(`assignedCount`). 리치 시뮬레이터는 용접선마다 지정표의 프로필로 순회를 판정한다. `detail=true` 면 경유점 포함 |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |

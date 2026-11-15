@@ -185,6 +185,12 @@ public sealed record ReachRobotModel
     /// Z 는 작업물 프레임 원점(Top − <see cref="ScanTopZMm"/>, 면 쪽) 기준이라 TCP 면 이격 = <see cref="ScanStandoffMm"/> + (Z − 33.8). 설정 <c>Acs:Reach:ScanTiltProfile</c>.
     /// </summary>
     public IReadOnlyList<double[]>? ScanTiltProfile { get; init; }
+    /// <summary>
+    /// 용접선별 순회 프로필(6축 경유점) — 용접선 점 목록(<see cref="ReachSimulator.TraverseSeam"/> 에 넘긴 그 객체)을 주면 그 용접선이 쓸
+    /// 경유점을 돌려준다. null 을 돌려주면 <see cref="ScanTiltProfile"/>(없으면 포괄 근사)로 판정한다.
+    /// HD_AMR 이 올려 보낸 프로필과 유형·면별 지정표로 App 이 채운다.
+    /// </summary>
+    public Func<IReadOnlyList<double[]>, IReadOnlyList<ScanWaypoint>?>? SeamProfile { get; init; }
     /// <summary>작업물 프레임 Top 높이 [mm] — HD_AMR InternalWorkpieceFrame.DefaultCorrugationTopHeightMm. 점1(Top)이 이 Z 다.</summary>
     public const double ScanTopZMm = 33.8;
     /// <summary>기울기 판정 간격 [도] — HD_AMR 경로 검증 자세 간격(ChainSampleDeg 10°)과 같다.</summary>
@@ -261,6 +267,12 @@ public sealed record ReachPlane(string Code, double[] Origin, double[] Normal)
 
 /// <summary>정차 — 도면 프레임 차체 중심 (x,y)[m], 차체 전방 yaw[rad], 층 바닥 z[m].</summary>
 public sealed record ReachStation(double X, double Y, double Yaw, double FloorZ);
+
+/// <summary>
+/// 순회 경유점 하나 — HD_AMR 절대 자세 프로필과 같은 값. 작업물 좌표계(X = 용접선 시작 → 끝, Z = 면에서 멀어지는 쪽,
+/// Y = Z × X) 기준 위치 [mm]와 자세 [도](R = Rz · Ry · Rx, Ry = 프로필의 θ).
+/// </summary>
+public sealed record ScanWaypoint(double X, double Y, double Z, double RxDeg, double RyDeg, double RzDeg);
 
 public enum ReachStage { Approach, Align, Focus }
 
@@ -604,7 +616,8 @@ public static partial class ReachSimulator
         IReadOnlyList<double[]> seamPoints, double[] wallNormal, double[]? startSeed,
         double offsetForwardMm = 0, double offsetLeftMm = 0) =>
         model.CheckTraversal && seamPoints.Count > 0 && startSeed is { Length: >= 6 }
-            ? Traverse(model, station, strokeMm, seamPoints[0], seamPoints[^1], wallNormal, startSeed, offsetForwardMm, offsetLeftMm)
+            ? Traverse(model, station, strokeMm, seamPoints[0], seamPoints[^1], wallNormal, startSeed, offsetForwardMm, offsetLeftMm,
+                model.SeamProfile?.Invoke(seamPoints))
             : null;
 
     /// <summary>층의 장애물 평면 — 탱크 면 + (2층 이상) 그 층 데크면.</summary>

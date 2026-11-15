@@ -282,6 +282,35 @@ CREATE TABLE ref.tank_geometry (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- ─────────────── HD_AMR 검사 프로필 사본 (ref) ───────────────
+-- AMR 이 프로필을 저장할 때 전체 목록을 올려 보낸다. 내용이 바뀌면 version +1. 리치 시뮬레이터 순회 판정용.
+CREATE TABLE IF NOT EXISTS ref.inspection_profile (
+  source         text NOT NULL,
+  amr_profile_id int  NOT NULL,
+  name           text NOT NULL,
+  seam_type      text NOT NULL DEFAULT 'LINE',
+  pose_absolute  boolean NOT NULL DEFAULT false,
+  waypoints      jsonb NOT NULL DEFAULT '[]',
+  point_count    int  NOT NULL DEFAULT 0,
+  version        int  NOT NULL DEFAULT 1,
+  content_hash   text NOT NULL DEFAULT '',
+  amr_updated_at timestamptz,
+  received_at    timestamptz NOT NULL DEFAULT now(),
+  changed_at     timestamptz NOT NULL DEFAULT now(),
+  deleted        boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (source, amr_profile_id)
+);
+CREATE INDEX IF NOT EXISTS ix_inspection_profile_name ON ref.inspection_profile (name);
+-- 유형·면·진행 방향(H 가로 / V 세로)별 프로필 지정표 — AMR 이 통째로 올려 보낸다.
+CREATE TABLE IF NOT EXISTS ref.inspection_profile_assignment (
+  source         text NOT NULL,
+  seam_type      text NOT NULL,
+  wall_code      text NOT NULL,
+  direction      text NOT NULL,
+  amr_profile_id int  NOT NULL,
+  PRIMARY KEY (source, seam_type, wall_code, direction)
+);
+
 -- ─────────────── 벽면(Wall) LAYER (ref) [SPEC v3 §3: 파라미터에서 자동 생성] ───────────────
 -- 통짜 면 1개 = 행 1개(층 슬라이스 안 함, 층 소속은 영역이 가짐). PK (tank_id, wall_code).
 -- 프레임: origin(P0) + u/v 축(도면 좌표계 단위벡터) → 벽면-로컬 (u,v) 좌표. normal=내부향 단위법선.

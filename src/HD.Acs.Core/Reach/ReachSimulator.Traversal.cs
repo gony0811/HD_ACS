@@ -3,7 +3,9 @@ using HD.Acs.Core.Geometry;
 namespace HD.Acs.Core.Reach;
 
 /// <summary>도면 순회 판정 자세 하나 — 용접선 시작점에서의 거리·광축 기울기·TCP(도면 m)·관절각·이 자세의 관절 여유.</summary>
-public sealed record ReachTraversalPoint(double AlongMm, double TiltDeg, double[] Tcp, double[] JointsDeg, double MarginDeg, string Limiting);
+/// <param name="Waypoint">6축 프로필로 판정했을 때의 경유점 번호(1부터, 경유점 사이 경로면 뒤쪽 경유점) — 그 외는 null.</param>
+public sealed record ReachTraversalPoint(double AlongMm, double TiltDeg, double[] Tcp, double[] JointsDeg, double MarginDeg, string Limiting,
+    int? Waypoint = null);
 
 /// <summary>
 /// 도면 순회(⑱ inspectionRun) 판정 — HD_AMR 이 용접선 시작점 정렬 뒤 티칭 프로필 경유점을 도는 동안 관절이 이어지는가.
@@ -36,7 +38,7 @@ public static partial class ReachSimulator
     /// <param name="seed">순회 직전 관절각 J1~J6 [도] — 보통 <see cref="ScanSeed"/>(시작점 초점 자세).</param>
     public static ReachTraversal Traverse(
         ReachRobotModel m, ReachStation station, double strokeMm, double[] seamStart, double[] seamEnd, double[] wallNormal,
-        double[] seed, double offsetForwardMm = 0, double offsetLeftMm = 0)
+        double[] seed, double offsetForwardMm = 0, double offsetLeftMm = 0, IReadOnlyList<ScanWaypoint>? waypoints = null)
     {
         var f = new BaseFrame(m, station, strokeMm, offsetForwardMm, offsetLeftMm);
         var n = Vec3.Normalize(wallNormal) ?? new[] { 0.0, 0, 1 };
@@ -65,8 +67,57 @@ public static partial class ReachSimulator
         var steps = Math.Max(1, (int)Math.Ceiling(len * 1000 / m.ScanSampleMm - 1e-9));
         var tiltSteps = m.ScanTiltDeg > 0 && m.ScanTiltStepDeg > 0 ? (int)Math.Ceiling(m.ScanTiltDeg / m.ScanTiltStepDeg - 1e-9) : 0;
         var plan = new List<(double Along, double Tilt, double Dz, int From)>();
+        // 6축 프로필 판정 자세 — plan 과 같은 번호. 있으면 Pose(거리, 기울기) 대신 이 목표를 쓴다.
+        var exact = new List<(double[] Tcp, double[,] Target, string Where, int Waypoint)>();
         var lastMain = -1;
-        if (m.ScanTiltProfile is { Count: > 0 } profile)
+        if (waypoints is { Count: > 0 })
+        {
+            // HD_AMR 절대 자세 경유점 그대로 — 작업물 좌표계 X = 용접선 방향, Y = 법선 × 방향, Z = 면에서 멀어지는 쪽,
+            // 원점 = 시작점 Top 에서 면 쪽으로 33.8mm. 툴 자세 R = Rz·Ry·Rx, 검사 공구 #1(플랜지 대비 rx 180°·rz 90°)이라
+            // 플랜지 X = 툴 Y, 플랜지 Y = 툴 X, 플랜지 Z = −툴 Z. 경유점 사이는 MoveL — 위치는 직선, 자세는 한 축 둘레로 고르게 돈다.
+            var origin = Vec3.Add(seamStart, Vec3.Scale(n, (m.ScanStandoffMm - ReachRobotModel.ScanTopZMm) / 1000.0));
+            double[] ToDrawing(double[] v) => Vec3.Add(Vec3.Add(Vec3.Scale(dir, v[0]), Vec3.Scale(axis, v[1])), Vec3.Scale(n, v[2]));
+            (double[] Tcp, double[,] Target) Exact(double[] posMm, double[,] rot)
+            {
+                var tcp = Vec3.Add(origin, Vec3.Scale(ToDrawing(posMm), 1 / 1000.0));
+                var toolX = ToDrawing(new[] { rot[0, 0], rot[1, 0], rot[2, 0] });
+                var toolY = ToDrawing(new[] { rot[0, 1], rot[1, 1], rot[2, 1] });
+                var toolZ = ToDrawing(new[] { rot[0, 2], rot[1, 2], rot[2, 2] });
+                var xb = f.DirectionToBase(toolY);
+                var yb = f.DirectionToBase(toolX);
+                var zb = f.DirectionToBase(Vec3.Scale(toolZ, -1));
+                return (tcp, Mat4.FromAxes(xb, yb, zb, Vec3.Sub(f.DrawingToBase(tcp), Vec3.Scale(zb, m.ToolZMm))));
+            }
+            double[] prevPos = Array.Empty<double>();
+            double[,] prevRot = new double[3, 3];
+            for (var w = 0; w < waypoints.Count; w++)
+            {
+                var wp = waypoints[w];
+                var pos = new[] { wp.X, wp.Y, wp.Z };
+                var rot = RotZyx(wp.RxDeg, wp.RyDeg, wp.RzDeg);
+                if (w > 0)
+                {
+                    var (rotAxis, angleDeg) = RotBetween(prevRot, rot);
+                    var sub = Math.Max(1, (int)Math.Ceiling(Math.Max(
+                        Math.Sqrt(Math.Pow(pos[0] - prevPos[0], 2) + Math.Pow(pos[1] - prevPos[1], 2)) / m.ScanSampleMm,
+                        m.ScanTiltStepDeg > 0 ? angleDeg / m.ScanTiltStepDeg : 0) - 1e-9));
+                    for (var k = 1; k < sub; k++)
+                    {
+                        var t = (double)k / sub;
+                        var mid = new[] { prevPos[0] + (pos[0] - prevPos[0]) * t, prevPos[1] + (pos[1] - prevPos[1]) * t, prevPos[2] + (pos[2] - prevPos[2]) * t };
+                        var e = Exact(mid, Mul3(prevRot, RotAxis(rotAxis, angleDeg * t)));
+                        plan.Add((mid[0], wp.RyDeg, 0, plan.Count - 1));
+                        exact.Add((e.Tcp, e.Target, $"경유점 #{w + 1} 앞 경로", w + 1));
+                    }
+                }
+                var at = Exact(pos, rot);
+                plan.Add((wp.X, wp.RyDeg, 0, plan.Count - 1));
+                exact.Add((at.Tcp, at.Target, $"경유점 #{w + 1}", w + 1));
+                prevPos = pos;
+                prevRot = rot;
+            }
+        }
+        else if (m.ScanTiltProfile is { Count: > 0 } profile)
         {
             // 실제 경유점(거리, 기울기[, Z])이 있으면 그 순서대로 잇는다 — 사이는 판정 간격(거리·기울기)으로 나눠 경로를 본다.
             (double A, double T, double D) Wp(double[] v) => (v[0], v[1], v.Length >= 3 ? v[2] - ReachRobotModel.ScanTopZMm : 0);
@@ -111,10 +162,10 @@ public static partial class ReachSimulator
         {
             var (along, tilt, dz, from) = plan[i];
             var reference = from < 0 ? seed : sols[from];
-            var (tcp, target) = Pose(along, tilt, dz);
+            var (tcp, target) = exact.Count > 0 ? (exact[i].Tcp, exact[i].Target) : Pose(along, tilt, dz);
             tcps[i] = tcp;
             var j = NearestWound(m, m.Kinematics.InverseFlange(target), reference);
-            if (j is null) { unreachable = $"도면 순회 — {Where(along, tilt)} 도달 불가(관절 범위 안 해 없음)"; break; }
+            if (j is null) { unreachable = $"도면 순회 — {At(i)} 도달 불가(관절 범위 안 해 없음)"; break; }
             sols[i] = j;
             reached = i + 1;
         }
@@ -147,12 +198,12 @@ public static partial class ReachSimulator
             j[5] = WindJ6(j[5] + twist, prev[5]);
 
             var (margin, why) = TraverseMargin(m, j, seed, SafeJ6(j[5]) ? null : j[5] + shift, shift);
-            var p = new ReachTraversalPoint(along, tilt, tcps[i], j, margin, why);
+            var p = new ReachTraversalPoint(along, tilt, tcps[i], j, margin, why, exact.Count > 0 ? exact[i].Waypoint : null);
             points.Add(p);
             if (margin < minMargin) { minMargin = margin; limiting = why; worst = p; }
 
             if (blocker is not null) continue;
-            var at = Where(along, tilt);
+            var at = At(i);
             if (from >= 0 && StageJump6(prev, j) is { Travel: var jump, Joint: var jn } && jump > m.MaxPathJointStepDeg)
                 blocker = $"도면 순회 — {at} J{jn + 1} {jump:0}° 튐(> {m.MaxPathJointStepDeg:0}°) — 해 가지가 바뀜";
             else if (ElbowFlip(seed, j))
@@ -169,7 +220,65 @@ public static partial class ReachSimulator
         if (points.Count == 0 && unreachable is null) minMargin = double.NegativeInfinity;
         return new ReachTraversal(blocker is null, blocker, minMargin, limiting, twist, worst, points);
 
+        string At(int i) => exact.Count > 0 ? exact[i].Where : Where(plan[i].Along, plan[i].Tilt);
         static string Where(double along, double tilt) => $"{along:0}mm 지점 기울기 {tilt:+0;-0;0}°";
+    }
+
+    /// <summary>R = Rz(rz) · Ry(ry) · Rx(rx) [도] — HD_AMR FrameMath.PoseToMatrix 와 같은 규약.</summary>
+    public static double[,] RotZyx(double rxDeg, double ryDeg, double rzDeg)
+    {
+        double a = rxDeg * Math.PI / 180, b = ryDeg * Math.PI / 180, c = rzDeg * Math.PI / 180;
+        double ca = Math.Cos(a), sa = Math.Sin(a), cb = Math.Cos(b), sb = Math.Sin(b), cc = Math.Cos(c), sc = Math.Sin(c);
+        return new[,]
+        {
+            { cb * cc, cc * sa * sb - ca * sc, ca * cc * sb + sa * sc },
+            { cb * sc, ca * cc + sa * sb * sc, ca * sb * sc - cc * sa },
+            { -sb, cb * sa, ca * cb },
+        };
+    }
+
+    private static double[,] Mul3(double[,] a, double[,] b)
+    {
+        var r = new double[3, 3];
+        for (var i = 0; i < 3; i++)
+            for (var j = 0; j < 3; j++)
+                r[i, j] = a[i, 0] * b[0, j] + a[i, 1] * b[1, j] + a[i, 2] * b[2, j];
+        return r;
+    }
+
+    /// <summary>축(단위벡터) 둘레 회전 행렬 [도].</summary>
+    private static double[,] RotAxis(double[] k, double angleDeg)
+    {
+        double t = angleDeg * Math.PI / 180, c = Math.Cos(t), s = Math.Sin(t), v = 1 - c;
+        return new[,]
+        {
+            { c + k[0] * k[0] * v, k[0] * k[1] * v - k[2] * s, k[0] * k[2] * v + k[1] * s },
+            { k[1] * k[0] * v + k[2] * s, c + k[1] * k[1] * v, k[1] * k[2] * v - k[0] * s },
+            { k[2] * k[0] * v - k[1] * s, k[2] * k[1] * v + k[0] * s, c + k[2] * k[2] * v },
+        };
+    }
+
+    /// <summary>a 에서 b 로 가는 회전(a 기준 좌표) — b = a · R(축, 각). 각이 0 이면 축은 임의(z).</summary>
+    public static (double[] Axis, double AngleDeg) RotBetween(double[,] a, double[,] b)
+    {
+        var r = new double[3, 3];
+        for (var i = 0; i < 3; i++)
+            for (var j = 0; j < 3; j++)
+                r[i, j] = a[0, i] * b[0, j] + a[1, i] * b[1, j] + a[2, i] * b[2, j];   // aᵀ · b
+        var cos = Math.Clamp((r[0, 0] + r[1, 1] + r[2, 2] - 1) / 2, -1, 1);
+        var angle = Math.Acos(cos);
+        if (angle < 1e-9) return (new[] { 0.0, 0, 1 }, 0);
+        double[] axis;
+        if (Math.PI - angle > 1e-6)
+            axis = new[] { r[2, 1] - r[1, 2], r[0, 2] - r[2, 0], r[1, 0] - r[0, 1] };
+        else
+        {
+            // 180° — 대칭 행렬에서 가장 큰 대각 성분의 축
+            var d = new[] { r[0, 0], r[1, 1], r[2, 2] };
+            var i = Array.IndexOf(d, d.Max());
+            axis = new[] { r[0, i] + (i == 0 ? 1 : 0), r[1, i] + (i == 1 ? 1 : 0), r[2, i] + (i == 2 ? 1 : 0) };
+        }
+        return (Vec3.Normalize(axis) ?? new[] { 0.0, 0, 1 }, angle * 180 / Math.PI);
     }
 
     /// <summary>

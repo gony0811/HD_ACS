@@ -19,7 +19,7 @@ public sealed partial class ReachSimService
     public async Task<FieldCompareResult?> FieldCompareAsync(string tankId, IReadOnlyList<FieldAttempt> attempts, string? wallCode,
         CancellationToken ct, IReadOnlyList<string>? parseWarnings = null)
     {
-        _model = _baseModel;   // 운영 가지 규칙
+        _model = (await BaseAsync(ct));   // 운영 가지 규칙
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var areas = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId).ToListAsync(ct);
@@ -103,6 +103,7 @@ public sealed partial class ReachSimService
             var (sx, sy) = tw.MapToDrawing(pose.X, pose.Y);
             var station = new ReachStation(sx, sy, tw.MapYawToDrawing(pose.Theta), floorZ);
             var wp = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
+            _areaWall[area.AreaId] = area.WallCode;
             var pts = SeamPoints(wp, task);
             var lift = Math.Clamp(f.LiftMm, 0, model.StrokeMaxMm);
             var s = ReachSimulator.Survey(model, ReachSimulator.PlanesForLevel(ctx.WallPlanes, floorZ, area.Level),
