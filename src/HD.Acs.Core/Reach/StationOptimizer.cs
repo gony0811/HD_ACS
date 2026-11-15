@@ -89,7 +89,7 @@ public sealed record PoseErrorStats(int Samples, int WorstMiss, int WorstCollisi
 public sealed record StationOptimum(StationCandidate Baseline, StationCandidate Best, int Evaluated);
 
 /// <summary>배차 직전 정차 선택 조건.</summary>
-/// <param name="RobustM">도착 오차 [m] — 고른 정차에서 이 반경의 8방향(전후·좌우·대각선)으로 어긋나도 전부 닿아야 한다(0 = 검사 안 함).</param>
+/// <param name="RobustM">도착 오차 [m] — 고른 정차에서 이 반경의 8방향(전후·좌우·대각선)으로 어긋나도 전부 닿아야 한다(0 = 위치 표본 없음 — 방향 오차까지 0 이어야 검사하지 않는다).</param>
 /// <param name="MaxEvaluations">조사할 후보 수 상한(계산 시간 상한).</param>
 /// <param name="StepFactor">후보 격자 간격 = 탐색 간격 × 이 값.</param>
 /// <param name="InPlace">제자리 회전 후보(로봇 현재 위치 그대로, 방향만 바꿈)를 볼지.</param>
@@ -337,10 +337,12 @@ public static class StationOptimizer
 
         bool Robust(StationCandidate c)
         {
-            if (o.RobustM <= 0) return true;
+            // 도착 오차 — 반경 RobustM 의 8방향(전후·좌우·대각선)과 방향 ±RobustYawDeg 에서도 전부 닿아야 한다.
+            // 위치 반경이 0 이어도 방향 오차가 있으면 그 표본은 본다(둘 다 0 이하일 때만 검사하지 않는다).
+            var samples = PoseErrorSamples(new PoseErrorOptions(Math.Max(0, o.RobustM), Math.Max(0, o.RobustYawDeg)));
+            if (samples.Count == 0) return true;
             var strokes = c.StrokeMm is { } s ? new[] { s } : strokesMm;
-            // 도착 오차 — 반경 RobustM 의 8방향(전후·좌우·대각선)과 방향 ±RobustYawDeg 에서도 전부 닿아야 한다
-            foreach (var (dd, dl, dy) in PoseErrorSamples(new PoseErrorOptions(o.RobustM, o.RobustYawDeg)))
+            foreach (var (dd, dl, dy) in samples)
             {
                 ct.ThrowIfCancellationRequested();
                 var n = Evaluate(model, planes, space, c.DistM + dd, c.LateralM + dl, c.YawDeg + dy, seams, wallNormal, strokes, wallCode: wallCode);

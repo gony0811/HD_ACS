@@ -153,4 +153,26 @@ public class StationPoseErrorTests
         Assert.Equal(3, o.RobustYawDeg);
         Assert.Equal(10, StationOptimizer.PoseErrorSamples(new PoseErrorOptions(o.RobustM, o.RobustYawDeg)).Count);
     }
+
+    [Fact]
+    public void 배차_직전_정차_선택은_위치_반경이_0이어도_방향_오차는_본다()
+    {
+        // 찾아 둔 정차에 서 있는 로봇 — 오차를 모두 0 으로 두면 표본을 보지 않고, 방향 오차만 줘도 그 표본(±방향 2개)은 본다.
+        var (space, seams) = Area(1.45);
+        var model = ReachRobotModel.Default;
+        var best = StationOptimizer.Optimize(model, Planes, space, seams, Sl.Normal, Strokes).Best;
+        var at = space with { BaselineDistM = best.DistM, BaselineLateralM = best.LateralM, BaselineYawDeg = best.YawDeg };
+        var from = new[] { best.Station.X, best.Station.Y };
+
+        var off = StationOptimizer.Nearest(model, Planes, at, seams, Sl.Normal, Strokes, from,
+            new NearestOptions(RobustM: 0, RobustYawDeg: 0, InPlace: false));
+        var yawOnly = StationOptimizer.Nearest(model, Planes, at, seams, Sl.Normal, Strokes, from,
+            new NearestOptions(RobustM: 0, RobustYawDeg: 0.5, InPlace: false));
+
+        Assert.NotNull(off);
+        Assert.NotNull(yawOnly);
+        Assert.Equal(0, off!.TravelM, 3);
+        Assert.Equal(0, yawOnly!.TravelM, 3);                      // 0.5° 는 견딘다 — 같은 정차
+        Assert.Equal(off.Evaluated + 2, yawOnly.Evaluated);        // 방향 ± 표본 2개를 더 봤다(종전엔 위치 반경이 0 이면 건너뛰었다)
+    }
 }
