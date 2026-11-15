@@ -66,10 +66,15 @@ public class InspectionKindTests
         Assert.Empty(await db.TankGeometries.ToListAsync());
     }
 
+    /// <summary>지령 만들기 구현이 등록된 종류만 지원 — 값 없음(검사 종류가 생기기 전 선창)은 용접검사.</summary>
     [Theory]
-    [InlineData(null, true)] [InlineData("WELD", true)] [InlineData("GAS", false)]
-    public void DispatchSupported_OnlyWeld(string? kind, bool expected) =>
-        Assert.Equal(expected, InspectionKinds.DispatchSupported(kind));
+    [InlineData(null, true)] [InlineData("", true)] [InlineData("WELD", true)] [InlineData("weld", true)] [InlineData("GAS", false)]
+    public void CommandBuilders_OnlyWeldIsRegistered(string? kind, bool expected)
+    {
+        var builders = new InspectionCommandBuilders(new WeldInspectionCommandBuilder(400, 400, NullLogger.Instance));
+        Assert.Equal(expected, builders.Supports(kind));
+        Assert.Equal(expected ? "startWeldInspection" : null, builders.Find(kind)?.ActionType);
+    }
 
     /// <summary>GAS 선창은 run 을 만들지 않는다(409) — 용접검사 지령이 다른 장비를 단 로봇에 나가지 않게.</summary>
     [Fact]

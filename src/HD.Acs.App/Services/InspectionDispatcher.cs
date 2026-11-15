@@ -46,6 +46,8 @@ public sealed class InspectionDispatcher
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
+        // 검사 종류별 지령 만들기 — 가스검사 등 새 종류는 여기에 구현을 더한다
+        _commands = new InspectionCommandBuilders(new WeldInspectionCommandBuilder(_standoffMm, _workingDistanceMm, log));
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
         _verticalStationStandoffM = config.GetValue("Acs:Area:VerticalStationStandoffM", 1.2);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
@@ -58,6 +60,24 @@ public sealed class InspectionDispatcher
             config.GetValue("Acs:Dispatch:StationAdjust:MaxLateralMm", 200.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxThetaDeg", 5.0));
     }
+
+    private readonly InspectionCommandBuilders _commands;
+
+    /// <summary>이 검사 종류의 지령을 만들 수 있는지 — 아니면 run 을 시작하지 않는다(값 없음 = 용접검사).</summary>
+    public bool SupportsInspectionKind(string? kind) => _commands.Supports(kind);
+
+    /// <summary>선창의 검사 종류에 맞는 지령 만들기 구현. 구현이 없는 종류면 거부(409).</summary>
+    private async Task<IInspectionCommandBuilder> CommandBuilderAsync(string tankId, CancellationToken ct)
+    {
+        var kind = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == tankId)
+            .Select(g => g.InspectionKind).FirstOrDefaultAsync(ct);
+        return _commands.Find(kind) ?? throw new RunConflictException(
+            $"선창 {tankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다.");
+    }
+
+    private async Task<string?> ParamSchemaAsync(string actionType, CancellationToken ct) =>
+        (await _db.ActionCatalog.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.ActionType == actionType, ct))?.ParamSchema;
 
     // 배차 직전 정차 선택(Acs:Dispatch:NearestStation) — ReachSimService 가 이 클래스를 참조하므로 순환을 피해 늦게 꺼낸다.
     private readonly IServiceProvider? _services;
@@ -102,7 +122,9 @@ public sealed class InspectionDispatcher
                 return null;
             }
 
-            var stop = BuildStop(run.RunId, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct), await WeldSchemaAsync(ct),
+            var builder = await CommandBuilderAsync(area.TankId, ct);
+            var stop = BuildStop(run.RunId, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct),
+                builder, await ParamSchemaAsync(builder.ActionType, ct),
                 new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm));
             wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
             _log.LogInformation(
@@ -331,8 +353,9 @@ public sealed class InspectionDispatcher
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
 
-        // 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
-        var weldSchema = await WeldSchemaAsync(ct);
+        // 검사 종류별 지령 만들기 + 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
+        var builder = await CommandBuilderAsync(tankId, ct);
+        var paramSchema = await ParamSchemaAsync(builder.ActionType, ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
@@ -351,7 +374,7 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(area.AreaId));
+            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId));
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -378,12 +401,13 @@ public sealed class InspectionDispatcher
     }
 
     /// <summary>
-    /// 영역 1개 → 정차 1곳(맵 프레임 x/y/θ) + 그 영역 작업들의 startWeldInspection 액션 payload(json 배열).
+    /// 영역 1개 → 정차 1곳(맵 프레임 x/y/θ) + 그 영역 작업들의 검사 액션 payload(json 배열).
+    /// 액션 종류·파라미터는 검사 종류별 구현(<see cref="IInspectionCommandBuilder"/>)이 만든다 — 용접검사 = startWeldInspection.
     /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
         Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
-        IReadOnlyList<double>? levelZ, string? weldSchema, StopOverride? ov = null)
+        IReadOnlyList<double>? levelZ, IInspectionCommandBuilder builder, string? paramSchema, StopOverride? ov = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
@@ -400,62 +424,10 @@ public sealed class InspectionDispatcher
         // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
         var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
         var actionsJson = new JsonArray();
+        var ctx = new InspectionCommandContext(runId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm);
         foreach (var t in area.Tasks.OrderBy(x => x.Seq))
         {
-            if (string.IsNullOrWhiteSpace(t.SectionDxfId) || string.IsNullOrWhiteSpace(t.ProfileId))
-                throw new InvalidOperationException(
-                    $"TASK {t.TaskId} 검사 참조 누락: sectionDxfId/profileId를 등록한 뒤 RUN을 시작하세요.");
-            var startD = pose.LocalToDrawing(t.StartU, t.StartV);
-            var endD = pose.LocalToDrawing(t.EndU, t.EndV);
-            var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV, t.EndU, t.EndV);
-            var worldPos = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
-            var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
-            var taskParams = new JsonObject
-            {
-                ["seamType"] = t.SeamType,
-                ["sectionDxfId"] = t.SectionDxfId,
-                ["inspectionProfileId"] = t.ProfileId,
-                ["standoffMm"] = _standoffMm,
-                ["workingDistanceMm"] = _workingDistanceMm,
-                ["anchorGroupId"] = anchorGroupId,
-                ["seqInGroup"] = t.Seq,
-                ["liftStrokeMm"] = liftMm,
-                // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
-                // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
-                ["taskId"] = t.TaskId.ToString(),
-            };
-
-            // CROSS3/4 교차 가지 끝점 → AMR 면-로컬 mm·규약 순서 [VDA §8.5.1, N13]. ACS 저장은 전개도 프레임이라
-            // 반드시 면 법선에서 AMR 프레임을 재구성해 변환한다(좌현·마구리 거울 흡수 — CrossGeometry).
-            if (!string.IsNullOrWhiteSpace(t.Points))
-            {
-                var amrPts = CrossGeometry.BuildAmrPoints(t.SeamType, t.StartU, t.StartV,
-                    Json<double[][]>(t.Points), pose.U, pose.V, Json<double[]>(wall.Normal));
-                if (amrPts is not null)
-                {
-                    var arr = new JsonArray();
-                    foreach (var p in amrPts) arr.Add(new JsonArray((JsonNode)p[0], p[1]));
-                    taskParams["points"] = arr;
-                }
-            }
-
-            var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
-            var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
-            if (violations.Count > 0)
-            {
-                _log.LogWarning("Run {Run}: {Job} payload 스키마 위반 — run 시작 중단: {V}",
-                    runId, jobRef, string.Join("; ", violations));
-                throw new WeldPayloadSchemaException(violations);
-            }
-
-            actionsJson.Add(new JsonObject
-            {
-                ["actionType"] = "startWeldInspection",
-                ["taskId"] = t.TaskId.ToString(),
-                ["jobRef"] = jobRef,
-                ["position"] = worldPos,
-                ["params"] = taskParams.DeepClone(),
-            });
+            actionsJson.Add(builder.BuildAction(ctx, t, paramSchema));
             if (ov is not null) actionsJson[^1]!["liftFixed"] = true;   // 발행 때 영역 리프트로 덮지 않음
         }
 
@@ -484,7 +456,8 @@ public sealed class InspectionDispatcher
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
-        var weldSchema = await WeldSchemaAsync(ct);
+        var builder = await CommandBuilderAsync(tankId, ct);
+        var paramSchema = await ParamSchemaAsync(builder.ActionType, ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
         // 임시 제외(enabled = false) 용접선은 재계산에서도 싣지 않는다
@@ -517,7 +490,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(wi.AreaId));
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId));
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
@@ -560,10 +533,6 @@ public sealed class InspectionDispatcher
         }
         return tWdByLevel;
     }
-
-    private async Task<string?> WeldSchemaAsync(CancellationToken ct) =>
-        (await _db.ActionCatalog.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
 
     /// <summary>선창 층 바닥 높이 목록 level_z (m) — seam z를 층 바닥 기준으로 보내는 데 쓴다 [VDA §10 N17]. 지오메트리 없으면 null.</summary>
     private async Task<double[]?> LevelZAsync(string tankId, CancellationToken ct)

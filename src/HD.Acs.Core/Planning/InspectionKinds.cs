@@ -2,7 +2,7 @@ namespace HD.Acs.Core.Planning;
 
 /// <summary>
 /// 검사 종류 — 선창(프로젝트) 단위 값. 같은 AMR·VDA 5050 을 쓰고 검사 장비만 다른 제품을 한 저장소에서 가른다.
-/// 지금은 값을 저장·표시만 한다. 지령(액션)·결과 연동이 종류별로 갈리는 것은 다음 단계.
+/// 지령(액션) 만들기는 검사 종류별 구현(App IInspectionCommandBuilder)이 맡는다 — 구현이 없는 종류는 run 을 시작하지 않는다.
 /// </summary>
 public static class InspectionKinds
 {
@@ -22,7 +22,4 @@ public static class InspectionKinds
         kind = All.FirstOrDefault(k => string.Equals(k, raw.Trim(), StringComparison.OrdinalIgnoreCase));
         return kind is not null;
     }
-
-    /// <summary>지령(액션) 생성이 구현된 종류인지 — 아니면 run 을 시작하지 않는다(다른 장비에 용접검사 지령이 나가는 것 방지).</summary>
-    public static bool DispatchSupported(string? kind) => kind is null or Weld;
 }
