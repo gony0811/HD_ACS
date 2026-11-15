@@ -204,10 +204,21 @@ public sealed record ReachRobotModel
     public Func<IReadOnlyList<double[]>, IReadOnlyList<ScanWaypoint>?>? SeamProfile { get; init; }
     /// <summary>작업물 프레임 Top 높이 [mm] — HD_AMR InternalWorkpieceFrame.DefaultCorrugationTopHeightMm. 점1(Top)이 이 Z 다.</summary>
     public const double ScanTopZMm = 33.8;
-    /// <summary>기울기 판정 간격 [도] — HD_AMR 경로 검증 자세 간격(ChainSampleDeg 10°)과 같다.</summary>
-    public double ScanTiltStepDeg { get; init; } = 10;
-    /// <summary>용접선 따라 판정 간격 [mm] — 경로 검증 간격(100mm)보다 촘촘히(360mm 용접선 = 7점).</summary>
-    public double ScanSampleMm { get; init; } = 60;
+    /// <summary>
+    /// 순회 판정 자세 간격 [도] — 경유점 사이에서 툴 자세가 이만큼 돌 때마다 판정한다. HD_AMR 경로 검증(ChainSampleDeg 10°)보다 촘촘히 봐서
+    /// 표본 사이에서 |J5| 가 잠깐 작아지는 것을 놓치지 않는다(2026-11-16 까지 10°). 설정 <c>Acs:Reach:ScanTiltStepDeg</c>.
+    /// </summary>
+    public double ScanTiltStepDeg { get; init; } = 5;
+    /// <summary>
+    /// 순회 판정 위치 간격 [mm] — 경유점 사이 TCP 이동 거리(면 쪽으로 넣었다 빼는 Z 이동 포함, 3D)가 이만큼일 때마다 판정한다.
+    /// HD_AMR 경로 검증 간격(100 mm)보다 촘촘히(2026-11-16 까지 60 mm, 그리고 X·Y 거리만 셌다). 설정 <c>Acs:Reach:ScanSampleMm</c>.
+    /// </summary>
+    public double ScanSampleMm { get; init; } = 25;
+    /// <summary>
+    /// 관절 튐 판정 창의 자세 폭 [도] — HD_AMR ChainSampleDeg. 관절 튐(<see cref="MaxPathJointStepDeg"/>)은 AMR 의 경로 검증 간격
+    /// (위치 <see cref="PlanarSampleMm"/> · 자세 이 값) 안에서의 관절 변화로 본다 — 판정 간격을 촘촘히 해도 같은 기준이 되게.
+    /// </summary>
+    public double ChainSampleDeg { get; init; } = 10;
     /// <summary>경로 관절 한계 여유 [도] — PathJointLimitMarginDeg(하드 한계에서 이만큼 안쪽이어야 통과).</summary>
     public double PathJointLimitMarginDeg { get; init; } = 2;
     /// <summary>

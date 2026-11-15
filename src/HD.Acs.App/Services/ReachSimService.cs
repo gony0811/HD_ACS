@@ -142,6 +142,9 @@ public sealed partial class ReachSimService
             CheckTraversal = config.GetValue("Acs:Reach:CheckTraversal", d.CheckTraversal),
             ScanStandoffMm = scanStandoff,
             ScanTiltDeg = config.GetValue("Acs:Reach:ScanTiltDeg", d.ScanTiltDeg),
+            // 순회 판정 간격 — 3D 이동 거리·자세 회전각 기준. 1 mm·0.5° 미만은 받지 않는다(계산량)
+            ScanSampleMm = config.GetValue<double?>("Acs:Reach:ScanSampleMm") is { } sm && sm >= 1 ? sm : d.ScanSampleMm,
+            ScanTiltStepDeg = config.GetValue<double?>("Acs:Reach:ScanTiltStepDeg") is { } sd && sd >= 0.5 ? sd : d.ScanTiltStepDeg,
             ScanTiltProfile = TiltProfileFrom(config.GetSection("Acs:Reach:ScanTiltProfile")),
             TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
             // 순위에서 여유를 비교할 상한 — 없거나 0 이하면 상한 없음(실제 최소 여유각이 큰 쪽)

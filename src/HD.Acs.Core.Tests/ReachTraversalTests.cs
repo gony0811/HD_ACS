@@ -102,7 +102,7 @@ public class ReachTraversalTests
         var flat = Field with { ScanTiltProfile = new[] { new[] { 0.0, 0 }, new[] { 360.0, 0 } } };
         var t = ReachSimulator.Traverse(flat, Station, 0, pts[0], pts[2], Normal, seed);
         Assert.True(t.Ok, t.Blocker);
-        Assert.Equal(7, t.Points.Count);   // 0 → 360 mm 를 60 mm 간격으로
+        Assert.Equal(16, t.Points.Count);   // 0 → 360 mm 를 25 mm 이하 간격으로(15칸)
     }
 
     [Fact]

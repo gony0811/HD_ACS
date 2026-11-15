@@ -78,7 +78,7 @@ public class ReachFieldCompareTests
         var (sx, sy, yaw) = InspectionDispatcher.StationDrawingOf(area, wall, dispatcher.DefaultStandoffM(wall));
         var tasks = area.Tasks.OrderBy(t => t.Seq).ToList();
         var survey = (await sim.SurveyAsync("CT1", 1, "F", CancellationToken.None, strokeMm: 0))!.Single().Seams;
-        Assert.Equal("Clear", survey[0].Verdict);   // 저장된 정차에서는 닿는다(아래 대조의 전제)
+        Assert.True(survey[0].Verdict == "Clear", survey[0].Blocker);   // 저장된 정차에서는 닿는다(아래 대조의 전제)
 
         // 벽 안쪽 법선 방향으로 2.1 m 더 물러난 자리(벽에서 3.5 m) — 팔이 닿지 않는다
         var n = JsonSerializer.Deserialize<double[]>(wall.Normal)!;

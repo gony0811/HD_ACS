@@ -64,9 +64,26 @@ public static partial class ReachSimulator
         }
 
         // 판정 자세 순서 — (거리, 기울기, 이어 풀 기준 자세 번호). 기울기 0 자세는 앞 점 0 자세에서, 기울인 자세는 바로 앞 기울기에서 잇는다.
-        var steps = Math.Max(1, (int)Math.Ceiling(len * 1000 / m.ScanSampleMm - 1e-9));
+        var steps = Math.Max(1, (int)Math.Ceiling(len * 1000 / Math.Max(1, m.ScanSampleMm) - 1e-9));
         var tiltSteps = m.ScanTiltDeg > 0 && m.ScanTiltStepDeg > 0 ? (int)Math.Ceiling(m.ScanTiltDeg / m.ScanTiltStepDeg - 1e-9) : 0;
         var plan = new List<(double Along, double Tilt, double Dz, int From)>();
+        // 판정 자세마다 바로 앞 자세(From)에서의 이동량 — TCP 이동 거리 [mm](3D)와 툴 자세 회전 [도]. 관절 튐 판정 창에 쓴다.
+        var stepMm = new List<double>();
+        var stepDeg = new List<double>();
+        // 사슬 종류 — 실제 경유점 경로는 모두 0. 포괄 근사에서는 용접선 따라 가는 자세(0)와 그 자리에서 기울여 보는 자세(1)를 가른다:
+        // 기울여 보는 자세는 실제 경로가 아니라 "여기서 이만큼 기울 수 있다"는 가정이라, 관절 튐 창을 두 사슬에 걸쳐 잇지 않는다.
+        var chain = new List<int>();
+        void Add(double along, double tilt, double dz, int from, double mm, double deg, int kind = 0)
+        {
+            plan.Add((along, tilt, dz, from));
+            stepMm.Add(mm);
+            stepDeg.Add(deg);
+            chain.Add(kind);
+        }
+        // 구간 분할 수 — 3D 이동 거리와 자세 회전각 중 더 촘촘한 쪽.
+        int Subdivide(double distMm, double angleDeg) => Math.Max(1, (int)Math.Ceiling(Math.Max(
+            m.ScanSampleMm > 0 ? distMm / m.ScanSampleMm : 0,
+            m.ScanTiltStepDeg > 0 ? angleDeg / m.ScanTiltStepDeg : 0) - 1e-9));
         // 6축 프로필 판정 자세 — plan 과 같은 번호. 있으면 Pose(거리, 기울기) 대신 이 목표를 쓴다.
         var exact = new List<(double[] Tcp, double[,] Target, string Where, int Waypoint)>();
         var lastMain = -1;
@@ -95,23 +112,27 @@ public static partial class ReachSimulator
                 var wp = waypoints[w];
                 var pos = new[] { wp.X, wp.Y, wp.Z };
                 var rot = RotZyx(wp.RxDeg, wp.RyDeg, wp.RzDeg);
+                double segMm = 0, segDeg = 0;
+                var sub = 1;
                 if (w > 0)
                 {
                     var (rotAxis, angleDeg) = RotBetween(prevRot, rot);
-                    var sub = Math.Max(1, (int)Math.Ceiling(Math.Max(
-                        Math.Sqrt(Math.Pow(pos[0] - prevPos[0], 2) + Math.Pow(pos[1] - prevPos[1], 2)) / m.ScanSampleMm,
-                        m.ScanTiltStepDeg > 0 ? angleDeg / m.ScanTiltStepDeg : 0) - 1e-9));
+                    // 경유점 사이 거리는 3D — 면 쪽으로 넣었다 빼는 Z 이동도 나눠 본다(HD_AMR SamplePoseSegment 와 같다).
+                    var distMm = Math.Sqrt(Math.Pow(pos[0] - prevPos[0], 2) + Math.Pow(pos[1] - prevPos[1], 2) + Math.Pow(pos[2] - prevPos[2], 2));
+                    segMm = distMm;
+                    segDeg = angleDeg;
+                    sub = Subdivide(distMm, angleDeg);
                     for (var k = 1; k < sub; k++)
                     {
                         var t = (double)k / sub;
                         var mid = new[] { prevPos[0] + (pos[0] - prevPos[0]) * t, prevPos[1] + (pos[1] - prevPos[1]) * t, prevPos[2] + (pos[2] - prevPos[2]) * t };
                         var e = Exact(mid, Mul3(prevRot, RotAxis(rotAxis, angleDeg * t)));
-                        plan.Add((mid[0], wp.RyDeg, 0, plan.Count - 1));
+                        Add(mid[0], wp.RyDeg, 0, plan.Count - 1, distMm / sub, angleDeg / sub);
                         exact.Add((e.Tcp, e.Target, $"경유점 #{w + 1} 앞 경로", w + 1));
                     }
                 }
                 var at = Exact(pos, rot);
-                plan.Add((wp.X, wp.RyDeg, 0, plan.Count - 1));
+                Add(wp.X, wp.RyDeg, 0, plan.Count - 1, segMm / sub, segDeg / sub);
                 exact.Add((at.Tcp, at.Target, $"경유점 #{w + 1}", w + 1));
                 prevPos = pos;
                 prevRot = rot;
@@ -122,16 +143,17 @@ public static partial class ReachSimulator
             // 실제 경유점(거리, 기울기[, Z])이 있으면 그 순서대로 잇는다 — 사이는 판정 간격(거리·기울기)으로 나눠 경로를 본다.
             (double A, double T, double D) Wp(double[] v) => (v[0], v[1], v.Length >= 3 ? v[2] - ReachRobotModel.ScanTopZMm : 0);
             var prevWp = Wp(profile[0]);
-            plan.Add((prevWp.A, prevWp.T, prevWp.D, -1));
+            Add(prevWp.A, prevWp.T, prevWp.D, -1, 0, 0);
             for (var w = 1; w < profile.Count; w++)
             {
                 var wp = Wp(profile[w]);
-                var sub = Math.Max(1, (int)Math.Ceiling(Math.Max(
-                    Math.Abs(wp.A - prevWp.A) / m.ScanSampleMm,
-                    m.ScanTiltStepDeg > 0 ? Math.Abs(wp.T - prevWp.T) / m.ScanTiltStepDeg : 0) - 1e-9));
+                // 거리는 용접선 방향과 면 법선 방향(Z)을 함께 — 면 쪽으로 넣었다 빼는 구간도 나눠 본다.
+                var distMm = Math.Sqrt(Math.Pow(wp.A - prevWp.A, 2) + Math.Pow(wp.D - prevWp.D, 2));
+                var angleDeg = Math.Abs(wp.T - prevWp.T);
+                var sub = Subdivide(distMm, angleDeg);
                 for (var s = 1; s <= sub; s++)
-                    plan.Add((prevWp.A + (wp.A - prevWp.A) * s / sub, prevWp.T + (wp.T - prevWp.T) * s / sub,
-                        prevWp.D + (wp.D - prevWp.D) * s / sub, plan.Count - 1));
+                    Add(prevWp.A + (wp.A - prevWp.A) * s / sub, prevWp.T + (wp.T - prevWp.T) * s / sub,
+                        prevWp.D + (wp.D - prevWp.D) * s / sub, plan.Count - 1, distMm / sub, angleDeg / sub);
                 prevWp = wp;
             }
         }
@@ -139,7 +161,7 @@ public static partial class ReachSimulator
         for (var k = 0; k <= (len > 1e-6 ? steps : 0); k++)
         {
             var along = len * 1000 * k / steps;
-            plan.Add((along, 0, 0, lastMain));
+            Add(along, 0, 0, lastMain, lastMain < 0 ? 0 : len * 1000 / steps, 0);
             var main = plan.Count - 1;
             lastMain = main;
             foreach (var sign in new[] { 1, -1 })
@@ -147,7 +169,8 @@ public static partial class ReachSimulator
                 var from = main;
                 for (var s = 1; s <= tiltSteps; s++)
                 {
-                    plan.Add((along, sign * Math.Min(m.ScanTiltDeg, s * m.ScanTiltStepDeg), 0, from));
+                    var tilt = Math.Min(m.ScanTiltDeg, s * m.ScanTiltStepDeg);
+                    Add(along, sign * tilt, 0, from, 0, tilt - Math.Min(m.ScanTiltDeg, (s - 1) * m.ScanTiltStepDeg), kind: 1);
                     from = plan.Count - 1;
                 }
             }
@@ -204,7 +227,20 @@ public static partial class ReachSimulator
 
             if (blocker is not null) continue;
             var at = At(i);
-            if (from >= 0 && StageJump6(prev, j) is { Travel: var jump, Joint: var jn } && jump > m.MaxPathJointStepDeg)
+            // 관절 튐 — HD_AMR 은 경로 검증 간격(위치 PlanarSampleMm · 자세 ChainSampleDeg) 사이의 관절 변화를 본다. 판정 간격이 그보다
+            // 촘촘하므로, 앞 자세들을 그 창만큼 거슬러 올라가 가장 먼 자세와 비교한다(바로 앞 자세만 보면 같은 튐이 여러 칸에 나뉘어 안 걸린다).
+            var back = from;
+            if (from >= 0)
+            {
+                double accMm = stepMm[i], accDeg = stepDeg[i];
+                while (plan[back].From >= 0 && chain[back] == chain[i] && accMm + stepMm[back] <= m.PlanarSampleMm + 1e-6 && accDeg + stepDeg[back] <= m.ChainSampleDeg + 1e-6)
+                {
+                    accMm += stepMm[back];
+                    accDeg += stepDeg[back];
+                    back = plan[back].From;
+                }
+            }
+            if (from >= 0 && StageJump6(points[back].JointsDeg, j) is { Travel: var jump, Joint: var jn } && jump > m.MaxPathJointStepDeg)
                 blocker = $"도면 순회 — {at} J{jn + 1} {jump:0}° 튐(> {m.MaxPathJointStepDeg:0}°) — 해 가지가 바뀜";
             else if (ElbowFlip(seed, j))
                 blocker = $"도면 순회 — {at} 팔꿈치 가지 전환(J3 {seed[2]:0.0}° → {j[2]:0.0}°)";

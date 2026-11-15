@@ -126,8 +126,9 @@ public class ReachTraversalBacktestTests
     {
         // 실기: R02C06-4 '경유점 #6 손목 특이점(J5 58.7° → -1.5°)' — #6 = X 21.6 mm, θ +50°.
         var c6 = Run(Cases.Single(c => c.Name.EndsWith("R02C06-4")));
+        // 판정 간격을 촘촘히 한 뒤로는 #6 바로 앞 경로(#5 18.2 mm·+40° → #6 사이, 20 mm·+45°)에서 먼저 걸린다 — 같은 자리·같은 원인.
         Assert.Contains("손목 특이점", c6.Blocker);
-        Assert.StartsWith("도면 순회 — 22mm 지점 기울기 +50°", c6.Blocker);
+        Assert.StartsWith("도면 순회 — 20mm 지점 기울기 +45°", c6.Blocker);
         // 실기: T 시험 '경유점 #5 앞 경로 J4 관절 한계 근접(83.6°)' — #5 = X 18.2 mm.
         var t = Run(Cases.Single(c => c.Wall == "T"));
         Assert.Contains("J4 관절 한계", t.Blocker);
