@@ -98,7 +98,14 @@ public sealed class InspectionDispatcher
         {
             theta = tWd.DrawingYawToMap(stored);
             var dev = SideStation.DeviationFromTangentDeg(theta, tangentMap);
-            why = dev > 15 ? $"수동 정차 theta(벽 접선과 {dev:F0}° 어긋남)" : "수동 정차 theta";
+            if (dev > SideStation.MaxManualDeviationDeg)
+            {
+                // AMR 은 theta 를 벽 접선으로 믿고 면 법선을 유도하므로(벽 각도 정보 없음) 어긋난 theta 를 그대로 보내면
+                // 촬영 입사각·접근점이 같이 틀어진다(HD_AMR 확인 2026-11-15) — 운영자가 고른 방향 쪽 접선으로 맞춘다.
+                theta = SideStation.SnapToTangent(theta, tangentMap);
+                why = $"수동 정차 theta 가 벽 접선과 {dev:F1}° 어긋나 접선으로 맞춤";
+            }
+            else why = "수동 정차 theta";
         }
         else
         {

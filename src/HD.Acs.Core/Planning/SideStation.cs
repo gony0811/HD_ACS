@@ -62,6 +62,16 @@ public static class SideStation
     }
 
     /// <summary>heading 이 벽 접선과 이루는 각 [deg, 0~90] — 수동 저장 theta 가 벽과 나란한지 확인용.</summary>
+    /// <summary>측면 정차에서 수동 theta 를 그대로 쓰는 최대 어긋남 [deg] — 넘으면 <see cref="SnapToTangent"/>.</summary>
+    public const double MaxManualDeviationDeg = 5.0;
+
+    /// <summary>heading 을 벽 접선 두 방향 중 가까운 쪽으로 맞춘다.</summary>
+    public static double SnapToTangent(double headingYaw, double tangentYaw)
+    {
+        double plus = Normalize(tangentYaw), minus = Normalize(tangentYaw + Math.PI);
+        return Math.Abs(Normalize(headingYaw - plus)) <= Math.Abs(Normalize(headingYaw - minus)) ? plus : minus;
+    }
+
     public static double DeviationFromTangentDeg(double headingYaw, double tangentYaw)
     {
         double d = Math.Abs(Normalize(headingYaw - tangentYaw));

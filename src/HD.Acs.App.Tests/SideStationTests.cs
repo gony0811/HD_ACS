@@ -202,6 +202,25 @@ public class SideStationTests
         Assert.Contains("수동", dec.Why);
     }
 
+    /// <summary>수동 theta 가 벽 접선과 5° 넘게 어긋나면 고른 방향 쪽 접선으로 맞춘다(5° 이내는 그대로).</summary>
+    [Theory]
+    [InlineData(4.0, 4.0)]     // 4° — 그대로
+    [InlineData(12.0, 0.0)]    // 12° — 접선(0)으로
+    [InlineData(170.0, 180.0)] // 선미 쪽 10° 어긋남 — 접선 π 로
+    public async Task ManualTheta_SnappedBeyond5Deg(double storedDeg, double expectedDeg)
+    {
+        var db = NewDb();
+        var (scId, pm, _) = await Seed(db);
+        pm.StationTheta = storedDeg * Math.PI / 180;
+        db.WallStationModes.Add(new WallStationModeEntity { TankId = "CT1", Level = 1, WallCode = "PM", Mode = "SIDE" });
+        await db.SaveChangesAsync();
+        var d = Dispatcher(db, enabled: true);
+        var wi = await Queue(db, d, scId);
+
+        var dec = await d.SideDecisionForAsync(wi, null, null, default);
+        Assert.Equal(0, SideStation.Normalize(dec!.Theta - expectedDeg * Math.PI / 180), 6);
+    }
+
     /// <summary>켜기 설정이 꺼져 있으면 설정이 있어도 정면 — 이격·theta 모두 종전, stationMode 없음.</summary>
     [Fact]
     public async Task Disabled_IgnoresSetting()
