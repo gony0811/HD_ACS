@@ -68,21 +68,23 @@ public class InspectionKindTests
 
     /// <summary>지령 만들기 구현이 등록된 종류만 지원 — 값 없음(검사 종류가 생기기 전 선창)은 용접검사.</summary>
     [Theory]
-    [InlineData(null, true)] [InlineData("", true)] [InlineData("WELD", true)] [InlineData("weld", true)] [InlineData("GAS", false)]
-    public void CommandBuilders_OnlyWeldIsRegistered(string? kind, bool expected)
+    [InlineData(null, true)] [InlineData("", true)] [InlineData("WELD", true)] [InlineData("weld", true)] [InlineData("XRAY", false)]
+    public void CommandBuilders_UnknownKindIsNotRegistered(string? kind, bool expected)
     {
-        var builders = new InspectionCommandBuilders(new WeldInspectionCommandBuilder(400, 400, NullLogger.Instance));
+        var weld = new WeldInspectionCommandBuilder(400, 400, NullLogger.Instance);
+        var builders = new InspectionCommandBuilders(weld, new GasInspectionCommandBuilder(weld));
+        Assert.Equal("startWeldInspection", builders.Find("GAS")?.ActionType);   // 가스검사도 같은 액션(회차만 얹는다)
         Assert.Equal(expected, builders.Supports(kind));
         Assert.Equal(expected ? "startWeldInspection" : null, builders.Find(kind)?.ActionType);
     }
 
-    /// <summary>GAS 선창은 run 을 만들지 않는다(409) — 용접검사 지령이 다른 장비를 단 로봇에 나가지 않게.</summary>
+    /// <summary>지령 만들기 구현이 없는 검사 종류의 선창은 run 을 만들지 않는다(409).</summary>
     [Fact]
-    public async Task GasTank_RunStartIsRefused_AndNoRunIsCreated()
+    public async Task UnknownKindTank_RunStartIsRefused_AndNoRunIsCreated()
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        db.TankGeometries.Add(new TankGeometryEntity { TankId = "GT1", LevelZ = "[0,2.4]", InspectionKind = "GAS" });
+        db.TankGeometries.Add(new TankGeometryEntity { TankId = "GT1", LevelZ = "[0,2.4]", InspectionKind = "XRAY" });
         var sc = new ScenarioEntity { ScenarioId = Guid.NewGuid(), Name = "G", Version = 1, TankId = "GT1" };
         db.Scenarios.Add(sc);
         db.RobotContexts.Add(new RobotContextEntity { RobotId = "AMR-01", ConnectionState = "ONLINE", ReportedAt = DateTimeOffset.UtcNow });
@@ -93,7 +95,7 @@ public class InspectionKindTests
 
         var ex = await Assert.ThrowsAsync<RunConflictException>(() => missions.StartRunAsync(sc.ScenarioId, "AMR-01"));
 
-        Assert.Contains("GAS", ex.Message);
+        Assert.Contains("XRAY", ex.Message);
         Assert.Empty(await db.ScenarioRuns.ToListAsync());
     }
 }

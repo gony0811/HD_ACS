@@ -229,12 +229,20 @@ public sealed partial class MissionViewModel : ObservableObject
 
     private bool CanStartRun() => SelectedScenario is not null && !string.IsNullOrWhiteSpace(SelectedRobotId);
 
+    // ── 가스검사 회차 ── 가스검사 선창에서만 보이고 지령 params.round 로 나간다(용접검사 선창은 서버가 무시).
+    /// <summary>현재 선창이 가스검사인지 — Shell 이 선창의 검사 종류로 맞춘다.</summary>
+    [ObservableProperty] private bool _isGasTank;
+    public IReadOnlyList<string> RoundOptions { get; } = new[] { "회차 없음", "1회차", "2회차" };
+    /// <summary>회차 선택(0 = 없음, 1·2 = 그 회차).</summary>
+    [ObservableProperty] private int _roundIndex;
+    private int? Round => IsGasTank && RoundIndex is 1 or 2 ? RoundIndex : null;
+
     [RelayCommand(CanExecute = nameof(CanStartRun))]
     private async Task StartRunAsync()
     {
         try
         {
-            var runId = await _api.StartRunAsync(SelectedScenario!.ScenarioId, SelectedRobotId!);
+            var runId = await _api.StartRunAsync(SelectedScenario!.ScenarioId, SelectedRobotId!, Round, default);
             await RefreshRunAsync(runId);
             StatusMessage = $"미션 실행 시작: run {runId}";
         }

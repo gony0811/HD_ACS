@@ -34,8 +34,8 @@ public sealed class MissionService
     /// 시나리오 → Run 생성. 선창 영역을 작업 큐로 전개(층별 미션 포함)한 뒤 첫 정차를 greedy 최근접 배차.
     /// 검사 순서는 고정 시퀀스가 아니라 "현재 층 미검사 중 로봇 최근접"으로 동적 결정된다.
     /// </summary>
-    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
-        => (await StartRunCoreAsync(scenarioId, robotId, null, false, ct)).RunId;
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default, int? round = null)
+        => (await StartRunCoreAsync(scenarioId, robotId, null, false, ct, round)).RunId;
 
     /// <summary>
     /// 리페어 run — 지정한 용접선(TASK)만 검사한다(1개 이상). 영역 검사에서 실패한 용접선을 골라 다시 돌릴 때 쓴다.
@@ -46,7 +46,7 @@ public sealed class MissionService
     /// (이 run의 정차에만 적용 — 영역에 저장된 정차는 바꾸지 않는다).
     /// </summary>
     public async Task<RepairRunStarted> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
-        CancellationToken ct = default, bool optimize = true)
+        CancellationToken ct = default, bool optimize = true, int? round = null)
     {
         var ids = taskIds.Distinct().ToList();
         if (ids.Count == 0) throw new RepairRequestException("검사할 용접선을 1개 이상 지정하세요.");
@@ -83,7 +83,7 @@ public sealed class MissionService
             if (sid is null) throw new RepairRequestException($"선창 {tankId}에 시나리오가 없습니다 — 계획 ▸ 시나리오에서 먼저 만드세요.");
         }
 
-        return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct);
+        return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct, round);
     }
 
     /// <summary>리페어 run의 정차 최적화 — 실패해도 재검사는 저장된 정차로 진행한다(빈 목록).</summary>
@@ -104,8 +104,10 @@ public sealed class MissionService
         stops.Where(s => s.Applied).ToDictionary(s => s.AreaId, s => new InspectionDispatcher.StopOverride(s.X, s.Y, s.Yaw, s.LiftMm));
 
     private async Task<RepairRunStarted> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, bool optimize,
-        CancellationToken ct)
+        CancellationToken ct, int? round = null)
     {
+        if (round is not (null or 1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(round), round, "검사 회차(round)는 1 또는 2 입니다.");
         var what = repairTaskIds is null ? "미션 시작" : "용접선 재검사";
         // 활성 run 가드 — 같은 로봇에 RUNNING/WAITING_FLOOR_TRANSFER run이 있으면 새 시작 거부 (유령 run 누적 방지)
         var active = await _db.ScenarioRuns.AsNoTracking()
@@ -137,6 +139,8 @@ public sealed class MissionService
             State = "RUNNING",
             StartedAt = DateTimeOffset.UtcNow,
             TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
+            // 회차는 가스검사 선창에서만 쓴다(지령 params.round) — 용접검사 run 에는 남기지 않는다
+            Round = string.Equals(kind, HD.Acs.Core.Planning.InspectionKinds.Gas, StringComparison.OrdinalIgnoreCase) ? round : null,
         };
         // 재검사 — 지정한 용접선만 놓고 정차·리프트를 다시 고른다(가드를 모두 통과한 뒤 계산: 수 초 걸린다)
         IReadOnlyList<RepairStop> stops = repairTaskIds is not null && optimize

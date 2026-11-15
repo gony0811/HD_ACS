@@ -91,6 +91,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private InspectionKindOption _selectedInspectionKind = InspectionKindOption.All[0];
     /// <summary>현재 선창의 검사 종류 표시(서버 값. 구서버 = 용접검사).</summary>
     [ObservableProperty] private string _inspectionKindLabel = InspectionKindOption.All[0].Label;
+    /// <summary>현재 선창의 검사 종류 코드(WELD|GAS).</summary>
+    [ObservableProperty] private string _inspectionKindCode = InspectionKindOption.Weld;
     [ObservableProperty] private string _derivedText = "-";
 
     // 선택 면 경계 폴리곤(캔버스 px) — 면 전체(회색 음영). 마구리(F/A)는 팔각, 그 외 직사각형.
@@ -1209,6 +1211,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         }
         SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);
         InspectionKindLabel = SelectedInspectionKind.Label;
+        InspectionKindCode = SelectedInspectionKind.Code;
         var d = g.Derived;
         _derB = d.B; _derWCeil = d.WCeil; _derH = d.H;   // 마구리 팔각 윤곽용
         DerivedText = $"B(전폭)={d.B:0.###}  W_ceil(천장폭)={d.WCeil:0.###}  H(전체높이)={d.H:0.###}";

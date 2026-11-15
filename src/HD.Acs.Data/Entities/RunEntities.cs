@@ -16,6 +16,7 @@ public class ScenarioRunEntity
     /// <summary>리페어 run의 검사 대상 용접선(taskId json 배열). null = 일반 run(시나리오 영역 전체).
     /// 큐 전개와 재개(resume) 시 정차 재계산이 이 목록의 용접선만 싣는다.</summary>
     public string? TaskIds { get; set; }
+    public int? Round { get; set; }   // 가스검사 회차 1|2 → 지령 params.round (NULL = 미지정·용접검사)
     public List<MissionEntity> Missions { get; set; } = new();
 }
 

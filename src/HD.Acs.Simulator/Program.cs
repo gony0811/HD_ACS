@@ -29,6 +29,7 @@ using MQTTnet.Protocol;
 //
 // 사용: dotnet run [brokerHost] [manufacturer] [serialNumber] [mapId]
 //   SIM_BROKER_PORT=n (기본 1883) · SIM_NO_UI=1 (창 없이 실행)
+//   SIM_GAS=1 (가스검사 AMR 흉내 — 검사 결과를 SAIGE 결과 본문 JSON 으로 보고)
 
 var initialMapId = args.ElementAtOrDefault(3) ?? "CT1-L1";
 var control = new SimulatorControlState(initialMapId, 95, 0, 0, 0);
@@ -389,13 +390,20 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
                      && !movedSinceLastAction;
         var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
         var (simTaskId, simAttempt) = WeldInspectionParams.ReadTaskRef(action);
-        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label} · task={simTaskId} attempt={simAttempt}");
+        var simRound = WeldInspectionParams.ReadRound(action);
+        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label} · task={simTaskId} attempt={simAttempt}" +
+                          (simRound is int r0 ? $" round={r0}" : ""));
+        var simStartedAt = DateTimeOffset.UtcNow;
         await Task.Delay(shared ? sharedMs : fullMs);
 
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}";
+        // SIM_GAS=1 — 가스검사 AMR 흉내: 결과를 SAIGE 결과 본문(JSON)으로 싣는다 [HD_AMR 가스 디텍터 사양 §5.2]
+        actionState.ResultDescription = Environment.GetEnvironmentVariable("SIM_GAS") == "1"
+            ? WeldInspectionParams.GasResultJson(action, robot.SerialNumber, simStartedAt, DateTimeOffset.UtcNow)
+            : $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}" +
+              (simRound is int r1 ? $";round={r1}" : "");
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else if (action.ActionType == "moveToSeamStart")
@@ -553,8 +561,43 @@ static class WeldInspectionParams
             if (prms.Value.TryGetProperty("attempt", out var at) &&
                 !(at.ValueKind == JsonValueKind.Number && at.TryGetInt32(out var atv) && atv is >= 1 and <= 255))
                 violations.Add("params.attempt");
+            // round — 가스검사 회차(선택). 실려 왔다면 1 또는 2 [HD_AMR 가스 디텍터 사양 §5.1 — 그 밖의 값은 AMR 이 거부]
+            if (prms.Value.TryGetProperty("round", out var rd) &&
+                !(rd.ValueKind == JsonValueKind.Number && rd.TryGetInt32(out var rdv) && rdv is 1 or 2))
+                violations.Add("params.round");
         }
         return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);
+    }
+
+    /// <summary>params.round(가스검사 회차 1|2). 없으면 null.</summary>
+    public static int? ReadRound(VdaAction action) =>
+        GetObject(action, "params") is { } p && p.TryGetProperty("round", out var rd) && rd.TryGetInt32(out var v) ? v : null;
+
+    /// <summary>
+    /// 가스 모드 결과 본문 — 실제 AMR 이 액션 종료 시 resultDescription 에 싣는 SAIGE 결과 JSON 과 같은 모양
+    /// [HD_AMR 가스 디텍터 사양 §5.2]. 값은 시뮬레이션(포인트 1개, 0.8 ppm, 임계 5 ppm → OK).
+    /// </summary>
+    public static string GasResultJson(VdaAction action, string robotId, DateTimeOffset startedAt, DateTimeOffset finishedAt)
+    {
+        var (taskId, _) = ReadTaskRef(action);
+        string tank = GetObject(action, "position") is { } pos && pos.TryGetProperty("drawingPos", out var dp)
+                      && dp.TryGetProperty("tank", out var tk) ? tk.GetString() ?? "" : "";
+        var body = new Dictionary<string, object?>
+        {
+            ["tankId"] = tank, ["taskId"] = taskId == "-" ? "" : taskId,
+        };
+        if (ReadRound(action) is int round) body["round"] = round;
+        body["robotId"] = robotId;
+        body["startedAt"] = startedAt.ToUnixTimeMilliseconds();
+        body["finishedAt"] = finishedAt.ToUnixTimeMilliseconds();
+        body["threshold"] = new { value = 5.0, unit = "ppm" };
+        body["result"] = "OK";
+        body["points"] = new[]
+        {
+            new { pointSeq = 1, result = "OK", scans = new[]
+                { new { retry = 0, u = 0, v = 0, value = 0.8, result = "OK", measuredAt = finishedAt.ToUnixTimeMilliseconds() } } },
+        };
+        return JsonSerializer.Serialize(body);
     }
 
     /// <summary>params.taskId·attempt 추출(검증 통과 후 호출). 미탑재(구버전 ACS)면 "-" / 1 — 실제 AMR 폴백과 동일.</summary>

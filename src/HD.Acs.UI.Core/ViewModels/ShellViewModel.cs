@@ -102,6 +102,13 @@ public sealed partial class ShellViewModel : ObservableObject
         AreaPlanning.ConfirmAsync = (message, caption) => _dialog.ConfirmAsync(message, caption);
         AreaPlanning.TankRenamed += (_, tankId) => _ = OnTankRenamedAsync(tankId);
 
+        // 선창의 검사 종류 → 운영 화면의 가스검사 회차 선택 표시
+        AreaPlanning.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AreaPlanningViewModel.InspectionKindCode))
+                Mission.IsGasTank = AreaPlanning.InspectionKindCode == HD.Acs.UI.Models.InspectionKindOption.Gas;
+        };
+
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
         // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산

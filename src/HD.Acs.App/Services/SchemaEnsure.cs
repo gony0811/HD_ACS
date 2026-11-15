@@ -30,6 +30,8 @@ public static class SchemaEnsure
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS task_ids jsonb",
         // db/migrations/2026-11-15_tank_inspection_kind.sql — 선창의 검사 종류(WELD 용접 / GAS 가스)
         "ALTER TABLE ref.tank_geometry ADD COLUMN IF NOT EXISTS inspection_kind text NOT NULL DEFAULT 'WELD'",
+        // db/migrations/2026-11-15_run_round.sql — 가스검사 회차(1|2, NULL=미지정)
+        "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS round int",
         // db/migrations/2026-11-15_inspection_profile.sql — HD_AMR 검사 프로필 사본(새 테이블 — 없을 때만 만든다)
         """
         CREATE TABLE IF NOT EXISTS ref.inspection_profile (

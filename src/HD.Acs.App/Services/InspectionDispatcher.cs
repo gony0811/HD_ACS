@@ -47,7 +47,8 @@ public sealed class InspectionDispatcher
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         // 검사 종류별 지령 만들기 — 가스검사 등 새 종류는 여기에 구현을 더한다
-        _commands = new InspectionCommandBuilders(new WeldInspectionCommandBuilder(_standoffMm, _workingDistanceMm, log));
+        var weld = new WeldInspectionCommandBuilder(_standoffMm, _workingDistanceMm, log);
+        _commands = new InspectionCommandBuilders(weld, new GasInspectionCommandBuilder(weld));
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
         _verticalStationStandoffM = config.GetValue("Acs:Area:VerticalStationStandoffM", 1.2);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
@@ -123,7 +124,7 @@ public sealed class InspectionDispatcher
             }
 
             var builder = await CommandBuilderAsync(area.TankId, ct);
-            var stop = BuildStop(run.RunId, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct),
+            var stop = BuildStop(run, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct),
                 builder, await ParamSchemaAsync(builder.ActionType, ct),
                 new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm));
             wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
@@ -374,7 +375,7 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId));
+            var stop = BuildStop(run, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId));
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -406,7 +407,7 @@ public sealed class InspectionDispatcher
     /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
-        Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
+        ScenarioRunEntity run, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
         IReadOnlyList<double>? levelZ, IInspectionCommandBuilder builder, string? paramSchema, StopOverride? ov = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
@@ -424,7 +425,7 @@ public sealed class InspectionDispatcher
         // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
         var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
         var actionsJson = new JsonArray();
-        var ctx = new InspectionCommandContext(runId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm);
+        var ctx = new InspectionCommandContext(run.RunId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm, run.Round);
         foreach (var t in area.Tasks.OrderBy(x => x.Seq))
         {
             actionsJson.Add(builder.BuildAction(ctx, t, paramSchema));
@@ -490,7 +491,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId));
+            var stop = BuildStop(run, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId));
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
