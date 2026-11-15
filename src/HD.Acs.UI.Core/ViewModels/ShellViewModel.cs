@@ -218,7 +218,7 @@ public sealed partial class ShellViewModel : ObservableObject
             // 베이스 프로젝트 파일을 새 선창 ID 로 복제 (선창 등록은 창이 아니라 여기서 한다)
             var newTank = AreaPlanning.TankId.Trim();
             AreaPlanning.ClearBaseProject();
-            if (!await CreateFromBaseAsync(basePath, newTank))
+            if (!await CreateFromBaseAsync(basePath, newTank, AreaPlanning.SelectedInspectionKind.Code))
             {
                 AreaPlanning.TankId = previousTank;
                 await AreaPlanning.LoadAsync();           // 창이 덮어쓴 치수 입력칸을 현재 선창 값으로
@@ -239,7 +239,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// 베이스 프로젝트 파일로 새 선창 만들기 — 형상·영역·작업·시나리오를 새 선창 ID 로 복제한다
     /// (영역 ID·taskId 새 발급, 캘리브레이션 제외). 성공하면 모든 화면을 새 선창으로 맞춘다.
     /// </summary>
-    private async Task<bool> CreateFromBaseAsync(string basePath, string newTank)
+    private async Task<bool> CreateFromBaseAsync(string basePath, string newTank, string inspectionKind)
     {
         try
         {
@@ -258,7 +258,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
             await RunProjectBusyAsync("생성", async progress =>
             {
-                var doc = await _project.CreateFromBaseAsync(basePath, newTank, progress: progress);
+                var doc = await _project.CreateFromBaseAsync(basePath, newTank, progress: progress, inspectionKind: inspectionKind);
                 ApplyTankId(doc.TankId);
                 progress.Report(new ProjectProgress("화면 갱신", 0, 0));
                 await Task.WhenAll(

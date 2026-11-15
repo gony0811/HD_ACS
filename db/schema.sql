@@ -277,6 +277,7 @@ CREATE TABLE ref.tank_geometry (
   reach_z_max double precision,            -- (선택, v3.1) 코봇 도달 밴드 상한 상대높이
   origin_ox   double precision NOT NULL DEFAULT 0,
   origin_oy   double precision NOT NULL DEFAULT 0,
+  inspection_kind text NOT NULL DEFAULT 'WELD',   -- 검사 종류: WELD(용접) | GAS(가스). 같은 AMR·VDA 5050, 검사 장비만 다름
   created_by  text,
   created_at  timestamptz NOT NULL DEFAULT now()
 );

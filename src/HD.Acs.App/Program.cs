@@ -359,7 +359,8 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
         req.ReachZMin, req.ReachZMax);
     try
     {
-        int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId);
+        int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId,
+            inspectionKind: req.InspectionKind);
         return Results.Ok(new { tankId, wallsGenerated = n });
     }
     catch (TankGeometryService.GeometryInvalidException ex)
@@ -1356,7 +1357,8 @@ public sealed record CreateTankGeometryRequest(
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double? OriginOx, double? OriginOy,
     double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId,
-    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
+    double? ReachZMin = null, double? ReachZMax = null,    // v3.1 §5-A 도달 밴드 보정(선택)
+    string? InspectionKind = null);                        // 검사 종류 WELD|GAS. null = 기존 선창은 유지, 새 선창은 WELD
 // 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v). Level은 v3.1에서 무시(서버가 §5-A로 유도).
 // Corners = 임의 4점 사각형[[u,v]…]. 미지정 시 UMin/VMin/UMax/VMax 로 사각형 폴백(하위호환).
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,

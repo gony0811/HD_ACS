@@ -84,6 +84,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private string _reachZMaxText = "";      // 선택 — 코봇 도달 밴드 상한
     [ObservableProperty] private double _originOx;
     [ObservableProperty] private double _originOy;
+
+    // 검사 종류(용접/가스) — 선창 단위 값. 새 프로젝트 창에서 고르고, 현재 선창의 값은 배너에 표시한다.
+    public IReadOnlyList<InspectionKindOption> InspectionKindOptions => InspectionKindOption.All;
+    /// <summary>새 프로젝트 창의 선택값(선창을 읽으면 그 선창 값으로 맞춘다).</summary>
+    [ObservableProperty] private InspectionKindOption _selectedInspectionKind = InspectionKindOption.All[0];
+    /// <summary>현재 선창의 검사 종류 표시(서버 값. 구서버 = 용접검사).</summary>
+    [ObservableProperty] private string _inspectionKindLabel = InspectionKindOption.All[0].Label;
     [ObservableProperty] private string _derivedText = "-";
 
     // 선택 면 경계 폴리곤(캔버스 px) — 면 전체(회색 음영). 마구리(F/A)는 팔각, 그 외 직사각형.
@@ -275,7 +282,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         try
         {
             int n = await _api.RegisterTankGeometryAsync(TankId, LengthL, WFloor, ThetaLowDeg, HLow,
-                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax);
+                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax, SelectedInspectionKind.Code);
             StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성";
             await LoadAsync();
             return true;
@@ -782,8 +789,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         ReachZMinText = g.ReachZMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
         ReachZMaxText = g.ReachZMax?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
         LevelZText = string.Join(", ", g.LevelZ.Select(z => z.ToString("0.###", CultureInfo.InvariantCulture)));
+        SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);   // 기본 = 베이스 파일 값(창에서 바꿀 수 있다)
         BaseProjectInfo = $"{System.IO.Path.GetFileName(path)} — 원래 선창 {doc.TankId} · 영역 {doc.Areas.Length:N0} · " +
-                          $"작업 {doc.Areas.Sum(a => a.Tasks.Length):N0} · 시나리오 {doc.Scenarios?.Length ?? 0}";
+                          $"작업 {doc.Areas.Sum(a => a.Tasks.Length):N0} · 시나리오 {doc.Scenarios?.Length ?? 0} · {InspectionKindOption.Of(g.InspectionKind).Label}";
         BaseProjectPath = path;
     }
 
@@ -1199,6 +1207,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, $"L{i}"));
             SelectedLevel = Levels.FirstOrDefault(x => x.Level == keep) ?? Levels.FirstOrDefault();
         }
+        SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);
+        InspectionKindLabel = SelectedInspectionKind.Label;
         var d = g.Derived;
         _derB = d.B; _derWCeil = d.WCeil; _derH = d.H;   // 마구리 팔각 윤곽용
         DerivedText = $"B(전폭)={d.B:0.###}  W_ceil(천장폭)={d.WCeil:0.###}  H(전체높이)={d.H:0.###}";

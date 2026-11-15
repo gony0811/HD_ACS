@@ -426,14 +426,22 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
         double originOx, double originOy, string userId,
-        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default)
+        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default) =>
+        await RegisterTankGeometryAsync(tankId, lengthL, wFloor, thetaLowDeg, hLow, hWall, thetaUpDeg, hUp, levelZ,
+            originOx, originOy, userId, reachZMin, reachZMax, null, ct);
+
+    public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId,
+        double? reachZMin, double? reachZMax, string? inspectionKind, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", new
         {
             LengthL = lengthL, WFloor = wFloor, ThetaLowDeg = thetaLowDeg, HLow = hLow,
             HWall = hWall, ThetaUpDeg = thetaUpDeg, HUp = hUp,
             LevelZ = levelZ, OriginOx = originOx, OriginOy = originOy, UserId = userId,
-            ReachZMin = reachZMin, ReachZMax = reachZMax
+            ReachZMin = reachZMin, ReachZMax = reachZMax,
+            InspectionKind = inspectionKind   // null = 기존 선창은 유지, 새 선창은 WELD
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 검증 실패 400 reasons 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<GeometryResult>(ct))?.WallsGenerated ?? 0;

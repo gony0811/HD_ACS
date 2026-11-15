@@ -25,9 +25,13 @@ public sealed class TankGeometryService
 
     /// <summary>파라미터 등록/수정 → 검증 → 10면 자동 생성·저장(기존 면 삭제 후 재삽입). 각도는 rad 입력.</summary>
     public async Task<int> RegisterAsync(string tankId, TankGeometry geom,
-        double? checkH, double? checkBeam, double? checkWCeil, string? userId, CancellationToken ct = default)
+        double? checkH, double? checkBeam, double? checkWCeil, string? userId, CancellationToken ct = default,
+        string? inspectionKind = null)
     {
-        var reasons = geom.Validate(checkH, checkBeam, checkWCeil);
+        var reasons = geom.Validate(checkH, checkBeam, checkWCeil).ToList();
+        // 검사 종류: 지정 안 함(null·빈값) = 기존 선창은 그대로, 새 선창은 WELD
+        if (!InspectionKinds.TryNormalize(inspectionKind, out var kind))
+            reasons.Add($"검사 종류 '{inspectionKind}'는 쓸 수 없습니다 — {string.Join(" · ", InspectionKinds.All)} 중 하나.");
         if (reasons.Count > 0) throw new GeometryInvalidException(reasons);
 
         await EnsureMapsAsync(tankId, geom.LevelZ.Length, ct);
@@ -36,6 +40,7 @@ public sealed class TankGeometryService
         var g = await _db.TankGeometries.FirstOrDefaultAsync(x => x.TankId == tankId, ct);
         if (g is null) { g = new TankGeometryEntity { TankId = tankId }; _db.TankGeometries.Add(g); }
         ApplyTo(g, geom, userId);
+        if (kind is not null) g.InspectionKind = kind;
 
         var existing = await _db.Walls.Where(w => w.TankId == tankId).ToListAsync(ct);
         if (existing.Count > 0) _db.Walls.RemoveRange(existing);
@@ -148,6 +153,7 @@ public sealed class TankGeometryService
             levelZ = JsonSerializer.Deserialize<double[]>(g.LevelZ),
             reachZMin = g.ReachZMin, reachZMax = g.ReachZMax,
             originOx = g.OriginOx, originOy = g.OriginOy,
+            inspectionKind = g.InspectionKind,
             derived = new { d.WLow, d.B, d.WUp, d.WCeil, d.H }
         };
     }

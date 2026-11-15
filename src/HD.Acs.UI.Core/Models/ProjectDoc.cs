@@ -31,7 +31,8 @@ public sealed record GeometryDoc(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
     double HWall, double ThetaUpDeg, double HUp,
     double[] LevelZ, double OriginOx, double OriginOy,
-    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드(선택)
+    double? ReachZMin = null, double? ReachZMax = null,    // v3.1 §5-A 도달 밴드(선택)
+    string? InspectionKind = null);                        // 검사 종류 WELD|GAS. 구파일(null) = WELD
 
 /// <summary>영역 스냅샷 (벽면-로컬 u,v) + 소속 검사 작업.</summary>
 public sealed record AreaDoc(

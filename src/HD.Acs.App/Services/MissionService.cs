@@ -121,6 +121,13 @@ public sealed class MissionService
 
         var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
 
+        // 검사 종류 가드 — 지령 생성은 아직 용접검사만 구현돼 있다. 다른 장비를 단 로봇에 용접검사 지령을 보내지 않는다.
+        var kind = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == scenario.TankId)
+            .Select(g => g.InspectionKind).FirstOrDefaultAsync(ct);
+        if (!HD.Acs.Core.Planning.InspectionKinds.DispatchSupported(kind))
+            throw new RunConflictException(
+                $"선창 {scenario.TankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다 — 용접검사(WELD) 선창만 {what}할 수 있습니다.");
+
         var run = new ScenarioRunEntity
         {
             RunId = Guid.NewGuid(),

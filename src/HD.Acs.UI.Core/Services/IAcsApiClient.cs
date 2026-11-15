@@ -101,6 +101,13 @@ public interface IAcsApiClient
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
         double originOx, double originOy, string userId,
         double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default);
+    /// <summary>선창 등록 + 검사 종류(WELD|GAS, null = 기존 선창은 유지·새 선창은 WELD). 기본 구현 = 검사 종류 없이 등록(기존 대역 무수정).</summary>
+    Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId,
+        double? reachZMin, double? reachZMax, string? inspectionKind, CancellationToken ct = default) =>
+        RegisterTankGeometryAsync(tankId, lengthL, wFloor, thetaLowDeg, hLow, hWall, thetaUpDeg, hUp, levelZ,
+            originOx, originOy, userId, reachZMin, reachZMax, ct);
     Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default);
     // v3.1 §8: level 지정 시 그 층 도달 가능 면만 + 면별 reachableVBand 반환.
     Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);

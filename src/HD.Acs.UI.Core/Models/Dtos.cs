@@ -269,7 +269,8 @@ public sealed record TankGeometryDto(
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double OriginOx, double OriginOy,
     TankDerivedDto Derived,
-    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
+    double? ReachZMin = null, double? ReachZMax = null,    // v3.1 §5-A 도달 밴드 보정(선택)
+    string? InspectionKind = null);                        // 검사 종류 WELD|GAS. 구서버(null) = WELD
 public sealed record TankDerivedDto(double WLow, double B, double WUp, double WCeil, double H);
 
 /// <summary>GET /api/internal/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>

@@ -15,6 +15,12 @@
             <TextBlock Text="Tank" Classes="lbl" />
             <TextBox Width="110" Classes="field" Text="{Binding TankId}" />
         </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+            <TextBlock Text="검사 종류" Classes="lbl"
+                       ToolTip.Tip="이 선창에서 하는 검사. 같은 AMR·VDA 5050 을 쓰고 검사 장비만 다릅니다. 가스검사 선창은 아직 미션을 시작할 수 없습니다(지령 미구현)." />
+            <ComboBox MinWidth="150" ItemsSource="{Binding InspectionKindOptions}"
+                      SelectedItem="{Binding SelectedInspectionKind}" />
+        </StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
             <TextBlock Text="베이스 프로젝트" Classes="lbl"
                        ToolTip.Tip="(선택) 기존 프로젝트 파일(.hdacs)의 형상·영역·작업·시나리오를 위 Tank ID 의 새 선창으로 복제합니다." />

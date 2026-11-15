@@ -93,6 +93,23 @@ public class ProjectFromBaseTests : IDisposable
         Assert.Equal(AreaA, BaseDoc().Areas[0].SourceId);
     }
 
+    /// <summary>검사 종류 — 지정하면 베이스 파일 값 대신 그 값으로, 지정하지 않으면 파일 값 그대로(구파일 = 값 없음 → 서버가 용접검사).</summary>
+    [Theory]
+    [InlineData("GAS", "GAS")] [InlineData(null, null)]
+    public async Task InspectionKind_OverridesBaseFile_WhenGiven(string? chosen, string? sent)
+    {
+        WriteBase();
+        var (svc, server) = Build("CT1");
+
+        var doc = await svc.CreateFromBaseAsync(_path, "GT1", inspectionKind: chosen);
+
+        var geometry = Assert.Single(server.Writes, w => w.Path.EndsWith("/project-import")).Body.GetProperty("geometry");
+        Assert.Equal(sent, geometry.GetProperty("inspectionKind").GetString());
+        Assert.Equal(sent, doc.Geometry.InspectionKind);
+        Assert.Equal("용접검사", InspectionKindOption.Of(null).Label);
+        Assert.Equal("가스검사", InspectionKindOption.Of("gas").Label);
+    }
+
     [Theory]
     [InlineData("CT1")] [InlineData("ct1")]
     public async Task ExistingTankId_IsRejected_WithoutTouchingDb(string newId)

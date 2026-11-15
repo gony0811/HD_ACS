@@ -81,7 +81,7 @@ public sealed class ProjectService : IProjectService
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
-                geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
+                geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax, InspectionKindOption.Of(geom.InspectionKind).Code),
             areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray());
 
         progress?.Report(new ProjectProgress("파일 기록", 0, 0));
@@ -141,7 +141,7 @@ public sealed class ProjectService : IProjectService
     /// <summary>
     /// 베이스 문서를 새 선창용으로 복제 — 영역·작업 ID 새 발급, 시나리오의 영역 연결은 새 ID 로 옮김, 캘리브레이션 제외.
     /// </summary>
-    public static ProjectDoc Rebase(ProjectDoc source, string newTankId)
+    public static ProjectDoc Rebase(ProjectDoc source, string newTankId, string? inspectionKind = null)
     {
         var areaIdMap = new Dictionary<Guid, Guid>();
         var areas = source.Areas.Select(a =>
@@ -157,11 +157,12 @@ public sealed class ProjectService : IProjectService
         var scenarios = (source.Scenarios ?? Array.Empty<ScenarioDoc>())
             .Select(s => s with { AreaIds = s.AreaIds.Where(areaIdMap.ContainsKey).Select(id => areaIdMap[id]).ToArray() })
             .ToArray();
-        return source with { TankId = newTankId, Areas = areas, Calibrations = Array.Empty<CalibrationDoc>(), Scenarios = scenarios };
+        var geometry = inspectionKind is null ? source.Geometry : source.Geometry with { InspectionKind = InspectionKindOption.Of(inspectionKind).Code };
+        return source with { TankId = newTankId, Geometry = geometry, Areas = areas, Calibrations = Array.Empty<CalibrationDoc>(), Scenarios = scenarios };
     }
 
     public async Task<ProjectDoc> CreateFromBaseAsync(string basePath, string newTankId, CancellationToken ct = default,
-        IProgress<ProjectProgress>? progress = null)
+        IProgress<ProjectProgress>? progress = null, string? inspectionKind = null)
     {
         newTankId = newTankId?.Trim() ?? "";
         if (TankIdProblem(newTankId) is { } problem) throw new InvalidOperationException(problem);
@@ -180,7 +181,7 @@ public sealed class ProjectService : IProjectService
                 $"선창 ID '{newTankId}' 는 서버에 이미 있습니다 — 다른 ID 를 쓰세요. DB는 변경하지 않았습니다.\n" +
                 "(같은 선창의 이름만 바꾸려면 계획 ▸ 영역·작업의 '선창 ID 변경'을 쓰세요.)");
 
-        var doc = Rebase(source, newTankId);
+        var doc = Rebase(source, newTankId, inspectionKind);
         await ImportAsync(doc, ct, progress);
         CurrentPath = null;   // 새 프로젝트 — 저장 위치는 따로 고른다(베이스 파일을 덮어쓰지 않는다)
         return doc;
@@ -204,7 +205,7 @@ public sealed class ProjectService : IProjectService
         var g = doc.Geometry;
         var request = new ProjectImportRequestDto(
             new ProjectImportGeometryDto(g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow, g.HWall, g.ThetaUpDeg, g.HUp,
-                g.LevelZ, g.OriginOx, g.OriginOy, null, null, null, _operatorId, g.ReachZMin, g.ReachZMax),
+                g.LevelZ, g.OriginOx, g.OriginOy, null, null, null, _operatorId, g.ReachZMin, g.ReachZMax, g.InspectionKind),
             doc.Areas.Select(a => new ProjectImportAreaDto(a.WallCode, a.Name, a.Corners,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM,
                 null, a.SourceId,
@@ -228,7 +229,7 @@ public sealed class ProjectService : IProjectService
         progress?.Report(new ProjectProgress("선창 등록", 0, 0));
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
             g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
-            g.ReachZMin, g.ReachZMax, ct);
+            g.ReachZMin, g.ReachZMax, g.InspectionKind, ct);
 
         // 진행 단위 = REST 등록 건수(영역 + 작업). 대형 선창은 수천 건이라 이 단계가 열기 시간 대부분이다.
         int itemTotal = doc.Areas.Sum(a => 1 + a.Tasks.Length), itemDone = 0;

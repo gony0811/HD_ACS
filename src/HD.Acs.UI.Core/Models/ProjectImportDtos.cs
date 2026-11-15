@@ -9,7 +9,8 @@ public sealed record ProjectImportGeometryDto(
     double HWall, double ThetaUpDeg, double HUp,
     double[] LevelZ, double OriginOx, double OriginOy,
     double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId,
-    double? ReachZMin, double? ReachZMax);
+    double? ReachZMin, double? ReachZMax,
+    string? InspectionKind = null);   // 검사 종류 WELD|GAS. null = 기존 선창은 유지, 새 선창은 WELD
 
 /// <summary>작업 1개 — 서버 CreateAreaTaskRequest와 같은 필드.</summary>
 public sealed record ProjectImportTaskDto(int? Seq, string? Name, string? SeamType,
