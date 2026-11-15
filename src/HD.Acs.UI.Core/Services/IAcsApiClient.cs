@@ -154,6 +154,15 @@ public interface IAcsApiClient
     /// <summary>용접선 임시 제외/복귀 — enabled=false 면 검사(큐 전개·재개·재검사)에서 빠진다. false 반환 = 서버 미지원(구빌드).</summary>
     Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default) =>
         Task.FromResult(false);
+    /// <summary>측면 정차 층+벽면 설정 조회 [VDA §4.4.3]. 선창 없음·구서버면 null.</summary>
+    Task<WallStationModesDto?> GetWallStationModesAsync(string tankId, CancellationToken ct = default) =>
+        Task.FromResult<WallStationModesDto?>(null);
+    /// <summary>측면 정차 층+벽면 설정 저장. 구서버면 false, 값 오류는 예외 메시지.</summary>
+    Task<bool> SetWallStationModeAsync(string tankId, int level, string wallCode, string mode, string? defaultDir, double? standoffM,
+        string? userId, CancellationToken ct = default) => Task.FromResult(false);
+    /// <summary>측면 정차 층+벽면 설정 삭제(= 정면). 없거나 구서버면 false.</summary>
+    Task<bool> DeleteWallStationModeAsync(string tankId, int level, string wallCode, string? userId, CancellationToken ct = default) =>
+        Task.FromResult(false);
     /// <summary>CROSS 교차 기하 미리보기 — 중심·가지(면-전체 v)로 회전 유도·AMR 점 정렬(비영속) [VDA §8.5.1].</summary>
     Task<CrossPreviewResult?> CrossPreviewAsync(Guid areaId, string seamType, double centerU, double centerV,
         double[][] arms, CancellationToken ct = default);

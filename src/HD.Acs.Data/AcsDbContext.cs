@@ -30,6 +30,7 @@ public class AcsDbContext : DbContext
     public DbSet<WallEntity> Walls => Set<WallEntity>();
     public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
     public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
+    public DbSet<WallStationModeEntity> WallStationModes => Set<WallStationModeEntity>();
     // run
     public DbSet<ScenarioRunEntity> ScenarioRuns => Set<ScenarioRunEntity>();
     public DbSet<MissionEntity> Missions => Set<MissionEntity>();
@@ -123,6 +124,9 @@ public class AcsDbContext : DbContext
         mb.Entity<AreaTaskEntity>(e => { e.ToTable("area_task", "ref"); e.HasKey(x => x.TaskId);
             e.Property(x => x.Points).HasColumnType("jsonb");
             e.HasIndex(x => new { x.AreaId, x.Seq }).IsUnique(); });
+
+        mb.Entity<WallStationModeEntity>(e => { e.ToTable("wall_station_mode", "ref");
+            e.HasKey(x => new { x.TankId, x.Level, x.WallCode }); });
 
         mb.Entity<ScenarioAreaEntity>(e => { e.ToTable("scenario_area", "ref");
             e.HasKey(x => new { x.ScenarioId, x.AreaId });

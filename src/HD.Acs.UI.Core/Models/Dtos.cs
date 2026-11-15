@@ -319,7 +319,8 @@ public sealed record CrossPreviewResult(string SeamType, double[][]? Points, dou
 
 /// <summary>코봇 seam 시작점 이동 시험 응답 [VDA §8 moveToSeamStart] — 발행된 Order·정차점·seam 시작 맵좌표.</summary>
 public sealed record SeamStartTestResultDto(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[]? SeamStartW,
-    double? LiftStrokeMm = null);   // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    double? LiftStrokeMm = null,   // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    string? StationMode = null);   // 측면 정차면 SIDE_LEFT/SIDE_RIGHT [VDA §4.4.3], 정면·구서버면 null
 
 /// <summary>GET /api/robots/{id}/drawing-pose — 로봇 보고 위치를 보고 층의 유효 T_W_D로 도면 좌표화(정차점 지정용).</summary>
 public sealed record RobotDrawingPoseDto(string RobotId, string MapId, int Level, double X, double Y, double? Theta,
@@ -385,3 +386,10 @@ public sealed record ResumePauseResultDto(string RobotId, string ActionType);
 /// <summary>SignalR "BatterySwapDispatched" 푸시 — 운영자 교체 디스패치 사실을 UI 이벤트 로그가 흡수.</summary>
 public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, string TargetNodeId,
     string MapId, string Reason, Guid? AbortedRunId);
+
+/// <summary>GET /api/tanks/{id}/wall-station-modes 한 줄 — 측면 정차 층+벽면 설정 [VDA §4.4.3]. 행이 없으면 정면.</summary>
+public sealed record WallStationModeDto(int Level, string WallCode, string Mode, string DefaultDir, double? StandoffM,
+    string? UpdatedBy = null, DateTimeOffset? UpdatedAt = null);
+
+/// <summary>GET /api/tanks/{id}/wall-station-modes 응답 — enabled = 서버 설정 Acs:Dispatch:SideStation:Enabled.</summary>
+public sealed record WallStationModesDto(string TankId, bool Enabled, WallStationModeDto[] Items);

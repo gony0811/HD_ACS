@@ -78,21 +78,28 @@ public sealed class ProjectService : IProjectService
             scenarios.Add(new ScenarioDoc(scenario.Name, links.OrderBy(x => x.SortOrder).Select(x => x.AreaId).ToArray()));
         }
 
+        var modes = await _api.GetWallStationModesAsync(tankId, ct);   // 측면 정차 설정 — 구서버면 null(저장 안 함)
+
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
                 geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
-            areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray());
+            areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray(),
+            modes?.Items.Select(m => new WallStationModeDoc(m.Level, m.WallCode, m.Mode, m.DefaultDir, m.StandoffM)).ToArray());
 
         progress?.Report(new ProjectProgress("파일 기록", 0, 0));
-        await using (var fs = File.Create(path))
-        {
-            await fs.WriteAsync(Magic, ct);
-            fs.WriteByte(FormatVersion);
-            await using var gz = new GZipStream(fs, CompressionLevel.Optimal);
-            await JsonSerializer.SerializeAsync(gz, doc, Json, ct);
-        }
+        await WriteFileAsync(doc, path, ct);
         CurrentPath = path;
+    }
+
+    /// <summary>문서를 프로젝트 파일 형식(매직 + 버전 + GZip JSON)으로 기록한다.</summary>
+    public static async Task WriteFileAsync(ProjectDoc doc, string path, CancellationToken ct = default)
+    {
+        await using var fs = File.Create(path);
+        await fs.WriteAsync(Magic, ct);
+        fs.WriteByte(FormatVersion);
+        await using var gz = new GZipStream(fs, CompressionLevel.Optimal);
+        await JsonSerializer.SerializeAsync(gz, doc, Json, ct);
     }
 
     public async Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null)
@@ -291,6 +298,17 @@ public sealed class ProjectService : IProjectService
             var scenarioId = existing?.ScenarioId ?? await _api.CreateScenarioAsync(scenario.Name, doc.TankId, ct);
             var areaIds = scenario.AreaIds.Where(restoredAreaIds.ContainsKey).Select(id => restoredAreaIds[id]).ToArray();
             await _api.SetScenarioAreasAsync(scenarioId, areaIds, ct);
+        }
+
+        // 측면 정차 층+벽면 설정 — 파일이 정본: 서버에만 있는 줄은 지우고 파일 값을 넣는다. 구파일(null)은 건드리지 않는다.
+        if (doc.WallStationModes is { } modes)
+        {
+            var existing = await _api.GetWallStationModesAsync(doc.TankId, ct);
+            foreach (var old in existing?.Items ?? Array.Empty<WallStationModeDto>())
+                if (!modes.Any(m => m.Level == old.Level && m.WallCode == old.WallCode))
+                    await _api.DeleteWallStationModeAsync(doc.TankId, old.Level, old.WallCode, _operatorId, ct);
+            foreach (var m in modes)
+                await _api.SetWallStationModeAsync(doc.TankId, m.Level, m.WallCode, m.Mode, m.DefaultDir, m.StandoffM, _operatorId, ct);
         }
     }
 

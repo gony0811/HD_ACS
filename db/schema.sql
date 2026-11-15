@@ -148,6 +148,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "anchorGroupId":       { "type": "string" },
         "seqInGroup":          { "type": "integer", "minimum": 1 },
         "liftStrokeMm":        { "type": "number", "minimum": 0, "maximum": 1000 },
+        "stationMode":         { "enum": ["FRONT", "SIDE_LEFT", "SIDE_RIGHT"] },
         "taskId":              { "type": "string", "format": "uuid" },
         "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
         "stationAdjust": {
@@ -182,7 +183,8 @@ VALUES ('moveToSeamStart', 'NODE', 'HARD',
     "params": {
       "type": "object",
       "properties": {
-        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "stationMode":  { "enum": ["FRONT", "SIDE_LEFT", "SIDE_RIGHT"] }
       }
     },
     "position": {
@@ -354,6 +356,19 @@ CREATE TABLE ref.scenario_area (
   area_id     uuid NOT NULL REFERENCES ref.inspection_area (area_id) ON DELETE CASCADE,
   sort_order  int  NOT NULL DEFAULT 0,   -- 표시·Seq용 (배차 순서는 greedy 최근접)
   PRIMARY KEY (scenario_id, area_id)
+);
+
+-- 측면 정차 층+벽면 설정 [VDA §4.4.3 / N25] — 행이 없으면 정면(FRONT). 면 재생성과 무관하게 유지(외래 키 없음).
+CREATE TABLE ref.wall_station_mode (
+  tank_id     text NOT NULL,
+  level       int  NOT NULL,
+  wall_code   text NOT NULL,
+  mode        text NOT NULL DEFAULT 'FRONT' CHECK (mode IN ('FRONT','SIDE')),
+  default_dir text NOT NULL DEFAULT 'U_PLUS' CHECK (default_dir IN ('U_PLUS','U_MINUS')),
+  standoff_m  double precision,          -- 측면 고정 이격 [m] (NULL=영역·면 기본)
+  updated_by  text,
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tank_id, level, wall_code)
 );
 
 -- ═══════════════════════════ 로봇 마스터 (ref) ═══════════════════════════

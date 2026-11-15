@@ -148,6 +148,22 @@ client.ApplicationMessageReceivedAsync += async e =>
             return;
         }
 
+        // 측면 정차 stationMode 검사 [VDA §4.4.3 AMR 규칙 5] — 한 Order 안에서 섞이거나 정의되지 않은 값이면 Order 전체 거부
+        if (StationModeOf(incoming) is { Problem: { } smProblem })
+        {
+            state.Errors.RemoveAll(er => er.ErrorType == "orderValidationError");
+            state.Errors.Add(new VdaError
+            {
+                ErrorType = "orderValidationError", ErrorLevel = "WARNING",
+                ErrorDescription = $"orderId={incoming.OrderId}: stationMode {smProblem}",
+            });
+            Console.WriteLine($"[SIM] Order 거부(stationMode {smProblem}): {incoming.OrderId}");
+            _ = PublishStateAsync();
+            return;
+        }
+        if (StationModeOf(incoming).Mode is { } sm && sm != "FRONT")
+            Console.WriteLine($"[SIM] 측면 정차 {sm} — theta={incoming.Nodes.FirstOrDefault()?.NodePosition?.Theta:F3} (벽 = theta {(sm == "SIDE_LEFT" ? "+" : "−")} 90°)");
+
         currentOrder = incoming;
         Console.WriteLine($"[SIM] Order 수신: {currentOrder?.OrderId} (nodes={currentOrder?.Nodes.Count})");
         _ = Task.Run(() => ExecuteOrderAsync(currentOrder!));
@@ -395,7 +411,7 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}";
+        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt};station={ParamMode(action)}";
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else if (action.ActionType == "moveToSeamStart")
@@ -424,7 +440,7 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         catch { /* 로그용 — 파싱 실패 무해 */ }
         await Task.Delay(fullMs);
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift}";
+        actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift};station={ParamMode(action)}";
         Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift}");
     }
     else
@@ -463,6 +479,51 @@ async Task PublishStateAsync()
 }
 
 // initPosition actionParameters 안전 파싱 — Value는 object(역직렬화 시 JsonElement)일 수 있음
+// Order 의 stationMode — 모든 액션 params.stationMode 가 같아야 한다(부재 = FRONT). 섞이거나 정의 안 된 값이면 Problem.
+static (string? Mode, string? Problem) StationModeOf(Vda5050Order order)
+{
+    var modes = new HashSet<string>();
+    foreach (var a in order.Nodes.SelectMany(n => n.Actions))
+    {
+        if (a.ActionType is not ("startWeldInspection" or "moveToSeamStart")) continue;
+        string m = "FRONT";
+        try
+        {
+            var prm = a.ActionParameters.FirstOrDefault(p => p.Key == "params")?.Value;
+            if (prm is not null && System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prm))?["stationMode"] is { } v)
+                m = v.GetValue<string>();
+        }
+        catch { return (null, "형식 오류"); }
+        if (m is not ("FRONT" or "SIDE_LEFT" or "SIDE_RIGHT")) return (null, $"정의되지 않은 값 '{m}'");
+        if (m != "FRONT")
+        {
+            // 측면은 수직벽 PM·SM·F·A 만 [VDA §4.4.3 AMR 규칙 5]
+            string? wall = null;
+            try
+            {
+                var pos = a.ActionParameters.FirstOrDefault(p => p.Key == "position")?.Value;
+                if (pos is not null) wall = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(pos))?["drawingPos"]?["wall_code"]?.GetValue<string>();
+            }
+            catch { /* 아래에서 거부 */ }
+            if (wall is not ("PM" or "SM" or "F" or "A")) return (null, $"{m} 는 수직벽(PM·SM·F·A)만 — 면 {wall ?? "?"}");
+        }
+        modes.Add(m);
+    }
+    if (modes.Count > 1) return (null, $"섞임({string.Join(",", modes)})");
+    return (modes.FirstOrDefault(), null);
+}
+
+static string ParamMode(VdaAction a)
+{
+    try
+    {
+        var prm = a.ActionParameters.FirstOrDefault(p => p.Key == "params")?.Value;
+        return prm is not null && System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prm))?["stationMode"] is { } v
+            ? v.GetValue<string>() : "FRONT";
+    }
+    catch { return "FRONT"; }
+}
+
 static string? ParamStr(IEnumerable<ActionParameter> ps, string key)
 {
     var v = ps.FirstOrDefault(p => p.Key == key)?.Value;

@@ -95,6 +95,10 @@ public sealed class TankRenameService(AcsDbContext db, ILogger<TankRenameService
         foreach (var a in areas) a.TankId = newId;
         foreach (var s in scenarios) s.TankId = newId;
         foreach (var s in await db.WeldSeams.Where(s => s.TankId == oldId).ToListAsync(ct)) s.TankId = newId;
+        // 측면 정차 층+벽면 설정 — 키에 선창 ID 가 들어 있어 새 행 추가 + 옛 행 삭제(외래 키 없음)
+        var sideModes = await db.WallStationModes.Where(m => m.TankId == oldId).ToListAsync(ct);
+        foreach (var m in sideModes) db.WallStationModes.Add(Clone(m, x => x.TankId = newId));
+        db.WallStationModes.RemoveRange(sideModes);
 
         var points = await db.MapCalibrationPoints.Where(p => oldMapIds.Contains(p.MapId)).ToListAsync(ct);
         foreach (var p in points) p.MapId = renamedMaps[p.MapId];

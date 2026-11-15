@@ -574,6 +574,32 @@ public sealed class AcsApiClient : IAcsApiClient
         return true;
     }
 
+    public async Task<WallStationModesDto?> GetWallStationModesAsync(string tankId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/wall-station-modes", ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버 또는 선창 없음
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<WallStationModesDto>(ct);
+    }
+
+    public async Task<bool> SetWallStationModeAsync(string tankId, int level, string wallCode, string mode, string? defaultDir, double? standoffM,
+        string? userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/wall-station-modes/{level}/{Uri.EscapeDataString(wallCode)}",
+            new { Mode = mode, DefaultDir = defaultDir, StandoffM = standoffM, UserId = userId }, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed) return false;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return true;
+    }
+
+    public async Task<bool> DeleteWallStationModeAsync(string tankId, int level, string wallCode, string? userId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/wall-station-modes/{level}/{Uri.EscapeDataString(wallCode)}?userId={Uri.EscapeDataString(userId ?? "")}", ct);
+        if (IsUnsupportedRoute(resp)) return false;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return true;
+    }
+
     public async Task<IReadOnlyList<AreaTaskDto>> GetAreaTasksAsync(Guid areaId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<List<AreaTaskDto>>($"/api/internal/areas/{areaId}/tasks", ct) ?? new();
 

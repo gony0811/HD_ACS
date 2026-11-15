@@ -23,9 +23,9 @@ public class ProjectIdentityTests : IDisposable
     private static readonly Guid Task1 = Guid.Parse("3a9f2c14-8e51-4d7a-b2c9-1f6e0a5d3b47");
     private static readonly Guid Task2 = Guid.Parse("3a9f2c14-8e51-4d7a-b2c9-1f6e0a5d3b48");
 
-    private static (ProjectService Svc, FakeAcs Server) Build(bool bulk = false, bool rejectImport = false)
+    private static (ProjectService Svc, FakeAcs Server) Build(bool bulk = false, bool rejectImport = false, bool sideModes = false)
     {
-        var server = new FakeAcs { Bulk = bulk, RejectImport = rejectImport };
+        var server = new FakeAcs { Bulk = bulk, RejectImport = rejectImport, SideModes = sideModes };
         var http = new HttpClient(server) { BaseAddress = new Uri("http://acs.test") };
         return (new ProjectService(new AcsApiClient(http), Options.Create(new AcsOptions { OperatorId = "tester" })), server);
     }
@@ -112,6 +112,39 @@ public class ProjectIdentityTests : IDisposable
 
         Assert.Contains("seq 5", Assert.Single(ex.Reasons));
         Assert.DoesNotContain(server.Posts, p => p.Path.Contains("calibration") || p.Path.StartsWith("/api/scenarios"));   // 거부 후 후속 복원 없음
+    }
+
+    /// <summary>측면 정차 층+벽면 설정이 파일에 저장되고, 열 때 파일 값으로 맞춘다(파일에 없는 서버 줄은 삭제).</summary>
+    [Fact]
+    public async Task WallStationModes_RoundTrip()
+    {
+        var (svc, server) = Build(sideModes: true);
+        await svc.SaveAsync("CT1", _path);
+        var doc = await svc.ReadAsync(_path);
+        Assert.Equal(2, doc.WallStationModes!.Length);
+        Assert.Equal(new WallStationModeDoc(2, "PM", "SIDE", "U_MINUS", 1.4), doc.WallStationModes[0]);
+
+        // 파일에서 SM L3 를 뺀 뒤 열면 → SM 삭제, PM 저장
+        File.Delete(_path);
+        await ProjectService.WriteFileAsync(doc with { WallStationModes = new[] { doc.WallStationModes[0] } }, _path);
+        await svc.OpenAsync(_path);
+        Assert.Contains(server.Writes, w => w.Method == "DELETE" && w.Path.EndsWith("/3/SM"));
+        var put = Assert.Single(server.Writes, w => w.Method == "PUT");
+        Assert.EndsWith("/2/PM", put.Path);
+        Assert.Contains("\"standoffM\":1.4", put.Body);
+        Assert.Contains("U_MINUS", put.Body);
+    }
+
+    /// <summary>구파일(설정 칸 없음)은 서버 설정을 건드리지 않는다.</summary>
+    [Fact]
+    public async Task OldFile_LeavesServerModes()
+    {
+        var (svc, _) = Build();   // 측면 API 없는 서버 → 저장 시 null
+        await svc.SaveAsync("CT1", _path);
+        Assert.Null((await svc.ReadAsync(_path)).WallStationModes);
+        var (svc2, server2) = Build(sideModes: true);
+        await svc2.OpenAsync(_path);
+        Assert.Empty(server2.Writes);
     }
 
     private sealed class ListProgress(List<ProjectProgress> sink) : IProgress<ProjectProgress>
@@ -233,11 +266,26 @@ public class ProjectIdentityTests : IDisposable
         public bool Bulk { get; init; }
         /// <summary>일괄 가져오기를 400(검증 거부)으로 응답.</summary>
         public bool RejectImport { get; init; }
+        /// <summary>측면 정차 설정 API 지원 — GET 은 PM L2 측면 1줄 + 서버에만 있는 SM L3 1줄, PUT·DELETE 는 기록.</summary>
+        public bool SideModes { get; init; }
+        public List<(string Method, string Path, string Body)> Writes { get; } = new();
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
         {
             var path = req.RequestUri!.AbsolutePath;
             if (req.Method == HttpMethod.Get) Gets.Add(path);
+            if (path.StartsWith("/api/tanks/CT1/wall-station-modes"))
+            {
+                if (!SideModes) return new HttpResponseMessage(HttpStatusCode.NotFound);
+                if (req.Method == HttpMethod.Get)
+                    return Json(new { tankId = "CT1", enabled = false, items = new object[]
+                    {
+                        new { level = 2, wallCode = "PM", mode = "SIDE", defaultDir = "U_MINUS", standoffM = 1.4 },
+                        new { level = 3, wallCode = "SM", mode = "SIDE", defaultDir = "U_PLUS", standoffM = (double?)null },
+                    } });
+                Writes.Add((req.Method.Method, path, req.Content is null ? "" : await req.Content.ReadAsStringAsync(ct)));
+                return req.Method == HttpMethod.Delete ? new HttpResponseMessage(HttpStatusCode.NoContent) : Json(new { });
+            }
             if (path == "/api/internal/area-tasks")
                 return !Bulk ? new HttpResponseMessage(HttpStatusCode.NotFound) : Json(new object[]
                 {

@@ -62,6 +62,7 @@ public static class ActionCatalogSeed
             "anchorGroupId":       { "type": "string" },
             "seqInGroup":          { "type": "integer", "minimum": 1 },
             "liftStrokeMm":        { "type": "number", "minimum": 0, "maximum": 1000 },
+            "stationMode":         { "enum": ["FRONT", "SIDE_LEFT", "SIDE_RIGHT"] },
             "taskId":              { "type": "string", "format": "uuid" },
             "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
             "stationAdjust": {
@@ -107,7 +108,8 @@ public static class ActionCatalogSeed
         "params": {
           "type": "object",
           "properties": {
-            "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+            "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+            "stationMode":  { "enum": ["FRONT", "SIDE_LEFT", "SIDE_RIGHT"] }
           }
         },
         "position": {

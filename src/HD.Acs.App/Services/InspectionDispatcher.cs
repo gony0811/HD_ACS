@@ -57,6 +57,71 @@ public sealed class InspectionDispatcher
             config.GetValue("Acs:Dispatch:StationAdjust:MaxBackwardMm", 400.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxLateralMm", 200.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxThetaDeg", 5.0));
+        _sideEnabled = config.GetValue("Acs:Dispatch:SideStation:Enabled", false);
+    }
+
+    // ── 측면 정차 [VDA §4.4.3 / N25] ─────────────────────────────────────────────
+    /// <summary>측면 정차 사용 여부(기본 꺼짐) — 꺼져 있으면 층+벽면 설정을 무시하고 stationMode 를 싣지 않는다(구버전 HD_AMR 보호).</summary>
+    private readonly bool _sideEnabled;
+
+    /// <summary>측면 정차 결정 — 노드 theta(맵 프레임)·params.stationMode 값·설명.</summary>
+    public sealed record SideDecision(double Theta, string Mode, string Why);
+
+    /// <summary>선창의 측면 설정(사용 중이고 SIDE 인 것만, 바닥·천장 제외). 꺼져 있으면 빈 사전.</summary>
+    private async Task<Dictionary<(int Level, string Wall), WallStationModeEntity>> SideSettingsAsync(string tankId, CancellationToken ct)
+    {
+        if (!_sideEnabled) return new();
+        var rows = await _db.WallStationModes.AsNoTracking()
+            .Where(m => m.TankId == tankId && m.Mode == SideStation.ModeSide).ToListAsync(ct);
+        return rows.Where(m => SideStation.WallAllowsSide(m.WallCode)).ToDictionary(m => (m.Level, m.WallCode));
+    }
+
+    private async Task<WallStationModeEntity?> SideSettingAsync(InspectionAreaEntity area, CancellationToken ct)
+        => (await SideSettingsAsync(area.TankId, ct)).GetValueOrDefault((area.Level, area.WallCode));
+
+    /// <summary>
+    /// 측면 정차의 theta·좌우 [VDA §4.4.3 ACS 규칙 2] — 순수. 수동 정차(station_theta 저장)는 저장된 theta 그대로,
+    /// 아니면 로봇→정차 방향에 가까운 벽 접선 방향(불분명하면 층+벽면 기본 방향). 좌/우는 그 theta 기준 벽이 있는 쪽.
+    /// 면 u 축·법선에 수평 성분이 없으면(바닥·천장) null.
+    /// </summary>
+    public static SideDecision? ResolveSide(InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
+        WallStationModeEntity side, double stationMapX, double stationMapY, double? robotMapX, double? robotMapY)
+    {
+        var u = Json<double[]>(wall.UAxis);
+        var n = Json<double[]>(wall.Normal);
+        if (Math.Sqrt(u[0] * u[0] + u[1] * u[1]) < 1e-6 || Math.Sqrt(n[0] * n[0] + n[1] * n[1]) < 1e-6) return null;
+        double tangentMap = tWd.DrawingYawToMap(Math.Atan2(u[1], u[0]));
+        double normalMap = tWd.DrawingYawToMap(Math.Atan2(n[1], n[0]));
+
+        double theta; string why;
+        if (area.StationTheta is double stored)
+        {
+            theta = tWd.DrawingYawToMap(stored);
+            var dev = SideStation.DeviationFromTangentDeg(theta, tangentMap);
+            why = dev > 15 ? $"수동 정차 theta(벽 접선과 {dev:F0}° 어긋남)" : "수동 정차 theta";
+        }
+        else
+        {
+            theta = SideStation.ChooseHeading(tangentMap, stationMapX, stationMapY, robotMapX, robotMapY, side.DefaultDir);
+            bool isDefault = Math.Abs(SideStation.Normalize(theta - SideStation.ChooseHeading(
+                tangentMap, stationMapX, stationMapY, null, null, side.DefaultDir))) < 1e-9;
+            why = robotMapX is null ? "로봇 위치 모름 — 기본 방향" : isDefault ? "기본 방향(또는 이동 방향)" : "이동 방향";
+        }
+        return new SideDecision(theta, SideStation.SideOf(theta, normalMap), why);
+    }
+
+    /// <summary>
+    /// 정차(work_item)의 측면 결정 — 측면 설정이 없거나 꺼져 있으면 null(정면). 테스트·발행 공용.
+    /// </summary>
+    public async Task<SideDecision?> SideDecisionForAsync(WorkItemEntity wi, double? robotMapX, double? robotMapY, CancellationToken ct)
+    {
+        if (!_sideEnabled) return null;
+        var area = await _db.InspectionAreas.AsNoTracking().FirstOrDefaultAsync(a => a.AreaId == wi.AreaId, ct);
+        if (area is null || await SideSettingAsync(area, ct) is not { } side) return null;
+        var wall = await _db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode, ct);
+        var tWd = await LoadTransformsAsync(area.TankId, new[] { area.Level }, Guid.Empty, ct);
+        if (wall is null || !tWd.TryGetValue(area.Level, out var lv)) return null;
+        return ResolveSide(area, wall, lv.T, side, wi.X, wi.Y, robotMapX, robotMapY);
     }
 
     // 배차 직전 정차 선택(Acs:Dispatch:NearestStation) — ReachSimService 가 이 클래스를 참조하므로 순환을 피해 늦게 꺼낸다.
@@ -84,6 +149,8 @@ public sealed class InspectionDispatcher
             var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks)
                 .FirstOrDefaultAsync(a => a.AreaId == wi.AreaId, ct);
             if (area is null) return null;
+            // 측면 정차는 리치 시뮬레이터가 측면 자세를 아직 모르므로 저장된(층+벽면 고정 이격) 정차로 보낸다
+            if (await SideSettingAsync(area, ct) is not null) return null;
             // 큐에 실린 용접선과 현재 계획이 다르면(run 도중 계획 수정) 실린 그대로 보낸다
             var queued = actions.Select(a => a?["taskId"]?.GetValue<string>()).OrderBy(s => s).ToList();
             if (!queued.SequenceEqual(area.Tasks.Where(t => t.Enabled).Select(t => t.TaskId.ToString()).OrderBy(s => s))) return null;
@@ -224,11 +291,11 @@ public sealed class InspectionDispatcher
     /// (B/T는 수평성분 없음 → 중심 폴백). 방향 = station_theta ?? 면 facing_yaw. 큐 전개와 계획 정차점 조회의 단일 정본.
     /// </summary>
     public static (double X, double Y, double? Yaw) StationDrawingOf(
-        InspectionAreaEntity area, WallEntity wall, double defaultStandoffM)
+        InspectionAreaEntity area, WallEntity wall, double defaultStandoffM, double? forceStandoffM = null)
     {
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         var (uc, vc) = AreaGeometry.Centroid(Json<double[][]>(area.Corners));
-        var standoffM = area.StationStandoffM ?? defaultStandoffM;
+        var standoffM = forceStandoffM ?? area.StationStandoffM ?? defaultStandoffM;
         var d = AreaGeometry.StationDrawing(pose, uc, vc, Json<double[]>(wall.Normal), standoffM);
         return (area.StationX ?? d[0], area.StationY ?? d[1], area.StationTheta ?? wall.FacingYaw);
     }
@@ -245,15 +312,18 @@ public sealed class InspectionDispatcher
         var (areas, _, _) = await LoadScenarioAreasAsync(scenarioId, sc.TankId, ct);
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == sc.TankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
+        var sideByWall = await SideSettingsAsync(sc.TankId, ct);
         var list = new List<PlannedStation>();
         foreach (var a in areas)
         {
             if (!walls.TryGetValue(a.WallCode, out var wall)) continue;
-            var (x, y, yaw) = StationDrawingOf(a, wall, DefaultStandoffM(wall));
+            var side = sideByWall.GetValueOrDefault((a.Level, a.WallCode));
+            var (x, y, yaw) = StationDrawingOf(a, wall, DefaultStandoffM(wall), side?.StandoffM);
+            if (side is not null && a.StationTheta is null) yaw = null;   // 측면 theta 는 배차 때 정해진다(로봇 위치에 따라)
             var u = Json<double[]>(wall.UAxis);
             var n = Json<double[]>(wall.Normal);
             list.Add(new PlannedStation(a.AreaId, a.Name, a.WallCode, a.Level, $"{sc.TankId}-L{a.Level}",
-                x, y, yaw, a.StationStandoffM ?? DefaultStandoffM(wall),
+                x, y, yaw, side?.StandoffM ?? a.StationStandoffM ?? DefaultStandoffM(wall),
                 a.StationX is not null || a.StationY is not null,
                 Horizontal(u), Horizontal(n)));
         }
@@ -336,6 +406,7 @@ public sealed class InspectionDispatcher
         var levelZ = await LevelZAsync(tankId, ct);
 
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
+        var sideByWall = await SideSettingsAsync(tankId, ct);
 
         var seq = 0;
         var missionMaps = new HashSet<string>();
@@ -351,7 +422,8 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(area.AreaId));
+            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(area.AreaId),
+                sideByWall.GetValueOrDefault((area.Level, area.WallCode)));
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -383,13 +455,14 @@ public sealed class InspectionDispatcher
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
         Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
-        IReadOnlyList<double>? levelZ, string? weldSchema, StopOverride? ov = null)
+        IReadOnlyList<double>? levelZ, string? weldSchema, StopOverride? ov = null, WallStationModeEntity? side = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
         // station_x/y/theta는 벽면·AREA와 같은 도면 프레임이다. 수동 오버라이드도
         // VDA nodePosition에 넣기 전에 반드시 T_W_D를 적용해야 한다.
-        var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
+        // 측면 정차는 층+벽면 고정 이격(설정값이 있을 때)으로 정차점을 낸다 [VDA §4.4.3 ACS 규칙 3]
+        var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall), side?.StandoffM);
         // 리페어 정차 최적화 결과 — 이 run의 이 정차에만 쓴다(영역에 저장된 정차는 그대로)
         if (ov is not null) (stationDx, stationDy, stationYaw) = (ov.X, ov.Y, ov.Yaw);
         var liftMm = ov?.LiftMm ?? area.StationLiftMm ?? 0.0;
@@ -484,6 +557,7 @@ public sealed class InspectionDispatcher
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
+        var sideByWall = await SideSettingsAsync(tankId, ct);
         var weldSchema = await WeldSchemaAsync(ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
@@ -517,7 +591,8 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(wi.AreaId));
+            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(wi.AreaId),
+                sideByWall.GetValueOrDefault((area!.Level, area.WallCode)));
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
@@ -699,6 +774,17 @@ public sealed class InspectionDispatcher
             .FirstOrDefaultAsync(ct);
         var stationAdjust = _stationAdjust is null ? null : _stationAdjust.ForArea(areaMeta?.StationMaxBackwardMm);
 
+        // 측면 정차 [VDA §4.4.3] — 배차 시점 로봇 위치로 theta·좌우를 정하고, 측면이면 정차 보정(stationAdjust)을 싣지 않는다.
+        var rctx = await _db.RobotContexts.AsNoTracking().FirstOrDefaultAsync(c => c.RobotId == run.RobotId, ct);
+        var side = await SideDecisionForAsync(wi, rctx?.ReportedX, rctx?.ReportedY, ct);
+        if (side is not null)
+        {
+            wi.Theta = side.Theta;
+            node.NodePosition.Theta = side.Theta;
+            stationAdjust = null;
+            _log.LogInformation("Run {Run}: wi={Wi} 측면 정차 {Mode} theta={Theta:F3} rad ({Why})", run.RunId, wi.WorkItemId, side.Mode, side.Theta, side.Why);
+        }
+
         // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
         // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
         var stopTaskIds = actionsJson
@@ -724,6 +810,7 @@ public sealed class InspectionDispatcher
                 prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
+            if (side is not null) prm["stationMode"] = side.Mode;   // 정차의 모든 액션에 같은 값 [VDA §4.4.3 / N25]
             var vda = new VdaAction
             {
                 ActionType = o["actionType"]!.GetValue<string>(), ActionId = actionId.ToString(), BlockingType = "HARD",
@@ -753,6 +840,7 @@ public sealed class InspectionDispatcher
         // work_item DISPATCHED, mission.OrderId를 이번 정차 orderId로 갱신(state 대조), 미션/런 상태
         var tracked = await _db.WorkItems.FirstAsync(w => w.WorkItemId == wi.WorkItemId, ct);
         tracked.Status = "DISPATCHED"; tracked.OrderId = orderId; tracked.UpdatedAt = DateTimeOffset.UtcNow;
+        tracked.Theta = wi.Theta;   // 측면 정차는 배차 때 theta 가 바뀐다
         mission.OrderId = orderId;
         mission.State = nameof(MissionState.Released);
         mission.StartedAt ??= DateTimeOffset.UtcNow;
@@ -767,7 +855,7 @@ public sealed class InspectionDispatcher
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
-    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW, double LiftStrokeMm = 0.0);
+    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW, double LiftStrokeMm = 0.0, string? StationMode = null);
 
     /// <summary>
     /// 코봇툴 seam 시작점 이동 시험 [VDA §8 moveToSeamStart, N협의] — 지정 용접선(area-task)의 정차점(standoff)으로
@@ -804,9 +892,13 @@ public sealed class InspectionDispatcher
         var tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
 
         // 정차점(standoff) 도면 → 맵 (배차와 동일식 StationDrawingOf)
-        var (sdx, sdy, syaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
+        // 측면 정차면 층+벽면 고정 이격·배차와 같은 theta·좌우를 쓴다 [VDA §4.4.3 — 시험도 실제 검사와 같은 자세]
+        var sideSetting = await SideSettingAsync(area, ct);
+        var (sdx, sdy, syaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall), sideSetting?.StandoffM);
         var (mx, my) = tWd.DrawingToMap(sdx, sdy);
         double? mTheta = syaw is double sy ? tWd.DrawingYawToMap(sy) : null;
+        var side = sideSetting is null ? null : ResolveSide(area, wall, tWd, sideSetting, mx, my, ctx.ReportedX, ctx.ReportedY);
+        if (side is not null) mTheta = side.Theta;
 
         // seam 시작점 position (BuildStop와 동일 — seamStartW는 맵 x,y + 층 바닥 기준 z [N17])
         var floorZ = WeldInspectionPayload.FloorZ(await LevelZAsync(area.TankId, ct), area.Level);
@@ -819,28 +911,30 @@ public sealed class InspectionDispatcher
 
         // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
         var liftStrokeMm = area.StationLiftMm ?? 0.0;
-        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm);
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm, side?.Mode);
 
         _db.AuditLogs.Add(new AuditLogEntity
         {
             UserId = userId ?? "", Action = "TEST_SEAM_START",
-            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
+            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm{(side is null ? "" : " " + side.Mode)}",
         });
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
         _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm", robotId, taskId, mapId, mx, my, liftStrokeMm);
-        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm);
+        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm, side?.Mode);
     }
 
     /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm 포함). 순수 — 테스트 대상.</summary>
     public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
-        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0)
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0, string? stationMode = null)
     {
         var orderId = Guid.NewGuid().ToString();
         var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
         action.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = jobRef });
         action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
-        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = new JsonObject { ["liftStrokeMm"] = liftStrokeMm } });
+        var prm = new JsonObject { ["liftStrokeMm"] = liftStrokeMm };
+        if (stationMode is not null) prm["stationMode"] = stationMode;   // 측면 정차면 본검사와 같은 값 [VDA §4.4.3 / §8.7]
+        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = prm });
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(new OrderNode
         {
@@ -971,6 +1065,15 @@ public sealed class InspectionDispatcher
         if (errorDescription is null || !errorDescription.Contains(rejectedOrderId, StringComparison.OrdinalIgnoreCase))
         {
             _log.LogWarning("Run {Run}: orderValidationError 수신했으나 description에 현재 orderId({Order}) 없음 — 무시. desc={Desc}",
+                run.RunId, rejectedOrderId, errorDescription);
+            return false;
+        }
+
+        // 이미 실행을 시작한 Order 는 거부가 아니다 — AMR 이 수리 후 actionStates 를 보고했으면(WAITING 아님) 액션 결과가 정차를 종결한다.
+        // 실행 중에 orderValidationError 를 받아 남은 액션을 FAILED 로 닫고 다음 정차를 보내면, 아직 수행 중인 Order 를 새 Order 가 폐기시킨다.
+        if (await _db.OrderActions.AnyAsync(a => a.WorkItemId == wi.WorkItemId && a.Status != "WAITING", ct))
+        {
+            _log.LogWarning("Run {Run}: orderValidationError 수신 — Order {Order} 는 이미 실행 중(액션 상태 보고됨)이라 거부로 처리하지 않음. 액션 결과로 종결. desc={Desc}",
                 run.RunId, rejectedOrderId, errorDescription);
             return false;
         }

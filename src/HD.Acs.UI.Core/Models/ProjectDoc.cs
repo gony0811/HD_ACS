@@ -10,7 +10,11 @@ public sealed record ProjectDoc(
     GeometryDoc Geometry,
     AreaDoc[] Areas,
     CalibrationDoc[]? Calibrations = null,
-    ScenarioDoc[]? Scenarios = null);
+    ScenarioDoc[]? Scenarios = null,
+    WallStationModeDoc[]? WallStationModes = null);   // 측면 정차 층+벽면 설정 [VDA §4.4.3] — 구파일 = 없음(전부 정면)
+
+/// <summary>측면 정차 층+벽면 설정 한 줄. 영역 ID 와 무관(층·면 코드 키)이라 베이스 프로젝트 복제에도 그대로 쓴다.</summary>
+public sealed record WallStationModeDoc(int Level, string WallCode, string Mode, string DefaultDir, double? StandoffM);
 
 /// <summary>층별 캘리브레이션과 재계산 가능한 원본 대응점.</summary>
 public sealed record CalibrationDoc(

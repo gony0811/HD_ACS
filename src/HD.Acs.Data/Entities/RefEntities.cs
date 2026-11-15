@@ -240,3 +240,17 @@ public class RobotEntity
     public string VdaVersion { get; set; } = "2.0";
     public bool IsActive { get; set; } = true;
 }
+
+// 측면 정차 층+벽면 설정 [VDA §4.4.3 / N25] — (tank_id, level, wall_code) 단위. 행이 없으면 정면(FRONT).
+// 면(ref.wall)은 선창 재등록 때 다시 만들어지므로 외래 키를 두지 않는다(.hdacs 로 함께 저장·복원).
+public class WallStationModeEntity
+{
+    public string TankId { get; set; } = "";
+    public int Level { get; set; }
+    public string WallCode { get; set; } = "";
+    public string Mode { get; set; } = "FRONT";        // FRONT | SIDE
+    public string DefaultDir { get; set; } = "U_PLUS"; // 측면 기본 방향 — 면 +u 축을 따라(U_PLUS) / 반대(U_MINUS)
+    public double? StandoffM { get; set; }             // 측면 고정 이격 [m, 벽↔로봇 중심] — NULL=영역·면 기본 이격
+    public string? UpdatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

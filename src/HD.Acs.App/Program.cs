@@ -62,6 +62,7 @@ builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
 builder.Services.AddScoped<TankRenameService>();   // 선창 ID 변경(형상·면·영역·시나리오·층 맵을 한 트랜잭션으로)
+builder.Services.AddScoped<WallStationModeService>();   // 측면 정차 층+벽면 설정 [VDA §4.4.3 / N25]
 builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
 builder.Services.AddScoped<RobotPoseService>();          // 로봇 보고 위치 → 도면 좌표(현재 위치를 정차점으로)
@@ -431,6 +432,24 @@ app.MapGet("/api/internal/tanks/{tankId}/geometry", async (string tankId, TankGe
 
 app.MapGet("/api/internal/tanks/{tankId}/walls", async (string tankId, int? level, TankGeometryService svc) =>
     Results.Ok(await svc.GetWallsAsync(tankId, level)));
+
+// ── 측면 정차 층+벽면 설정 [VDA §4.4.3 / N25] — 행이 없으면 정면. 실제 사용 여부는 Acs:Dispatch:SideStation:Enabled(기본 꺼짐).
+app.MapGet("/api/tanks/{tankId}/wall-station-modes", async (string tankId, WallStationModeService svc, CancellationToken ct) =>
+    await svc.ListAsync(tankId, ct) is { } list
+        ? Results.Ok(new { tankId, enabled = svc.Enabled, items = list })
+        : Results.NotFound(new { error = $"선창 '{tankId}' 없음" }));
+
+app.MapPut("/api/tanks/{tankId}/wall-station-modes/{level:int}/{wallCode}",
+    async (string tankId, int level, string wallCode, WallStationModeRequest req, WallStationModeService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.PutAsync(tankId, level, wallCode, req, ct)); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (WallStationModeService.RejectedException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapDelete("/api/tanks/{tankId}/wall-station-modes/{level:int}/{wallCode}",
+    async (string tankId, int level, string wallCode, string? userId, WallStationModeService svc, CancellationToken ct) =>
+        await svc.DeleteAsync(tankId, level, wallCode, userId, ct) ? Results.NoContent() : Results.NotFound());
 
 // ── 영역·검사 작업 [SPEC v3 §4] — 벽면-로컬 (u,v) 등록 ──
 app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>

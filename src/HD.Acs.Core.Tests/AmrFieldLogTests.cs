@@ -118,6 +118,9 @@ public class AmrFieldLogTests
     [InlineData("peak2Center", "Peak 가 반대로 움직였습니다 (이동 전 -4.8 → -4.8mm)", FieldOutcome.Sensor)]
     [InlineData(null, "저전력으로 검사를 중단했습니다", FieldOutcome.Operation)]
     [InlineData("monitorOpen", "창을 열지 못했습니다", FieldOutcome.Other)]
+    [InlineData("sideAlign", "SIDE_REACH_NORMAL: 벽 방향 거리 1.62 m — 범위 0.95~1.40 m 밖", FieldOutcome.Reach)]
+    [InlineData("sideAlign", "SIDE_REACH_ALONG: 벽 따라 0.35 m 부족", FieldOutcome.Reach)]
+    [InlineData("sideAlign", "SIDE_LR_MISMATCH: stationMode SIDE_LEFT, 용접선은 오른쪽 — 카메라 재정렬 안 함", FieldOutcome.Rule)]
     public void Classify_SeparatesReachFromSensorAndOperation(string? step, string reason, FieldOutcome expected) =>
         Assert.Equal(expected, AmrFieldLog.Classify(step, reason));
 }

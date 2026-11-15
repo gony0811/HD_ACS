@@ -2,11 +2,11 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.18** |
-| 작성일 | 2026-08-27 (최종 개정 2026-11-14) |
+| 문서 버전 | **1.19** |
+| 작성일 | 2026-08-27 (최종 개정 2026-11-15) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
-| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
+| 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준. **N25(측면 정차 검사 `stationMode`)는 협의 확정(2026-11-15)·양측 미구현** |
 | 개정 1.1 | 2026-09-01 — 로봇(TARS-M) REST 실물 스펙 확보분 반영. **ACS↔AMR 계약(§1~§9·부록 A~C)은 무변경**이며, AMR 온보드가 그 계약을 로봇 REST로 어떻게 이행하는지를 **부록 D**로 신설하고 관련 절에 각주를 달았다. 에러코드 매핑·층 전환 절차는 로봇측 정보 미확보로 **보류**(§6.4·§5.2·§9.2 그대로 유효, 구현만 유보) |
 | 개정 1.2 | 2026-09-03 — ACS 프로세스 생존 상태를 HD_AMR에 알리는 ACS 전용 `connection` 토픽과 Last Will 사양 추가. **VDA 5050 표준 확장·승인 완료** `[N12]` |
 | 개정 1.3 | 2026-09-14 — §8.5 검사 타입 카탈로그·레시피 계약(제안) 신설 + **§8.5.1 `seamType`×`wall_code`→레시피 매핑 규칙(제안)**, §10 `[N13]` 등재 + **부록 D.3 경유점 `Surface` 유도(온보드 구현, HD_AMR 코드 근거)** |
@@ -23,6 +23,7 @@
 | 개정 1.13 | 2026-11-03 — **run 중단 시 진행 중 Order 취소**(§4.5.3·§5.4): `cancelOrder` 발행 조건을 "통신 단절 PAUSE 중"에서 "**중단 시 그 run의 정차가 실행 중이거나 PAUSE 중**"으로 확장. 취소·비상정지로 FAILED 보고된 정차는 실패 집계 없이 PENDING(이어하기 대상). AMR 요구 동작은 무변경(HD_AMR `CancelOrderAsync`는 PAUSE 여부와 무관하게 주행 정지·검사 중단·잔여 액션 FAILED) |
 | 개정 1.14 | 2026-11-09 — **정차 리프트 높이 `params.liftStrokeMm` 명문화**(§8.1·§8.7). 정차점 최적화로 찾은 영역 공통 리프트 높이(0~1000 mm, 미지정 0)를 `startWeldInspection` 의 모든 액션에 싣는 것(ACS 구현 2026-11-04)을 표에 반영하고, **시험 액션 `moveToSeamStart` 에도 같은 값을 `params.liftStrokeMm` 으로 싣는다**(종전엔 `params` 없음 → 시험이 리프트 없이 수행돼 운영 자세와 달랐다). 선택 필드라 하위 호환(부재 = 0). HD_AMR 쪽 리프트 구동 반영 여부는 확인 필요 |
 | 개정 1.18 | 2026-11-14 — **선창 이름은 ACS 가 정하고 AMR 은 층만 정의** `[N24]`: §4.3 에 규칙 추가 — AMR 은 `nodePosition.mapId` 의 층 번호만 자기 층과 비교(선창 이름 부분 비교 안 함), 층이 맞는 Order 의 선창 이름을 받아 저장하고 state 로 되돌려 보고, ACS 는 등록되지 않은 보고값을 층 번호로 맞춘다. ACS 에 선창 ID 변경(`POST /api/tanks/{tankId}/rename`) 신설. 메시지 형식은 무변경(`mapId = "{tankId}-L{n}"` 그대로) — 다만 **구버전 AMR 은 mapId 를 글자 그대로 비교하므로 선창 ID 를 바꾸기 전에 AMR 을 먼저 올려야 한다**. 구현: ACS·HD_AMR 양측 완료(단위 테스트·시뮬레이터 E2E), 실기 미확인. |
+| 개정 1.19 | 2026-11-15 — **측면 정차 검사 `params.stationMode` 추가** `[N25]`(§4.4·신설 §4.4.3·§8.1·§8.2·§8.7·§10·부록 C). AMR 이 벽과 나란히 서서(노드 `theta` = 벽과 나란한 방향) 코봇 J1 을 ±90° 돌려 검사하는 방식. 값 `FRONT`(정면, 종전)·`SIDE_LEFT`·`SIDE_RIGHT`, 부재 = `FRONT`. ACS 는 **층+벽면 단위**로 방식을 정하고 같은 정차의 모든 액션에 같은 값을 싣는다. 측면 정차에는 정차 보정 주행이 없고 팔로만 맞추며, 닿지 않으면 정해진 앞머리 문구(`SIDE_REACH_NORMAL`·`SIDE_REACH_ALONG`·`SIDE_LR_MISMATCH`)로 액션 `FAILED`. 한 정차 안에서 값이 섞이거나 정의되지 않은 값이면 Order 거부(`orderValidationError`). **구버전 AMR 은 이 값을 무시하고 정면 검사로 진행하므로 HD_AMR 을 먼저 배포하고, ACS 는 설정으로 켜기 전까지 `SIDE_*` 를 보내지 않는다(기본 꺼짐).** 2026-11-15 HD_AMR 협의 완료, 양측 미구현 같은 날 HD_AMR 추가 2건 동의 반영: 측면은 수직벽 PM·SM·F·A 만(그 밖 면의 `SIDE_*` = Order 거부), `SIDE_LR_MISMATCH` 는 주행 전 판정이면 `orderValidationError`·실행 중이면 액션 FAILED `inspectionFailed`, `SIDE_REACH_*` = `inspectionFailed`(§4.4.3 규칙 4·5·6). |
 | 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.16 | 2026-11-12 — **`position.drawingPos`에 용접선 끝점 면 좌표 `uEnd`·`vEnd` 추가(선택 필드, §8.1) [N15]**. AMR은 `u,v`(시작점)를 원점으로, `uEnd,vEnd − u,v`의 큰 축을 면 위 용접선 방향으로 삼아 촬영 위치(CAPTURE_REQ `PosX/PosY`)를 면 좌표로 환산한다(작업물 좌표계 X+ = 시작→끝, 면의 손잡이는 `wall_code`로 판정 — T·SM·SL·SU는 왼손). 종전에는 용접선 시작점 기준 좌표가 그대로 나가 CROSS4 교차 팔의 음수 좌표를 비전이 `ERR_POSITION`으로 거부했다(실기 11-12 03:53, 56점 중 17점). 끝점이 없거나(구버전 ACS) 면 축에서 10° 넘게 비스듬하면 AMR은 종전 방식으로 보낸다. 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기. 높이 `h`가 음수인 경유점(교차 중심, 프로필 Z −12)은 그대로 음수로 나가므로 비전 측 수용 여부 협의 필요 |
 | 개정 1.15 | 2026-11-12 — **작업자 입력 요청 errorType `manualBeadInputRequired` 추가**(§6.4). AMR이 비드 자동 검출 대신 작업자 입력 팝업을 띄운 동안 `errors[]`에 WARNING으로 싣고, 팝업이 닫히면 뺀다. **고장·실패가 아니다** — 진행 액션은 `RUNNING` 그대로이며 ACS는 알람(`MANUAL_BEAD_INPUT_REQUIRED`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. AMR은 같은 동안 타워램프 녹색을 1초 주기로 점멸한다(AMR 로컬). 추가 필드라 하위 호환(구버전 ACS는 일반 경고로 표시). 양측 구현 완료, 실기 확인 대기 |
@@ -225,7 +226,7 @@ ACS가 발행하는 `nodePosition`은 다음과 같이 산출된 **벽면 이격
 
 ```
 정차점(x,y) = 검사 영역 중심의 바닥 투영 + (벽 내부향 법선의 수평 성분) × 정차 이격(standoff)
-theta       = 벽을 정면으로 바라보는 방향
+theta       = 벽을 정면으로 바라보는 방향   (측면 정차 stationMode=SIDE_* 이면 벽과 나란한 방향 — §4.4.3)
 ```
 
 - **정차 이격(기본 수직벽 1.2 m·경사면 0.8 m, 영역별 설정 가능)이 이미 반영되어 있다** — 목표점이 벽면에 붙어 있지 않다.
@@ -238,6 +239,7 @@ theta       = 벽을 정면으로 바라보는 방향
 - **검사 방향(툴 회전각) 유도 전제** (2026-08-29 AMR 회신 §5.2): AMR은 `seamStartW→seamEndW` 벡터를
   **노드 `theta`(벽 정면 방향)** 기준 벽면-로컬로 투영해 촬상 기울기를 액션별 자동 계산한다 — ACS는 방향 정보를 추가로 보내지 않는다.
   따라서 **`station_theta` 수동 오버라이드 시에도 theta는 벽 정면 방향을 유지해야** 이 유도가 성립한다.
+  예외: **측면 정차(`stationMode = SIDE_LEFT/SIDE_RIGHT`)** 는 theta 가 벽과 나란하며, AMR 은 벽 방향을 `theta ± 90°` 로 보고 같은 유도를 한다(§4.4.3).
 
 > **각주 (1.1) — theta 보정은 로봇 이동 명령의 옵션이다.**
 > `POST /robot/go` 의 `stopFlag` 는 `true` 일 때만 **정차 후 rz(=노드 theta)까지 보정**하고, `false` 면 근처를 지나며 각도를 보정하지 않는다.
@@ -280,6 +282,52 @@ theta       = 벽을 정면으로 바라보는 방향
 
 > ※구현(2026-10-31, ACS): `stationReachShortfall` → `RobotStateService.AddReachShortfallAlarmAsync` — `StationReachShortfall.TryParse`(Core)로 수치 해석, order_action→work_item→영역 이름 조회, actionId로 중복 제거(jsonb 재포맷에도 JSON으로 대조). 해석 불가 설명도 원문 알람으로 남긴다.
 > ※구현(2026-10-31, ACS): `StationAdjustLimits`(Core) — 발행 시점(`PublishStopAsync`)에 설정값을 실어 재개(resume)에도 바뀐 설정이 반영된다. `param_schema`에 `stationAdjust`(4키 필수·`minimum: 0`) 추가, 시드 upsert로 기존 DB에 반영. `moveToSeamStart`(§8.7)에는 **싣지 않는다** — 그 시험의 FAILED가 N10 실측 근거라 보정이 결과를 가리면 안 된다.
+
+#### 4.4.3 측면 정차 검사 — `stationMode` `(1.19)` `[N25]`
+
+**배경.** 벽을 따라 줄지어 있는 영역(SM·PM·F·A 등)은 AMR 이 벽을 정면으로 보고 섰다가 다음 영역으로 갈 때마다 돌아서야 한다.
+측면 정차는 AMR 이 **벽과 나란히 서서** 코봇 J1 만 ±90° 돌려 검사하는 방식이다. 정면 정차(종전)와 함께 쓴다.
+
+**값** — 각 검사 액션 `params.stationMode` (§8.1):
+
+| 값 | 노드 `theta` | 코봇 | 벽의 위치 |
+|---|---|---|---|
+| `FRONT` (부재 시 기본) | 벽 정면 (종전, §4.4) | 종전 정면 자세 | AMR 앞 |
+| `SIDE_LEFT` | 벽과 나란한 방향 | J1 왼쪽 90° 측면 준비 자세 | `theta` 기준 **왼쪽** |
+| `SIDE_RIGHT` | 벽과 나란한 방향 | J1 오른쪽 90° 측면 준비 자세 | `theta` 기준 **오른쪽** |
+
+**ACS 규칙.**
+1. 방식은 **층+벽면 단위**로 정한다(운영 설정). 영역은 벽면 하나에 속하므로 **한 정차 = 한 방식**이며, 같은 정차의 모든 액션에 같은 값을 싣는다(VDA 노드에 커스텀 필드 자리가 없음).
+2. 측면 정차의 `theta` 는 **배차할 때** 정한다 — AMR 현재 위치에서 그 정차로 가는 방향에 가까운, 벽과 나란한 두 방향 중 하나. 방향이 분명하지 않으면(벽과 수직으로 다가오는 경우 등) 층+벽면 설정의 기본 방향을 쓴다. 운영자가 수동으로 지정한 정차(덮어쓰기)는 **저장된 `theta` 를 그대로** 쓴다. `SIDE_LEFT`/`SIDE_RIGHT` 는 그 `theta` 기준으로 벽이 있는 쪽이다.
+3. 정차점 식(§4.4)은 그대로다. 정차 이격은 여전히 "벽 ↔ 로봇 중심" 거리이며, 측면에서는 **층+벽면마다 하나로 고정**한다(벽을 따라 직선 이동). 높이 차이는 영역별 리프트(`liftStrokeMm`)로 맞춘다. 어떤 리프트로도 공통 거리가 안 나오는 벽면만 영역별 이격을 허용한다. 측면 정차의 차체-벽 여유 = 이격 − **반폭 350 mm** − `allowedDeviationXY`.
+4. 측면 정차에는 `params.stationAdjust`(§4.4.2)를 **싣지 않는다** — AMR 은 측면에서 정차 보정 주행을 하지 않는다.
+5. 측면 정차는 **수직벽 `PM`·`SM`·`F`·`A` 에만** 쓴다. 바닥(B)·천장(T)은 벽 방향이 없고, 챔퍼(`SL`·`PL`·`SU`·`PU`)는 HD_AMR 측면 자세 대상이 아니다 — 이 면에는 `SIDE_*` 를 보내지 않는다(ACS 설정 단계에서 거부).
+6. **배포 순서**: 구버전 HD_AMR 은 `stationMode` 를 모르고 무시해 측면용 `theta` 로 **정면 검사**를 하므로 벽 충돌 위험이 있다. HD_AMR 을 먼저 배포하고, ACS 는 설정으로 켜기 전까지 `SIDE_*` 를 보내지 않는다(기본 꺼짐).
+
+**AMR 규칙.**
+1. 운용 흐름: 영역 간 이동은 코봇 홈(J1 0°) → 정차 후 J1 ±90° 측면 준비 자세 → 검사 → 홈 복귀 → 다음 영역. 주행은 전진·후진만 쓴다(옆 이동 보류).
+2. 노드 `theta` 는 받은 그대로 쓴다. 벽 방향 = `theta + 90°`(LEFT) / `theta − 90°`(RIGHT) 로 보고 검사 방향(툴 회전각)·도달 사전 점검·부분 수행을 이 기준으로 한다.
+3. **정차 위치가 어긋나면 팔로만 보정**하고, 도달 범위를 벗어나면 그 액션을 중단하고 `FAILED` 로 보고한다(ACS 는 실패로 기록 → 재검사).
+4. 용접선 위치로 계산한 좌/우가 `stationMode` 와 다르면 **검사하지 않는다**(벽 충돌 방지). 판정 시점에 따라 보고가 다르다:
+   - **정상 경로 — Order 수신 검증 단계**(주행 전, 노드 위치·용접선 좌표로 계산): Order 전체 폐기, `orderValidationError`, `errorDescription = "orderId=<id>: SIDE_LR_MISMATCH: …"`.
+   - **실행 중 재확인**(실측 정차 위치 기준, 방어용): 그 액션만 `FAILED`, `errorType = inspectionFailed`, `resultDescription = "SIDE_LR_MISMATCH: …"`. `orderValidationError` 는 **보내지 않는다** — ACS 는 이를 "실행 전 폐기"로 보고 남은 액션을 닫고 다음 Order 를 보내므로, 수행 중인 Order 가 폐기된다(ACS 는 액션 상태가 이미 보고된 Order 의 `orderValidationError` 를 거부로 처리하지 않는 방어도 둔다).
+5. **Order 거부**(§4.5.2, `orderValidationError`, `errorDescription = "orderId=<id>: <사유>"`): 한 Order 안의 `stationMode` 가 섞여 있거나, 정의되지 않은 값이거나, 수직벽(`PM`·`SM`·`F`·`A`)이 아닌 면(`drawingPos.wall_code`)에 `SIDE_*` 가 오면 그 Order 전체를 실행하지 않는다.
+6. 측면 실패의 `resultDescription` 은 다음 앞머리로 시작한다(ACS 현장 실적 대조 도구가 분류에 사용 — 문구를 바꾸면 사전 통보):
+
+   | 앞머리 | 의미 | errorType | ACS 실적 대조 분류 |
+   |---|---|---|---|
+   | `SIDE_REACH_NORMAL:` | 벽 방향 거리 부족(너무 멀거나 가까움) | `inspectionFailed`(액션 FAILED) | 도달 실패 |
+   | `SIDE_REACH_ALONG:` | 벽 따라 앞뒤 위치 부족 | `inspectionFailed`(액션 FAILED) | 도달 실패 |
+   | `SIDE_LR_MISMATCH:` | `stationMode` 의 좌/우와 용접선 위치 계산이 다름 | 주행 전 = `orderValidationError`(Order 폐기, description 에 앞머리) / 실행 중 = `inspectionFailed`(액션 FAILED) — 규칙 4 | 규칙 거부(도달 대조 제외) |
+
+**측면 리치 맵 전달 (VDA 메시지 밖 — 파일).** HD_AMR 은 측면 자세의 도달 범위를 계산해 ACS 에 JSON 파일 1개로 준다. ACS 는 이것으로 층+벽면 고정 이격과 영역별 리프트를 고른다.
+
+- 내용: 벽면 · 좌우(`SIDE_LEFT`·`SIDE_RIGHT` 각각, 같으면 같다고 표기) · **상대 높이 구간** [mm] · 그 구간의 이격 [최소, 권장, 최대] mm · 유효 스트로크 조건("스트로크 X mm 이상에서만 유효") + 스트로크 사용 범위 + 리치 맵 버전·계산 날짜.
+- **상대 높이 = 용접선 z(층 바닥 기준, §8.1 과 같은 기준) − 텔레스코픽 스트로크(완전 하강 = 0 mm).** 코봇 장착 높이 등 나머지 보정은 HD_AMR 계산에 포함한다.
+- 로봇 기준 계산이라 **전 층 공통**으로 주고, 층별 장애물이 있으면 층별 예외로 추가한다. 다시 계산하면 버전을 올려 다시 준다.
+- ACS 판정: 용접선 하나는 리프트 높이 하나로 검사하므로, 용접선이 지나는 **모든 상대 높이 구간**에서 고정 이격이 [최소, 최대] 안일 때만 가능으로 본다. 리프트는 영역(정차) 단위 하나라 한 정차 안에서 바뀌지 않는다. 리프트를 끄고 운용하면(HD_AMR `Telescopic:Enabled = false`) 고정 스트로크 하나로 판정한다.
+
+> ※구현(2026-11-15): 계약 확정. **ACS 1차 구현** — 층+벽면 설정 `ref.wall_station_mode`(방식 FRONT/SIDE·기본 방향 `U_PLUS`/`U_MINUS` = 면 +u 축 수평 성분 기준·고정 이격 m)와 `GET/PUT/DELETE /api/tanks/{tankId}/wall-station-modes[/{level}/{wallCode}]`, 켜기 설정 `Acs:Dispatch:SideStation:Enabled`(기본 false — 꺼져 있으면 설정이 있어도 정면·`stationMode` 미발행). 켜져 있으면 측면 벽면의 정차점은 고정 이격으로 내고, **발행 직전** 로봇 보고 위치로 `theta`(로봇→정차 방향이 접선과 60° 이내·0.3 m 이상일 때 그 방향, 아니면 기본 방향, 수동 `station_theta` 는 그대로)와 좌우를 정해 모든 액션에 `stationMode` 를 싣고 `stationAdjust` 는 뺀다. `moveToSeamStart` 도 같다. 정면은 키를 싣지 않는다(부재 = FRONT). 측면은 수직벽 PM·SM·F·A 만 받는다. 측면 정차에는 배차 직전 정차 선택(NearestStation)을 쓰지 않는다. 시뮬레이터는 섞이거나 정의 안 된 값을 쓰거나 수직벽이 아닌 면에 `SIDE_*` 가 오면 `orderValidationError` 로 거부. 액션 상태가 이미 보고된(실행 중) Order 에 `orderValidationError` 가 오면 거부로 처리하지 않는다. 실적 대조 도구는 앞머리로 분류(`SIDE_REACH_*` = 도달 실패, `SIDE_LR_MISMATCH` = 규칙 거부). 추가 2건(수직벽 한정·errorType)은 HD_AMR 동의 회신(2026-11-15). **ACS 미구현**: 리치 시뮬레이터 측면 판정·리치 맵 JSON 반영(맵 수령 후), 설정 화면(API 로 입력). **HD_AMR 미구현.**
 
 ### 4.5 Order 수명주기
 
@@ -621,7 +669,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `params.taskId` | **(1.6 신설, 선택)** 검사 작업(용접선 1구간)의 **영구 식별자** — GUID 문자열(하이픈 포함 36자, 소문자). ACS가 작업 등록 시 발급하며 **실행(run)이 바뀌어도 같은 용접선이면 같은 값**. AMR은 이 액션 수행 중 발생하는 **모든 CAPTURE_REQ에 같은 값**을 싣는다(비전 v3.2 [15-30], 바이너리 16B). 비전 S/W→SAIGE 메타데이터의 `taskId`·`productId`가 되어 도면·진행률·촬영 이미지를 잇는 유일한 키다(§8.6) |
 | `params.attempt` | **(1.6 신설, 선택)** 그 `taskId`의 **몇 번째 시도인지** — 정수 1~255, **ACS 발급**. AMR은 값을 해석·증감하지 않고 CAPTURE_REQ [31]에 그대로 싣는다. 발급 규칙은 §8.6.2 |
 | `params.liftStrokeMm` | **(1.14, 선택)** 정차 리프트(텔레스코픽) 높이 [mm, 0~1000] — 정차점 최적화로 찾은 **영역 공통** 높이(`ref.inspection_area.station_lift_mm`). **같은 정차의 모든 액션에 같은 값**, 저장값이 없으면 `0`. 발행 시점에 읽으므로 run 도중 고쳐도 다음 정차부터 반영. 시험 액션 `moveToSeamStart`(§8.7)에도 같은 값이 실린다 |
-| `params.stationAdjust` | **(1.12 초안, 선택) `[N23]`** 정차 온보드 보정 허용 범위 객체 `{maxForwardMm, maxBackwardMm, maxLateralMm, maxThetaDeg}`(전부 필수·0 이상). 의미·프레임·보고는 §4.4.2. **같은 정차의 모든 액션에 같은 값**이 실린다(VDA 노드에 커스텀 필드 자리가 없음). ACS 설정에서 꺼져 있거나 정차각(`theta`)이 없는 정차(바닥·천장)에는 **싣지 않는다** — 없으면 AMR은 `nodePosition`에 그대로 선다(종전 동작) |
+| `params.stationAdjust` | **(1.12 초안, 선택) `[N23]`** 정차 온보드 보정 허용 범위 객체 `{maxForwardMm, maxBackwardMm, maxLateralMm, maxThetaDeg}`(전부 필수·0 이상). 의미·프레임·보고는 §4.4.2. **같은 정차의 모든 액션에 같은 값**이 실린다(VDA 노드에 커스텀 필드 자리가 없음). ACS 설정에서 꺼져 있거나 정차각(`theta`)이 없는 정차(바닥·천장)에는 **싣지 않는다** — 없으면 AMR은 `nodePosition`에 그대로 선다(종전 동작). 측면 정차(`stationMode = SIDE_*`)에도 싣지 않는다 |
+| `params.stationMode` | **(1.19, 선택) `[N25]`** 정차 방식 — `FRONT`(벽 정면, 종전) · `SIDE_LEFT` · `SIDE_RIGHT`(벽과 나란히 서서 코봇 J1 왼쪽/오른쪽 90°, 벽은 노드 `theta` 기준 그쪽). **부재 = `FRONT`.** 같은 정차의 모든 액션에 같은 값(섞이면·정의 안 된 값이면 Order 거부). 의미·규칙·실패 문구는 §4.4.3 |
 
 `wallNormalW`(벽 법선)는 **전송하지 않는다** — 툴 자세는 AMR이 `wall_code` 티칭으로 결정한다.
 
@@ -664,7 +713,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
         "anchorGroupId": { "type": "string" },
         "seqInGroup": { "type": "integer", "minimum": 1 },
         "taskId": { "type": "string", "format": "uuid" },
-        "attempt": { "type": "integer", "minimum": 1, "maximum": 255 }
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "stationMode": { "enum": ["FRONT", "SIDE_LEFT", "SIDE_RIGHT"] }
       }
     }
   }
@@ -674,6 +724,8 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 > ※`wall_code`는 스키마상 `{ "type": "string" }`(enum 미강제)이지만, 발행 값은 **항상 10개 면 코드**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`) 중 하나다 — 값 자체는 `ref.inspection_area.wall_code`(FK→`ref.wall`)에서 오므로 DB 제약이 도메인을 보장한다. AMR은 이 10종만 티칭 키로 대응하면 되며, 그 밖의 값이 오면 계약 위반(액션 FAILED + `orderValidationError`)으로 처리해도 무방하다.
 >
 > ※`taskId`·`attempt`는 **`required`에 넣지 않는다**(1.6) — ① 구버전 AMR/ACS 혼용 기간의 호환, ② `attempt`는 Order **발행 시점**에 발급되므로 run 시작 시의 사전 검증 payload에는 아직 없기 때문. ACS는 영역 기반 검사 액션에 두 값을 **항상** 싣는다. AMR은 부재 시 폴백(taskId 미지정=`Guid.Empty`, attempt=1)으로 동작하되, **실려 왔는데 형식이 틀리면**(GUID 아님·범위 밖) 계약 위반으로 액션 `FAILED` + `orderValidationError` 처리한다(조용한 오귀속 방지).
+>
+> ※`stationMode`(1.19)도 **`required`에 넣지 않는다** — 부재 = `FRONT`라 종전 지령과 같다. ACS 는 측면 기능이 꺼져 있으면 이 키를 싣지 않는다(§4.4.3 배포 순서).
 >
 > ※구현(2026-08-28 반영 완료): `drawingPos`의 `u`, `v`와 완전한 `params`(seamType·sectionDxfId·inspectionProfileId·standoffMm·workingDistanceMm·anchorGroupId·seqInGroup)를 ACS가 본 스키마대로 발행하며, **발행 전 자체 스키마 검증**(위반 시 run 시작 거부)도 동작한다. DB 포함 풀 E2E(시뮬레이터)로 검증 완료. AMR 파서는 방어적으로 u,v 부재도 수용 가능하게 구현해도 무방하다.
 
@@ -892,7 +944,7 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
 정지**한다 — **촬영·측정·자세 시퀀스 없음**. `wall_code`(§8.1)로 툴 자세를 정한다.
 
 - **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(nodePosition=검사 정차점 standoff) + 액션 1건.
-- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm` 하나만: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0`). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
+- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm` 하나만: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0`). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현). **1.19: `params.stationMode`**(§4.4.3)도 본검사와 같은 값을 싣는다 — 시험도 실제 검사와 같은 자세(정면/측면)로 해야 의미가 있다. 부재 = `FRONT`.
 - **완료 판정**: `state.actionStates`로 `FINISHED`(도달 성공) / `FAILED`(reach 불가·특이자세 등 — `errors`에 사유). 이 시험의 FAILED가 곧 **N10(정차 이격) 실측 근거**가 된다.
 - **발행**: `POST /api/robots/{id}/test/seam-start { taskId }` — ACS가 area→정차점·task→seamStartW·wall_code 산출.
   진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).
@@ -1037,6 +1089,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N22 | **장치 통신 HEAVY 알람** (§9.6·§6.4·§4.5.2) | 장치 6종 `*LinkLost`(FATAL, 래치, `errorReferences` device) 보고, 알람 중 임무 즉시 중단(남은 액션 FAILED)·신규 Order `orderRejectedDeviceFault`(기존 orderId 유지), **모든 errors에 `errorReferences` 발행**, 알람 발생·복구·해제 시 state 즉시 발행. ACS 구현 완료(2026-10-13) — 알람·해제 기록·배차 보류/재개·명령 409·거부 정차 PENDING 복귀 | ⏳ HD_AMR 측 구현은 장치통신 HEAVY알람 사양 §10(2026-10-12 배포) — **실기 연동 확인 대기**. 미결: 알람 코드·등급 표기(ACS는 HEAVY→CRITICAL 매핑), 비전 HEARTBEAT 실주기, LIGHT 알람 |
 | N23 | **정차 온보드 보정 허용 범위** `params.stationAdjust` (§4.4.2·§8.1) — **초안(1.12)** | ACS가 정차마다 AMR이 리치(용접선 도달)를 위해 `nodePosition`에서 옮겨 서도 되는 한계(전진·후진·횡·각)를 각 검사 액션 `params.stationAdjust`로 준다. `allowedDeviationXY/Theta`(도착 판정)와 별개. 필드 없음 = 종전 동작(옮기지 않음). 회신 요청: (a) 범위 기준(원래 `nodePosition`)·프레임(노드 theta 전진/좌측 횡) 수용 여부, (b) 보정 결과 보고 형식(§4.4.2 `stationAdjusted` 토큰) 수용 여부, (c) 범위 안에서도 리치 불가일 때의 신호 — **확정(2026-10-31, A안)**: 전용 errorType `stationReachShortfall`(§6.4) + ACS 액션별 알람, 자동 재정차 없음(N18 (c) 해소), (d) 기본값(전진 0·후진 400 mm·횡 200 mm·5°)의 차체 여유 검증 — **AMR 치수 확정(2026-10-31)**: 운용 외곽 앞 395·뒤 365·반폭 350 mm(§4.4). 원래 정차점 벽 여유 ≈ 205 mm(이격 0.8·dev 0.2), 후진 400 시 뒤 공간 765 mm 필요 → **확정(2026-10-31)**: 전역 설정 + **영역별 덮어쓰기** `ref.inspection_area.station_max_backward_mm`(null=전역, 0=후진 금지) — 뒤 공간이 좁은 영역만 운영자가 줄인다. 형상 기반 자동 산출은 2단계 | ⏳ **ACS 제기(2026-10-31)** — ACS 발행 구현 완료(설정 `Acs:Dispatch:StationAdjust`, **기본 꺼짐**). AMR 미구현 상태에서도 필드는 무시되므로 켜도 무해하나, 사인오프 전에는 켜지 않는다 |
 | N24 | **선창 이름의 주인** (§4.3) | AMR 은 층 번호만 정의·검증, 선창 이름은 ACS 지령의 값을 저장해 되돌려 보고. ACS 는 보고 층을 층 번호로 해석(선창 하나 전제) | ✅ 양측 구현(2026-11-14) — 실기 확인 전. 선창이 둘 이상이면 로봇의 소속 선창을 ACS 가 따로 관리해야 한다(미구현) |
+| N25 | **측면 정차 검사** `params.stationMode` (§4.4.3·§8.1·§8.7) | `FRONT`/`SIDE_LEFT`/`SIDE_RIGHT`, 부재 = `FRONT`. ACS 는 층+벽면 단위로 방식을 정해 정차의 모든 액션에 같은 값, 측면 `theta` 는 배차 때 벽과 나란한 방향으로 결정(수동 정차는 저장값). 측면은 정차 보정 주행 없이 팔로만 보정, 닿지 않으면 `SIDE_REACH_NORMAL`·`SIDE_REACH_ALONG`, 좌/우 불일치는 `SIDE_LR_MISMATCH`(주행 전 판정 = Order 거부 `orderValidationError`, 실행 중 재확인 = 액션 FAILED `inspectionFailed`). 혼재·미정의 값·수직벽(PM·SM·F·A) 밖 면의 `SIDE_*` 는 Order 거부(description `orderId=<id>: <사유>`). 측면 리치 맵은 JSON 파일(전 층 공통·좌우별·상대 높이 구간별 [최소, 권장, 최대] 이격·스트로크 조건) | ✅ **협의 확정(2026-11-15)** — 추가 2건(측면 = 수직벽 한정, 실패 errorType) HD_AMR 동의(2026-11-15). ACS 1차 구현 완료(기본 꺼짐), HD_AMR 미구현. **HD_AMR 먼저 배포**(구버전은 값을 무시하고 정면 검사), ACS 는 설정으로 켜기 전까지 `SIDE_*` 미발행. HD_AMR 확인 예정: 벽 옆 나란히 정차 목표의 주행 S/W 수용, J1 ±90° 회전 방향·케이블 여유·리프트 기둥 간섭, J6 안전 범위 유지(측면 리치 맵으로 확인) |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
@@ -1143,6 +1196,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 - [ ] 장치 HEAVY 알람: `*LinkLost`(FATAL) 6종·임무 즉시 중단·`orderRejectedDeviceFault`(기존 orderId 유지)·RESET 전 래치 (§9.6, N22)
 - [ ] 모든 errors에 `errorReferences` 발행 (§6.4, N22)
 - [ ] `stopPause`: 재개 전 확인 후 재개, 불충족 시 `resumeRejected` / `cancelOrder`: PAUSE 중 Order 종료·에러 클리어 (§5.3·§5.4, N21)
+- [ ] 측면 정차 검사: `params.stationMode` 파싱(부재 = `FRONT`), 벽 방향 = `theta ± 90°`, J1 ±90° 측면 준비 자세, 측면은 정차 보정 주행 없음, 실패 앞머리 문구 3종, `SIDE_REACH_*` = `inspectionFailed`·`SIDE_LR_MISMATCH` = 주행 전 `orderValidationError`(Order 폐기)/실행 중 `inspectionFailed`, 혼재·미정의 값·수직벽(PM·SM·F·A) 밖 면의 `SIDE_*` Order 거부(description `orderId=<id>: <사유>`), `moveToSeamStart` 에도 적용, 측면 리치 맵 JSON 제공 (§4.4.3, N25)
 - [ ] §10 협의 항목 N1~N11 회신 (+ 1.6 신규 N14~N16)
 
 ---

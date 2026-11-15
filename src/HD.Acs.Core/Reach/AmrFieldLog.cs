@@ -5,7 +5,7 @@ namespace HD.Acs.Core.Reach;
 
 /// <summary>
 /// 현장 검사 한 건의 결과 분류.
-/// Ok = 성공 · Reach = 팔이 닿지 못함(시뮬레이터가 맞혀야 하는 실패) · Rule = AMR 이 규칙(최소 플랜지 뻗음)으로 출발 전에 거부(움직여 보지 않음) ·
+/// Ok = 성공 · Reach = 팔이 닿지 못함(시뮬레이터가 맞혀야 하는 실패) · Rule = AMR 이 규칙(최소 플랜지 뻗음·측면 좌우 불일치 SIDE_LR_MISMATCH)으로 거부(팔이 닿는지 시험한 것이 아님) ·
 /// Sensor = 레이저·카메라 정렬·측정 실패 · Operation = 비상정지·임무 실패 등 운영 원인 · Other = 그 밖 ·
 /// NotRun = 같은 정차의 다른 용접선 때문에 실행하지 않음 · Unknown = 결과 줄이 로그에 없음.
 /// </summary>
@@ -57,6 +57,9 @@ public static class AmrFieldLog
     public static FieldOutcome Classify(string? step, string? reason)
     {
         var r = reason ?? "";
+        // 측면 정차 실패 앞머리 [VDA §4.4.3 AMR 규칙 6] — 문구 변경은 HD_AMR 이 사전 통보
+        if (r.Contains("SIDE_LR_MISMATCH:")) return FieldOutcome.Rule;
+        if (r.Contains("SIDE_REACH_NORMAL:") || r.Contains("SIDE_REACH_ALONG:")) return FieldOutcome.Reach;
         if (r.Contains("뻗음부족") || r.Contains("플랜지 뻗음")) return FieldOutcome.Rule;
         if (OperationWords.IsMatch(r)) return FieldOutcome.Operation;
         if (ReachWords.IsMatch(r)) return FieldOutcome.Reach;

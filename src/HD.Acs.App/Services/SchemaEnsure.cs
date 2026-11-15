@@ -28,6 +28,21 @@ public static class SchemaEnsure
         "ALTER TABLE ref.inspection_area ADD COLUMN IF NOT EXISTS station_lift_mm double precision",
         // db/migrations/2026-11-11_run_task_ids.sql — 리페어 run의 검사 대상 용접선(NULL=일반 run)
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS task_ids jsonb",
+        // db/migrations/2026-11-15_wall_station_mode.sql — 측면 정차 층+벽면 설정(VDA §4.4.3 N25).
+        // 새 테이블이지만 다른 테이블과 외래 키가 없는 독립 추가라 같은 안전망에 둔다(CREATE TABLE IF NOT EXISTS).
+        """
+        CREATE TABLE IF NOT EXISTS ref.wall_station_mode (
+          tank_id     text NOT NULL,
+          level       int  NOT NULL,
+          wall_code   text NOT NULL,
+          mode        text NOT NULL DEFAULT 'FRONT' CHECK (mode IN ('FRONT','SIDE')),
+          default_dir text NOT NULL DEFAULT 'U_PLUS' CHECK (default_dir IN ('U_PLUS','U_MINUS')),
+          standoff_m  double precision,
+          updated_by  text,
+          updated_at  timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (tank_id, level, wall_code)
+        )
+        """,
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)
