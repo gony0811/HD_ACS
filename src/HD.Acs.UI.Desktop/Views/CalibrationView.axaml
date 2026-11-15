@@ -10,7 +10,7 @@
 
         <Grid Grid.Row="1" ColumnDefinitions="Auto,220,*" Margin="0,0,0,8">
             <TextBlock Text="층" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox Grid.Column="1" ItemsSource="{Binding Floors}" DisplayMemberBinding="{Binding Level}" SelectedItem="{Binding SelectedFloor}" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Floors}" DisplayMemberBinding="{Binding Label}" SelectedItem="{Binding SelectedFloor}" />
             <Border Grid.Column="2" Margin="8,0,0,0" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="8,5">
                 <TextBlock Text="{Binding ReadinessText}" TextWrapping="Wrap" />
             </Border>

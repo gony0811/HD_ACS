@@ -10,7 +10,11 @@ public sealed record WallCode(string Code, string Name, double NormX, double Nor
 /// <summary>화물창 층(건조 슬라이스). AMR은 엘리베이터로 층간 이동(수동, Q9).</summary>
 /// <param name="Level">L1~L4</param>
 /// <param name="MapId">VDA 5050 mapId 접미 (예: CT1-L1)</param>
-public sealed record TankFloor(string Level, string MapId);
+public sealed record TankFloor(string Level, string MapId)
+{
+    /// <summary>화면 표기(<see cref="LevelLabel"/>). <see cref="Level"/> 은 맵 ID 를 만드는 내부 키(L1~L4)라 화면에 쓰지 않는다.</summary>
+    public string Label => LevelLabel.OfKey(Level);
+}
 
 /// <summary>
 /// TANK_WALL_LAYOUT 전개도의 정적 레이아웃 모델.

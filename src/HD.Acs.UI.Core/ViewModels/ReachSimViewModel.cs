@@ -53,6 +53,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     private int _surveyVersion;
 
     public ObservableCollection<int> Levels { get; } = new(new[] { 1, 2, 3, 4 });
+    /// <summary>층 선택 목록의 화면 표기 — <see cref="Levels"/> 와 같은 순서(선택은 순번으로).</summary>
+    public IReadOnlyList<string> LevelLabels => Levels.Select(LevelLabel.Of).ToList();
     public ObservableCollection<string> WallCodes { get; } = new(WallOrder);
     public ObservableCollection<ReachAreaItem> Areas { get; } = new();
     public ObservableCollection<ReachSeamItem> Seams { get; } = new();
@@ -128,6 +130,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 for (var i = 1; i <= z.Length; i++) Levels.Add(i);
                 if (!Levels.Contains(SelectedLevel)) SelectedLevel = Levels[^1];
                 _suppress = false;
+                OnPropertyChanged(nameof(LevelLabels));   // 목록을 먼저 바꾸고 선택 순번을 다시 알린다
                 OnPropertyChanged(nameof(LevelIndex));
                 OnPropertyChanged(nameof(AreaMapScopes));
             }
@@ -228,7 +231,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
     {
         var version = ++_surveyVersion;
         IsBusy = true;
-        StatusMessage = $"L{SelectedLevel} {SelectedWall} 조사 중… (리프트 0~1000 mm × 세 자세{(AreaLift ? " · 영역마다 리프트 고정" : "")})";
+        StatusMessage = $"{LevelLabel.Of(SelectedLevel)} {SelectedWall} 조사 중… (리프트 0~1000 mm × 세 자세{(AreaLift ? " · 영역마다 리프트 고정" : "")})";
         try
         {
             var areas = await _api.GetReachSurveyAsync(TankId, SelectedLevel, SelectedWall, branch: Branch, areaLift: AreaLift);
@@ -242,7 +245,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
             int clear = all.Count(s => s.Verdict == "Clear"), hit = all.Count(s => s.Verdict == "Collision");
             SurveySummary = $"용접선 {all.Count} · 간섭 없이 도달 {clear} · 닿지만 간섭 {hit} · 도달 불가 {all.Count - clear - hit}"
                             + LiftSummary(areas);
-            StatusMessage = areas.Count == 0 ? $"L{SelectedLevel} {SelectedWall} 에 영역이 없습니다." : $"영역 {areas.Count}개 조사 완료";
+            StatusMessage = areas.Count == 0 ? $"{LevelLabel.Of(SelectedLevel)} {SelectedWall} 에 영역이 없습니다." : $"영역 {areas.Count}개 조사 완료";
             // 간섭이 있는 첫 영역부터 보여 준다(없으면 첫 영역).
             SelectedArea = Areas.FirstOrDefault(a => a.Area.Seams.Any(s => s.Verdict == "Collision")) ?? Areas.FirstOrDefault();
         }
@@ -471,7 +474,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
     /// <summary>지도에 보일 층 — 0 = 전체, n = <see cref="Levels"/>[n − 1]. 계산은 전체 층을 한 번 하고 표시만 거른다.</summary>
     [ObservableProperty] private int _areaMapScopeIndex;
     /// <summary>층 선택 목록 — "전체", "L1", "L2", …</summary>
-    public IReadOnlyList<string> AreaMapScopes => new[] { "전체" }.Concat(Levels.Select(l => $"L{l}")).ToList();
+    public IReadOnlyList<string> AreaMapScopes => new[] { "전체" }.Concat(Levels.Select(LevelLabel.Of)).ToList();
     /// <summary>지금 보이는 층(전체면 null).</summary>
     public int? AreaMapLevel => AreaMapScopeIndex >= 1 && AreaMapScopeIndex <= Levels.Count ? Levels[AreaMapScopeIndex - 1] : null;
     [ObservableProperty] private bool _isMapping;
@@ -508,7 +511,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
             for (var i = 0; i < targets.Count; i++)
             {
                 var (level, wall) = targets[i];
-                AreaMapSummary = $"검사 가능 지도 계산 중… L{level} {wall} ({i + 1}/{targets.Count})";
+                AreaMapSummary = $"검사 가능 지도 계산 중… {LevelLabel.Of(level)} {wall} ({i + 1}/{targets.Count})";
                 var part = await _api.GetReachAreaMapAsync(TankId, level, wall);
                 if (part is null)
                 {
@@ -558,9 +561,9 @@ public sealed partial class ReachSimViewModel : ObservableObject
         var perWall = shown.GroupBy(a => a.WallCode).OrderBy(g => Array.IndexOf(WallOrder, g.Key))
             .Select(g => $"{g.Key} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}");
         var perLevel = shown.GroupBy(a => a.Level).OrderBy(g => g.Key)
-            .Select(g => $"L{g.Key} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}").ToList();
+            .Select(g => $"{LevelLabel.Of(g.Key)} {g.Sum(a => a.Ok)}/{g.Sum(a => a.Welds)}").ToList();
         int areaOk = shown.Count(a => a.Possible == true), areaBad = shown.Count(a => a.Possible == false);
-        var scope = AreaMapLevel is { } lvOnly ? $"L{lvOnly} " : "전체 층 ";
+        var scope = AreaMapLevel is { } lvOnly ? $"{LevelLabel.Of(lvOnly)} " : "전체 층 ";
         AreaMapSummary = $"{scope}용접선 {welds}개 — 검사 가능 {weldsOk} · 불가 {welds - weldsOk}"
             + (disabled > 0 ? $" · 임시 제외 {disabled}(판정 안 함)" : "")
             + (perLevel.Count > 1 ? $"  |  층별 가능/대상: {string.Join(" · ", perLevel)}" : "")
@@ -596,9 +599,9 @@ public sealed partial class ReachSimViewModel : ObservableObject
         if (_dialogs is null) { StatusMessage = "이 화면에서는 파일 저장 대화상자를 쓸 수 없습니다."; return; }
         var whole = ReportWholeTank;
         var optimize = ReportOptimize;
-        var label = whole ? $"{TankId} 전체" : $"L{SelectedLevel} {SelectedWall}";
+        var label = whole ? $"{TankId} 전체" : $"{LevelLabel.Of(SelectedLevel)} {SelectedWall}";
         var path = await _dialogs.PickCsvSavePathAsync("정차·리치 보고서 백데이터 저장",
-            $"리치보고서_{TankId}_{(whole ? "전체" : $"L{SelectedLevel}-{SelectedWall}")}_{DateTime.Now:yyyyMMdd-HHmm}.csv");
+            $"리치보고서_{TankId}_{(whole ? "전체" : $"{LevelLabel.Of(SelectedLevel)}-{SelectedWall}")}_{DateTime.Now:yyyyMMdd-HHmm}.csv");
         if (path is null) return;
         var ikPath = IkReportPath(path);
 
@@ -694,7 +697,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         _optimizeCts = cts;
         IsOptimizing = true;
         IsBusy = true;
-        var label = $"L{SelectedLevel} {SelectedWall}";
+        var label = $"{LevelLabel.Of(SelectedLevel)} {SelectedWall}";
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var done = new List<ReachStationOptimumDto>();
         var areas = new List<AreaDto>();

@@ -100,7 +100,7 @@ public sealed partial class ManualZoneChangeViewModel : ObservableObject
         try
         {
             await _api.ManualZoneChangeAsync(SelectedRobotId, SelectedFloor.MapId, _operatorId);
-            StatusMessage = $"수동 층 변경 요청: {SelectedFloor.Level} ({SelectedFloor.MapId}) — 작업자 {_operatorId}";
+            StatusMessage = $"수동 층 변경 요청: {SelectedFloor.Label} (맵 {SelectedFloor.MapId}) — 작업자 {_operatorId}";
             await RefreshContextAsync();
         }
         catch (Exception ex)

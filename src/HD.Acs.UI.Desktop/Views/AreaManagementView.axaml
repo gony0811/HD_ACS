@@ -218,7 +218,7 @@
                           AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="영역 이름" Binding="{Binding Name}" Width="Auto" MinWidth="100" />
-                        <DataGridTextColumn Header="층" Binding="{Binding Level, StringFormat='L{0}'}" Width="Auto" MinWidth="44" />
+                        <DataGridTextColumn Header="층" Binding="{Binding LevelText}" Width="Auto" MinWidth="44" />
                         <DataGridTextColumn Header="u 시작(m)" Binding="{Binding UMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="u 끝(m)" Binding="{Binding UMax, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="v 시작(m)" Binding="{Binding VMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />

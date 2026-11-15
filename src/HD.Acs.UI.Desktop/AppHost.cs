@@ -24,6 +24,8 @@ public static class AppHost
         });
         builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
         builder.Services.Configure<AcsOptions>(builder.Configuration.GetSection(AcsOptions.SectionName));
+        // 층의 화면 표기(L0~L3 / L1~L4) — 화면이 만들어지기 전에 정한다
+        LevelLabel.Base = builder.Configuration.GetValue($"{AcsOptions.SectionName}:{nameof(AcsOptions.LevelLabelBase)}", 0);
 
         // REST — typed HttpClient (BaseAddress는 AcsOptions.BaseUrl)
         builder.Services.AddHttpClient<IAcsApiClient, AcsApiClient>((sp, http) =>

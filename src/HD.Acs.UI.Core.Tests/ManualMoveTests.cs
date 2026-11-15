@@ -101,7 +101,7 @@ public class ManualMoveTests
         var monitoring = new FakeMonitoringClient();
         var vm = new TankViewModel(api, monitoring)
         {
-            SelectedViewMode = "L1",
+            SelectedViewMode = TankViewModel.ViewModeOf(1),
             ManualMoveMode = true
         };
         // 초기 로봇 상태 주입 (L1에 위치)
@@ -193,7 +193,7 @@ public class ManualMoveTests
         Assert.True(vm.HasMoveMarker);
 
         // 뷰 모드 L2로 변경
-        vm.SelectedViewMode = "L2";
+        vm.SelectedViewMode = TankViewModel.ViewModeOf(2);
 
         Assert.False(vm.HasMoveMarker);
         Assert.Null(vm.MoveMarker);

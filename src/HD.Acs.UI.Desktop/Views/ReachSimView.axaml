@@ -19,7 +19,7 @@
                                    Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="층" Classes="lbl" />
-                            <ComboBox Classes="field" Width="80" ItemsSource="{Binding Levels}" SelectedIndex="{Binding LevelIndex}" />
+                            <ComboBox Classes="field" Width="80" ItemsSource="{Binding LevelLabels}" SelectedIndex="{Binding LevelIndex}" />
                             <TextBlock Text="면" Classes="lbl" Margin="10,0,4,0" MinWidth="0" />
                             <ComboBox Classes="field" Width="90" ItemsSource="{Binding WallCodes}" SelectedIndex="{Binding WallIndex}" />
                             <Button Content="다시 조사" Margin="8,0,0,0" Command="{Binding SurveyCommand}" />

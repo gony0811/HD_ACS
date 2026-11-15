@@ -78,7 +78,7 @@ public class ReachOptimizeProgressTests
         Assert.DoesNotContain(null, api.OptimizedAreaIds);   // 면 전체 1건 요청이 아니라 영역마다
         Assert.InRange(api.MaxConcurrent, 2, ReachSimViewModel.OptimizeConcurrency);
         Assert.Equal(areas.Take(9).Select(a => a.Name).OrderBy(n => n), vm.Optima.Select(r => r.Optimum.Name));
-        Assert.StartsWith("정차점 최적화 완료 — L4 PU 영역 9개", vm.StatusMessage);
+        Assert.StartsWith("정차점 최적화 완료 — L3 PU 영역 9개", vm.StatusMessage);
         Assert.StartsWith("간섭 없이 도달 0 → 18 / 18", vm.OptimizeSummary);
         Assert.False(vm.IsOptimizing);
         Assert.False(vm.IsBusy);

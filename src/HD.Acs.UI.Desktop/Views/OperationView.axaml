@@ -124,7 +124,7 @@
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="#" Binding="{Binding Seq}" Width="36" />
                                     <DataGridTextColumn Header="영역" Binding="{Binding AreaName}" Width="*" />
-                                    <DataGridTextColumn Header="층" Binding="{Binding Level}" Width="36" />
+                                    <DataGridTextColumn Header="층" Binding="{Binding LevelText}" Width="36" />
                                     <DataGridTemplateColumn Header="상태" Width="86">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>

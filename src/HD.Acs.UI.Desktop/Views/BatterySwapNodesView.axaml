@@ -18,8 +18,8 @@
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock>
-                                <Run Text="{Binding Level}" />
-                                <Run Text=" (" /><Run Text="{Binding MapId}" /><Run Text=")" />
+                                <Run Text="{Binding Label}" />
+                                <Run Text=" (맵 " /><Run Text="{Binding MapId}" /><Run Text=")" />
                             </TextBlock>
                         </DataTemplate>
                     </ComboBox.ItemTemplate>

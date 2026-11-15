@@ -69,7 +69,7 @@ public class CalibrationCacheTests
         Api.Gate = null;
         var api = DispatchProxy.Create<IAcsApiClient, Api>();
         var mon = new FakeMonitoring();
-        var vm = new TankViewModel(api, mon) { SelectedViewMode = "L1", CalibrationTtl = ttl };
+        var vm = new TankViewModel(api, mon) { SelectedViewMode = TankViewModel.ViewModeOf(1), CalibrationTtl = ttl };
         return (vm, mon);
     }
 

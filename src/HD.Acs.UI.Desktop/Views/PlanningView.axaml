@@ -74,7 +74,7 @@
                                                         Command="{Binding $parent[UserControl].DataContext.Mission.AddScenarioAreaCommand}"
                                                         CommandParameter="{Binding}" />
                                                 <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                <TextBlock Text="{Binding LevelText}" Width="26"
                                                            Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
                                                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
@@ -93,7 +93,7 @@
                                                         Command="{Binding $parent[UserControl].DataContext.Mission.RemoveScenarioAreaCommand}"
                                                         CommandParameter="{Binding}" />
                                                 <TextBlock Text="{Binding WallCode}" FontWeight="Bold" Width="30" Margin="6,0,0,0" VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding Level, StringFormat='L{0}'}" Width="26"
+                                                <TextBlock Text="{Binding LevelText}" Width="26"
                                                            Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
                                                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>

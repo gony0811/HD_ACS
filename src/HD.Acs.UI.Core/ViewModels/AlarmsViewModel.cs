@@ -310,8 +310,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
             if (workFloors.Count > 0 && (robot.ReportedMapId is null || !workFloors.Contains(robot.ReportedMapId)))
             {
                 floorMismatch = robot.ReportedMapId is null
-                    ? $"AMR이 층을 보고하지 않습니다 · 남은 작업 층 {string.Join(", ", workFloors)}"
-                    : $"AMR 현재 층 {robot.ReportedMapId} · 남은 작업 층 {string.Join(", ", workFloors)}";
+                    ? $"AMR이 층을 보고하지 않습니다 · 남은 작업 층 {string.Join(", ", workFloors.Select(LevelLabel.WithMapId))}"
+                    : $"AMR 현재 층 {LevelLabel.WithMapId(robot.ReportedMapId)} · 남은 작업 층 {string.Join(", ", workFloors.Select(LevelLabel.WithMapId))}";
                 floorWorked = robot.ReportedMapId is not null && Mission.WorkItems.Any(w => w.MapId == robot.ReportedMapId);
             }
         }

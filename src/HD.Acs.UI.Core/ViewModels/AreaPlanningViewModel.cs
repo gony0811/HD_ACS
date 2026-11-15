@@ -313,7 +313,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var (areaId, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
                 _operatorId, StationStandoffM, stationMaxBackwardMm: StationMaxBackwardMm, stationLiftMm: StationLiftMm);
-            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 L{level}";
+            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 {LevelLabel.Of(level)}";
             await RefreshAreasAsync(select: areaId);   // 새 영역을 선택 → 바로 작업 등록·수정 가능
         }
         catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }   // 면범위·층유도 400·중복 409
@@ -358,8 +358,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             int level = await _api.UpdateAreaAsync(area.AreaId, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
                 StationStandoffM, _operatorId, StationMaxBackwardMm, StationLiftMm);
-            StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 L{level} — areaId·작업 유지"
-                + (SelectedLevel is { } l && l.Level != level ? $" (층이 L{level}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
+            StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 {LevelLabel.Of(level)} — areaId·작업 유지"
+                + (SelectedLevel is { } l && l.Level != level ? $" (층이 {LevelLabel.Of(level)}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
             await RefreshAreasAsync(select: area.AreaId);
         }
         catch (Exception ex) { StatusMessage = $"영역 수정 실패: {ex.Message}"; }   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404
@@ -480,7 +480,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var p = await _api.GetRobotDrawingPoseAsync(robot.RobotId);
             if (level is int lv && p.Level != lv)
             {
-                StatusMessage = $"AMR이 L{p.Level}({p.MapId})에 있습니다 — 이 영역은 L{lv}라 정차점으로 쓸 수 없습니다.";
+                StatusMessage = $"AMR이 {LevelLabel.Of(p.Level)}(맵 {p.MapId})에 있습니다 — 이 영역은 {LevelLabel.Of(lv)}라 정차점으로 쓸 수 없습니다.";
                 return;
             }
 
@@ -751,7 +751,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 _operatorId, StationStandoffM, StationMaxBackwardMm);
             SplitTasks.Clear();
             NotifySplitState();
-            StatusMessage = $"새 영역 분리 완료: {w.WallCode}/{AreaName} (L{level}) — 작업 {moved}건 이동 (taskId 유지)";
+            StatusMessage = $"새 영역 분리 완료: {w.WallCode}/{AreaName} ({LevelLabel.Of(level)}) — 작업 {moved}건 이동 (taskId 유지)";
             await RefreshAreasAsync(select: areaId);
         }
         catch (Exception ex) { StatusMessage = $"새 영역 분리 실패: {ex.Message}"; }
@@ -1209,7 +1209,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             // 층 필터 목록 = level_z 길이만큼 L1..LN (기존 선택 층 유지)
             int keep = SelectedLevel?.Level ?? 1;
             Levels.Clear();
-            for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, $"L{i}"));
+            for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, LevelLabel.Of(i)));
             SelectedLevel = Levels.FirstOrDefault(x => x.Level == keep) ?? Levels.FirstOrDefault();
         }
         SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);

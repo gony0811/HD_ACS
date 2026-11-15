@@ -589,7 +589,7 @@ public sealed partial class MissionViewModel : ObservableObject
         {
             var kind = Classify(m.State);
             if (kind == "done") done++;
-            var level = m.MapId.Contains('-') ? m.MapId[(m.MapId.LastIndexOf('-') + 1)..] : m.MapId;
+            var level = LevelLabel.OfMapId(m.MapId);   // 화면 표기(맵 ID 의 층 번호와 다를 수 있다)
 
             var floorItems = WorkItems.Where(w => w.MapId == m.MapId).ToList();
             double frac = floorItems.Count > 0
@@ -651,6 +651,7 @@ public sealed partial class WorkItemRow : ObservableObject
     public Guid AreaId { get; }
     public string AreaName { get; }
     public int Level { get; }
+    public string LevelText => LevelLabel.Of(Level);
     public string MapId { get; }
     public int Seq { get; }
     [ObservableProperty] private string _status;
@@ -718,7 +719,10 @@ public static class WorkOutcome
 }
 
 /// <summary>시나리오 검사 대상 영역 행 [부분 검사 계획] — 풀/대상 소속이 곧 선택 상태.</summary>
-public sealed record ScenarioAreaPick(Guid AreaId, string WallCode, int Level, string Name);
+public sealed record ScenarioAreaPick(Guid AreaId, string WallCode, int Level, string Name)
+{
+    public string LevelText => LevelLabel.Of(Level);
+}
 
 /// <summary>용접라인(액션) 행. Status: PLANNED(미배차) | WAITING | RUNNING | FINISHED | FAILED.</summary>
 public sealed partial class TaskRow : ObservableObject
