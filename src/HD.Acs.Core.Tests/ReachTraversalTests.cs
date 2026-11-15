@@ -155,13 +155,14 @@ public class ReachTraversalTests
         var a = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 2), S(ReachVerdict.Clear, 3), S(ReachVerdict.Clear, 12) }, 10);
         var b = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Unreachable, null) }, 10);
         Assert.Equal((1, 3, 3, 2.0, 0), a);
-        Assert.Equal((2, 2, 2, 10.0, 1), b);
+        Assert.Equal((2, 2, 2, 11.0, 1), b);   // 최소 여유는 자르지 않는다(종전엔 목표 10 에서 잘랐다)
         Assert.True(StationOptimizer.CompareScore(a, b) > 0);
         // 둘 다 전부 도달이면 여유 확보 수가 먼저다.
         var c = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Collision, 12) }, 10);
         Assert.True(StationOptimizer.CompareScore(c, a) > 0);
-        // 최소 여유는 목표에서 자르고 0.5° 단위 — 순회 판정이 없으면(null) 목표로 본다.
-        Assert.Equal(10, StationOptimizer.MarginKey(23.4, 10));
+        // 최소 여유는 0.5° 단위(상한을 주면 그 이상은 같게) — 순회 판정이 없으면(null) 목표로 본다.
+        Assert.Equal(23.5, StationOptimizer.MarginKey(23.4, 10));
+        Assert.Equal(10, StationOptimizer.MarginKey(23.4, 10, 10));
         Assert.Equal(4.5, StationOptimizer.MarginKey(4.6, 10));
         Assert.Equal(10, StationOptimizer.MarginKey(null, 10));
     }

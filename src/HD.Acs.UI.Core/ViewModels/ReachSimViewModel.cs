@@ -773,7 +773,8 @@ public sealed partial class ReachSimViewModel : ObservableObject
     {
         static string Counts(ReachStationCandidateDto c) => $"{c.Clear}/{c.Collision}/{c.Unreachable}"
             + (c.SafeClear is { } s && s < c.Clear ? $" (여유 {s})" : "");
-        var improved = IsImproved(o.Current, o.Best);
+        // 서버가 순위(위치 오차·보장 여유 포함)로 판정해 알려 주면 그 값을 쓴다 — 구서버면 화면에서 다시 판정한다
+        var improved = o.Improved ?? IsImproved(o.Current, o.Best);
         var move = !improved ? "그대로"
             : $"{o.Best.DistM:0.0} m ← {o.Current.DistM:0.0}" +
               (Math.Abs(o.Best.LateralM - o.Current.LateralM) > 1e-6 ? $" · 좌 {o.Best.LateralM:+0.0;-0.0}" : "") +

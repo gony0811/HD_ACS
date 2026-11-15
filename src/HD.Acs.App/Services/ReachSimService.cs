@@ -44,8 +44,26 @@ public sealed partial class ReachSimService
         _baseModel = ModelFrom(config);
         _model = _baseModel;
         _wallMinDistM = WallMinDistFrom(config);
+        _poseError = PoseErrorFrom(config);
         _scanProfileName = config?["Acs:Reach:ScanProfileName"];
         _useAmrProfiles = config?.GetValue("Acs:Reach:UseAmrProfiles", true) ?? true;
+    }
+
+    /// <summary>정차 최적화가 보는 위치 오차 조건(<c>Acs:Reach:PoseError</c>) — 꺼져 있으면 null.</summary>
+    private readonly PoseErrorOptions? _poseError;
+
+    /// <summary>
+    /// <c>Acs:Reach:PoseError{Enabled=true, RadiusM 0.3, YawDeg 3, TopCandidates 6, MaxBatches 3}</c> — 정차 위치 오차(SLAM·도착 오차) 조건.
+    /// 설정이 없으면(단위 테스트 등) 보지 않는다. 반경·방향이 모두 0 이하이거나 Enabled=false 면 null.
+    /// </summary>
+    public static PoseErrorOptions? PoseErrorFrom(IConfiguration? config)
+    {
+        var sec = config?.GetSection("Acs:Reach:PoseError");
+        if (sec is null || !sec.Exists() || !sec.GetValue("Enabled", true)) return null;
+        var o = new PoseErrorOptions(
+            Math.Max(0, sec.GetValue("RadiusM", 0.3)), Math.Max(0, sec.GetValue("YawDeg", 3.0)),
+            Math.Max(1, sec.GetValue("TopCandidates", 6)), Math.Max(1, sec.GetValue("MaxBatches", 3)));
+        return o.Enabled ? o : null;
     }
 
     private readonly bool _useAmrProfiles;
@@ -126,6 +144,8 @@ public sealed partial class ReachSimService
             ScanTiltDeg = config.GetValue("Acs:Reach:ScanTiltDeg", d.ScanTiltDeg),
             ScanTiltProfile = TiltProfileFrom(config.GetSection("Acs:Reach:ScanTiltProfile")),
             TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
+            // 순위에서 여유를 비교할 상한 — 없거나 0 이하면 상한 없음(실제 최소 여유각이 큰 쪽)
+            MarginRankCapDeg = config.GetValue<double?>("Acs:Reach:MarginRankCapDeg") is { } cap && cap > 0 ? cap : double.PositiveInfinity,
             MinFlangeReachMm = config.GetValue("Acs:Reach:MinFlangeReachMm", d.MinFlangeReachMm),
             MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
             // 손목 여유 |J5| — 경로(진입·순회)는 HD_AMR 과 같은 10°, 판정 자세는 그보다 넉넉한 15°
@@ -324,7 +344,7 @@ public sealed partial class ReachSimService
             if (SearchSpace(a, wall, setup) is not { } space) continue;
             var seams = a.Tasks.OrderBy(t => t.Seq).Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, areaLift);
+            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, areaLift, _poseError);
             var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
             var perSeam = tasks.Select((t, i) => new ReachOptimumSeam(t.TaskId, t.Seq,
                 i < r.Baseline.Seams.Count ? r.Baseline.Seams[i].Verdict.ToString() : nameof(ReachVerdict.Unreachable),
@@ -335,7 +355,8 @@ public sealed partial class ReachSimService
                 i < r.Best.Seams.Count && r.Best.Seams[i].Verdict == ReachVerdict.Unreachable ? r.Best.Seams[i].Blocker : null)).ToList();
             list.Add(new ReachStationOptimum(a.AreaId, a.Name, a.WallCode, a.Level,
                 a.StationX is not null || a.StationY is not null || a.StationTheta is not null,
-                Candidate(r.Baseline), Candidate(r.Best), r.Evaluated, sw.ElapsedMilliseconds, perSeam));
+                Candidate(r.Baseline), Candidate(r.Best), r.Evaluated, sw.ElapsedMilliseconds, perSeam,
+                Improved: !ReferenceEquals(r.Best, r.Baseline)));
         }
         return list;
     }
@@ -376,7 +397,7 @@ public sealed partial class ReachSimService
             int nowClear = nowSeams.Count(s => s.Verdict == ReachVerdict.Clear);
             int nowReach = nowSeams.Count(s => s.Verdict != ReachVerdict.Unreachable);
 
-            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, areaLift: true);
+            var r = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, areaLift: true, poseError: _poseError);
             var b = r.Best;
             int bestReach = b.Clear + b.Collision;
             if (!b.Feasible || bestReach == 0)
@@ -511,7 +532,36 @@ public sealed partial class ReachSimService
         Math.Round(c.Station.X, 3), Math.Round(c.Station.Y, 3), Math.Round(c.Station.Yaw, 4),
         Math.Round(c.DistM, 3), Math.Round(c.LateralM, 3), Math.Round(c.YawDeg, 1),
         Math.Round(c.BodyClearanceM, 3), c.Feasible, c.Clear, c.Collision, c.Unreachable, Math.Round(c.Robustness, 4),
-        c.StrokeMm, c.SafeClear, Round1(c.TraverseMarginDeg), c.MarginTargetDeg);
+        c.StrokeMm, c.SafeClear, Round1(c.TraverseMarginDeg), c.MarginTargetDeg,
+        c.Error?.WorstMiss, c.Error?.WorstCollision, Round1(c.Error?.MinMarginDeg), c.Error?.Samples, c.Error?.RadiusM, c.Error?.YawDeg,
+        c.Error is null ? null : Round1(c.GuaranteedMarginDeg));
+
+    /// <summary>
+    /// 영역을 도면 (x, y, 방향)에 세웠을 때의 판정(조회 전용) — 정차 최적화와 같은 판정에 위치 오차 표본 판정을 더한다.
+    /// 리프트를 주면 그 높이로 고정, 없으면 영역 공통 높이를 고른다. 영역·면·탐색 좌표가 없으면 null.
+    /// </summary>
+    public async Task<ReachStationCandidate?> EvaluateStationAsync(Guid areaId, double x, double y, double thetaRad, double? strokeMm, CancellationToken ct)
+    {
+        _model = await BaseAsync(ct);
+        var a = await _db.InspectionAreas.AsNoTracking().Include(t => t.Tasks).FirstOrDefaultAsync(t => t.AreaId == areaId, ct);
+        if (a is null) return null;
+        a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();
+        var ctx = await LoadTankAsync(a.TankId, ct);
+        if (ctx is null || !ctx.Walls.TryGetValue(a.WallCode, out var wall) || a.Tasks.Count == 0) return null;
+        var setup = Setup(ctx, a, wall);
+        if (SearchSpace(a, wall, setup) is not { } space) return null;
+        var seams = a.Tasks.OrderBy(t => t.Seq).Select(t => (IReadOnlyList<double[]>)SeamPoints(setup.Pose, t)).ToList();
+        double rx = x - space.CenterXY[0], ry = y - space.CenterXY[1];
+        var dist = rx * space.InwardH[0] + ry * space.InwardH[1];
+        var lateral = -rx * space.InwardH[1] + ry * space.InwardH[0];
+        var dyaw = thetaRad - space.FacingYaw;
+        var yawDeg = Math.Atan2(Math.Sin(dyaw), Math.Cos(dyaw)) * 180 / Math.PI;
+        var strokes = strokeMm is { } h ? new[] { Math.Clamp(h, 0, _model.StrokeMaxMm) } : Strokes;
+        var c = StationOptimizer.Evaluate(_model, setup.Planes, space, dist, lateral, yawDeg, seams, setup.Normal, strokes,
+            surveyInfeasible: true, wallCode: a.WallCode);
+        if (_poseError is { } pe) c = StationOptimizer.WithPoseError(_model, setup.Planes, space, c, seams, setup.Normal, strokes, pe, ct, a.WallCode);
+        return Candidate(c);
+    }
 
     // ── 내부 ─────────────────────────────────────────────────────────────
 
@@ -602,16 +652,21 @@ public sealed record ReachSplitSeam(Guid TaskId, int Seq, string Verdict, double
 
 /// <summary>정차점 최적화 결과 — 영역 하나. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimum(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
-    ReachStationCandidate Current, ReachStationCandidate Best, int Evaluated, long ElapsedMs, IReadOnlyList<ReachOptimumSeam> Seams);
+    ReachStationCandidate Current, ReachStationCandidate Best, int Evaluated, long ElapsedMs, IReadOnlyList<ReachOptimumSeam> Seams,
+    bool Improved = false);
 
 /// <summary>용접선 하나의 지금·찾은 정차 판정과 찾은 정차에서 고른 리프트·도면 순회 관절 여유[도](순회 판정 없음·도달 불가면 null)·찾은 정차에서 막히는 사유.</summary>
 public sealed record ReachOptimumSeam(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm,
     double? CurrentTraverseMarginDeg = null, double? BestTraverseMarginDeg = null, string? BestBlocker = null);
 
-/// <summary>후보 정차 — 도면 x·y·방향, 탐색 좌표(중심에서 안쪽 거리·좌측·방향 보정 °), 차체 여유, 판정 개수, 공통 리프트.</summary>
+/// <summary>후보 정차 — 도면 x·y·방향, 탐색 좌표(중심에서 안쪽 거리·좌측·방향 보정 °), 차체 여유, 판정 개수, 공통 리프트.
+/// Error* = 위치 오차 표본(반경 ErrorRadiusM 8방향 + 방향 ±ErrorYawDeg)에서 가장 나쁜 값 — 도달 불가 수·간섭 수·순회 최소 여유.
+/// GuaranteedMarginDeg = 제자리와 오차 표본 전체의 최소 여유(오차 판정을 안 했으면 null).</summary>
 public sealed record ReachStationCandidate(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
     double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
-    double? StrokeMm = null, int SafeClear = 0, double? TraverseMarginDeg = null, double MarginTargetDeg = 10);
+    double? StrokeMm = null, int SafeClear = 0, double? TraverseMarginDeg = null, double MarginTargetDeg = 10,
+    int? ErrorMiss = null, int? ErrorCollision = null, double? ErrorMarginDeg = null, int? ErrorSamples = null,
+    double? ErrorRadiusM = null, double? ErrorYawDeg = null, double? GuaranteedMarginDeg = null);
 
 public sealed record ReachSeamLine(Guid TaskId, int Seq, double[] Start, double[] End);
 public sealed record ReachBodyDto(double[][] Corners, double ClearanceM, string NearestPlane);

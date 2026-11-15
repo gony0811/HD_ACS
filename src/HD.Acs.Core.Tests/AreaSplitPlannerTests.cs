@@ -68,21 +68,25 @@ public class AreaSplitPlannerTests
     public void 지금_정차가_이미_최상이면_정차_최적화는_탐색하지_않는다()
     {
         // 분리안의 왼쪽 묶음(H01·H05)을 그 묶음 정차로 — 두 용접선 모두 여유 확보. 최상 점수면 후보를 더 보지 않는다(평가 1곳).
+        // 여유 비교 상한이 있을 때만이다(여기서는 종전처럼 10°) — 상한이 없으면(기본) 여유는 늘 더 커질 수 있어 매번 탐색한다.
         var (seams, uv) = R02C05();
         var sub = new List<IReadOnlyList<double[]>> { seams[0], seams[4] };
-        var first = StationOptimizer.Optimize(Field, Planes, Space() with { CenterXY = new[] { 15.48, 2.70 } }, sub, Normal, Strokes, wallCode: "F");
+        var capped = Field with { MarginRankCapDeg = 10 };
+        var first = StationOptimizer.Optimize(capped, Planes, Space() with { CenterXY = new[] { 15.48, 2.70 } }, sub, Normal, Strokes, wallCode: "F");
         var best = first.Best;
-        var again = StationOptimizer.Optimize(Field, Planes,
+        var again = StationOptimizer.Optimize(capped, Planes,
             Space() with { CenterXY = new[] { 15.48, 2.70 }, BaselineDistM = best.DistM, BaselineLateralM = best.LateralM, BaselineYawDeg = best.YawDeg },
             sub, Normal, Strokes, wallCode: "F");
 
         // 면 간섭 여유는 초점 자세에서 툴 끝–면 98.5 mm 가 최대 — 그 값이면 더 나은 후보가 없다.
         Assert.Equal(0.0985, StationOptimizer.RobustnessBound(Field), 4);
-        Assert.True(StationOptimizer.IsTop(again.Baseline, 2, Field.TraverseMarginTargetDeg, StationOptimizer.RobustnessBound(Field)));
+        Assert.True(StationOptimizer.IsTop(again.Baseline, 2, capped.MarginRankCapDeg, StationOptimizer.RobustnessBound(Field)));
         Assert.Equal(1, again.Evaluated);
         Assert.Same(again.Baseline, again.Best);
         Assert.True(first.Evaluated > 1);
-        Assert.Equal(StationOptimizer.Score(best.Seams, 10), StationOptimizer.Score(again.Best.Seams, 10));
+        Assert.Equal(StationOptimizer.Score(best.Seams, 10, 10), StationOptimizer.Score(again.Best.Seams, 10, 10));
+        // 상한이 없으면 최상 판정을 하지 않는다 — 같은 정차에서도 탐색한다.
+        Assert.False(StationOptimizer.IsTop(again.Baseline, 2, double.PositiveInfinity, StationOptimizer.RobustnessBound(Field)));
     }
 
     [Fact]

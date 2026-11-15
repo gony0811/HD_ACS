@@ -109,7 +109,7 @@ public sealed partial class ReachSimService
             var seams = evals.Select(e => (IReadOnlyList<double[]>)e.Pts).ToList();
             alt = AreaLift.Evaluate(_model, setup.Planes, setup.Stations, seams, setup.Normal, Strokes, a.WallCode);
             if (optimize && SearchSpace(a, wall, setup) is { } space)
-                opt = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode);
+                opt = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, poseError: _poseError);
         }
         var moved = opt is not null && (Math.Abs(opt.Best.Station.X - opt.Baseline.Station.X) > 1e-6
             || Math.Abs(opt.Best.Station.Y - opt.Baseline.Station.Y) > 1e-6 || Math.Abs(opt.Best.Station.Yaw - opt.Baseline.Station.Yaw) > 1e-6

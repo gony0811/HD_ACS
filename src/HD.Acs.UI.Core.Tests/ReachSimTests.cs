@@ -121,6 +121,14 @@ public class ReachSimTests
         Assert.True(ReachSimViewModel.IsImproved(C(4, 3, 2), C(4, 3, 6, 2.1)));
         Assert.True(ReachSimViewModel.IsImproved(C(2, null, null), C(3, null, null)));   // 구서버 — 간섭 없음 수만
 
+        // 새 서버는 순위(위치 오차·보장 여유 포함)로 판정한 결과를 알려 준다 — 개수가 같아도 그 값을 따른다
+        var same = new ReachStationOptimumDto(Guid.NewGuid(), "L2-R01C01", "F", 2, false, C(4, 4, 12), C(4, 4, 18, 2.1), 30, 100, null, Improved: true);
+        var held = same with { Improved = false };
+        var rows = Vm();
+        rows.ApplyOptima(new[] { same, held });
+        Assert.True(rows.Optima[0].Improved);
+        Assert.False(rows.Optima[1].Improved);
+
         var vm = Vm();
         var seams = new List<ReachOptimumSeamDto>
         {

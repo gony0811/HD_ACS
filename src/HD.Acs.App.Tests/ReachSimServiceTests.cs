@@ -269,6 +269,27 @@ public class ReachSimServiceTests
     }
 
     [Fact]
+    public void 위치_오차와_여유_비교_상한_설정을_읽는다()
+    {
+        static IConfiguration Cfg(params (string K, string V)[] kv) => new ConfigurationBuilder()
+            .AddInMemoryCollection(kv.Append(("Acs:Reach:MountYawDeg", "180")).ToDictionary(x => x.Item1, x => (string?)x.Item2)).Build();
+
+        Assert.Null(ReachSimService.PoseErrorFrom(null));
+        Assert.Null(ReachSimService.PoseErrorFrom(Cfg()));                                            // 설정이 없으면 보지 않는다
+        Assert.Equal(new PoseErrorOptions(0.3, 3, 6, 3), ReachSimService.PoseErrorFrom(Cfg(("Acs:Reach:PoseError:Enabled", "true"))));
+        Assert.Equal(new PoseErrorOptions(0.4, 5, 8, 2), ReachSimService.PoseErrorFrom(Cfg(
+            ("Acs:Reach:PoseError:RadiusM", "0.4"), ("Acs:Reach:PoseError:YawDeg", "5"),
+            ("Acs:Reach:PoseError:TopCandidates", "8"), ("Acs:Reach:PoseError:MaxBatches", "2"))));
+        Assert.Null(ReachSimService.PoseErrorFrom(Cfg(("Acs:Reach:PoseError:Enabled", "false"), ("Acs:Reach:PoseError:RadiusM", "0.3"))));
+        Assert.Null(ReachSimService.PoseErrorFrom(Cfg(("Acs:Reach:PoseError:RadiusM", "0"), ("Acs:Reach:PoseError:YawDeg", "0"))));
+
+        // 여유 비교 상한 — 기본은 없음(실제 최소 여유각이 큰 쪽), 10 을 주면 종전 동작
+        Assert.True(double.IsPositiveInfinity(ReachSimService.ModelFrom(Cfg()).MarginRankCapDeg));
+        Assert.Equal(10, ReachSimService.ModelFrom(Cfg(("Acs:Reach:MarginRankCapDeg", "10"))).MarginRankCapDeg);
+        Assert.True(double.IsPositiveInfinity(ReachSimService.ModelFrom(Cfg(("Acs:Reach:MarginRankCapDeg", "0"))).MarginRankCapDeg));
+    }
+
+    [Fact]
     public void 도면_순회_설정을_읽는다()
     {
         var m = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

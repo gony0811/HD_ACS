@@ -75,7 +75,7 @@ public sealed record AreaSplitResultAreaDto(Guid AreaId, string Name, int Level,
 /// <summary>정차점 최적화 — 영역 하나의 지금 정차와 찾은 정차. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimumDto(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
     ReachStationCandidateDto Current, ReachStationCandidateDto Best, int Evaluated, long ElapsedMs,
-    List<ReachOptimumSeamDto>? Seams = null);
+    List<ReachOptimumSeamDto>? Seams = null, bool? Improved = null);
 
 /// <summary>용접선 하나의 지금·찾은 정차 판정(Clear | Collision | Unreachable)과 찾은 정차에서 고른 리프트·도면 순회 관절 여유[도]·막힘 사유.</summary>
 public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm,
@@ -84,7 +84,9 @@ public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, s
 /// <summary>후보 정차 — 도면 x·y·방향, 영역 중심에서 안쪽 거리·좌측·방향 보정(°), 차체 여유, 판정 개수, 공통 리프트.</summary>
 public sealed record ReachStationCandidateDto(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
     double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
-    double? StrokeMm = null, int? SafeClear = null, double? TraverseMarginDeg = null, double? MarginTargetDeg = null);
+    double? StrokeMm = null, int? SafeClear = null, double? TraverseMarginDeg = null, double? MarginTargetDeg = null,
+    int? ErrorMiss = null, int? ErrorCollision = null, double? ErrorMarginDeg = null, int? ErrorSamples = null,
+    double? ErrorRadiusM = null, double? ErrorYawDeg = null, double? GuaranteedMarginDeg = null);
 
 /// <summary>
 /// GET /api/reach-sim/tanks/{id}/report — 정차·리치 보고서 백데이터. Header = CSV 머리줄(줄바꿈 없음), Rows = CRLF 로 끝나는 CSV 본문

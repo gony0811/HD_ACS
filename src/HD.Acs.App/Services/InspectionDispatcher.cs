@@ -40,9 +40,10 @@ public sealed class InspectionDispatcher
         _nearestEnabled = config.GetValue("Acs:Dispatch:NearestStation:Enabled", false);
         _nearestTimeout = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:NearestStation:TimeoutSec", 30.0));
         _nearestOptions = new HD.Acs.Core.Reach.NearestOptions(
-            config.GetValue("Acs:Dispatch:NearestStation:RobustM", config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08)),
+            config.GetValue("Acs:Dispatch:NearestStation:RobustM", 0.3),   // SLAM 오차 300 mm 이상 관측 — 도착 허용 오차(0.2)보다 크게 본다
             config.GetValue("Acs:Dispatch:NearestStation:MaxEvaluations", 600),
-            InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true));
+            InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true),
+            RobustYawDeg: config.GetValue("Acs:Dispatch:NearestStation:RobustYawDeg", 3.0));
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);

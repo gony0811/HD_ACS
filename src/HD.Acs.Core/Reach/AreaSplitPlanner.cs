@@ -70,7 +70,7 @@ public static class AreaSplitPlanner
             var best = (Cell: -1, Score: (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity, Miss: int.MaxValue));
             for (var c = 0; c < cells.Count; c++)
             {
-                var s = StationOptimizer.Score(idx.Select(i => table[i][c]).ToList(), cap);
+                var s = StationOptimizer.Score(idx.Select(i => table[i][c]).ToList(), cap, model.MarginRankCapDeg);
                 if (StationOptimizer.CompareScore(s, best.Score) > 0) best = (c, s);
             }
             return groupMemo[mask] = best;

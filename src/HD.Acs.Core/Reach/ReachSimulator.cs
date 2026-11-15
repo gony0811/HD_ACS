@@ -218,6 +218,12 @@ public sealed record ReachRobotModel
     /// (넘는 여유는 같게 본다). 실기 백테스트에서 모델 오차가 약 ±5° 라(경계 −4° 사례가 실기 통과) 그 두 배. 설정 <c>Acs:Reach:TraverseMarginTargetDeg</c>.
     /// </summary>
     public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
+    /// <summary>
+    /// 정차 순위에서 순회 최소 여유를 비교할 때의 상한 [도] — 이보다 큰 여유는 같게 본다. 기본은 상한 없음(무한대): 여유 확보 수가 같은
+    /// 후보끼리는 실제 최소 여유각이 큰 쪽을 고른다("최소 여유각 최대화"). 2026-11-16 까지는 목표(10°)에서 잘라, 10° 이상 후보끼리는
+    /// 여유를 비교하지 않았다 — 그 동작으로 되돌리려면 10 을 넣는다. 설정 <c>Acs:Reach:MarginRankCapDeg</c>.
+    /// </summary>
+    public double MarginRankCapDeg { get; init; } = double.PositiveInfinity;
     public const double DefaultTraverseMarginTargetDeg = 10;
     public const double DefaultSafeJ6MinDeg = -320, DefaultSafeJ6MaxDeg = -140;
     /// <summary>J6 안전 범위 [도] — 2026-11-14 실제 기구 확인으로 −320°~−140°. 설정 <c>Acs:Reach:SafeJ6MinDeg</c>·<c>SafeJ6MaxDeg</c>.
