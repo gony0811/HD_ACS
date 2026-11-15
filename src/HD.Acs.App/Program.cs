@@ -61,6 +61,7 @@ builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
+builder.Services.AddScoped<TankRenameService>();   // 선창 ID 변경(형상·면·영역·시나리오·층 맵을 한 트랜잭션으로)
 builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
 builder.Services.AddScoped<RobotPoseService>();          // 로봇 보고 위치 → 도면 좌표(현재 위치를 정차점으로)
@@ -104,15 +105,12 @@ using (var scope = app.Services.CreateScope())
         // EF 매핑 컬럼 선보장(추가형만, 멱등) — 아래 시드·이후 API가 새 컬럼을 읽기 전에.
         await SchemaEnsure.EnsureAsync(db, app.Logger);
 
+        // 기본 선창 맵 시드는 **맵이 하나도 없는 새 DB** 에서만 — 선창 ID 를 바꾼 뒤(POST /api/tanks/{id}/rename)
+        // 재기동할 때 옛 이름의 맵이 되살아나면 층 번호로 AMR 보고 층을 맞추는 규칙(ReportedMap)이 깨진다.
         const string seedTankId = "CT1";
-        var existingMapIds = await db.Maps.AsNoTracking()
-            .Where(m => m.TankId == seedTankId).Select(m => m.MapId).ToListAsync();
-        for (int level = 1; level <= 4; level++)
-        {
-            var mapId = $"{seedTankId}-L{level}";
-            if (!existingMapIds.Contains(mapId))
-                db.Maps.Add(new MapEntity { MapId = mapId, TankId = seedTankId, Level = level, Name = $"{seedTankId} L{level}" });
-        }
+        if (!await db.Maps.AsNoTracking().AnyAsync())
+            for (int level = 1; level <= 4; level++)
+                db.Maps.Add(new MapEntity { MapId = $"{seedTankId}-L{level}", TankId = seedTankId, Level = level, Name = $"{seedTankId} L{level}" });
         if (db.ChangeTracker.HasChanges())
         {
             await db.SaveChangesAsync();
@@ -366,6 +364,20 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
     }
     catch (TankGeometryService.GeometryInvalidException ex)
     { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
+});
+
+// 등록된 선창 ID 목록(운영 UI 가 시작할 때 지금 선창을 찾는다 — 선창 ID 를 바꾼 뒤에도 화면이 따라오게).
+app.MapGet("/api/internal/tanks", async (AcsDbContext db, CancellationToken ct) =>
+    Results.Ok(await db.TankGeometries.AsNoTracking().OrderBy(g => g.CreatedAt).Select(g => g.TankId).ToListAsync(ct)));
+
+// 선창 ID 변경 — 형상·면·영역·시나리오·층 맵(`{선창}-L{층}`)과 캘리브레이션·정차 큐·로봇 보고 층까지 한 트랜잭션.
+// 영역 ID·taskId 는 그대로. 진행 중 run 이 있으면 409. AMR 은 층만 검증하고 선창 이름은 다음 지령에서 받는다 [VDA §4.3].
+app.MapPost("/api/tanks/{tankId}/rename", async (string tankId, RenameTankRequest req, TankRenameService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.RenameAsync(tankId, req.NewTankId, req.UserId, ct)); }
+    catch (TankRenameService.InvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (TankRenameService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (TankRenameService.ConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 
 // ── 선창 형상 조회 — 같은 데이터를 두 규약으로 제공한다 ──
@@ -1336,6 +1348,8 @@ public sealed record SetAreaStationRequest(double? StationX, double? StationY, d
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
+// 선창 ID 변경 — 새 ID 는 영문·숫자로 시작, 영문·숫자·'_'·'-', 1~32자('-L숫자' 로 끝날 수 없음).
+public sealed record RenameTankRequest(string? NewTankId, string? UserId);
 // 선창 파라미터 등록 [SPEC v3 §2/§8]. 각도는 deg 입력(서버가 rad 변환).
 public sealed record CreateTankGeometryRequest(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,

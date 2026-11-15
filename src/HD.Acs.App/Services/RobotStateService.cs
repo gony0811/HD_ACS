@@ -24,6 +24,9 @@ public sealed class RobotStateService
     private readonly MissionService _missions;
     private readonly ILogger<RobotStateService> _log;
 
+    /// <summary>보고 층을 맞췄다는 안내를 (로봇, 보고값, 맞춘 값)마다 한 번만 남긴다 — state 는 2초마다 온다.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> NormalizedLogged = new();
+
     public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
         InspectionDispatcher dispatcher, ProgressService progress,
         RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log)
@@ -37,7 +40,12 @@ public sealed class RobotStateService
         // ── 1. robot_context 갱신 (보고값)
         var ctx = await _db.RobotContexts.FindAsync(new object[] { robot.RobotId }, ct)
                   ?? _db.RobotContexts.Add(new RobotContextEntity { RobotId = robot.RobotId }).Entity;
-        ctx.ReportedMapId = state.AgvPosition?.MapId;
+        // AMR 은 층만 알고 선창 이름은 ACS 가 준 값을 되돌려 보고한다 — 옛 이름·층만 보고해도 층 번호로 ACS 층 맵에 맞춘다
+        var rawMapId = state.AgvPosition?.MapId;
+        ctx.ReportedMapId = await ReportedMap.ResolveAsync(_db, rawMapId, ct);
+        if (ctx.ReportedMapId != rawMapId && NormalizedLogged.TryAdd($"{robot.RobotId}|{rawMapId}|{ctx.ReportedMapId}", 0))
+            _log.LogInformation("로봇 {Robot} 보고 층 '{Raw}' 를 층 번호로 '{Map}' 에 맞춤 (선창 ID 변경 직후·AMR 재시작 직후에 생긴다).",
+                robot.RobotId, rawMapId, ctx.ReportedMapId);
         ctx.ReportedX = state.AgvPosition?.X;
         ctx.ReportedY = state.AgvPosition?.Y;
         ctx.ReportedTheta = state.AgvPosition?.Theta;

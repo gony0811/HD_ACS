@@ -27,6 +27,16 @@ public sealed partial class CalibrationViewModel : ObservableObject
     public string[] Units { get; } = { "m", "mm" };
 
     [ObservableProperty] private TankFloor? _selectedFloor;
+    private string _tankId = TankLayout.DefaultTankId;
+
+    /// <summary>선창 ID 가 바뀌면 층 목록의 맵 ID 를 새 선창 것으로 바꾸고 같은 층을 다시 고른다.</summary>
+    public void SetTank(string tankId)
+    {
+        _tankId = tankId;
+        var level = SelectedFloor?.Level;
+        if (!TankLayout.Retarget(Floors, tankId)) return;
+        SelectedFloor = Floors.FirstOrDefault(f => f.Level == level) ?? Floors.FirstOrDefault();
+    }
     [ObservableProperty] private double _drawingX;
     [ObservableProperty] private double _drawingY;
     [ObservableProperty] private string _unit = "m";
@@ -116,7 +126,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
     {
         try
         {
-            var g = await _api.GetTankGeometryAsync(TankLayout.DefaultTankId);
+            var g = await _api.GetTankGeometryAsync(_tankId);
             if (g is null) return;
             _originOx = g.OriginOx; _originOy = g.OriginOy;
             _minX = g.OriginOx - g.LengthL / 2; _maxX = g.OriginOx + g.LengthL / 2;

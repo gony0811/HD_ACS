@@ -21,6 +21,15 @@
                         <TextBlock Text="{Binding TankId, StringFormat='현재 선창: {0}'}" FontWeight="Bold" Margin="0,0,0,2" />
                         <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" FontSize="12" />
                         <TextBlock Text="선창 3D 정의는 [파일 ▸ 새 프로젝트] 또는 [열기]에서 수행합니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <!-- 선창 ID 변경 — 형상·면·영역·시나리오·층 맵을 서버가 한 번에 옮긴다(영역 ID·taskId 유지) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="선창 ID 변경" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,0" />
+                            <TextBox x:Name="NewTankIdBox" Width="150" Text="{Binding NewTankId, Mode=TwoWay}" Watermark="새 선창 ID"
+                                     ToolTip.Tip="영문·숫자로 시작, 영문·숫자·_·- 만, 1~32자. '-L숫자' 로 끝날 수 없습니다." />
+                            <Button x:Name="RenameTankButton" Content="변경" Margin="6,0,0,0" Command="{Binding RenameTankCommand}"
+                                    ToolTip.Tip="진행 중인 run 이 있으면 바꿀 수 없습니다. 변경 뒤 [파일 ▸ 저장]을 하세요." />
+                        </StackPanel>
+                        <TextBlock Text="세이지 조회 주소의 tankId 가 바뀝니다. 변경 뒤 [파일 ▸ 저장] — 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록됩니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>
 

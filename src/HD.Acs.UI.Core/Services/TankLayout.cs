@@ -31,6 +31,27 @@ public static class TankLayout
         new TankFloor("L4", $"{DefaultTankId}-L4"),
     };
 
+    /// <summary>선창 ID 의 층 목록 — 층 맵 ID 는 `{선창}-L{층}`.</summary>
+    public static IReadOnlyList<TankFloor> FloorsFor(string tankId) =>
+        Floors.Select(f => new TankFloor(f.Level, $"{tankId}-{f.Level}")).ToArray();
+
+    /// <summary>
+    /// 층 목록을 다른 선창 ID 로 바꾼다(선창 ID 변경·다른 선창 프로젝트 열기). 항목을 제자리에서 갈아 끼우므로
+    /// 호출한 쪽이 선택 항목을 같은 층으로 다시 잡아야 한다. 바뀐 것이 있으면 true.
+    /// </summary>
+    public static bool Retarget(System.Collections.ObjectModel.ObservableCollection<TankFloor> floors, string tankId)
+    {
+        var changed = false;
+        for (var i = 0; i < floors.Count; i++)
+        {
+            var mapId = $"{tankId}-{floors[i].Level}";
+            if (floors[i].MapId == mapId) continue;
+            floors[i] = floors[i] with { MapId = mapId };
+            changed = true;
+        }
+        return changed;
+    }
+
     /// <summary>10개 벽면 코드 (중앙 A · 방사형 8 · 외곽 F).</summary>
     public static readonly IReadOnlyList<WallCode> Walls = new[]
     {

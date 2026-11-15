@@ -98,6 +98,10 @@ public sealed partial class ShellViewModel : ObservableObject
             RobotStatus.InvalidateCalibrations();   // 위치 카드도 함께
         };
 
+        // 선창 ID 변경 — 확인 창을 연결하고, 바뀌면 모든 화면을 새 선창 ID 로 맞춰 다시 읽는다
+        AreaPlanning.ConfirmAsync = (message, caption) => _dialog.ConfirmAsync(message, caption);
+        AreaPlanning.TankRenamed += (_, tankId) => _ = OnTankRenamedAsync(tankId);
+
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
         // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산
@@ -138,6 +142,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         ConnectionText = ToText(_monitoring.Status);
         await _monitoring.StartAsync();
+        await AdoptServerTankAsync();
         await Task.WhenAll(
             RobotStatus.LoadAsync(),
             Mission.LoadAsync(),
@@ -149,6 +154,54 @@ public sealed partial class ShellViewModel : ObservableObject
         Mission.TankId = AreaPlanning.TankId;   // 시나리오 생성 대상 선창 동기화
     }
 
+    /// <summary>
+    /// 모든 화면의 선창 ID 를 한 번에 맞춘다 — 영역·작업, 3D, 미션(시나리오), 리치·간섭과
+    /// 층 맵 ID(`{선창}-L{층}`)를 쓰는 캘리브레이션·배터리 교체 장소·수동 층 변경.
+    /// </summary>
+    private void ApplyTankId(string tankId)
+    {
+        AreaPlanning.TankId = tankId;
+        Tank.TankId = tankId;
+        Mission.TankId = tankId;
+        ReachSim.TankId = tankId;
+        Calibration.SetTank(tankId);
+        BatterySwapNodes.SetTank(tankId);
+        ManualZoneChange.SetTank(tankId);
+    }
+
+    /// <summary>
+    /// 시작할 때 서버에 등록된 선창을 따른다 — 화면 기본값(CT1)이 서버에 없으면(선창 ID 를 바꾼 뒤) 등록된 선창으로 맞춘다.
+    /// 서버가 구빌드이거나 닿지 않으면 기본값 그대로.
+    /// </summary>
+    private async Task AdoptServerTankAsync()
+    {
+        try
+        {
+            var tanks = await _api.GetTankIdsAsync();
+            if (tanks is { Count: > 0 } && !tanks.Contains(AreaPlanning.TankId)) ApplyTankId(tanks[0]);
+        }
+        catch { /* 서버 미기동 — 기본 선창 ID 로 둔다 */ }
+    }
+
+    private async Task OnTankRenamedAsync(string tankId)
+    {
+        ApplyTankId(tankId);
+        try
+        {
+            await Task.WhenAll(
+                AreaPlanning.LoadAsync(),
+                Tank.LoadAsync(),
+                Calibration.LoadAsync(),
+                Mission.LoadAsync(),
+                BatterySwapNodes.LoadAsync());
+        }
+        catch (Exception ex) { ConnectionText = $"선창 ID 변경 후 화면 갱신 실패: {ex.Message}"; }
+        Tank.InvalidateCalibrationCache();
+        RobotStatus.InvalidateCalibrations();
+        RobotStatus.InvalidatePlannedStations();
+        UpdateTitle();
+    }
+
     // ── 파일 메뉴 (프로젝트 파일 .hdacs) ──────────────────────────────
     // 파일 = 현재 선창의 지오메트리·영역·작업 스냅샷. DB가 런타임 truth이며 파일은 내보내기/가져오기.
 
@@ -158,7 +211,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         if (IsProjectBusy) return;   // CanExecute를 거치지 않는 직접 호출 방어
         if (!await _projectDialog.ShowNewProjectAsync()) return;   // 취소/실패 시 파일 미생성
-        Mission.TankId = AreaPlanning.TankId;            // 시나리오 생성 대상 선창 동기화
+        ApplyTankId(AreaPlanning.TankId);                // 모든 화면의 선창 ID·층 맵 ID 동기화
         await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
         var path = await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
@@ -177,9 +230,7 @@ public sealed partial class ShellViewModel : ObservableObject
             await RunProjectBusyAsync("열기", async progress =>
             {
                 var doc = await _project.OpenAsync(path, progress: progress);
-                AreaPlanning.TankId = doc.TankId;
-                Tank.TankId = doc.TankId;
-                Mission.TankId = doc.TankId;   // 시나리오 생성 대상 선창 동기화
+                ApplyTankId(doc.TankId);   // 모든 화면의 선창 ID·층 맵 ID 동기화
                 // 프로젝트 재적재 결과를 모두 다시 조회한다. 특히 Calibration을 갱신하지 않으면
                 // 앱 시작 때 로컬 DB에서 읽은 포인트가 파일에서 복원된 것처럼 화면에 남는다.
                 progress.Report(new ProjectProgress("화면 갱신", 0, 0));

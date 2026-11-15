@@ -760,6 +760,53 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>영역·작업이 등록/삭제되어 3D 오버레이 갱신이 필요함(등록/삭제가 모두 RefreshAreasAsync 경유).</summary>
     public event EventHandler? PlanningChanged;
 
+    // ── 선창 ID 변경 ──────────────────────────────────────────────────
+    /// <summary>바꿀 새 선창 ID(입력칸).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RenameTankCommand))]
+    private string _newTankId = "";
+
+    /// <summary>변경 전에 묻는 확인 창(Shell 이 연결). 없으면 묻지 않는다(테스트).</summary>
+    public Func<string, string, Task<bool>>? ConfirmAsync { get; set; }
+
+    /// <summary>선창 ID 가 바뀌었다 — Shell 이 모든 화면의 선창 ID·층 맵을 새 값으로 맞추고 다시 읽는다.</summary>
+    public event EventHandler<string>? TankRenamed;
+
+    private bool CanRenameTank() =>
+        !string.IsNullOrWhiteSpace(NewTankId) && !string.Equals(NewTankId.Trim(), TankId, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 선창 ID 변경 — 서버가 형상·면·영역·시나리오·층 맵·캘리브레이션을 한 번에 옮긴다(영역 ID·taskId 유지).
+    /// 세이지 조회 주소의 tankId 가 바뀌고, 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록되므로 변경 뒤 파일 ▸ 저장이 필요하다.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRenameTank))]
+    private async Task RenameTankAsync()
+    {
+        var (oldId, newId) = (TankId, NewTankId.Trim());
+        if (ConfirmAsync is not null && !await ConfirmAsync(
+                $"선창 ID 를 '{oldId}' → '{newId}' 로 바꿉니다.\n\n" +
+                "· 세이지(SAIGE) 조회 주소의 tankId 가 바뀝니다 — 세이지 쪽과 시점을 맞추세요.\n" +
+                "· AMR 은 층 번호만 확인하고 선창 이름은 다음 지령에서 받습니다(ACS·AMR 새 버전 필요).\n" +
+                "· 변경 뒤 [파일 ▸ 저장]을 하세요 — 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록됩니다.\n\n계속하시겠습니까?",
+                "선창 ID 변경"))
+            return;
+        try
+        {
+            if (!await _api.RenameTankAsync(oldId, newId, _operatorId))
+            {
+                StatusMessage = "선창 ID 변경 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요.";
+                return;
+            }
+            TankId = newId;
+            NewTankId = "";
+            TankRenamed?.Invoke(this, newId);
+            StatusMessage = $"선창 ID 변경: {oldId} → {newId} — [파일 ▸ 저장]으로 프로젝트 파일에 반영하세요.";
+        }
+        catch (Exception ex) { StatusMessage = $"선창 ID 변경 실패: {ex.Message}"; }   // 형식 400 · 이미 쓰는 ID·진행 중 run 409 · 없음 404
+    }
+
+    partial void OnTankIdChanged(string value) => RenameTankCommand.NotifyCanExecuteChanged();
+
     private async Task RefreshAreasAsync(Guid? select = null)
     {
         // 그 면의 **모든 층** 영역을 로드(_allAreas, 면-전체 v — 전개도가 타 층을 회색으로 표시).

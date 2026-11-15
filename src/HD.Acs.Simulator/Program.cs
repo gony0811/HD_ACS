@@ -28,6 +28,7 @@ using MQTTnet.Protocol;
 //     FAILED, resultDescription="FAIL;reason=INJECTED".
 //
 // 사용: dotnet run [brokerHost] [manufacturer] [serialNumber] [mapId]
+//   SIM_BROKER_PORT=n (기본 1883) · SIM_NO_UI=1 (창 없이 실행)
 
 var initialMapId = args.ElementAtOrDefault(3) ?? "CT1-L1";
 var control = new SimulatorControlState(initialMapId, 95, 0, 0, 0);
@@ -81,7 +82,7 @@ var connTopic = Vda5050Topics.Connection(robot);
 var stateTopic = Vda5050Topics.State(robot);
 
 var options = new MqttClientOptionsBuilder()
-    .WithTcpServer(broker)
+    .WithTcpServer(broker, int.TryParse(Environment.GetEnvironmentVariable("SIM_BROKER_PORT"), out var brokerPort) ? brokerPort : null)
     .WithClientId($"sim-{robot.SerialNumber}")
     .WithKeepAlivePeriod(TimeSpan.FromSeconds(5))   // 통신단절 Fail-Safe §2.2 — 로봇·관제 동일 5 s
     // Last Will: 비정상 종료 시 CONNECTIONBROKEN (두절 감지의 근거 [ADR-002])
@@ -498,7 +499,9 @@ async Task PublishAsync<T>(string topic, T payload, bool retain = false)
 }
 });
 
-SimulatorUi.Run(control);
+// SIM_NO_UI=1 이면 창 없이 돈다(자동 검증용) — 끝내려면 프로세스를 종료한다.
+if (Environment.GetEnvironmentVariable("SIM_NO_UI") == "1") await simulatorTask;
+else SimulatorUi.Run(control);
 control.Stop();
 try { await simulatorTask; }
 catch (OperationCanceledException) { }

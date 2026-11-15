@@ -548,6 +548,24 @@ public sealed class AcsApiClient : IAcsApiClient
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
     }
 
+    public async Task<IReadOnlyList<string>?> GetTankIdsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/internal/tanks", ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<string>>(ct) ?? new();
+    }
+
+    public async Task<bool> RenameTankAsync(string tankId, string newTankId, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/rename",
+            new { NewTankId = newTankId, UserId = userId }, ct);
+        // 없는 선창도 404 지만 그때는 본문에 사유가 있다 — 본문 없는 404·405 만 "경로 없음(구빌드)"로 본다
+        if (IsUnsupportedRoute(resp) && (resp.Content.Headers.ContentLength ?? 0) == 0) return false;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return true;
+    }
+
     public async Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync("/api/area-tasks/enabled", new { TaskIds = taskIds, Enabled = enabled, UserId = userId }, ct);

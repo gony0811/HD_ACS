@@ -142,6 +142,15 @@ public interface IAcsApiClient
     Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
         string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
+    /// <summary>서버에 등록된 선창 ID 목록(등록 순). null = 서버 미지원(구빌드).</summary>
+    Task<IReadOnlyList<string>?> GetTankIdsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string>?>(null);
+    /// <summary>
+    /// 선창 ID 변경 — 형상·면·영역·시나리오·층 맵을 함께 옮긴다(영역 ID·taskId 유지). false = 서버 미지원(구빌드).
+    /// 형식 오류 400 · 이미 쓰는 ID·진행 중 run 409 · 없는 선창 404 는 예외(메시지에 사유).
+    /// </summary>
+    Task<bool> RenameTankAsync(string tankId, string newTankId, string userId, CancellationToken ct = default) =>
+        Task.FromResult(false);
     /// <summary>용접선 임시 제외/복귀 — enabled=false 면 검사(큐 전개·재개·재검사)에서 빠진다. false 반환 = 서버 미지원(구빌드).</summary>
     Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default) =>
         Task.FromResult(false);
