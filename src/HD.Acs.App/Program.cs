@@ -75,6 +75,9 @@ builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 });
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
+// 가스 측정 결과 전송(가스검사) — Acs:Saige:Gas:Enabled=false(기본)면 저장만 하고 보내지 않는다.
+builder.Services.AddSingleton<SaigeGasResultSender>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeGasResultSender>());
 
 // 계획 자연어 어시스턴트 [ADR-013] — Ollama(로컬 LLM). Acs:Llm:Enabled=false(기본)면 어시스턴트 API는 503.
 // 변경안 엔진(PlanChangeSetEngine)은 LLM 없이도 동작(연산 JSON 직접 미리보기·적용).
@@ -151,6 +154,20 @@ app.MapHub<MonitoringHub>("/hubs/monitoring");
 
 // SAIGE 연동 상태 [운영 확인] — 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다(lastOkAt·totalSent·robots[].lastSentAt).
 app.MapGet("/api/integrations/saige", (SaigeHealthReporter saige) => Results.Ok(saige.Status));
+// 가스 측정 결과 전송 상태(보낼 것·보낸 것·거부된 것 수, 마지막 오류)
+app.MapGet("/api/integrations/saige/gas", async (SaigeGasResultSender gas, AcsDbContext db, CancellationToken ct) =>
+    Results.Ok(await gas.StatusAsync(db, ct)));
+// run 의 가스 측정 결과 목록(받은 순) — 판정·회차·세이지 전송 상태. body=true 면 AMR 본문 포함.
+app.MapGet("/api/runs/{runId:guid}/gas-results", async (Guid runId, bool? body, AcsDbContext db, CancellationToken ct) =>
+{
+    var rows = await db.GasResults.AsNoTracking().Where(g => g.RunId == runId).OrderBy(g => g.CreatedAt).ToListAsync(ct);
+    return Results.Ok(rows.Select(g => new
+    {
+        g.ResultId, g.ActionId, g.TaskId, g.TankId, g.RobotId, g.Round, g.Result, g.PointCount,
+        g.SendState, g.SendAttempts, g.LastError, g.CreatedAt, g.SentAt,
+        body = body == true ? System.Text.Json.Nodes.JsonNode.Parse(g.Body) : null,
+    }));
+});
 
 app.MapGet("/api/robots", async (AcsDbContext db) =>
     Results.Ok(await db.Robots.AsNoTracking().ToListAsync()));

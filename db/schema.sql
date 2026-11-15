@@ -533,6 +533,29 @@ CREATE TABLE hist.inspection_result (
   occurred_at timestamptz NOT NULL   -- 대조 키 (타임스탬프 규약 Q2)
 );
 CREATE INDEX ix_inspresult_time ON hist.inspection_result (occurred_at);
+
+-- 가스 측정 결과(가스검사 AMR 이 액션 종료 때 보낸 본문) + 세이지 전송 상태. 받은 즉시 저장, 전송은 따로 돈다.
+-- send_state: PENDING(보낼 것) | SENT | REJECTED(세이지가 형식 거부 — 재전송 안 함). body = AMR 본문 그대로.
+CREATE TABLE IF NOT EXISTS hist.gas_result (
+  result_id     uuid PRIMARY KEY,
+  action_id     uuid NOT NULL,
+  run_id        uuid NOT NULL,
+  task_id       uuid,
+  tank_id       text,
+  robot_id      text NOT NULL,
+  round         int,
+  result        text NOT NULL,
+  point_count   int  NOT NULL DEFAULT 0,
+  body          jsonb NOT NULL,
+  send_state    text NOT NULL DEFAULT 'PENDING',
+  send_attempts int  NOT NULL DEFAULT 0,
+  last_error    text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  sent_at       timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_gas_result_action ON hist.gas_result (action_id);
+CREATE INDEX IF NOT EXISTS ix_gas_result_send ON hist.gas_result (send_state, created_at);
+CREATE INDEX IF NOT EXISTS ix_gas_result_run ON hist.gas_result (run_id);
 CREATE INDEX ix_inspresult_run  ON hist.inspection_result (run_id);
 
 -- ═══════════════════════════ ⑥ 알람 (alarm) ═══════════════════════════

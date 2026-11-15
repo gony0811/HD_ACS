@@ -107,3 +107,26 @@ public class RobotContextEntity
     public string? ConnectionState { get; set; }      // ONLINE | OFFLINE | CONNECTIONBROKEN
     public DateTimeOffset? ReportedAt { get; set; }
 }
+
+/// <summary>
+/// 가스 측정 결과 1건(용접선 1구간의 검사 1회) — 가스검사 AMR 이 액션 종료 때 보낸 본문과 세이지 전송 상태.
+/// 세이지가 내려가 있어도 잃지 않도록 받은 즉시 저장하고, 전송은 따로 돈다(보낼 때까지 PENDING).
+/// </summary>
+public class GasResultEntity
+{
+    public Guid ResultId { get; set; }
+    public Guid ActionId { get; set; }                // run.order_action — 액션 1개 = 결과 1건(중복 저장 방지 키)
+    public Guid RunId { get; set; }
+    public Guid? TaskId { get; set; }                 // ACS 내부 taskId(용접선)
+    public string? TankId { get; set; }
+    public string RobotId { get; set; } = "";
+    public int? Round { get; set; }                   // 검사 회차 1|2
+    public string Result { get; set; } = "";          // OK | NG | ERROR
+    public int PointCount { get; set; }
+    public string Body { get; set; } = "{}";          // jsonb — AMR 이 보낸 본문 그대로
+    public string SendState { get; set; } = "PENDING";   // PENDING | SENT | REJECTED(세이지가 형식 거부 — 재전송 안 함)
+    public int SendAttempts { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? SentAt { get; set; }
+}

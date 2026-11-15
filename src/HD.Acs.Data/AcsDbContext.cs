@@ -43,6 +43,7 @@ public class AcsDbContext : DbContext
     // hist / alarm / sys
     public DbSet<TransitionLogEntity> TransitionLogs => Set<TransitionLogEntity>();
     public DbSet<InspectionResultEntity> InspectionResults => Set<InspectionResultEntity>();
+    public DbSet<GasResultEntity> GasResults => Set<GasResultEntity>();
     public DbSet<AlarmSpecEntity> AlarmSpecs => Set<AlarmSpecEntity>();
     public DbSet<AlarmEntity> Alarms => Set<AlarmEntity>();
     public DbSet<AppUserEntity> Users => Set<AppUserEntity>();
@@ -173,6 +174,13 @@ public class AcsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.MissionId, x.OccurredAt });
             e.Property(x => x.Payload).HasColumnType("jsonb"); });
+
+        mb.Entity<GasResultEntity>(e => { e.ToTable("gas_result", "hist");
+            e.HasKey(x => x.ResultId);
+            e.HasIndex(x => x.ActionId).IsUnique();
+            e.HasIndex(x => new { x.SendState, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.Property(x => x.Body).HasColumnType("jsonb"); });
 
         mb.Entity<InspectionResultEntity>(e => { e.ToTable("inspection_result", "hist");
             e.HasKey(x => x.ResultId);

@@ -491,6 +491,13 @@ public sealed class RobotStateService
         ActionState a, RobotRef robot, CancellationToken ct)
     {
         oa.Result = System.Text.Json.JsonSerializer.Serialize(new { a.ActionStatus, a.ResultDescription });
+        // 가스검사 — 끝난 액션의 결과가 가스 측정 본문이면 저장해 둔다(세이지 전송은 SaigeGasResultSender 가 따로 돈다)
+        if (a.ActionStatus == "FINISHED" && GasResultRecorder.Create(mission.RunId, oa, a.ResultDescription, robot.RobotId) is { } gas)
+        {
+            _db.GasResults.Add(gas);
+            _log.LogInformation("가스 측정 결과 수신 — task={Task} round={Round} 판정 {Result} ({N}포인트)",
+                gas.TaskId, gas.Round, gas.Result, gas.PointCount);
+        }
         _db.InspectionResults.Add(new InspectionResultEntity
         {
             ResultId = Guid.NewGuid(),
