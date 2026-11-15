@@ -760,6 +760,35 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>영역·작업이 등록/삭제되어 3D 오버레이 갱신이 필요함(등록/삭제가 모두 RefreshAreasAsync 경유).</summary>
     public event EventHandler? PlanningChanged;
 
+    // ── 새 프로젝트: 베이스 프로젝트 파일 ─────────────────────────────
+    /// <summary>새 프로젝트 창에서 고른 베이스 프로젝트 파일(.hdacs). null = 치수를 직접 입력해 빈 선창 생성.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBaseProject))]
+    private string? _baseProjectPath;
+
+    /// <summary>베이스 파일 요약(파일명·원래 선창·영역/작업/시나리오 수).</summary>
+    [ObservableProperty] private string _baseProjectInfo = "";
+
+    public bool HasBaseProject => BaseProjectPath is not null;
+
+    /// <summary>베이스 파일을 골랐다 — 형상 치수를 파일 값으로 채우고(창에서는 잠김) 요약을 만든다. 선창 ID 는 건드리지 않는다.</summary>
+    public void ApplyBaseProject(string path, ProjectDoc doc)
+    {
+        var g = doc.Geometry;
+        // 입력칸만 채운다(층 목록·면은 생성 뒤 LoadAsync 가 서버에서 다시 읽는다)
+        LengthL = g.LengthL; WFloor = g.WFloor; ThetaLowDeg = g.ThetaLowDeg; HLow = g.HLow;
+        HWall = g.HWall; ThetaUpDeg = g.ThetaUpDeg; HUp = g.HUp;
+        OriginOx = g.OriginOx; OriginOy = g.OriginOy;
+        ReachZMinText = g.ReachZMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
+        ReachZMaxText = g.ReachZMax?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
+        LevelZText = string.Join(", ", g.LevelZ.Select(z => z.ToString("0.###", CultureInfo.InvariantCulture)));
+        BaseProjectInfo = $"{System.IO.Path.GetFileName(path)} — 원래 선창 {doc.TankId} · 영역 {doc.Areas.Length:N0} · " +
+                          $"작업 {doc.Areas.Sum(a => a.Tasks.Length):N0} · 시나리오 {doc.Scenarios?.Length ?? 0}";
+        BaseProjectPath = path;
+    }
+
+    public void ClearBaseProject() { BaseProjectPath = null; BaseProjectInfo = ""; }
+
     // ── 선창 ID 변경 ──────────────────────────────────────────────────
     /// <summary>바꿀 새 선창 ID(입력칸).</summary>
     [ObservableProperty]

@@ -14,14 +14,23 @@ public sealed class AvaloniaProjectDialogService : IProjectDialogService
     };
 
     private readonly AreaPlanningViewModel _areaPlanning;
+    private readonly IProjectService _project;
 
-    public AvaloniaProjectDialogService(AreaPlanningViewModel areaPlanning) => _areaPlanning = areaPlanning;
+    public AvaloniaProjectDialogService(AreaPlanningViewModel areaPlanning, IProjectService project)
+    {
+        _areaPlanning = areaPlanning;
+        _project = project;
+    }
 
     public async Task<bool> ShowNewProjectAsync()
     {
         var owner = AvaloniaDialogService.Owner;
         if (owner is null) return false;
-        var dialog = new NewProjectDialog { DataContext = _areaPlanning };
+        var dialog = new NewProjectDialog
+        {
+            DataContext = _areaPlanning,
+            ReadProject = path => _project.ReadAsync(path),   // 베이스 프로젝트 파일 미리 읽기(DB 무변경)
+        };
         return await dialog.ShowDialog<bool>(owner);
     }
 

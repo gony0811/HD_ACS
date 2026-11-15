@@ -210,12 +210,77 @@ public sealed partial class ShellViewModel : ObservableObject
     private async Task NewProjectAsync()
     {
         if (IsProjectBusy) return;   // CanExecute를 거치지 않는 직접 호출 방어
-        if (!await _projectDialog.ShowNewProjectAsync()) return;   // 취소/실패 시 파일 미생성
-        ApplyTankId(AreaPlanning.TankId);                // 모든 화면의 선창 ID·층 맵 ID 동기화
-        await Tank.LoadAsync();                          // 새 지오메트리로 3D 셸 갱신
+        var previousTank = Tank.TankId;                  // 창이 AreaPlanning.TankId 를 직접 고친다 — 실패 시 되돌릴 값
+        AreaPlanning.ClearBaseProject();
+        if (!await _projectDialog.ShowNewProjectAsync()) { AreaPlanning.ClearBaseProject(); return; }   // 취소/실패 시 파일 미생성
+        if (AreaPlanning.BaseProjectPath is { } basePath)
+        {
+            // 베이스 프로젝트 파일을 새 선창 ID 로 복제 (선창 등록은 창이 아니라 여기서 한다)
+            var newTank = AreaPlanning.TankId.Trim();
+            AreaPlanning.ClearBaseProject();
+            if (!await CreateFromBaseAsync(basePath, newTank))
+            {
+                AreaPlanning.TankId = previousTank;
+                await AreaPlanning.LoadAsync();           // 창이 덮어쓴 치수 입력칸을 현재 선창 값으로
+                return;
+            }
+        }
+        else
+        {
+            ApplyTankId(AreaPlanning.TankId);            // 모든 화면의 선창 ID·층 맵 ID 동기화
+            await Tank.LoadAsync();                      // 새 지오메트리로 3D 셸 갱신
+        }
         var path = await _projectDialog.PickSavePathAsync(AreaPlanning.TankId);
         if (path is null) { UpdateTitle(); return; }    // DB엔 등록됨, 파일만 나중에 저장 가능
         await SaveToAsync(path);
+    }
+
+    /// <summary>
+    /// 베이스 프로젝트 파일로 새 선창 만들기 — 형상·영역·작업·시나리오를 새 선창 ID 로 복제한다
+    /// (영역 ID·taskId 새 발급, 캘리브레이션 제외). 성공하면 모든 화면을 새 선창으로 맞춘다.
+    /// </summary>
+    private async Task<bool> CreateFromBaseAsync(string basePath, string newTank)
+    {
+        try
+        {
+            // 서버에 다른 선창이 남아 있으면 선창이 둘 이상이 된다 — 미리 알린다
+            IReadOnlyList<string>? tanks = null;
+            try { tanks = await _api.GetTankIdsAsync(); } catch { /* 아래 생성 단계가 연결 오류를 알린다 */ }
+            var others = tanks?.Where(t => !string.Equals(t, newTank, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (others is { Count: > 0 } && !await _dialog.ConfirmAsync(
+                    $"서버에 선창 {string.Join(", ", others)} 이(가) 이미 있습니다. '{newTank}' 는 새 선창으로 추가되고 기존 선창은 그대로 남습니다.\n\n" +
+                    "· 영역 ID·taskId 는 새로 발급됩니다(세이지에서는 다른 선창·다른 용접선).\n" +
+                    "· 캘리브레이션은 복사하지 않습니다 — 새 선창의 층마다 다시 잡아야 지령이 나갑니다.\n" +
+                    "· 선창이 둘 이상이면 AMR 이 옛 이름이나 층 번호만 보고할 때 ACS 가 층을 맞추지 못합니다.\n" +
+                    "· 같은 선창의 이름만 바꾸려면 계획 ▸ 영역·작업의 '선창 ID 변경'을 쓰세요.\n\n계속하시겠습니까?",
+                    "베이스 프로젝트로 새 프로젝트"))
+                return false;
+
+            await RunProjectBusyAsync("생성", async progress =>
+            {
+                var doc = await _project.CreateFromBaseAsync(basePath, newTank, progress: progress);
+                ApplyTankId(doc.TankId);
+                progress.Report(new ProjectProgress("화면 갱신", 0, 0));
+                await Task.WhenAll(
+                    AreaPlanning.LoadAsync(),
+                    Tank.LoadAsync(),
+                    Calibration.LoadAsync(),
+                    Mission.LoadAsync(),
+                    BatterySwapNodes.LoadAsync());
+                Tank.InvalidateCalibrationCache();
+                RobotStatus.InvalidateCalibrations();
+                RobotStatus.InvalidatePlannedStations();
+                UpdateTitle();
+                ConnectionText = $"새 프로젝트: {doc.TankId} ← {System.IO.Path.GetFileName(basePath)} · 영역 {doc.Areas.Length:N0}·작업 " +
+                                 $"{doc.Areas.Sum(a => a.Tasks.Length):N0} 복제 — 캘리브레이션은 새로 잡으세요";
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await _dialog.ShowErrorAsync(DescribeProjectFailure("생성", ex), "오류");
+            return false;
+        }
     }
 
     /// <summary>열기 — 프로젝트 파일을 읽어 DB에 재적재하고 화면을 갱신.</summary>

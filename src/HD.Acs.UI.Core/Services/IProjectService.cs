@@ -19,4 +19,17 @@ public interface IProjectService
     /// <summary>프로젝트 파일을 읽어 DB에 재적재(선창 등록 → 면 재생성 → 영역 → 작업). CurrentPath 갱신. 로드된 문서 반환.
     /// <paramref name="progress"/>는 호출 스레드에서 동기로 불린다(null = 보고 안 함).</summary>
     Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null);
+
+    /// <summary>프로젝트 파일을 읽기만 한다(DB 무변경) — 새 프로젝트 창이 베이스 파일 내용을 보여 줄 때 쓴다.</summary>
+    Task<ProjectDoc> ReadAsync(string path, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    /// <summary>
+    /// 베이스 프로젝트 파일의 형상·영역·작업·시나리오를 새 선창 ID 로 복제해 DB 에 등록한다.
+    /// 영역 ID·taskId 는 새로 발급하고(베이스 선창이 DB 에 남아 있어도 겹치지 않게), 캘리브레이션은 복사하지 않는다.
+    /// 새 선창 ID 가 서버에 이미 있으면 거부한다(가져오기는 그 선창의 영역을 통째로 바꾸므로).
+    /// CurrentPath 는 비운다 — 저장이 베이스 파일을 덮어쓰지 않게. 반환 = 새 선창 문서.
+    /// </summary>
+    Task<ProjectDoc> CreateFromBaseAsync(string basePath, string newTankId, CancellationToken ct = default,
+        IProgress<ProjectProgress>? progress = null) => throw new NotSupportedException();
 }
