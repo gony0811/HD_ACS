@@ -38,7 +38,7 @@ INFICON 센서 → AMR ──(Task 완료 시 결과 JSON, startWeldInspection r
 | 요청 1건 = Task 1개·회차 1개 | 검사 액션 1개가 끝날 때 받은 본문 1건 = 요청 1건 (`hist.gas_result`) | 충족 |
 | `taskId` = 도면의 taskId | ACS 가 발급한 taskId 를 **도면 조회 API 와 같은 표기**(`Acs:Saige:TaskIdLittleEndian`)로 덮어써서 보낸다 | 충족 |
 | `round` 필수 (1·2) | 가스검사 선창은 회차 없이 미션·재검사를 시작할 수 없다(400). 화면 선택도 1회차·2회차뿐 | 충족 |
-| 판정은 `OK`·`NG` | 보내기 전에 규격 검사 — 그 밖의 값(`ERROR`)·빈 `scans`·`retry` 범위 밖이면 **보내지 않고** REJECTED + 알람 | ACS 는 걸러 냄 — **AMR 협의 필요**(아래 4) |
+| 판정은 `OK`·`NG` | 판정은 OK · NG · FAIL 세 가지로 본다. **FAIL(측정 실패)이 낀 Task 는 AMR 이 결과를 보고하지 않고 검사 액션을 FAILED 로 끝낸다** — ACS 는 실패로 기록하고(작업 현황 "실패", 재검사 대상) SAIGE 로는 보내지 않는다. 그래도 규격 밖 본문이 오면 보내기 전 검사에서 걸러 REJECTED + 알람 | 충족 |
 | 200 까지 보관·재전송 | DB 에 쌓고 받은 순서대로, 성공할 때까지 | 충족 |
 | 400·404·409 = 재시도 안 함, 로그·알람 | 그 건만 REJECTED + `SAIGE_BAD_REQUEST` 알람, 다음 건은 계속 | 충족 |
 | 500·연결 거부·타임아웃 = 간격을 두고 재시도 | 그 건에서 멈추고 백오프(5 s → 최대 60 s) 뒤 같은 건부터 | 충족 |
@@ -73,9 +73,8 @@ ACS 는 임계값을 저장하지 않는다 — AMR 이 받아 보관하고(재�
 
 ## 4. 협의·확인이 남은 것
 
-- **측정 실패 표기**: AMR 은 통신 실패로 값이 없는 측정을 빼고, 그런 포인트·Task 의 판정을 `"ERROR"` 로 보낸다. 규격은 `OK`·`NG` 만이고 `scans` 는 최소 1건이라 그대로는 400 이다.
-  ACS 는 지금 그런 결과를 보내지 않고 REJECTED 로 남긴다. 정할 것: AMR 이 그 Task 를 실패(FAILED)로 끝낼지, 규격에 `ERROR` 를 넣을지.
-- **검사 시작의 주인**: 규격 §3 은 SAIGE 화면의 시작 버튼이 임계값을 보내며 검사를 시작한다고 본다. ACS 미션은 ACS 화면에서 시작한다 — SAIGE 에서 시작하지 않고 돌리면 결과가 409 로 거부된다(재전송 API 로 되살릴 수 있다). 시작 순서를 운영 절차로 정하거나, ACS 미션 시작을 SAIGE 요청에 묶을지 협의.
+- **측정 실패(FAIL)를 SAIGE 에도 보일지**: 결정(2026-11-15) — 판정은 OK · NG · FAIL, FAIL 이 낀 Task 는 검사 실패로 끝낸다(HD_AMR `feature/gas-inspection`). SAIGE 는 그 Task 의 결과를 받지 않으므로 SAIGE 화면에서는 "결과 없음"으로 보인다. SAIGE 에도 FAIL 을 남기려면 규격의 판정 값에 `FAIL` 을 넣는 협의가 필요하다.
+- **검사 시작 순서**: 규격 §2 응답 표의 `409 · 40901` = "SAIGE 에서 검사가 시작되지 않음" — **SAIGE 서버가** ACS 가 올린 가스 결과를 받지 않겠다고 답하는 코드다. SAIGE 는 자기 화면의 [시작] 버튼(이때 임계값을 ACS 로 보낸다, §3)을 누른 선창의 결과만 받는다. 작업자가 SAIGE 에서 시작을 누르지 않고 ACS 에서 미션부터 돌리면 검사는 정상적으로 진행되지만 결과가 SAIGE 에 쌓이지 않는다(ACS 에는 REJECTED 로 남고, SAIGE 시작 뒤 재전송 API 로 다시 보낼 수 있다). 운영 절차: **SAIGE 에서 검사 시작 → ACS 에서 미션 시작**. ACS 미션 시작을 SAIGE 요청에 묶을지는 협의.
 - **robotId 표기**: 결과 본문의 `robotId` 는 AMR 의 VDA 시리얼 번호, 상태 전송의 `robotId` 는 ACS 로봇 ID 다(지금은 둘 다 `AMR-01`, 규격 예시는 `AMR01`).
 - **ACS 포트**: 규격 5100 / ACS 기본 5199.
 - AMR 구간(`params.round`·결과 JSON·`setGasThreshold`·`state.information`)은 HD_AMR 문서에도 협의안으로 적혀 있다.
