@@ -128,6 +128,9 @@ public sealed partial class ReachSimService
             TraverseMarginTargetDeg = config.GetValue("Acs:Reach:TraverseMarginTargetDeg", d.TraverseMarginTargetDeg),
             MinFlangeReachMm = config.GetValue("Acs:Reach:MinFlangeReachMm", d.MinFlangeReachMm),
             MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
+            // 손목 여유 |J5| — 경로(진입·순회)는 HD_AMR 과 같은 10°, 판정 자세는 그보다 넉넉한 15°
+            PlanarWristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:WristMarginDeg"), d.PlanarWristMarginDeg),
+            WristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:PostureWristMarginDeg"), d.WristMarginDeg),
             CheckEntryJ6 = config.GetValue("Acs:Reach:CheckEntryJ6", d.CheckEntryJ6),
             EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
             PlanarEntryWalls = PlanarEntryWallsFrom(config.GetSection("Acs:Reach:PlanarEntryWalls")),
@@ -138,6 +141,10 @@ public sealed partial class ReachSimService
                 config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Max,
         };
     }
+
+    /// <summary>손목 여유 설정 — 0 초과 90 미만만 받는다(밖이면 기본값).</summary>
+    private static double WristMarginFrom(double? v, double fallback) =>
+        v is { } x && double.IsFinite(x) && x > 0 && x < 90 ? x : fallback;
 
     /// <summary>평면 경유 진입을 쓰는 면 — 설정이 없으면 null(모든 면, 종전), 빈 배열이면 어느 면도 쓰지 않는다.</summary>
     private static IReadOnlySet<string>? PlanarEntryWallsFrom(IConfigurationSection section) =>

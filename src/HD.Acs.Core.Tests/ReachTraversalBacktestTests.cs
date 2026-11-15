@@ -77,6 +77,15 @@ public class ReachTraversalBacktestTests
     };
     private static readonly ReachStation BaseStation = new(0, 0, 0, -ReachRobotModel.Default.MountZMm / 1000);
 
+    /// <summary>
+    /// 그날 AMR 이 쓰던 손목 여유 — HD_AMR 은 2026-11-07 에 시퀀스 경로 검증의 |J5| 여유를 5° → 10° 로 통일했다.
+    /// 11-03·11-06 로그는 5° 때의 판정이라 그 값으로 다시 푼다(지금 기본값 10° 로 풀면 그날 통과한 5~10° 자세가 막힌다).
+    /// </summary>
+    private static ReachRobotModel ModelOn(Case c) =>
+        c.Name.StartsWith("11-03", StringComparison.Ordinal) || c.Name.StartsWith("11-06", StringComparison.Ordinal)
+            ? Model with { PlanarWristMarginDeg = 5 }
+            : Model;
+
     private static ReachTraversal Run(Case c)
     {
         // RPY(Fairino ZYX) → 프레임 X(용접선 진행)·Z(면 바깥 = 내부향 법선). Top = 원점 + 33.8·Z = 점1(② 접근점, 면 이격 400).
@@ -91,10 +100,11 @@ public class ReachTraversalBacktestTests
         var top = Enumerable.Range(0, 3).Select(i => c.OriginMm[i] + ReachRobotModel.ScanTopZMm * z[i]).ToArray();
         var s0 = Enumerable.Range(0, 3).Select(i => (top[i] - 400 * z[i]) / 1000).ToArray();
         var s1 = Enumerable.Range(0, 3).Select(i => s0[i] + 0.36 * x[i]).ToArray();
-        var r = ReachSimulator.Evaluate(Model, Array.Empty<ReachPlane>(), BaseStation, s0, z, 0, withGeometry: false, wallCode: c.Wall, checkEntry: false);
+        var model = ModelOn(c);
+        var r = ReachSimulator.Evaluate(model, Array.Empty<ReachPlane>(), BaseStation, s0, z, 0, withGeometry: false, wallCode: c.Wall, checkEntry: false);
         var seed = (double[])ReachSimulator.TraverseSeed(r)!.Clone();
         seed[5] = c.J6;   // 순회 직전 실제 J6(로그) — 연속 실행은 앞 순회 끝 자세(90°)를 이어받는다
-        return ReachSimulator.Traverse(Model, BaseStation, 0, s0, s1, z, seed);
+        return ReachSimulator.Traverse(model, BaseStation, 0, s0, s1, z, seed);
     }
 
     [Fact]

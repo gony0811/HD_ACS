@@ -12,7 +12,7 @@ public sealed record ReachTraversalPoint(double AlongMm, double TiltDeg, double[
 /// </summary>
 /// <param name="Ok">모든 판정 자세가 HD_AMR 경로 검증(관절 한계·관절 튐·팔꿈치·손목 특이점·J6 안전 범위)을 통과.</param>
 /// <param name="Blocker">처음 막히는 자세의 사유(통과면 null).</param>
-/// <param name="MinMarginDeg">전 판정 자세의 가장 빡빡한 여유 [도] — 관절 한계(−2° 여유)·|J5|−5°·J6 안전 범위 끝까지 중 최소. 해가 없으면 −∞.</param>
+/// <param name="MinMarginDeg">전 판정 자세의 가장 빡빡한 여유 [도] — 관절 한계(−2° 여유)·|J5|−손목 여유(10°)·J6 안전 범위 끝까지 중 최소. 해가 없으면 −∞.</param>
 /// <param name="Limiting">그 최소 여유를 만든 항목.</param>
 /// <param name="TwistDeg">고른 광축 둘레 비틀림(0 또는 180°) — HD_AMR SelectSafeTwist 와 같은 규칙.</param>
 /// <param name="Worst">최소 여유 자세.</param>

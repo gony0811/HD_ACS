@@ -250,6 +250,23 @@ public class ReachSimServiceTests
     }
 
     [Fact]
+    public void 손목_여유는_AMR_과_같은_10도가_기본이고_설정으로_바꾼다()
+    {
+        static ReachRobotModel From(params (string K, string V)[] kv) => ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddInMemoryCollection(kv.Append(("Acs:Reach:MountYawDeg", "180")).ToDictionary(x => x.Item1, x => (string?)x.Item2)).Build());
+
+        // HD_AMR PostureLimits.DefaultWristMarginDeg = 10 (2026-11-07 통일) — 진입 경로·도면 순회가 쓰는 값
+        Assert.Equal(10, ReachRobotModel.DefaultWristMarginDeg);
+        Assert.Equal(10, ReachRobotModel.Default.PlanarWristMarginDeg);
+        Assert.Equal(10, From().PlanarWristMarginDeg);
+        Assert.Equal(15, From().WristMarginDeg);                       // 판정 자세는 더 넉넉히
+        Assert.Equal(12, From(("Acs:Reach:WristMarginDeg", "12")).PlanarWristMarginDeg);
+        Assert.Equal(10, From(("Acs:Reach:WristMarginDeg", "0")).PlanarWristMarginDeg);    // 0 이하·90 이상은 기본값
+        Assert.Equal(10, From(("Acs:Reach:WristMarginDeg", "120")).PlanarWristMarginDeg);
+        Assert.Equal(20, From(("Acs:Reach:PostureWristMarginDeg", "20")).WristMarginDeg);
+    }
+
+    [Fact]
     public void 도면_순회_설정을_읽는다()
     {
         var m = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

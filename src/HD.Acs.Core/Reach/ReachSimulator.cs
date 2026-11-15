@@ -86,6 +86,10 @@ public sealed record ReachRobotModel
     /// </summary>
     public double[] JointMinDeg { get; init; } = { -175, -265, -170, -265, -175 };
     public double[] JointMaxDeg { get; init; } = { 175, 85, 170, 85, 175 };
+    /// <summary>
+    /// 판정 자세(② · 정렬 준비 · 초점)의 손목 여유 |J5| [도] — 경로 기준(<see cref="PlanarWristMarginDeg"/> 10°)보다 넉넉히 둔다
+    /// (세 자세 사이·검사 중 추가 이동의 몫). HD_AMR 자세 허용 범위 기본값은 10° 다. 설정 <c>Acs:Reach:PostureWristMarginDeg</c>.
+    /// </summary>
     public double WristMarginDeg { get; init; } = 15;
     public double ElbowMarginDeg { get; init; } = 8;
 
@@ -158,8 +162,15 @@ public sealed record ReachRobotModel
     public double PlanarSkipMm { get; init; } = 50;
     /// <summary>경로 검증 점 사이 관절 최대 변화 [도] — MaxPathJointStepDeg.</summary>
     public double MaxPathJointStepDeg { get; init; } = 30;
-    /// <summary>경로 손목 특이점 여유 |J5| [도] — PlanarWristMarginDeg.</summary>
-    public double PlanarWristMarginDeg { get; init; } = 5;
+    /// <summary>
+    /// 경로 손목 특이점 여유 |J5| [도] — 진입 경로·도면 순회에서 |J5| 가 이보다 작으면 막는다. HD_AMR
+    /// <c>PostureLimits.DefaultWristMarginDeg</c>(= CobotInspectionMoveStep.PlanarWristMarginDeg, 2026-11-07 10° 로 통일)와 같은 값이어야 한다.
+    /// ACS 는 2026-11-16 까지 5° 였다(AMR 이 막는 5~10° 자세를 통과시켰다). 설정 <c>Acs:Reach:WristMarginDeg</c>.
+    /// AMR 이 프로필 전송 때 자기 값을 알려 주므로 다르면 ACS 가 경고한다.
+    /// </summary>
+    public double PlanarWristMarginDeg { get; init; } = DefaultWristMarginDeg;
+    /// <summary>손목 여유 |J5| 의 기준값 [도] — HD_AMR <c>PostureLimits.DefaultWristMarginDeg</c> 와 같다. 바꾸면 함께 맞출 것.</summary>
+    public const double DefaultWristMarginDeg = 10;
 
     // ── 도면 순회(⑱ inspectionRun) 판정 — HD_AMR InspectionRunStep.CheckWaypointChainAsync 와 같은 규칙. 바뀌면 함께 맞출 것. ──
     /// <summary>

@@ -179,12 +179,13 @@ public class ReachTraversalTests
 
         var r = StationOptimizer.Optimize(m, Planes, space, seams, Normal, strokes, wallCode: "F");
 
-        // 지금 정차: 간섭 없음 2(여유 확보 1) — H03·H04 순회 막힘. 찾은 정차(거리 2.1 m·리프트 100): 4개 모두 순회, 여유 확보 3.
-        // 영역 오른쪽 끝 H04 는 여유 1.5° 에 그친다 — 한 정차로는 네 용접선 모두 10° 를 확보하지 못한다(영역 재분할 대상).
+        // 지금 정차: 간섭 없음 2(여유 확보 1) — H03·H04 순회 막힘. 찾은 정차(거리 2.0 m·리프트 100): 4개 모두 순회, 여유 확보 2.
+        // 양 끝 H01·H04 는 여유 1~3° 에 그친다 — 한 정차로는 네 용접선 모두 10° 를 확보하지 못한다(영역 재분할 대상).
+        // (손목 여유 5° 때는 여유 확보 3 이었다 — 10° 로 맞춘 뒤 끝 용접선 여유가 5° 줄었다.)
         Assert.Equal(2, r.Baseline.Clear);
         Assert.Equal(1, r.Baseline.SafeClear);
         Assert.Equal(4, r.Best.Clear);
-        Assert.Equal(3, r.Best.SafeClear);
+        Assert.Equal(2, r.Best.SafeClear);
         Assert.True(r.Best.TraverseMarginDeg > 0);
     }
 

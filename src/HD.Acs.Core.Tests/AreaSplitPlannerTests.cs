@@ -61,7 +61,7 @@ public class AreaSplitPlannerTests
             Assert.True(g.Best.TraverseMarginDeg >= Field.TraverseMarginTargetDeg, $"{g.Best.TraverseMarginDeg:0.0}");
         });
         // u 방향으로 자른다 — 한 묶음은 같은 열(두 줄)을 함께 갖는다.
-        Assert.Contains(p.Groups, g => g.Seams.SequenceEqual(new[] { 0, 4 }));
+        Assert.Contains(p.Groups, g => g.Seams.Contains(0) && g.Seams.Contains(4) && !g.Seams.Contains(3) && !g.Seams.Contains(7));
     }
 
     [Fact]
