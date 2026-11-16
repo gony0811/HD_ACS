@@ -683,6 +683,15 @@ public sealed class AcsApiClient : IAcsApiClient
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<LlmStatusDto>(ct) : null;
     }
 
+    public async Task<bool?> GetLiftEnabledAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/lift", ct);
+        if (!resp.IsSuccessStatusCode) return null;   // 구서버(404) — 사용으로 본다
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        return body.TryGetProperty("enabled", out var e) && e.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? e.GetBoolean() : null;
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {

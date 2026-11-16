@@ -56,6 +56,16 @@ public sealed record ReachRobotModel
     public double MountYawDeg { get; init; }
     public double StrokeMaxMm { get; init; } = 1000;
 
+    /// <summary>
+    /// 리프트 사용 여부 — false 면 리프트가 없는 것으로 본다: BASE 는 항상 <see cref="MountZMm"/>(스트로크 무시),
+    /// 리프트 기둥은 자기 간섭(차체 충돌 방지)·탱크 면 간섭 판정에서 빠진다. 설정 <c>Acs:Lift:Enabled</c>.
+    /// 리프트 후보 높이를 0 하나로 줄이는 것은 호출부(<see cref="StrokeMaxMm"/> = 0)의 몫이다.
+    /// </summary>
+    public bool LiftEnabled { get; init; } = true;
+
+    /// <summary>판정에 쓸 리프트 높이 — 리프트를 쓰지 않으면 0.</summary>
+    public double EffectiveStrokeMm(double strokeMm) => LiftEnabled ? strokeMm : 0;
+
     public double AmrFrontMm { get; init; } = 395;
     public double AmrRearMm { get; init; } = 365;
     public double AmrHalfWidthMm { get; init; } = 350;
@@ -412,7 +422,7 @@ public static partial class ReachSimulator
     {
         var frame = new BaseFrame(model, station, strokeMm, offsetForwardMm, offsetLeftMm);
         var body = Body(model, planes, frame);
-        var columnTop = frame.AmrToDrawing(0, 0, model.MountZMm + strokeMm);
+        var columnTop = frame.AmrToDrawing(0, 0, frame.BaseZMm);
         var start = seedJoints is null ? StartJoints(model, wallCode) : null;
         string? branchChange = null;
         ReachEntry? entry = null;
@@ -1060,7 +1070,7 @@ public static partial class ReachSimulator
             _oy = st.Y + (_sin * dF + _cos * dL) / 1000.0;
             _floor = st.FloorZ;
             _mc = Math.Cos(m.MountYawDeg * Math.PI / 180); _ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
-            BaseZMm = m.MountZMm + strokeMm;
+            BaseZMm = m.MountZMm + m.EffectiveStrokeMm(strokeMm);
         }
 
         public double[] AmrToDrawing(double x, double y, double z) =>
@@ -1168,7 +1178,7 @@ public static partial class ReachSimulator
         var self = SelfBoxes(m, f.BaseZMm);
         var segs = ArmSegments(m, fr);
         var core = segs[^1];
-        var parts = new[] { Column(m, planes, f) }
+        var parts = (m.LiftEnabled ? new[] { Column(m, planes, f) } : Array.Empty<ReachPart>())
             .Concat(segs[..^1].Select(s =>
                 WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f, s.NearColumn ? self[..2] : self)))
             .Concat(m.ToolBoxes.Select(t =>
@@ -1193,15 +1203,23 @@ public static partial class ReachSimulator
     /// <summary>차체 기준 상자(mm, x 전방·y 좌측·z 바닥 위).</summary>
     private readonly record struct SelfBox(string Name, double[] Min, double[] Max);
 
-    /// <summary>자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).</summary>
-    private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm) => new[]
+    /// <summary>
+    /// 자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).
+    /// 리프트를 쓰지 않으면(<see cref="ReachRobotModel.LiftEnabled"/> = false) 기둥은 빠진다.
+    /// </summary>
+    private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm)
     {
-        new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm }),
-        new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
-            new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm }),
-        new SelfBox("리프트 기둥", new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
-            new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
-    };
+        var body = new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm });
+        var tower = new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
+            new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm });
+        if (!m.LiftEnabled) return new[] { body, tower };
+        return new[]
+        {
+            body, tower,
+            new SelfBox("리프트 기둥", new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
+                new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
+        };
+    }
 
     /// <summary>리프트 기둥 — 사각 기둥 꼭짓점으로 탱크 면 여유를 잰다(그림은 반폭 반경 캡슐).</summary>
     private static ReachPart Column(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f)

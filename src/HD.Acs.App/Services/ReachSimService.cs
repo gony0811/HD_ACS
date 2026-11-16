@@ -124,6 +124,7 @@ public sealed partial class ReachSimService
             .Where(s => s.J is { Length: 6 })
             .ToDictionary(s => s.Code, s => s.J!, StringComparer.OrdinalIgnoreCase);
         var d = ReachRobotModel.Default;
+        var liftEnabled = LiftEnabledFrom(config);
         var stages = d.StageStandoffsMm.ToArray();
         stages[0] = config.GetValue("Acs:Reach:ApproachStandoffMm", stages[0]);
         var scanStandoff = config.GetValue("Acs:Reach:ScanStandoffMm", stages[0]);   // 없으면 ② 접근 이격(점1 Top = ② 접근점)
@@ -133,6 +134,10 @@ public sealed partial class ReachSimService
             // 링크 치수 [d1,a2,a3,d4,d5,d6] — 장비 컨트롤러의 DH 보정값(HD_AMR cobot.kinematics.linksMm 와 같은 값). 없거나 잘못되면 공칭
             Kinematics = Fr5Kinematics.FromLinks(config.GetSection("Acs:Reach:LinksMm").Get<double[]>()).Kinematics,
             MountYawDeg = config.GetValue("Acs:Reach:MountYawDeg", 0.0),
+            // 리프트를 쓰지 않으면 후보 높이는 0 하나(StrokeMaxMm 0 → 조사·최적화·보고서·지도 모두 0 으로 고정)이고,
+            // 리프트 기둥은 차체 충돌 방지(자기 간섭)·면 간섭 판정에서 빠진다
+            LiftEnabled = liftEnabled,
+            StrokeMaxMm = liftEnabled ? d.StrokeMaxMm : 0,
             ToolZMm = config.GetValue("Acs:Reach:ToolZMm", d.ToolZMm),
             StageStandoffsMm = stages,
             PlanarRetreatMm = config.GetValue("Acs:Reach:PlanarRetreatMm", d.PlanarRetreatMm),
@@ -164,6 +169,12 @@ public sealed partial class ReachSimService
                 config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Max,
         };
     }
+
+    /// <summary>
+    /// 리프트 사용 여부 — 설정 <c>Acs:Lift:Enabled</c>(기본 true). HD_AMR 에서 리프트를 끈(<c>Telescopic:Enabled = false</c>) AMR 이면
+    /// false 로 둔다: 지령의 <c>liftStrokeMm</c> 은 항상 0, 정차 시뮬레이션·최적화는 리프트 0 만, 리프트 기둥은 간섭 판정에서 제외.
+    /// </summary>
+    public static bool LiftEnabledFrom(IConfiguration? config) => config?.GetValue("Acs:Lift:Enabled", true) ?? true;
 
     /// <summary>손목 여유 설정 — 0 초과 90 미만만 받는다(밖이면 기본값).</summary>
     private static double WristMarginFrom(double? v, double fallback) =>
@@ -203,7 +214,7 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin, double? strokeMm = null, bool areaLift = false)
     {
-        var strokes = strokeMm is { } fixedStroke ? new[] { fixedStroke } : Strokes;
+        var strokes = strokeMm is { } fixedStroke ? new[] { Math.Clamp(fixedStroke, 0, _model.StrokeMaxMm) } : Strokes;
         _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
@@ -386,7 +397,7 @@ public sealed partial class ReachSimService
             if (tasks.Count == 0 || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) continue;
             var setup = Setup(ctx, a, wall);
             var saved = setup.Stations[0];
-            var savedLift = a.StationLiftMm ?? 0.0;
+            var savedLift = Math.Clamp(a.StationLiftMm ?? 0.0, 0, _model.StrokeMaxMm);   // 리프트를 쓰지 않으면 0
             if (SearchSpace(a, wall, setup) is not { } space)
             {
                 list.Add(new RepairStop(a.AreaId, a.Name, saved.X, saved.Y, saved.Yaw, savedLift, false, tasks.Count, 0, 0, 0, 0, 0,
@@ -441,7 +452,7 @@ public sealed partial class ReachSimService
         if (r is null) return null;
         var p = r.Pick;
         return new NearestStop(a.AreaId, a.Name, Math.Round(p.Station.X, 3), Math.Round(p.Station.Y, 3), Math.Round(p.Station.Yaw, 4),
-            p.StrokeMm ?? a.StationLiftMm ?? 0.0, r.Full, Math.Round(r.TravelM, 3), Math.Round(r.BaselineTravelM, 3),
+            Math.Clamp(p.StrokeMm ?? a.StationLiftMm ?? 0.0, 0, _model.StrokeMaxMm), r.Full, Math.Round(r.TravelM, 3), Math.Round(r.BaselineTravelM, 3),
             r.Evaluated, sw.ElapsedMilliseconds);
     }
 

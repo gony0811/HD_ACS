@@ -947,7 +947,9 @@ app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext 
 });
 
 // ── 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기, DB 무변경) → 운영자 승인 → 적용(전부 또는 전무) ──
-app.MapGet("/api/integrations/llm", async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
+// 리프트 사용 여부(Acs:Lift:Enabled) — UI 가 영역 폼 리프트 칸을 끌지 정한다
+app.MapGet("/api/settings/lift", (IConfiguration cfg) => Results.Ok(new { enabled = ReachSimService.LiftEnabledFrom(cfg) }));
+app.MapGet("/api/integrations/llm",async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
 
 app.MapPost("/api/planning/assistant/propose", async (ProposeRequest req, PlanningAssistantService svc, CancellationToken ct) =>
     await PlanningCall(() => svc.ProposeAsync(req, ct)));

@@ -184,6 +184,8 @@ public interface IAcsApiClient
     Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default) =>
         throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
     Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
+    /// <summary>서버 리프트 사용 여부(<c>Acs:Lift:Enabled</c>). null = 모름(구서버) — 호출 측은 사용으로 본다.</summary>
+    Task<bool?> GetLiftEnabledAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 
     // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] — mapId당 1곳, 운영자 수동 디스패치 ──
     Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default) =>

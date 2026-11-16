@@ -163,6 +163,30 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 리프트를_쓰지_않으면_기둥은_간섭_판정에서_빠지고_스트로크는_무시된다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var noLift = Symmetric175 with { LiftEnabled = false };
+
+        // 리프트 기둥에 닿던 elbow-down 자세 — 리프트를 끄면 부품 목록에도, 간섭 대상에도 기둥이 없다
+        var r = ReachSimulator.Evaluate(noLift, planes, st, sm.To3D(12, v), sm.Normal, 300);
+        var parts = r.Stages[2].Chosen!.Parts;
+        Assert.DoesNotContain(parts, p => p.Name == "리프트 기둥");
+        Assert.DoesNotContain(parts, p => p.NearestPlane == "리프트 기둥");
+
+        // 스트로크를 줘도 BASE 는 리프트 0 높이(MountZMm) — 같은 판정
+        var r0 = ReachSimulator.Evaluate(noLift, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(floor + noLift.MountZMm / 1000.0, r.ColumnTop[2], 9);
+        Assert.Equal(r0.Stages[2].Chosen!.JointsDeg, r.Stages[2].Chosen!.JointsDeg);
+
+        // 자기 간섭 — 같은 관절각에서 기둥을 빼면 기둥 상대 값은 나오지 않는다
+        var j = r.Stages[2].Chosen!.JointsDeg;
+        Assert.NotEqual("리프트 기둥", ReachSimulator.SelfClearance(noLift, noLift.MountZMm, j).Obstacle);
+    }
+
+    [Fact]
     public void 관절_한계는_FR5_WML_사양_비대칭이다()
     {
         var m = ReachRobotModel.Default;

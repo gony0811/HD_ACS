@@ -29,6 +29,11 @@ public sealed class InspectionDispatcher
     private readonly RobotErrorTracker _tracker;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
+    /// <summary>리프트 사용 여부(<c>Acs:Lift:Enabled</c>) — false 면 모든 지령의 <c>liftStrokeMm</c> 은 0(영역 저장값·최적화 결과 무시).</summary>
+    private readonly bool _liftEnabled;
+
+    /// <summary>지령에 실을 리프트 높이 — 리프트를 쓰지 않으면 항상 0.</summary>
+    private double LiftForOrder(double? liftMm) => _liftEnabled ? liftMm ?? 0.0 : 0.0;
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
@@ -45,6 +50,7 @@ public sealed class InspectionDispatcher
             InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true),
             RobustYawDeg: config.GetValue("Acs:Dispatch:NearestStation:RobustYawDeg", 3.0));
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
+        _liftEnabled = ReachSimService.LiftEnabledFrom(config);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         // 검사 종류별 지령 만들기 — 가스검사 등 새 종류는 여기에 구현을 더한다
@@ -418,7 +424,7 @@ public sealed class InspectionDispatcher
         var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
         // 리페어 정차 최적화 결과 — 이 run의 이 정차에만 쓴다(영역에 저장된 정차는 그대로)
         if (ov is not null) (stationDx, stationDy, stationYaw) = (ov.X, ov.Y, ov.Yaw);
-        var liftMm = ov?.LiftMm ?? area.StationLiftMm ?? 0.0;
+        var liftMm = LiftForOrder(ov?.LiftMm ?? area.StationLiftMm);
         var (mx, my) = tWd.DrawingToMap(stationDx, stationDy);
         double? mTheta = stationYaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 
@@ -693,6 +699,8 @@ public sealed class InspectionDispatcher
             prm["attempt"] = attempt;
             if (o["liftFixed"]?.GetValue<bool>() != true)   // 리페어 정차 최적화가 고른 리프트는 영역 저장값으로 덮지 않는다
                 prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
+            // 리프트를 쓰지 않으면 큐 전개 이후 설정이 바뀐 run 까지 포함해 발행 직전에 0 으로 고정한다
+            if (!_liftEnabled) prm["liftStrokeMm"] = 0.0;
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction
@@ -789,7 +797,7 @@ public sealed class InspectionDispatcher
         var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
 
         // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
-        var liftStrokeMm = area.StationLiftMm ?? 0.0;
+        var liftStrokeMm = LiftForOrder(area.StationLiftMm);   // 리프트를 쓰지 않으면 0
         var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm);
 
         _db.AuditLogs.Add(new AuditLogEntity
