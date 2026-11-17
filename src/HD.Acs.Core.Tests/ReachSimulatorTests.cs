@@ -187,6 +187,22 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 나무판_두께만큼_차체와_BASE가_올라가고_장착높이가_같으면_판정도_같다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var board = Symmetric175 with { LiftEnabled = false, MountZMm = 927, AmrFloorOffsetMm = 110 };
+        var direct = Symmetric175 with { LiftEnabled = false, MountZMm = 1037 };
+
+        var rb = ReachSimulator.Evaluate(board, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var rd = ReachSimulator.Evaluate(direct, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(floor + 1.037, rb.ColumnTop[2], 9);                       // BASE = 층 바닥 + 110 + 927
+        var (jb, jd) = (rb.Stages[2].Chosen!.JointsDeg, rd.Stages[2].Chosen!.JointsDeg);   // BASE 가 같으면 관절각도 같다
+        for (var i = 0; i < 6; i++) Assert.Equal(jd[i], jb[i], 6);
+    }
+
+    [Fact]
     public void 관절_한계는_FR5_WML_사양_비대칭이다()
     {
         var m = ReachRobotModel.Default;

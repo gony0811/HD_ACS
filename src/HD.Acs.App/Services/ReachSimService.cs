@@ -160,6 +160,9 @@ public sealed partial class ReachSimService
             // 링크 치수 [d1,a2,a3,d4,d5,d6] — 장비 컨트롤러의 DH 보정값(HD_AMR cobot.kinematics.linksMm 와 같은 값). 없거나 잘못되면 공칭
             Kinematics = Fr5Kinematics.FromLinks(config.GetSection("Acs:Reach:LinksMm").Get<double[]>()).Kinematics,
             MountYawDeg = config.GetValue("Acs:Reach:MountYawDeg", 0.0),
+            // 코봇 BASE 높이(차체 바닥 기준)·차체가 층 바닥보다 올라간 높이(나무판 등) — 범위 밖이면 기본값
+            MountZMm = MountZFrom(config.GetValue<double?>("Acs:Reach:MountZMm"), d.MountZMm),
+            AmrFloorOffsetMm = FloorOffsetFrom(config.GetValue<double?>("Acs:Reach:AmrFloorOffsetMm")),
             // 리프트를 쓰지 않으면 후보 높이는 0 하나(StrokeMaxMm 0 → 조사·최적화·보고서·지도 모두 0 으로 고정)이고,
             // 리프트 기둥은 차체 충돌 방지(자기 간섭)·면 간섭 판정에서 빠진다
             LiftEnabled = liftEnabled,
@@ -280,6 +283,14 @@ public sealed partial class ReachSimService
     /// false 로 둔다: 지령의 <c>liftStrokeMm</c> 은 항상 0, 정차 시뮬레이션·최적화는 리프트 0 만, 리프트 기둥은 간섭 판정에서 제외.
     /// </summary>
     public static bool LiftEnabledFrom(IConfiguration? config) => config?.GetValue("Acs:Lift:Enabled", true) ?? true;
+
+    /// <summary>코봇 BASE 높이 설정 [mm] — 300~3000 만 받는다(밖이면 기본값).</summary>
+    public static double MountZFrom(double? v, double fallback) =>
+        v is { } x && double.IsFinite(x) && x >= 300 && x <= 3000 ? x : fallback;
+
+    /// <summary>차체 바닥 올림(나무판 등) 설정 [mm] — 0~500 만 받는다(밖이면 0).</summary>
+    public static double FloorOffsetFrom(double? v) =>
+        v is { } x && double.IsFinite(x) && x >= 0 && x <= 500 ? x : 0;
 
     /// <summary>손목 여유 설정 — 0 초과 90 미만만 받는다(밖이면 기본값).</summary>
     private static double WristMarginFrom(double? v, double fallback) =>
