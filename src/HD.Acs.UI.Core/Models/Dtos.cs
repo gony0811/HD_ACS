@@ -322,6 +322,14 @@ public sealed record AreaTaskDto(
 /// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>
 public sealed record CrossPreviewResult(string SeamType, double[][]? Points, double SnapResidualDeg, bool FrameOk);
 
+/// <summary>CROSS4 정면 좌우 판정 1건 [VDA §8.2 · 1.22]. After = 정한 값(null = 판정 불가, Reason 에 사유).</summary>
+public sealed record Cross4SideRowDto(Guid TaskId, Guid AreaId, string AreaName, string WallCode, int Level, int Seq, string? Name,
+    string Before, string? After, bool Changed, string? StartToEnd, string? Reason);
+
+/// <summary>CROSS4 정면 좌우 판정 요약 — Applied = 서버가 저장했는가.</summary>
+public sealed record Cross4SideResultDto(string TankId, bool Applied, int Total, int Left, int Right, int Undecided, int Changed,
+    IReadOnlyList<Cross4SideRowDto> Rows);
+
 /// <summary>코봇 seam 시작점 이동 시험 응답 [VDA §8 moveToSeamStart] — 발행된 Order·정차점·seam 시작 맵좌표.</summary>
 public sealed record SeamStartTestResultDto(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[]? SeamStartW,
     double? LiftStrokeMm = null,    // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
