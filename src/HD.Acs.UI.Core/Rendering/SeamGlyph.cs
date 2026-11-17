@@ -40,7 +40,7 @@ public static class SeamGlyph
     {
         var st = (seamType ?? "").Trim().ToUpperInvariant();
         if (st.StartsWith("CROSS3", StringComparison.Ordinal)) return SeamKind.Cross3;
-        if (st is "CROSS4" or "CROSS") return SeamKind.Cross4;   // CROSS = legacy 별칭(서버가 CROSS4로 정규화)
+        if (st is "CROSS4" or "CROSS4_L" or "CROSS4_R" or "CROSS") return SeamKind.Cross4;   // CROSS = legacy 별칭(서버가 CROSS4로 정규화)
         return SeamKind.Line;
     }
 
@@ -61,6 +61,14 @@ public static class SeamGlyph
         return i >= 0 && i + 1 < st.Length ? st[(i + 1)..] : "R0";
     }
 
+    /// <summary>CROSS4 정면 좌우 표기 — CROSS4_L="L", CROSS4_R="R", 그 외(접미 없음 포함) "".</summary>
+    public static string Cross4SideLabel(string? seamType) => (seamType ?? "").Trim().ToUpperInvariant() switch
+    {
+        "CROSS4_L" => "L",
+        "CROSS4_R" => "R",
+        _ => "",
+    };
+
     /// <summary>
     /// 전개도 화면에서의 방향 화살표 — 면-로컬 (du,dv) 기준(전개도는 u=오른쪽·v=위쪽).
     /// 가장 가까운 상하좌우로 스냅, 길이 0이면 "".
@@ -80,7 +88,7 @@ public static class SeamGlyph
         var kind = KindOf(t.SeamType);
         string seq = t.Seq.ToString();
         if (kind == SeamKind.Line) return seq;
-        string head = seq + (kind == SeamKind.Cross3 ? "T" : "+");
+        string head = seq + (kind == SeamKind.Cross3 ? "T" : "+" + Cross4SideLabel(t.SeamType));
         if (!HasArms(kind, t.Points)) return head + (style == BadgeStyle.Full ? " 가지 미지정" : " ?");
         if (kind == SeamKind.Cross4) return head;
 

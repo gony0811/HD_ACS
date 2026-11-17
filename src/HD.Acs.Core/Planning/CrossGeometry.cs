@@ -89,7 +89,7 @@ public static class CrossGeometry
         if (armsAcs is null || armsAcs.Count == 0) return null;
         var st = (seamType ?? "").Trim().ToUpperInvariant();
         bool isCross3 = st.StartsWith("CROSS3", StringComparison.Ordinal);
-        bool isCross4 = st is "CROSS4" or "CROSS";
+        bool isCross4 = Cross4Side.IsCross4(st);
         if (!isCross3 && !isCross4) return null;
 
         var frame = AmrFaceFrame.FromNormal(normal);

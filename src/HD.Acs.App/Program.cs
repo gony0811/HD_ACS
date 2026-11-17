@@ -62,6 +62,7 @@ builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
+builder.Services.AddScoped<Cross4SideService>();   // CROSS4 정면 좌우(CROSS4_L/R) 판정·적용 [VDA §8.2 · 1.22]
 builder.Services.AddScoped<TankRenameService>();   // 선창 ID 변경(형상·면·영역·시나리오·층 맵을 한 트랜잭션으로)
 builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
@@ -455,6 +456,15 @@ app.MapPost("/api/tanks/{tankId}/rename", async (string tankId, RenameTankReques
     catch (TankRenameService.InvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (TankRenameService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (TankRenameService.ConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+});
+
+// CROSS4 작업의 정면 좌우(CROSS4_L / CROSS4_R) 판정 [VDA §8.2 · 1.22] — apply=false(기본) = 미리보기, true = 바뀐 작업 저장.
+// overwrite=true 면 이미 L/R 인 작업도 다시 정한다. 정하지 못한 작업은 그대로(사유 표시).
+app.MapPost("/api/tanks/{tankId}/cross4-sides", async (string tankId, bool? apply, bool? overwrite, string? userId,
+    Cross4SideService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.ClassifyAsync(tankId, apply ?? false, overwrite ?? false, userId, ct)); }
+    catch (Cross4SideService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
 });
 
 // ── 선창 형상 조회 — 같은 데이터를 두 규약으로 제공한다 ──

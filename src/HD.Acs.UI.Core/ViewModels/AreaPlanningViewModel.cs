@@ -224,7 +224,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // CROSS3*/CROSS4/CORNER* 는 HD_AMR 실행 게이트 OFF([협의 N13])라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
     // ⚠️ CROSS3/4 는 시작·끝점 2점만으로 교차 형상을 정의할 수 없다 — 교차 중심+가지 입력은 후속(제안: 데이터 모델 points 확장).
     public IReadOnlyList<string> SeamTypes { get; } =
-        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3" };
+        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3" };
     [ObservableProperty] private string _selectedSeamType = "LINE";
 
     // ── CROSS3/4 교차 그리기 [VDA §8.5.1, N13] — 중심+가지 클릭, 회전은 서버가 자동 유도·표시 ──
@@ -858,6 +858,42 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     }
 
     partial void OnTankIdChanged(string value) => RenameTankCommand.NotifyCanExecuteChanged();
+
+    /// <summary>
+    /// CROSS4 정면 좌우 자동 판정 [VDA §8.2 · 1.22] — 선창의 접미 없는 CROSS4 작업에 CROSS4_L/R 을 정한다.
+    /// 서버가 먼저 미리보기로 계산하고, 확인하면 적용한다. 정하지 못한 작업(세로·바닥/천장·가지를 그린 교차 등)은 그대로 —
+    /// 작업 목록에서 유형을 직접 고른다.
+    /// </summary>
+    [RelayCommand]
+    private async Task ClassifyCross4SidesAsync()
+    {
+        try
+        {
+            var preview = await _api.ClassifyCross4SidesAsync(TankId, apply: false, _operatorId);
+            if (preview is null) { StatusMessage = "CROSS4 좌우 판정: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
+            if (preview.Total == 0) { StatusMessage = "CROSS4 좌우 판정: 좌우가 정해지지 않은 CROSS4 작업이 없습니다."; return; }
+            var undecided = preview.Rows.Where(r => r.After is null)
+                .GroupBy(r => r.Reason ?? "").Select(g => $"  · {g.Key} {g.Count()}개");
+            if (preview.Changed == 0)
+            {
+                StatusMessage = $"CROSS4 좌우 판정: 정할 수 있는 작업이 없습니다(판정 불가 {preview.Undecided}개).";
+                return;
+            }
+            if (ConfirmAsync is not null && !await ConfirmAsync(
+                    $"CROSS4 작업 {preview.Total}개 중 {preview.Changed}개의 유형을 정면 기준 좌우로 바꿉니다.\n" +
+                    $"  CROSS4_L {preview.Left}개 · CROSS4_R {preview.Right}개 · 판정 불가 {preview.Undecided}개\n" +
+                    (preview.Undecided > 0 ? string.Join("\n", undecided) + "\n" : "") +
+                    "\n기준: 면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 L, 오른쪽에 있으면 R.\n" +
+                    "판정 불가 작업은 그대로 둡니다(작업 목록에서 직접 고르세요). 변경 뒤 [파일 ▸ 저장]을 하세요.\n\n계속하시겠습니까?",
+                    "CROSS4 좌우 판정"))
+                return;
+            var r = await _api.ClassifyCross4SidesAsync(TankId, apply: true, _operatorId);
+            StatusMessage = r is null ? "CROSS4 좌우 판정 실패: 서버 응답 없음"
+                : $"CROSS4 좌우 적용: L {r.Left} · R {r.Right} · 판정 불가 {r.Undecided} (변경 {r.Changed}개) — [파일 ▸ 저장]으로 반영하세요.";
+            await RefreshAreasAsync();
+        }
+        catch (Exception ex) { StatusMessage = $"CROSS4 좌우 판정 실패: {ex.Message}"; }
+    }
 
     private async Task RefreshAreasAsync(Guid? select = null)
     {

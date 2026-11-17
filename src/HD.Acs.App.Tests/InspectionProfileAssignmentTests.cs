@@ -55,6 +55,22 @@ public class InspectionProfileAssignmentTests
         Assert.Equal(1, await db.InspectionProfileAssignments.CountAsync());
     }
 
+    /// <summary>CROSS4_L·CROSS4_R [VDA 1.22] — 그 이름의 지정이 있으면 그것, 없으면 접미 없는 CROSS4 지정으로.</summary>
+    [Fact]
+    public async Task CROSS4_좌우는_자기_지정을_먼저_없으면_CROSS4_지정을_쓴다()
+    {
+        var db = NewDb();
+        await InspectionProfileService.SyncAsync(db, Req(new[]
+        {
+            new ProfileAssignment("CROSS4", "F", "H", 9), new ProfileAssignment("CROSS4_L", "F", "H", 18),
+        }, Line, Cross));
+        var profileOf = await InspectionProfileService.LoadSeamProfilesAsync(db);
+        Assert.Equal("LINE-A", profileOf("CROSS4_L", "F", "H")?.Name);    // 자기 지정
+        Assert.Equal("CROSS-A", profileOf("cross4_r", "F", "H")?.Name);   // 지정 없음 → CROSS4
+        Assert.Equal("CROSS-A", profileOf("CROSS4", "F", "H")?.Name);
+        Assert.Null(profileOf("CROSS4_R", "A", "H"));                      // 그 면엔 CROSS4 지정도 없음
+    }
+
     [Theory]
     [InlineData("LINE", "F", "X")]    // 방향이 H·V 가 아님
     [InlineData("LINE", " ", "H")]    // 면 없음

@@ -580,6 +580,15 @@ public sealed class AcsApiClient : IAcsApiClient
         return true;
     }
 
+    public async Task<Cross4SideResultDto?> ClassifyCross4SidesAsync(string tankId, bool apply, string userId, CancellationToken ct = default)
+    {
+        var url = $"/api/tanks/{Uri.EscapeDataString(tankId)}/cross4-sides?apply={(apply ? "true" : "false")}&userId={Uri.EscapeDataString(userId)}";
+        var resp = await _http.PostAsync(url, null, ct);
+        if (IsUnsupportedRoute(resp) && (resp.Content.Headers.ContentLength ?? 0) == 0) return null;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<Cross4SideResultDto>(ct);
+    }
+
     public async Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync("/api/area-tasks/enabled", new { TaskIds = taskIds, Enabled = enabled, UserId = userId }, ct);
