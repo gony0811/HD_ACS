@@ -57,7 +57,44 @@ public class SeamStartTestTests
         Assert.Contains(act.ActionParameters, p => p.Key == "position");
         // 리프트 미지정 → 본검사와 같은 기본 0
         Assert.Equal(0.0, LiftOf(act));
+        // taskId 미지정 → params 에 싣지 않는다
+        Assert.Null(ParamsOf(act)["taskId"]);
     }
+
+    // 시험 Order 에도 대상 용접선 taskId 를 params.taskId 로 싣는다 — 본검사와 같은 표기(Guid.ToString), 스키마 통과.
+    [Fact]
+    public void BuildSeamStartTestOrder_CarriesTaskId_AndPassesSchema()
+    {
+        var taskId = Guid.Parse("8e9b34ae-0625-5779-9c1d-2f0a6b3e4d51");
+        var position = new JsonObject
+        {
+            ["seamStartW"] = new JsonArray(12.5, 5.98, 1.42),
+            ["seamEndW"] = new JsonArray(13.3, 5.98, 1.42),
+            ["drawingPos"] = new JsonObject
+            {
+                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "SM",
+                ["u"] = 5.0, ["v"] = 1.6, ["x"] = 1.0, ["y"] = 2.0, ["z"] = 3.0,
+            },
+        };
+        var order = InspectionDispatcher.BuildSeamStartTestOrder("CT1-L2", 12.482, 5.117, 1.571, position,
+            $"TEST-SEAM-{taskId}", 0.08, 0.07, 300, taskId);
+        var act = Assert.Single(Assert.Single(order.Nodes).Actions);
+        Assert.Equal("8e9b34ae-0625-5779-9c1d-2f0a6b3e4d51", ParamsOf(act)["taskId"]!.GetValue<string>());
+        Assert.Equal(300.0, LiftOf(act));
+
+        var asObject = new JsonObject();
+        foreach (var p in act.ActionParameters)
+            asObject[p.Key] = JsonNode.Parse(JsonSerializer.Serialize(p.Value));
+        Assert.Empty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+
+        // 문자열이 아닌 taskId 는 스키마가 거부(format: uuid 는 검증기 기본값상 주석 — 본검사 taskId 와 같은 조건;
+        // uuid 형식 검사는 AMR·시뮬레이터 파서가 한다)
+        asObject["params"] = new JsonObject { ["liftStrokeMm"] = 0, ["taskId"] = 123 };
+        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+    }
+
+    private static JsonObject ParamsOf(VdaAction act) =>
+        JsonNode.Parse(JsonSerializer.Serialize(act.ActionParameters.Single(p => p.Key == "params").Value))!.AsObject();
 
     // 시험 Order 에도 영역 리프트 높이를 params.liftStrokeMm 으로 싣고, 카탈로그 param_schema 를 통과한다.
     [Fact]

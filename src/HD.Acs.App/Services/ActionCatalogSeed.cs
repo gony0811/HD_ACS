@@ -98,7 +98,8 @@ public static class ActionCatalogSeed
 
     // moveToSeamStart param_schema (JSON Schema draft-07) — VDA5050_INTERFACE_SPEC §8 (코봇 seam 시작점 이동 시험).
     // position 서브스키마는 startWeldInspection과 동일(seamStartW/seamEndW/drawingPos). 촬영 파라미터는 없고,
-    // params 에는 영역 리프트 높이(liftStrokeMm — 본검사와 같은 값)만 싣는다. params 는 선택(구 발행분 호환).
+    // params 에는 영역 리프트 높이(liftStrokeMm — 본검사와 같은 값)와 대상 용접선 taskId(본검사와 같은 표기)를 싣는다.
+    // params·taskId 는 선택(구 발행분 호환).
     public const string MoveToSeamStartParamSchema = """
     {
       "type": "object",
@@ -108,7 +109,8 @@ public static class ActionCatalogSeed
         "params": {
           "type": "object",
           "properties": {
-            "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+            "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+            "taskId":       { "type": "string", "format": "uuid" }
           }
         },
         "position": {

@@ -63,8 +63,9 @@ AMR은 **정차 지점으로 주행한 뒤 코봇툴을 seam 시작점까지만 
 | `drawingPos` | object | 도면 좌표 echo — `tank`·`level`·`wall_code`·`u`·`v`·`x`·`y`·`z`. **`wall_code`가 티칭 자세 선택 키**(10면: `B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`). |
 
 | `params.liftStrokeMm` | number | **(2026-11-09 추가, 사양서 1.14)** 정차 리프트(텔레스코픽) 높이 [mm, 0~1000] — 본검사 `startWeldInspection` 과 **같은 영역 리프트 높이**(정차점 최적화 결과). 저장값이 없으면 `0`. **코봇 이동 전에 리프트를 이 높이로 맞춘다** — 그래야 시험이 운영 자세와 같은 조건이 된다. `params` 가 없는 구 발행분은 `0` 으로 본다. |
+| `params.taskId` | string(uuid) | **(2026-11-17 추가, 사양서 1.20, 선택)** 대상 용접선의 taskId — 본검사 `startWeldInspection` 의 `params.taskId` 와 **같은 표기**(ACS 내부 uuid 문자열). `jobRef` 의 `TEST-SEAM-` 뒤와 같은 값이며, 이제 잘라 읽지 않고 이 필드를 쓰면 된다. 없으면(구 발행분) `jobRef` 에서 읽는다. 실려 왔는데 uuid 가 아니면 형식 오류. |
 
-> **`params` 에는 `liftStrokeMm` 하나뿐이다.** `seamType`·`inspectionProfileId`·`standoffMm`·`taskId`·`attempt`·`anchorGroupId`·`stationAdjust` 등 **검사용 파라미터를 보내지 않는다** —
+> **`params` 에는 `liftStrokeMm`·`taskId` 뿐이다.** `seamType`·`inspectionProfileId`·`standoffMm`·`attempt`·`anchorGroupId`·`stationAdjust` 등 **검사용 파라미터를 보내지 않는다** —
 > 이 액션은 검사가 아니라 reach 이동 시험이기 때문이다. `wallNormalW`도 보내지 않는다(툴 자세는 `wall_code` 티칭으로 결정, §8.1과 동일).
 
 ### 3.3 param_schema (ACS가 발행 직전 자체 검증 — 참고)
@@ -77,7 +78,10 @@ AMR은 **정차 지점으로 주행한 뒤 코봇툴을 seam 시작점까지만 
     "jobRef": { "type": "string" },
     "params": {
       "type": "object",
-      "properties": { "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 } }
+      "properties": {
+        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "taskId":       { "type": "string", "format": "uuid" }
+      }
     },
     "position": {
       "type": "object",
@@ -101,7 +105,7 @@ AMR은 **정차 지점으로 주행한 뒤 코봇툴을 seam 시작점까지만 
 
 | # | 단계 | 요건 |
 |---|---|---|
-| 1 | 액션 파싱 | `actionType == "moveToSeamStart"` 분기. `jobRef`·`position.seamStartW`·`position.drawingPos.wall_code`·`params.liftStrokeMm`(없으면 0) 추출. 형식 오류 시 액션 `FAILED` + `errors`(`orderValidationError`). |
+| 1 | 액션 파싱 | `actionType == "moveToSeamStart"` 분기. `jobRef`·`position.seamStartW`·`position.drawingPos.wall_code`·`params.liftStrokeMm`(없으면 0)·`params.taskId`(없으면 `jobRef` 에서) 추출. 형식 오류 시 액션 `FAILED` + `errors`(`orderValidationError`). |
 | 2 | 주행 | 노드 `nodePosition`으로 주행 — **일반 검사 주행과 동일**(TARS-M `/robot/go`, `stopFlag:true`). |
 | 3 | 코봇 이동 | 도달 후 **리프트를 `params.liftStrokeMm` 높이로 맞추고**, **코봇툴을 `position.seamStartW`(맵 좌표)로 이동**. 툴 자세는 `wall_code` 티칭. **`startWeldInspection`의 접근 단계(①~④ 수준)만 재사용** — 그 이상 진행하지 않는다. |
 | 4 | **정지** | seam 시작점 도달 후 **정지**. **촬영·측정·`CAPTURE_REQ`·스캔 패턴·자세 시퀀스 없음.** 코봇 홈 복귀 여부는 온보드 판단(안전 우선). |
@@ -110,7 +114,7 @@ AMR은 **정차 지점으로 주행한 뒤 코봇툴을 seam 시작점까지만 
 
 **핵심 차이 (startWeldInspection 대비):**
 - 같은 `position`(seamStartW·wall_code)을 쓰되 **접근까지만, 촬영 없음**.
-- `params` 는 `liftStrokeMm`(본검사와 같은 리프트 높이)만 — seamType/profile/taskId/attempt/anchorGroup **없음** — 앵커 공유·attempt 관통 로직 **불필요**.
+- `params` 는 `liftStrokeMm`(본검사와 같은 리프트 높이)·`taskId`(대상 용접선 식별용)만 — seamType/profile/attempt/anchorGroup **없음** — 앵커 공유·attempt 관통 로직 **불필요**.
 - 완료 판정은 **도달 성공/실패**뿐(검사 결과 아님).
 
 > 구현 재사용 힌트: 본검사 시퀀스에서 "정렬 → seam 접근" 까지의 스텝을 분리해 재사용하고, 그 뒤 촬영 스텝을 건너뛰고 종결하면 된다.
@@ -141,7 +145,8 @@ AMR은 **정차 지점으로 주행한 뒤 코봇툴을 seam 시작점까지만 
                 "seamEndW":   [13.310, 5.980, 1.420],
                 "drawingPos": { "tank": "CT1", "level": 2, "wall_code": "SM",
                                 "u": 3.120, "v": 1.420, "x": 3.120, "y": 0.0, "z": 4.620 } } },
-            { "key": "params", "value": { "liftStrokeMm": 100 } }
+            { "key": "params", "value": { "liftStrokeMm": 100,
+                                          "taskId": "3a9f2c14-8e51-4d7a-b2c9-1f6e0a5d3b47" } }
           ]
         }
       ]

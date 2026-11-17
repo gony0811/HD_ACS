@@ -422,18 +422,36 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         string lift = "없음";
+        string seamTask = "-";
+        bool badTask = false;
         try
         {
             var prmParam = action.ActionParameters.FirstOrDefault(p => p.Key == "params");
-            if (prmParam?.Value is not null
-                && System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prmParam.Value))?["liftStrokeMm"] is { } ln)
+            var prmNode = prmParam?.Value is null ? null
+                : System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prmParam.Value));
+            if (prmNode?["liftStrokeMm"] is { } ln)
                 lift = $"{ln.GetValue<double>():0}mm";
+            // params.taskId — 선택 필드, 실려 왔다면 uuid 여야 한다(본검사와 같은 규칙)
+            if (prmNode?["taskId"] is { } tk)
+            {
+                var ts = tk.GetValueKind() == System.Text.Json.JsonValueKind.String ? tk.GetValue<string>() : null;
+                if (ts is not null && Guid.TryParse(ts, out _)) seamTask = ts; else badTask = true;
+            }
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         await Task.Delay(fullMs);
-        actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift}";
-        Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift}");
+        if (badTask)
+        {
+            actionState.ActionStatus = "FAILED";
+            actionState.ResultDescription = "PARAM;moveToSeamStart;params.taskId";
+            Console.WriteLine("[SIM]   코봇 seam 시작점 이동 시험 실패 — params.taskId 형식 오류");
+        }
+        else
+        {
+            actionState.ActionStatus = "FINISHED";
+            actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift};task={seamTask}";
+            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift} task={seamTask}");
+        }
     }
     else
     {

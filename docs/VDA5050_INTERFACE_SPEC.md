@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.19** |
-| 작성일 | 2026-08-27 (최종 개정 2026-11-14) |
+| 문서 버전 | **1.20** |
+| 작성일 | 2026-08-27 (최종 개정 2026-11-17) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
@@ -24,6 +24,7 @@
 | 개정 1.14 | 2026-11-09 — **정차 리프트 높이 `params.liftStrokeMm` 명문화**(§8.1·§8.7). 정차점 최적화로 찾은 영역 공통 리프트 높이(0~1000 mm, 미지정 0)를 `startWeldInspection` 의 모든 액션에 싣는 것(ACS 구현 2026-11-04)을 표에 반영하고, **시험 액션 `moveToSeamStart` 에도 같은 값을 `params.liftStrokeMm` 으로 싣는다**(종전엔 `params` 없음 → 시험이 리프트 없이 수행돼 운영 자세와 달랐다). 선택 필드라 하위 호환(부재 = 0). HD_AMR 쪽 리프트 구동 반영 여부는 확인 필요 |
 | 개정 1.18 | 2026-11-14 — **선창 이름은 ACS 가 정하고 AMR 은 층만 정의** `[N24]`: §4.3 에 규칙 추가 — AMR 은 `nodePosition.mapId` 의 층 번호만 자기 층과 비교(선창 이름 부분 비교 안 함), 층이 맞는 Order 의 선창 이름을 받아 저장하고 state 로 되돌려 보고, ACS 는 등록되지 않은 보고값을 층 번호로 맞춘다. ACS 에 선창 ID 변경(`POST /api/tanks/{tankId}/rename`) 신설. 메시지 형식은 무변경(`mapId = "{tankId}-L{n}"` 그대로) — 다만 **구버전 AMR 은 mapId 를 글자 그대로 비교하므로 선창 ID 를 바꾸기 전에 AMR 을 먼저 올려야 한다**. 구현: ACS·HD_AMR 양측 완료(단위 테스트·시뮬레이터 E2E), 실기 미확인. |
 | 개정 1.19 | 2026-11-15 — **가스검사(포밍가스 기밀 검사) 지령** `[N25]`: 가스검사 AMR 은 용접선을 따라가는 같은 시퀀스에서 검사 센서만 가스 감지기로 바꾼다. 그래서 액션은 `startWeldInspection` 그대로이고, §8.1 에 선택 필드 `params.round`(검사 회차 1\|2) 추가. ACS 는 선창의 검사 종류가 가스(GAS)일 때만, 운영자가 미션 시작 때 고른 회차를 싣는다(고르지 않으면 생략). 결과(`resultDescription` 의 SAIGE 결과 본문 JSON)·임계값(`setGasThreshold`)·센서 상태(`state.information`)는 HD_AMR `docs/GAS_DETECTOR_XL3000FLEX.md` §5.2~§5.4 제안 단계 — ACS 미구현. |
+| 개정 1.20 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.taskId` 추가**(§8.7). 대상 용접선의 taskId 를 본검사 `startWeldInspection` 의 `params.taskId` 와 **같은 표기**(ACS 내부 uuid 문자열)로 싣는다. 종전엔 `jobRef`(`TEST-SEAM-{taskId}`) 문자열 안에만 있어 AMR 이 잘라 읽어야 했다. 선택 필드라 하위 호환(부재 = 종전과 같음, `jobRef` 는 그대로). `attempt` 는 싣지 않는다(시험은 검사가 아니라 attempt 누적에 넣지 않는다). HD_AMR 쪽 사용 여부는 확인 필요 |
 | 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.16 | 2026-11-12 — **`position.drawingPos`에 용접선 끝점 면 좌표 `uEnd`·`vEnd` 추가(선택 필드, §8.1) [N15]**. AMR은 `u,v`(시작점)를 원점으로, `uEnd,vEnd − u,v`의 큰 축을 면 위 용접선 방향으로 삼아 촬영 위치(CAPTURE_REQ `PosX/PosY`)를 면 좌표로 환산한다(작업물 좌표계 X+ = 시작→끝, 면의 손잡이는 `wall_code`로 판정 — T·SM·SL·SU는 왼손). 종전에는 용접선 시작점 기준 좌표가 그대로 나가 CROSS4 교차 팔의 음수 좌표를 비전이 `ERR_POSITION`으로 거부했다(실기 11-12 03:53, 56점 중 17점). 끝점이 없거나(구버전 ACS) 면 축에서 10° 넘게 비스듬하면 AMR은 종전 방식으로 보낸다. 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기. 높이 `h`가 음수인 경유점(교차 중심, 프로필 Z −12)은 그대로 음수로 나가므로 비전 측 수용 여부 협의 필요 |
 | 개정 1.15 | 2026-11-12 — **작업자 입력 요청 errorType `manualBeadInputRequired` 추가**(§6.4). AMR이 비드 자동 검출 대신 작업자 입력 팝업을 띄운 동안 `errors[]`에 WARNING으로 싣고, 팝업이 닫히면 뺀다. **고장·실패가 아니다** — 진행 액션은 `RUNNING` 그대로이며 ACS는 알람(`MANUAL_BEAD_INPUT_REQUIRED`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. AMR은 같은 동안 타워램프 녹색을 1초 주기로 점멸한다(AMR 로컬). 추가 필드라 하위 호환(구버전 ACS는 일반 경고로 표시). 양측 구현 완료, 실기 확인 대기 |
@@ -894,7 +895,7 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
 정지**한다 — **촬영·측정·자세 시퀀스 없음**. `wall_code`(§8.1)로 툴 자세를 정한다.
 
 - **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(nodePosition=검사 정차점 standoff) + 액션 1건.
-- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm` 하나만: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0`). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
+- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm`: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0` / **1.20 — `taskId`**: 대상 용접선 taskId, 본검사 `params.taskId` 와 같은 uuid 문자열, 선택 — 부재 시 `jobRef` 에서 읽던 종전 방식, `attempt` 는 없음). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
 - **완료 판정**: `state.actionStates`로 `FINISHED`(도달 성공) / `FAILED`(reach 불가·특이자세 등 — `errors`에 사유). 이 시험의 FAILED가 곧 **N10(정차 이격) 실측 근거**가 된다.
 - **발행**: `POST /api/robots/{id}/test/seam-start { taskId }` — ACS가 area→정차점·task→seamStartW·wall_code 산출.
   진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).

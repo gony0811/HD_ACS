@@ -183,7 +183,8 @@ VALUES ('moveToSeamStart', 'NODE', 'HARD',
     "params": {
       "type": "object",
       "properties": {
-        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "taskId":       { "type": "string", "format": "uuid" }
       }
     },
     "position": {
