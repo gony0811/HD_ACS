@@ -73,6 +73,21 @@ public class OrderActionEntity
 }
 
 /// <summary>
+/// 코봇 이동 시험(moveToSeamStart) 발행 기록 [VDA §8.7]. 시험도 본검사와 같은 taskId 별 누적 attempt 를 받으므로
+/// (작업자가 시험 자세에서 수동 촬영할 때 그 taskId·attempt 를 비전에 싣는다), 발급한 번호를 여기에 남겨
+/// 다음 시도(본검사·시험 공통)가 그보다 큰 번호를 받게 한다. run·order_action 과 무관(검사 결과·진행률에 들어가지 않는다).
+/// </summary>
+public class SeamTestEntity
+{
+    public Guid TestId { get; set; }
+    public Guid TaskId { get; set; }
+    public string RobotId { get; set; } = "";
+    public string OrderId { get; set; } = "";
+    public int Attempt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
 /// 검사 작업 큐 항목 [greedy 최근접 배차]. run 스코프 — 시작 시 선창 영역에서 전개.
 /// 한 항목 = 영역 1개(정차 1곳) + 그 영역의 작업(용접선) 액션들. 좌표는 맵 프레임(로봇 보고와 동일).
 /// </summary>

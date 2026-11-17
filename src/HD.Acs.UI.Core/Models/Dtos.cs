@@ -324,7 +324,8 @@ public sealed record CrossPreviewResult(string SeamType, double[][]? Points, dou
 
 /// <summary>코봇 seam 시작점 이동 시험 응답 [VDA §8 moveToSeamStart] — 발행된 Order·정차점·seam 시작 맵좌표.</summary>
 public sealed record SeamStartTestResultDto(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[]? SeamStartW,
-    double? LiftStrokeMm = null);   // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    double? LiftStrokeMm = null,    // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    int? Attempt = null);           // 시험에 발급한 attempt(수동 촬영 때 비전에 실린다) — 구서버 응답이면 null
 
 /// <summary>GET /api/robots/{id}/drawing-pose — 로봇 보고 위치를 보고 층의 유효 T_W_D로 도면 좌표화(정차점 지정용).</summary>
 public sealed record RobotDrawingPoseDto(string RobotId, string MapId, int Level, double X, double Y, double? Theta,

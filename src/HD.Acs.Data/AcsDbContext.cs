@@ -40,6 +40,7 @@ public class AcsDbContext : DbContext
     public DbSet<OrderActionEntity> OrderActions => Set<OrderActionEntity>();
     public DbSet<RobotContextEntity> RobotContexts => Set<RobotContextEntity>();
     public DbSet<WorkItemEntity> WorkItems => Set<WorkItemEntity>();
+    public DbSet<SeamTestEntity> SeamTests => Set<SeamTestEntity>();
     // hist / alarm / sys
     public DbSet<TransitionLogEntity> TransitionLogs => Set<TransitionLogEntity>();
     public DbSet<InspectionResultEntity> InspectionResults => Set<InspectionResultEntity>();
@@ -161,6 +162,9 @@ public class AcsDbContext : DbContext
             e.HasIndex(x => new { x.MissionId, x.NodeSequenceId });
             e.Property(x => x.Params).HasColumnType("jsonb");
             e.Property(x => x.Result).HasColumnType("jsonb"); });
+
+        mb.Entity<SeamTestEntity>(e => { e.ToTable("seam_test", "run"); e.HasKey(x => x.TestId);
+            e.HasIndex(x => x.TaskId); });
 
         mb.Entity<RobotContextEntity>(e => { e.ToTable("robot_context", "run");
             e.HasKey(x => x.RobotId); });

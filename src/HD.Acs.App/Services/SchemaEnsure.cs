@@ -55,6 +55,18 @@ public static class SchemaEnsure
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_gas_result_action ON hist.gas_result (action_id)",
         "CREATE INDEX IF NOT EXISTS ix_gas_result_send ON hist.gas_result (send_state, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_gas_result_run ON hist.gas_result (run_id)",
+        // db/migrations/2026-11-17_seam_test_attempt.sql — 코봇 이동 시험 발행 기록(시험에도 누적 attempt 발급)
+        """
+        CREATE TABLE IF NOT EXISTS run.seam_test (
+          test_id    uuid PRIMARY KEY,
+          task_id    uuid NOT NULL,
+          robot_id   text NOT NULL,
+          order_id   text NOT NULL,
+          attempt    int  NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_seam_test_task ON run.seam_test (task_id)",
         // db/migrations/2026-11-15_inspection_profile.sql — HD_AMR 검사 프로필 사본(새 테이블 — 없을 때만 만든다)
         """
         CREATE TABLE IF NOT EXISTS ref.inspection_profile (

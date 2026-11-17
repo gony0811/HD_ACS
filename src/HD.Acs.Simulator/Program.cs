@@ -422,8 +422,8 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         string lift = "없음";
-        string seamTask = "-";
-        bool badTask = false;
+        string seamTask = "-", seamAttempt = "-";
+        bool badTask = false, badAttempt = false;
         try
         {
             var prmParam = action.ActionParameters.FirstOrDefault(p => p.Key == "params");
@@ -437,20 +437,28 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
                 var ts = tk.GetValueKind() == System.Text.Json.JsonValueKind.String ? tk.GetValue<string>() : null;
                 if (ts is not null && Guid.TryParse(ts, out _)) seamTask = ts; else badTask = true;
             }
+            // params.attempt — 선택 필드, 실려 왔다면 1~255 정수(본검사와 같은 규칙)
+            if (prmNode?["attempt"] is { } an)
+            {
+                if (an.GetValueKind() == System.Text.Json.JsonValueKind.Number && an.AsValue().TryGetValue<int>(out var av) && av is >= 1 and <= 255)
+                    seamAttempt = av.ToString();
+                else badAttempt = true;
+            }
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         await Task.Delay(fullMs);
-        if (badTask)
+        if (badTask || badAttempt)
         {
+            var field = badTask ? "params.taskId" : "params.attempt";
             actionState.ActionStatus = "FAILED";
-            actionState.ResultDescription = "PARAM;moveToSeamStart;params.taskId";
-            Console.WriteLine("[SIM]   코봇 seam 시작점 이동 시험 실패 — params.taskId 형식 오류");
+            actionState.ResultDescription = $"PARAM;moveToSeamStart;{field}";
+            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 실패 — {field} 형식 오류");
         }
         else
         {
             actionState.ActionStatus = "FINISHED";
-            actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift};task={seamTask}";
-            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift} task={seamTask}");
+            actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift};task={seamTask};attempt={seamAttempt}";
+            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift} task={seamTask} attempt={seamAttempt}");
         }
     }
     else

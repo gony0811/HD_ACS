@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HD.Acs.App.Services;
+using HD.Acs.Core.Integration;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
@@ -192,5 +193,53 @@ public class SeamStartTestTests
         var taskId = await SeedAsync(db, "CT1-L2");   // 로봇은 L2, 작업은 L1
         var ex = await Assert.ThrowsAsync<RunConflictException>(() => Dispatcher(db).MoveToSeamStartAsync("R1", taskId, "t"));
         Assert.Contains("다른 층", ex.Message);
+    }
+
+    // 시험도 본검사와 같은 taskId 별 누적 attempt 를 받는다 — 앞선 본검사 1회 뒤 시험은 2, 그 뒤 본검사는 3.
+    [Fact]
+    public async Task SeamStartTest_IssuesCumulativeAttempt_AndNextInspectionGoesHigher()
+    {
+        using var db = NewDb();
+        var taskId = await SeedAsync(db, "CT1-L1");
+        db.TankGeometries.Add(new TankGeometryEntity { TankId = "CT1", LevelZ = "[0,2.4,4.8,7.2]" });
+        db.OrderActions.Add(new OrderActionEntity { ActionId = Guid.NewGuid(), MissionId = Guid.NewGuid(), TaskId = taskId, ActionType = "startWeldInspection" });
+        await db.SaveChangesAsync();
+
+        // MQTT 미연결이라 발행은 실패하지만, 발급 기록은 발행 전에 저장된다(번호는 건너뛸 뿐 겹치지 않는다)
+        await Assert.ThrowsAnyAsync<Exception>(() => Dispatcher(db).MoveToSeamStartAsync("R1", taskId, "t"));
+        var test = Assert.Single(await db.SeamTests.ToListAsync());
+        Assert.Equal((taskId, 2, "R1"), (test.TaskId, test.Attempt, test.RobotId));
+        Assert.Contains(await db.AuditLogs.ToListAsync(), a => a.Action == "TEST_SEAM_START" && a.Target.Contains("attempt 2"));
+
+        var issued = await InspectionDispatcher.IssuedAttemptsAsync(db, new[] { taskId });
+        Assert.Equal(3, TaskAttempt.Next(issued[taskId]));   // 다음 본검사 — 시험 촬영보다 큰 번호(세이지에서 최신)
+    }
+
+    [Fact]
+    public void BuildSeamStartTestOrder_CarriesAttempt_AndSchemaLimits()
+    {
+        var position = new JsonObject
+        {
+            ["seamStartW"] = new JsonArray(12.5, 5.98, 1.42), ["seamEndW"] = new JsonArray(13.3, 5.98, 1.42),
+            ["drawingPos"] = new JsonObject
+            {
+                ["tank"] = "CT1", ["level"] = 2, ["wall_code"] = "SM",
+                ["u"] = 5.0, ["v"] = 1.6, ["x"] = 1.0, ["y"] = 2.0, ["z"] = 3.0,
+            },
+        };
+        var order = InspectionDispatcher.BuildSeamStartTestOrder("CT1-L2", 1, 2, 0, position, "TEST-SEAM-x", 0.08, 0.07, 0, Guid.NewGuid(), 4);
+        var act = Assert.Single(Assert.Single(order.Nodes).Actions);
+        Assert.Equal(4, ParamsOf(act)["attempt"]!.GetValue<int>());
+
+        var asObject = new JsonObject();
+        foreach (var p in act.ActionParameters) asObject[p.Key] = JsonNode.Parse(JsonSerializer.Serialize(p.Value));
+        Assert.Empty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+        asObject["params"] = new JsonObject { ["attempt"] = 0 };
+        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+        asObject["params"] = new JsonObject { ["attempt"] = 256 };
+        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.MoveToSeamStartParamSchema, asObject));
+        // attempt 미지정이면 싣지 않는다
+        var none = InspectionDispatcher.BuildSeamStartTestOrder("CT1-L2", 1, 2, 0, position, "TEST-SEAM-x", 0.08, 0.07);
+        Assert.Null(ParamsOf(Assert.Single(Assert.Single(none.Nodes).Actions))["attempt"]);
     }
 }

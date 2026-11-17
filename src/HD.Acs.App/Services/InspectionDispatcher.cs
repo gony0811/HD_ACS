@@ -677,14 +677,11 @@ public sealed class InspectionDispatcher
         var stationAdjust = _stationAdjust is null ? null : _stationAdjust.ForArea(areaMeta?.StationMaxBackwardMm);
 
         // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
-        // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
+        // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수 + 코봇 이동 시험 수.
         var stopTaskIds = actionsJson
             .Select(a => Guid.TryParse(a!["taskId"]?.GetValue<string>(), out var g) ? g : (Guid?)null)
             .Where(g => g is not null).Select(g => g!.Value).Distinct().ToList();
-        var issuedByTask = await _db.OrderActions.AsNoTracking()
-            .Where(a => a.TaskId != null && stopTaskIds.Contains(a.TaskId.Value))
-            .GroupBy(a => a.TaskId!.Value).Select(g => new { TaskId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
+        var issuedByTask = await IssuedAttemptsAsync(_db, stopTaskIds, ct);
 
         foreach (var an in actionsJson)
         {
@@ -746,7 +743,28 @@ public sealed class InspectionDispatcher
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
-    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW, double LiftStrokeMm = 0.0);
+    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW,
+        double LiftStrokeMm = 0.0, int? Attempt = null);
+
+    /// <summary>
+    /// taskId 별로 지금까지 발급한 attempt 수 — 본검사 액션(<c>run.order_action</c>)과 코봇 이동 시험(<c>run.seam_test</c>)을 합친다.
+    /// 다음 attempt = <see cref="TaskAttempt.Next"/>(이 값). 시험도 번호를 받으므로 시험 뒤 본검사는 더 큰 번호로 나간다
+    /// (세이지는 같은 taskId 의 가장 큰 attempt 를 최신으로 본다 — 본검사 결과가 시험 촬영을 대신한다).
+    /// </summary>
+    public static async Task<Dictionary<Guid, int>> IssuedAttemptsAsync(AcsDbContext db, IReadOnlyCollection<Guid> taskIds, CancellationToken ct = default)
+    {
+        var actions = await db.OrderActions.AsNoTracking()
+            .Where(a => a.TaskId != null && taskIds.Contains(a.TaskId.Value))
+            .GroupBy(a => a.TaskId!.Value).Select(g => new { TaskId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var tests = await db.SeamTests.AsNoTracking()
+            .Where(t => taskIds.Contains(t.TaskId))
+            .GroupBy(t => t.TaskId).Select(g => new { TaskId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var map = actions.ToDictionary(x => x.TaskId, x => x.Count);
+        foreach (var t in tests) map[t.TaskId] = (map.TryGetValue(t.TaskId, out var n) ? n : 0) + t.Count;
+        return map;
+    }
 
     /// <summary>
     /// 코봇툴 seam 시작점 이동 시험 [VDA §8 moveToSeamStart, N협의] — 지정 용접선(area-task)의 정차점(standoff)으로
@@ -798,25 +816,32 @@ public sealed class InspectionDispatcher
 
         // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
         var liftStrokeMm = LiftForOrder(area.StationLiftMm);   // 리프트를 쓰지 않으면 0
-        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm, taskId);
+        // attempt — 본검사와 같은 taskId 별 누적 번호. 작업자가 시험 자세에서 수동 촬영하면 AMR 이 이 taskId·attempt 로 비전에 보낸다.
+        // 발급 기록(run.seam_test)을 남겨 다음 본검사·시험이 더 큰 번호를 받게 한다(발행에 실패해도 번호는 건너뛸 뿐 겹치지 않는다).
+        var issued = await IssuedAttemptsAsync(_db, new[] { taskId }, ct);
+        var attempt = TaskAttempt.Next(issued.TryGetValue(taskId, out var nIssued) ? nIssued : 0);
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm, taskId, attempt);
+        _db.SeamTests.Add(new SeamTestEntity { TestId = Guid.NewGuid(), TaskId = taskId, RobotId = robotId, OrderId = order.OrderId, Attempt = attempt });
 
         _db.AuditLogs.Add(new AuditLogEntity
         {
             UserId = userId ?? "", Action = "TEST_SEAM_START",
-            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
+            Target = $"{robotId} → task {taskId} attempt {attempt} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
         });
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
-        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm", robotId, taskId, mapId, mx, my, liftStrokeMm);
-        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm);
+        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} attempt={Attempt} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm",
+            robotId, taskId, attempt, mapId, mx, my, liftStrokeMm);
+        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm, attempt);
     }
 
     /// <summary>
-    /// seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm·taskId 포함). 순수 — 테스트 대상.
+    /// seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm·taskId·attempt 포함). 순수 — 테스트 대상.
     /// taskId 는 본검사(startWeldInspection)의 params.taskId 와 같은 ACS 내부 표기(Guid.ToString) — jobRef 문자열을 잘라 읽지 않게.
+    /// attempt 는 본검사와 같은 taskId 별 누적 번호(<see cref="IssuedAttemptsAsync"/>) — 시험 자세 수동 촬영 때 AMR 이 비전에 싣는다.
     /// </summary>
     public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
-        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0, Guid? taskId = null)
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0, Guid? taskId = null, int? attempt = null)
     {
         var orderId = Guid.NewGuid().ToString();
         var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
@@ -824,6 +849,7 @@ public sealed class InspectionDispatcher
         action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
         var prm = new JsonObject { ["liftStrokeMm"] = liftStrokeMm };
         if (taskId is Guid tid) prm["taskId"] = tid.ToString();
+        if (attempt is int at) prm["attempt"] = at;
         action.ActionParameters.Add(new ActionParameter { Key = "params", Value = prm });
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(new OrderNode

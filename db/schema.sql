@@ -184,7 +184,8 @@ VALUES ('moveToSeamStart', 'NODE', 'HARD',
       "type": "object",
       "properties": {
         "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
-        "taskId":       { "type": "string", "format": "uuid" }
+        "taskId":       { "type": "string", "format": "uuid" },
+        "attempt":      { "type": "integer", "minimum": 1, "maximum": 255 }
       }
     },
     "position": {
@@ -488,6 +489,18 @@ CREATE TABLE run.order_action (
   created_at       timestamptz NOT NULL DEFAULT now()   -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
 );
 CREATE INDEX ix_orderaction_mission ON run.order_action (mission_id, node_sequence_id);
+
+-- 코봇 이동 시험(moveToSeamStart) 발행 기록 [VDA §8.7] — 시험도 taskId 별 누적 attempt 를 받는다(수동 촬영 시 비전에 싣는다).
+-- 다음 attempt = order_action(그 taskId) 수 + seam_test(그 taskId) 수 + 1. 검사 결과·진행률에는 들어가지 않는다.
+CREATE TABLE run.seam_test (
+  test_id    uuid PRIMARY KEY,
+  task_id    uuid NOT NULL,
+  robot_id   text NOT NULL,
+  order_id   text NOT NULL,
+  attempt    int  NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_seam_test_task ON run.seam_test (task_id);
 
 -- 로봇 컨텍스트: 수동 지정값 vs 로봇 보고값 분리 보관 [Q9, GRAPH_DATA_MODEL 8.4]
 CREATE TABLE run.robot_context (
