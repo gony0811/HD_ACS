@@ -798,7 +798,7 @@ public sealed class InspectionDispatcher
 
         // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
         var liftStrokeMm = LiftForOrder(area.StationLiftMm);   // 리프트를 쓰지 않으면 0
-        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm);
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm, taskId);
 
         _db.AuditLogs.Add(new AuditLogEntity
         {
@@ -811,15 +811,20 @@ public sealed class InspectionDispatcher
         return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm);
     }
 
-    /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm 포함). 순수 — 테스트 대상.</summary>
+    /// <summary>
+    /// seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm·taskId 포함). 순수 — 테스트 대상.
+    /// taskId 는 본검사(startWeldInspection)의 params.taskId 와 같은 ACS 내부 표기(Guid.ToString) — jobRef 문자열을 잘라 읽지 않게.
+    /// </summary>
     public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
-        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0)
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0, Guid? taskId = null)
     {
         var orderId = Guid.NewGuid().ToString();
         var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
         action.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = jobRef });
         action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
-        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = new JsonObject { ["liftStrokeMm"] = liftStrokeMm } });
+        var prm = new JsonObject { ["liftStrokeMm"] = liftStrokeMm };
+        if (taskId is Guid tid) prm["taskId"] = tid.ToString();
+        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = prm });
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(new OrderNode
         {
