@@ -13,7 +13,7 @@ public sealed partial class ReachSimService
 {
     public async Task<IReadOnlyList<ReachAreaVerdict>?> AreaMapAsync(string tankId, int? level, string? wallCode, CancellationToken ct)
     {
-        _model = (await BaseAsync(ct));   // 운영 가지 규칙
+        _model = (await BaseAsync(tankId, ct));   // 운영 가지 규칙
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);

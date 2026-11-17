@@ -19,7 +19,7 @@ public sealed partial class ReachSimService
     public async Task<FieldCompareResult?> FieldCompareAsync(string tankId, IReadOnlyList<FieldAttempt> attempts, string? wallCode,
         CancellationToken ct, IReadOnlyList<string>? parseWarnings = null)
     {
-        _model = (await BaseAsync(ct));   // 운영 가지 규칙
+        _model = (await BaseAsync(tankId, ct));   // 운영 가지 규칙
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var areas = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId).ToListAsync(ct);

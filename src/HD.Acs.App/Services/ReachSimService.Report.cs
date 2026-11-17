@@ -55,7 +55,7 @@ public sealed partial class ReachSimService
     public async Task<ReachReport?> ReportAsync(string tankId, int? level, string? wallCode, Guid? areaId, bool optimize,
         CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = (await BaseAsync(ct)) with { BranchRule = branch };
+        _model = (await BaseAsync(tankId, ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);

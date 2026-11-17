@@ -164,24 +164,37 @@ public static class InspectionProfileService
     }
 
     /// <summary>이름으로 찾은 프로필(삭제 표시 제외) — 같은 이름이 여럿이면 가장 최근에 바뀐 것.</summary>
-    public static async Task<InspectionProfileEntity?> FindByNameAsync(AcsDbContext db, string name, CancellationToken ct = default)
+    public static async Task<InspectionProfileEntity?> FindByNameAsync(AcsDbContext db, string name, CancellationToken ct = default,
+        string? source = null, IReadOnlyCollection<string>? excludeSources = null)
     {
         var rows = await db.InspectionProfiles.AsNoTracking().Where(x => x.Name == name && !x.Deleted).ToListAsync(ct);
-        return rows.OrderByDescending(x => x.ChangedAt).FirstOrDefault();
+        return rows.Where(x => SourceMatches(x.Source, source, excludeSources)).OrderByDescending(x => x.ChangedAt).FirstOrDefault();
     }
+
+    /// <summary>
+    /// 이 source 의 행인가 — <paramref name="source"/> 를 주면 그 AMR 만(대소문자 무시), 없으면 <paramref name="excludeSources"/>
+    /// (다른 검사 종류에 지정된 AMR)를 뺀 전부.
+    /// </summary>
+    public static bool SourceMatches(string rowSource, string? source, IReadOnlyCollection<string>? excludeSources) =>
+        source is not null
+            ? string.Equals(rowSource, source, StringComparison.OrdinalIgnoreCase)
+            : excludeSources is null || !excludeSources.Contains(rowSource, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>용접선의 진행 방향 — 면 좌표에서 세로(v) 변화가 가로(u) 변화보다 크면 "V", 아니면 "H".</summary>
     public static string DirectionOf(double startU, double startV, double endU, double endV) =>
         Math.Abs(endV - startV) > Math.Abs(endU - startU) ? "V" : "H";
 
     /// <summary>
-    /// 지정표를 읽어 (유형, 면, 방향) → 순회 프로필 찾기 함수를 만든다. 가장 최근에 받은 AMR 하나의 표를 쓴다.
+    /// 지정표를 읽어 (유형, 면, 방향) → 순회 프로필 찾기 함수를 만든다. AMR 하나의 표를 쓴다 — <paramref name="source"/> 를 주면
+    /// 그 AMR(검사 종류에 지정된 source), 없으면 <paramref name="excludeSources"/>(다른 검사 종류의 AMR)를 뺀 가장 최근에 받은 AMR.
     /// 지정된 프로필이 없거나 지워졌거나 절대 자세 프로필이 아니면 그 조합은 null(호출측이 종전 방식으로 판정).
     /// </summary>
-    public static async Task<Func<string, string, string, SeamScanProfile?>> LoadSeamProfilesAsync(AcsDbContext db, CancellationToken ct = default)
+    public static async Task<Func<string, string, string, SeamScanProfile?>> LoadSeamProfilesAsync(AcsDbContext db, CancellationToken ct = default,
+        string? source = null, IReadOnlyCollection<string>? excludeSources = null)
     {
-        var profiles = await db.InspectionProfiles.AsNoTracking().Where(x => !x.Deleted).ToListAsync(ct);
-        var source = profiles.OrderByDescending(x => x.ReceivedAt).FirstOrDefault()?.Source;
+        var profiles = (await db.InspectionProfiles.AsNoTracking().Where(x => !x.Deleted).ToListAsync(ct))
+            .Where(x => SourceMatches(x.Source, source, excludeSources)).ToList();
+        source = profiles.OrderByDescending(x => x.ReceivedAt).FirstOrDefault()?.Source;
         if (source is null) return (_, _, _) => null;
         var rows = await db.InspectionProfileAssignments.AsNoTracking().Where(x => x.Source == source).ToListAsync(ct);
         var scans = new Dictionary<int, SeamScanProfile?>();

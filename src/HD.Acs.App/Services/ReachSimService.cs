@@ -23,7 +23,9 @@ public sealed partial class ReachSimService
     private readonly InspectionDispatcher _dispatcher;
     private ReachRobotModel _baseModel;
     private readonly string? _scanProfileName;
-    private bool _scanProfileResolved;
+    private readonly IConfiguration? _config;
+    /// <summary>검사 종류 → (모델, 프로필 찾기, 프로필 출처) — 요청(스코프)마다 종류별 한 번만 만든다.</summary>
+    private readonly Dictionary<string, (ReachRobotModel Model, Func<string, string, string, SeamScanProfile?> ProfileOf, string Source)> _resolved = new();
     private ReachRobotModel _model;
     /// <summary>면 코드 → 차체 중심과 검사 면 사이 최소 거리 [m] (<c>Acs:Reach:WallMinDistMm</c>). 정차 최적화·배차 직전 정차 선택·분리 제안이 쓴다.</summary>
     private readonly IReadOnlyDictionary<string, double> _wallMinDistM;
@@ -41,6 +43,7 @@ public sealed partial class ReachSimService
     {
         _db = db;
         _dispatcher = dispatcher;
+        _config = config;
         _baseModel = ModelFrom(config);
         _model = _baseModel;
         _wallMinDistM = WallMinDistFrom(config);
@@ -82,28 +85,45 @@ public sealed partial class ReachSimService
     public string ScanProfileSource { get; private set; } = "설정";
 
     /// <summary>
-    /// 기준 모델 — 설정 <c>Acs:Reach:ScanProfileName</c> 의 프로필을 HD_AMR 이 올려 보냈고 직선 프로필이면 그 경유점으로 순회를 판정한다.
-    /// 이름이 없거나, 받은 적이 없거나, 직선 프로필이 아니면 설정값(<c>ScanTiltProfile</c>) 그대로다. 요청마다 한 번만 조회한다.
+    /// 그 선창의 기준 모델 — 선창의 검사 종류(<c>ref.tank_geometry.inspection_kind</c>)로 리치 설정(<see cref="ModelFrom"/> ·
+    /// <c>Acs:Reach:Kinds:{종류}</c>)과 순회 프로필을 보낸 AMR(<see cref="ProfileSourceFor"/>)을 고른다. 설정 <c>Acs:Reach:ScanProfileName</c>
+    /// 의 프로필을 그 AMR 이 올려 보냈고 직선 프로필이면 그 경유점으로 순회를 판정한다. 종류마다 요청당 한 번만 조회한다.
     /// </summary>
-    private async Task<ReachRobotModel> BaseAsync(CancellationToken ct)
+    private async Task<ReachRobotModel> BaseAsync(string? tankId, CancellationToken ct)
     {
-        if (_scanProfileResolved) return _baseModel;
-        _scanProfileResolved = true;
+        var raw = tankId is null ? null
+            : await _db.TankGeometries.AsNoTracking().Where(t => t.TankId == tankId).Select(t => t.InspectionKind).FirstOrDefaultAsync(ct);
+        var kind = InspectionKinds.TryNormalize(raw, out var k) && k is not null ? k : InspectionKinds.Weld;
+        if (_resolved.TryGetValue(kind, out var hit))
+        {
+            (_profileOf, ScanProfileSource) = (hit.ProfileOf, hit.Source);
+            return hit.Model;
+        }
+        var model = _config is null ? _baseModel : ModelFrom(_config, kind);
+        var profileOf = (Func<string, string, string, SeamScanProfile?>)((_, _, _) => null);
+        var sourceText = "설정";
+        var source = ProfileSourceFor(_config, kind);
         if (_useAmrProfiles)
         {
-            // HD_AMR 지정표 — 용접선의 유형·면·방향마다 AMR 이 실제로 쓰는 프로필(6축 경유점)로 순회를 판정한다
-            _profileOf = await InspectionProfileService.LoadSeamProfilesAsync(_db, ct);
-            _baseModel = _baseModel with { SeamProfile = pts => _seamProfiles.TryGetValue(pts, out var p) ? p.Waypoints : null };
+            // HD_AMR 지정표 — 용접선의 유형·면·방향마다 그 검사 종류의 AMR 이 실제로 쓰는 프로필(6축 경유점)로 순회를 판정한다
+            profileOf = await InspectionProfileService.LoadSeamProfilesAsync(_db, ct, source, OtherProfileSources(_config, kind));
+            model = model with { SeamProfile = pts => _seamProfiles.TryGetValue(pts, out var p) ? p.Waypoints : null };
         }
-        if (string.IsNullOrWhiteSpace(_scanProfileName)) return _baseModel;
-        var e = await InspectionProfileService.FindByNameAsync(_db, _scanProfileName.Trim(), ct);
-        if (e is null) return _baseModel;
-        var (tilt, _) = InspectionProfileService.ToTiltProfile(e);
-        if (tilt is null) return _baseModel;
-        _baseModel = _baseModel with { ScanTiltProfile = tilt };
-        ScanProfileSource = $"AMR {e.Name} v{e.Version}";
-        return _baseModel;
+        if (!string.IsNullOrWhiteSpace(_scanProfileName)
+            && await InspectionProfileService.FindByNameAsync(_db, _scanProfileName.Trim(), ct, source, OtherProfileSources(_config, kind)) is { } e
+            && InspectionProfileService.ToTiltProfile(e) is ({ } tilt, _))
+        {
+            model = model with { ScanTiltProfile = tilt };
+            sourceText = $"AMR {e.Name} v{e.Version}";
+        }
+        _resolved[kind] = (model, profileOf, sourceText);
+        (_profileOf, ScanProfileSource) = (profileOf, sourceText);
+        return model;
     }
+
+    /// <summary>영역이 속한 선창의 기준 모델(<see cref="BaseAsync"/>) — 영역이 없으면 용접검사 기준.</summary>
+    private async Task<ReachRobotModel> BaseForAreaAsync(Guid areaId, CancellationToken ct) =>
+        await BaseAsync(await _db.InspectionAreas.AsNoTracking().Where(a => a.AreaId == areaId).Select(a => a.TankId).FirstOrDefaultAsync(ct), ct);
 
     /// <summary><c>Acs:Reach:WallMinDistMm:{면 코드}</c> [mm] → m. 0 이하·숫자가 아닌 값은 버린다.</summary>
     public static IReadOnlyDictionary<string, double> WallMinDistFrom(IConfiguration? config) =>
@@ -115,9 +135,14 @@ public sealed partial class ReachSimService
                 .Where(x => x.Ok && x.V > 0)
                 .ToDictionary(x => x.Key, x => x.V / 1000.0, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>설정에서 장착 yaw·면별 출발 관절각을 읽어 로봇 모델을 만든다. 6개가 아닌 값은 버린다.</summary>
-    public static ReachRobotModel ModelFrom(IConfiguration? config)
+    /// <summary>
+    /// 설정에서 장착 yaw·면별 출발 관절각을 읽어 로봇 모델을 만든다. 6개가 아닌 값은 버린다.
+    /// <paramref name="inspectionKind"/> 를 주면 <c>Acs:Reach:Kinds:{종류}</c> 의 항목이 같은 이름의 <c>Acs:Reach</c> 항목을 통째로 대신한다
+    /// (<see cref="ReachConfigFor"/> — 검사 종류마다 다른 AMR·코봇의 J6 범위·대기 자세·출발 자세·링크 치수 등).
+    /// </summary>
+    public static ReachRobotModel ModelFrom(IConfiguration? config, string? inspectionKind = null)
     {
+        config = ReachConfigFor(config, inspectionKind);
         if (config is null) return ReachRobotModel.Default;
         var starts = config.GetSection("Acs:Reach:StartJoints").GetChildren()
             .Select(s => (Code: s.Key, J: s.Get<double[]>()))
@@ -129,6 +154,7 @@ public sealed partial class ReachSimService
         stages[0] = config.GetValue("Acs:Reach:ApproachStandoffMm", stages[0]);
         var scanStandoff = config.GetValue("Acs:Reach:ScanStandoffMm", stages[0]);   // 없으면 ② 접근 이격(점1 Top = ② 접근점)
         stages[^1] = config.GetValue("Acs:Reach:FocusStandoffMm", stages[^1]);   // 공구 TCP 가 초점보다 짧으면 그 차만큼 띄운다
+        var j6 = SafeJ6From(config);
         return d with
         {
             // 링크 치수 [d1,a2,a3,d4,d5,d6] — 장비 컨트롤러의 DH 보정값(HD_AMR cobot.kinematics.linksMm 와 같은 값). 없거나 잘못되면 공칭
@@ -143,7 +169,8 @@ public sealed partial class ReachSimService
             PlanarRetreatMm = config.GetValue("Acs:Reach:PlanarRetreatMm", d.PlanarRetreatMm),
             StartJointsByWall = starts,
             ToolMountRollDeg = config.GetValue("Acs:Reach:ToolMountRollDeg", d.ToolMountRollDeg),
-            OperationJ6Deg = OperationJ6From(config["Acs:Reach:OperationJ6Deg"], d.OperationJ6Deg),
+            // 운영 J6 — 따로 주지 않으면 대기 자세 J6 를 설정했을 때 그 값(HD_AMR: 수직 검사 J6 = 대기 자세), 아니면 모델 기본값(180°)
+            OperationJ6Deg = OperationJ6From(config["Acs:Reach:OperationJ6Deg"], j6.StandbySet ? j6.Standby : d.OperationJ6Deg),
             CheckTraversal = config.GetValue("Acs:Reach:CheckTraversal", d.CheckTraversal),
             ScanStandoffMm = scanStandoff,
             ScanTiltDeg = config.GetValue("Acs:Reach:ScanTiltDeg", d.ScanTiltDeg),
@@ -163,11 +190,89 @@ public sealed partial class ReachSimService
             EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
             PlanarEntryWalls = PlanarEntryWallsFrom(config.GetSection("Acs:Reach:PlanarEntryWalls")),
             EntryPathMarginMm = config.GetValue("Acs:Reach:EntryPathMarginMm", d.EntryPathMarginMm),
-            SafeJ6MinDeg = ReachRobotModel.ResolveSafeJ6Range(
-                config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Min,
-            SafeJ6MaxDeg = ReachRobotModel.ResolveSafeJ6Range(
-                config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg")).Max,
+            SafeJ6MinDeg = j6.Min,
+            SafeJ6MaxDeg = j6.Max,
+            SafeJ6StandbyDeg = j6.Standby,
         };
+    }
+
+    /// <summary>
+    /// J6 안전 범위·대기 자세 설정 — 대기 자세(<c>SafeJ6StandbyDeg</c>, 기본 −180°)를 포함하지 않는 범위 등 잘못된 값이면 셋 모두 기본값
+    /// (HD_AMR <c>ApplySafeJ6Range</c> 와 같은 규칙). StandbySet = 대기 자세를 설정에서 받아 그대로 쓰는지.
+    /// </summary>
+    public static (double Min, double Max, double Standby, bool StandbySet, bool Ok) SafeJ6From(IConfiguration config)
+    {
+        var standby = config.GetValue<double?>("Acs:Reach:SafeJ6StandbyDeg");
+        var (lo, hi, ok) = ReachRobotModel.ResolveSafeJ6Range(
+            config.GetValue<double?>("Acs:Reach:SafeJ6MinDeg"), config.GetValue<double?>("Acs:Reach:SafeJ6MaxDeg"), standby);
+        return ok && standby is { } s
+            ? (lo, hi, s, true, true)
+            : (lo, hi, ReachRobotModel.DefaultSafeJ6StandbyDeg, false, ok);
+    }
+
+    /// <summary>검사 종류별 리치 설정이 있는 하위 묶음 — <c>Acs:Reach:Kinds:{WELD|GAS}</c>.</summary>
+    public const string KindsSection = "Acs:Reach:Kinds";
+
+    /// <summary>
+    /// 검사 종류의 리치 설정 — <c>Acs:Reach</c> 위에 <c>Acs:Reach:Kinds:{종류}</c> 를 얹은 설정. 종류 묶음에 있는 항목은 같은 이름의
+    /// 기본 항목을 **통째로** 대신한다(<c>StartJoints</c> 를 주면 면 전부, 배열은 길이째) — 기본 값과 섞이지 않게.
+    /// 종류가 없거나 모르는 값이거나 그 묶음이 없으면 원래 설정 그대로(= 종전 동작). <c>Acs:Lift</c> 는 그대로 옮긴다.
+    /// </summary>
+    public static IConfiguration? ReachConfigFor(IConfiguration? config, string? inspectionKind)
+    {
+        if (config is null || !InspectionKinds.TryNormalize(inspectionKind, out var kind) || kind is null) return config;
+        var ks = config.GetSection($"{KindsSection}:{kind}");
+        if (!ks.Exists()) return config;
+        var replaced = ks.GetChildren().Select(c => c.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in config.GetSection("Acs:Reach").AsEnumerable(makePathsRelative: true))
+        {
+            if (value is null) continue;
+            var top = key.Split(':')[0];
+            if (top.Equals("Kinds", StringComparison.OrdinalIgnoreCase) || replaced.Contains(top)) continue;
+            dict["Acs:Reach:" + key] = value;
+        }
+        foreach (var (key, value) in ks.AsEnumerable(makePathsRelative: true))
+            if (value is not null) dict["Acs:Reach:" + key] = value;
+        foreach (var (key, value) in config.GetSection("Acs:Lift").AsEnumerable())
+            if (value is not null) dict[key] = value;
+        return new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+    }
+
+    /// <summary>
+    /// 그 검사 종류의 순회 프로필을 보낸 AMR(source) — <c>Acs:Reach:Kinds:{종류}:ProfileSource</c>, 용접검사(또는 종류 없음)는
+    /// <c>Acs:Reach:ProfileSource</c> 도 본다. 없으면 null(호출측이 다른 종류에 지정된 source 를 뺀 가장 최근 AMR 을 쓴다).
+    /// </summary>
+    public static string? ProfileSourceFor(IConfiguration? config, string? inspectionKind)
+    {
+        if (config is null) return null;
+        InspectionKinds.TryNormalize(inspectionKind, out var kind);
+        var v = kind is null ? null : config[$"{KindsSection}:{kind}:ProfileSource"];
+        if (string.IsNullOrWhiteSpace(v) && (kind is null || kind == InspectionKinds.Weld)) v = config["Acs:Reach:ProfileSource"];
+        return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+    }
+
+    /// <summary>다른 검사 종류에 지정된 source 들 — 지정이 없는 종류가 "가장 최근 AMR" 을 고를 때 뺀다(두 AMR 이 번갈아 보내도 섞이지 않게).</summary>
+    public static IReadOnlyList<string> OtherProfileSources(IConfiguration? config, string? inspectionKind)
+    {
+        if (config is null) return Array.Empty<string>();
+        InspectionKinds.TryNormalize(inspectionKind, out var kind);
+        var mine = kind ?? InspectionKinds.Weld;
+        return InspectionKinds.All.Where(k => k != mine)
+            .Select(k => ProfileSourceFor(config, k)).OfType<string>()
+            .Where(s => !string.Equals(s, ProfileSourceFor(config, mine), StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// 이 AMR(source)의 검사 종류 — 그 source 를 <c>ProfileSource</c> 로 지정한 종류. 없으면 null(기본 설정).
+    /// 프로필 전송 때 코봇 모델 값을 그 종류의 설정과 대조하는 데 쓴다.
+    /// </summary>
+    public static string? KindForSource(IConfiguration? config, string? source)
+    {
+        if (config is null || string.IsNullOrWhiteSpace(source)) return null;
+        return InspectionKinds.All.FirstOrDefault(k =>
+            string.Equals(config[$"{KindsSection}:{k}:ProfileSource"]?.Trim(), source.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -214,8 +319,8 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<ReachSurveyArea>?> SurveyAsync(string tankId, int? level, string? wallCode, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin, double? strokeMm = null, bool areaLift = false)
     {
+        _model = (await BaseAsync(tankId, ct)) with { BranchRule = branch };
         var strokes = strokeMm is { } fixedStroke ? new[] { Math.Clamp(fixedStroke, 0, _model.StrokeMaxMm) } : Strokes;
-        _model = (await BaseAsync(ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -275,7 +380,7 @@ public sealed partial class ReachSimService
         double offsetForwardMm, double offsetLeftMm, int yawIndex, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = (await BaseAsync(ct)) with { BranchRule = branch };
+        _model = (await BaseForAreaAsync(areaId, ct)) with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         var task = area?.Tasks.FirstOrDefault(t => t.TaskId == taskId);
         if (area is null || task is null) return null;
@@ -339,7 +444,7 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<ReachStationOptimum>?> OptimizeAsync(string tankId, int? level, string? wallCode, Guid? areaId,
         CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin, bool areaLift = true)
     {
-        _model = (await BaseAsync(ct)) with { BranchRule = branch };
+        _model = (await BaseAsync(tankId, ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -383,7 +488,7 @@ public sealed partial class ReachSimService
     public async Task<IReadOnlyList<RepairStop>> RepairStopsAsync(string tankId, IReadOnlySet<Guid> taskIds, CancellationToken ct,
         IReadOnlySet<Guid>? onlyAreas = null)
     {
-        _model = (await BaseAsync(ct));   // 운영 가지 규칙(MaxMargin)
+        _model = (await BaseAsync(tankId, ct));   // 운영 가지 규칙(MaxMargin)
         var list = new List<RepairStop>();
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return list;
@@ -437,7 +542,7 @@ public sealed partial class ReachSimService
     public async Task<NearestStop?> NearestStopAsync(Guid areaId, double fromX, double fromY, NearestOptions options, CancellationToken ct,
         double? fromYaw = null)
     {
-        _model = (await BaseAsync(ct));   // 운영 가지 규칙
+        _model = (await BaseForAreaAsync(areaId, ct));   // 운영 가지 규칙
         var a = await _db.InspectionAreas.AsNoTracking().Include(x => x.Tasks).FirstOrDefaultAsync(x => x.AreaId == areaId, ct);
         if (a is null) return null;
         a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();   // 임시 제외 용접선은 배차가 싣지 않는다
@@ -464,7 +569,7 @@ public sealed partial class ReachSimService
     public async Task<ReachSplitPlan?> SplitPlanAsync(Guid areaId, int maxGroups, CancellationToken ct,
         ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = (await BaseAsync(ct)) with { BranchRule = branch };
+        _model = (await BaseForAreaAsync(areaId, ct)) with { BranchRule = branch };
         var area = await _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).FirstOrDefaultAsync(a => a.AreaId == areaId, ct);
         if (area is null) return null;
         var ctx = await LoadTankAsync(area.TankId, ct);
@@ -556,7 +661,7 @@ public sealed partial class ReachSimService
     /// </summary>
     public async Task<ReachStationCandidate?> EvaluateStationAsync(Guid areaId, double x, double y, double thetaRad, double? strokeMm, CancellationToken ct)
     {
-        _model = await BaseAsync(ct);
+        _model = await BaseForAreaAsync(areaId, ct);
         var a = await _db.InspectionAreas.AsNoTracking().Include(t => t.Tasks).FirstOrDefaultAsync(t => t.AreaId == areaId, ct);
         if (a is null) return null;
         a.Tasks = a.Tasks.Where(t => t.Enabled).ToList();

@@ -232,7 +232,7 @@ public sealed record ReachRobotModel
     /// <summary>경로 관절 한계 여유 [도] — PathJointLimitMarginDeg(하드 한계에서 이만큼 안쪽이어야 통과).</summary>
     public double PathJointLimitMarginDeg { get; init; } = 2;
     /// <summary>
-    /// J6 안전 범위(실제 관절값, 대기 자세 −180° 쪽 감김 기준) [도] — HD_AMR WObjAttitude.SafeJ6Min/MaxDeg. 밖이면 센서 헤드–링크암 간섭·케이블 감김.
+    /// J6 안전 범위(실제 관절값, 대기 자세 <see cref="SafeJ6StandbyDeg"/> 쪽 감김 기준) [도] — HD_AMR WObjAttitude.SafeJ6Min/MaxDeg. 밖이면 센서 헤드–링크암 간섭·케이블 감김.
     /// </summary>
     /// <summary>
     /// 도면 순회 관절 여유 목표 [도] — 정차 최적화가 이 여유 이상으로 순회하는 용접선 수('여유 확보')를 먼저 늘리고, 같으면 최소 여유를 이 값까지 키운다
@@ -247,18 +247,28 @@ public sealed record ReachRobotModel
     public double MarginRankCapDeg { get; init; } = double.PositiveInfinity;
     public const double DefaultTraverseMarginTargetDeg = 10;
     public const double DefaultSafeJ6MinDeg = -320, DefaultSafeJ6MaxDeg = -140;
+    /// <summary>대기(홈) 자세 J6 실제 관절값 기본값 [도] — 용접검사 AMR −180°(HD_AMR <c>WObjAttitude.DefaultSafeJ6StandbyDeg</c>).</summary>
+    public const double DefaultSafeJ6StandbyDeg = -180;
     /// <summary>J6 안전 범위 [도] — 2026-11-14 실제 기구 확인으로 −320°~−140°. 설정 <c>Acs:Reach:SafeJ6MinDeg</c>·<c>SafeJ6MaxDeg</c>.
     /// HD_AMR 파라미터 <c>inspection.safeJ6MinDeg</c>·<c>safeJ6MaxDeg</c> 와 같게 둘 것.</summary>
     public double SafeJ6MinDeg { get; init; } = DefaultSafeJ6MinDeg;
     public double SafeJ6MaxDeg { get; init; } = DefaultSafeJ6MaxDeg;
+    /// <summary>
+    /// 대기(홈) 자세 J6 [도, 실제 관절값] — 안전 범위가 반드시 포함해야 하는 각이며, 운영 J6(<see cref="OperationJ6Deg"/>)를 따로 주지
+    /// 않으면 그 기준이다. 툴을 플랜지에 180° 돌려 단 가스검사 AMR 은 0(범위 −140~40). 설정 <c>Acs:Reach:SafeJ6StandbyDeg</c>,
+    /// HD_AMR 파라미터 <c>inspection.safeJ6StandbyDeg</c> 와 같게 둘 것.
+    /// </summary>
+    public double SafeJ6StandbyDeg { get; init; } = DefaultSafeJ6StandbyDeg;
 
-    /// <summary>설정 값 → 적용할 J6 안전 범위. 하한 ≥ 상한·대기 자세 −180° 미포함·폭 360° 이상·무한대면 기본값으로 되돌린다
-    /// (HD_AMR <c>WObjAttitude.ResolveSafeJ6Range</c> 와 같은 규칙).</summary>
-    public static (double Min, double Max, bool Ok) ResolveSafeJ6Range(double? min, double? max)
+    /// <summary>설정 값 → 적용할 J6 안전 범위. 하한 ≥ 상한·대기 자세(<paramref name="standby"/>, 기본 −180°) 미포함·폭 360° 이상·
+    /// 무한대면 기본값으로 되돌린다(HD_AMR <c>WObjAttitude.ResolveSafeJ6Range</c> 와 같은 규칙).</summary>
+    public static (double Min, double Max, bool Ok) ResolveSafeJ6Range(double? min, double? max, double? standby = null)
     {
         var lo = min ?? DefaultSafeJ6MinDeg;
         var hi = max ?? DefaultSafeJ6MaxDeg;
-        var ok = double.IsFinite(lo) && double.IsFinite(hi) && lo < hi && hi - lo < 360.0 && lo <= -180.0 && hi >= -180.0;
+        var home = standby ?? DefaultSafeJ6StandbyDeg;
+        var ok = double.IsFinite(lo) && double.IsFinite(hi) && double.IsFinite(home)
+                 && lo < hi && hi - lo < 360.0 && lo <= home && hi >= home;
         return ok ? (lo, hi, true) : (DefaultSafeJ6MinDeg, DefaultSafeJ6MaxDeg, false);
     }
 

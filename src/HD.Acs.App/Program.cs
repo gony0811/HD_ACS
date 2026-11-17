@@ -875,7 +875,8 @@ app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDb
         var result = await InspectionProfileService.SyncAsync(db, req, ct);
         if (req.Robot is not { } robot) return Results.Ok(result);
         // AMR 과 ACS 가 같은 코봇 모델 값(d6·손목 여유·초점 거리)을 쓰는지 대조 — 다르면 시뮬레이션과 실제 동작이 어긋난다
-        var mismatch = RobotModelCheck.Compare(ReachSimService.ModelFrom(cfg), robot);
+        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
+        var mismatch = RobotModelCheck.Compare(ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source)), robot);
         var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
         if (robotModels.Report(source, robot, mismatch) && mismatch.Count > 0)
             logs.CreateLogger("RobotModelCheck").LogWarning("코봇 모델 값이 {Source} 와 다르다 — {Mismatch}", source, string.Join(" / ", mismatch));
