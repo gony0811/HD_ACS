@@ -40,6 +40,25 @@ public class LiftDisabledTests
         Assert.Equal(0, off.EffectiveStrokeMm(600));
     }
 
+    [Fact]
+    public void 장착_높이와_나무판_두께를_설정에서_읽는다()
+    {
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Acs:Reach:MountZMm"] = "927", ["Acs:Reach:AmrFloorOffsetMm"] = "110",
+        }).Build();
+        var m = ReachSimService.ModelFrom(cfg);
+        Assert.Equal(927, m.MountZMm);
+        Assert.Equal(110, m.AmrFloorOffsetMm);
+
+        var none = ReachSimService.ModelFrom(Config(null));      // 없으면 종전 1635·0
+        Assert.Equal(1635, none.MountZMm);
+        Assert.Equal(0, none.AmrFloorOffsetMm);
+        Assert.Equal(1635, ReachSimService.MountZFrom(50, 1635));     // 범위 밖 = 기본값
+        Assert.Equal(0, ReachSimService.FloorOffsetFrom(-10));
+        Assert.Equal(0, ReachSimService.FloorOffsetFrom(900));
+    }
+
     private static async Task<(AcsDbContext Db, MissionService Missions, Guid ScenarioId)> Seed(bool liftEnabled)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>()

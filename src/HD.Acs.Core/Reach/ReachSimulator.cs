@@ -47,8 +47,16 @@ public sealed record ReachRobotModel
     /// 위치가 달라 회전 대칭으로 감싸면 실기 홈 자세부터 차체와 간섭으로 잘못 나온다(HD_AMR CobotEnvelope 와 같은 규칙).
     /// </summary>
     public ReachToolSegment SelfToolSegment { get; init; } = new("검사 툴(몸체)", 0, 293, 169);
-    /// <summary>차체 바닥 → 코봇 BASE 면 높이(리프트 0) [mm].</summary>
+    /// <summary>
+    /// 차체 바닥(바퀴 닿는 면) → 코봇 BASE 면 높이(리프트 0) [mm]. 설정 <c>Acs:Reach:MountZMm</c>.
+    /// 리프트를 떼어 코봇을 차체에 바로 달면 그 실측값으로 바꾼다.
+    /// </summary>
     public double MountZMm { get; init; } = 1635;
+    /// <summary>
+    /// 차체 바닥이 층 바닥(멤브레인)보다 올라간 높이 [mm] — 주행 바닥 보호용 나무판 등. 차체·코봇 전체가 이만큼 위로 간다
+    /// (용접선 좌표는 그대로 층 바닥 기준). 설정 <c>Acs:Reach:AmrFloorOffsetMm</c>, 기본 0.
+    /// </summary>
+    public double AmrFloorOffsetMm { get; init; }
     /// <summary>
     /// 장착 yaw [도] — BASE +X 가 차체 +X 에서 반시계로 돈 각(HD_AMR T_A_B rz). 링크 기하·간섭은 바뀌지 않고 관절각 이름표(J1)만
     /// 달라지지만, 출발 자세(<see cref="StartJointsByWall"/>)·J1 한계를 실기와 맞추려면 실제 값이어야 한다. 설정 <c>Acs:Reach:MountYawDeg</c>.
@@ -1078,7 +1086,7 @@ public static partial class ReachSimulator
             _cos = Math.Cos(st.Yaw); _sin = Math.Sin(st.Yaw);
             _ox = st.X + (_cos * dF - _sin * dL) / 1000.0;
             _oy = st.Y + (_sin * dF + _cos * dL) / 1000.0;
-            _floor = st.FloorZ;
+            _floor = st.FloorZ + m.AmrFloorOffsetMm / 1000.0;   // 차체가 서 있는 면(나무판 위)
             _mc = Math.Cos(m.MountYawDeg * Math.PI / 180); _ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
             BaseZMm = m.MountZMm + m.EffectiveStrokeMm(strokeMm);
         }
