@@ -399,3 +399,9 @@ public sealed record ResumePauseResultDto(string RobotId, string ActionType);
 /// <summary>SignalR "BatterySwapDispatched" 푸시 — 운영자 교체 디스패치 사실을 UI 이벤트 로그가 흡수.</summary>
 public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, string TargetNodeId,
     string MapId, string Reason, Guid? AbortedRunId);
+
+/// <summary>
+/// 영역 삭제 결과. Blocked = 원래 영역으로 옮길 수 없는 작업이 있어 삭제하지 않음(Message 에 사유, DeletedTasks 에 그 작업 이름).
+/// 삭제됐으면 Moved = "작업 → 받은 영역" 문구, DeletedTasks = 함께 지운 작업 이름.
+/// </summary>
+public sealed record AreaDeleteOutcome(bool Blocked, string? Message, IReadOnlyList<string> Moved, IReadOnlyList<string> DeletedTasks);

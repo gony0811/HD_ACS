@@ -534,6 +534,26 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task<AreaDeleteOutcome> DeleteAreaAsync(Guid areaId, bool deleteTasks, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync(
+            $"/api/areas/{areaId}?deleteTasks={(deleteTasks ? "true" : "false")}&userId={Uri.EscapeDataString(userId)}", ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var c = await resp.Content.ReadFromJsonAsync<DeleteConflictBody>(cancellationToken: ct);
+            return new AreaDeleteOutcome(true, c?.Error, Array.Empty<string>(), c?.Orphans ?? new List<string>());
+        }
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<DeleteOkBody>(cancellationToken: ct);
+        return new AreaDeleteOutcome(false, null,
+            body?.Moved?.Select(m => $"{m.TaskName ?? m.TaskId.ToString()[..8]} → {m.ToAreaName}").ToList() ?? new List<string>(),
+            body?.DeletedTasks ?? new List<string>());
+    }
+
+    private sealed record DeleteConflictBody(string? Error, List<string>? Orphans);
+    private sealed record DeleteMoveBody(Guid TaskId, string? TaskName, Guid ToAreaId, string ToAreaName, int NewSeq);
+    private sealed record DeleteOkBody(List<DeleteMoveBody>? Moved, List<string>? DeletedTasks);
+
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
         int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default)

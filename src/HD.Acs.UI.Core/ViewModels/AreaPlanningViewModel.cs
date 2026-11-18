@@ -389,7 +389,26 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private async Task DeleteAreaAsync(AreaDto? area)
     {
         if (area is null) return;
-        try { await _api.DeleteAreaAsync(area.AreaId); StatusMessage = "영역 삭제됨."; await RefreshAreasAsync(); }
+        try
+        {
+            // 서버가 작업을 원래 영역으로 되돌린 뒤 영역을 지운다. 갈 곳이 없는 작업이 있으면 먼저 묻는다(되돌릴 수 없음).
+            var r = await _api.DeleteAreaAsync(area.AreaId, deleteTasks: false, _operatorId);
+            if (r.Blocked)
+            {
+                if (ConfirmAsync is null || !await ConfirmAsync(
+                        (r.Message ?? "옮겨 갈 영역이 없는 작업이 있습니다.") +
+                        "\n\n이 작업들은 영역과 함께 삭제되며 되돌릴 수 없습니다. 삭제할까요?", "영역 삭제"))
+                {
+                    StatusMessage = $"영역 삭제 취소 — 원래 영역으로 옮길 수 없는 작업 {r.DeletedTasks.Count}개: {string.Join(", ", r.DeletedTasks)}";
+                    return;
+                }
+                r = await _api.DeleteAreaAsync(area.AreaId, deleteTasks: true, _operatorId);
+            }
+            StatusMessage = "영역 삭제됨."
+                + (r.Moved.Count > 0 ? $" 작업 {r.Moved.Count}개를 원래 영역으로 되돌림: {string.Join(", ", r.Moved)}." : "")
+                + (r.DeletedTasks.Count > 0 ? $" 함께 삭제한 작업 {r.DeletedTasks.Count}개: {string.Join(", ", r.DeletedTasks)}." : "");
+            await RefreshAreasAsync();
+        }
         catch (Exception ex) { StatusMessage = $"영역 삭제 실패: {ex.Message}"; }
     }
 

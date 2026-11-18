@@ -137,6 +137,15 @@ public interface IAcsApiClient
         Task.FromResult((Guid.Empty, 0, 0));
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
+    /// <summary>
+    /// 영역 삭제 — 서버가 작업을 원래 영역으로 되돌린 뒤 지운다. 갈 곳이 없는 작업이 있으면 <c>Blocked</c>(삭제 안 됨),
+    /// <paramref name="deleteTasks"/> = true 면 그 작업도 함께 지운다. 기본 구현 = 종전 삭제(구서버·테스트 대역).
+    /// </summary>
+    async Task<AreaDeleteOutcome> DeleteAreaAsync(Guid areaId, bool deleteTasks, string userId, CancellationToken ct = default)
+    {
+        await DeleteAreaAsync(areaId, ct);
+        return new AreaDeleteOutcome(false, null, Array.Empty<string>(), Array.Empty<string>());
+    }
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
         int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default);
