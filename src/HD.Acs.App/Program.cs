@@ -55,6 +55,7 @@ builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddSingleton<AmrRobotModelStore>();   // AMR 이 알려 준 코봇 모델 값(d6 등) 대조 결과
 builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
+builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
@@ -642,13 +643,16 @@ app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? 
     }));
 });
 
-app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, AcsDbContext db) =>
+app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, bool? deleteTasks, string? userId, AreaDeleteService svc, CancellationToken ct) =>
 {
-    var a = await db.InspectionAreas.FindAsync(areaId);
-    if (a is null) return Results.NotFound();
-    db.InspectionAreas.Remove(a);   // area_task CASCADE
-    await db.SaveChangesAsync();
-    return Results.Ok();
+    // 작업은 원래 영역(분리 전 영역 또는 작업을 품는 같은 면의 영역)으로 되돌리고 영역만 지운다. taskId 유지.
+    // 갈 곳이 없는 작업이 있으면 409 — deleteTasks=true 로 다시 요청하면 그 작업은 함께 지운다.
+    try
+    {
+        var r = await svc.DeleteAsync(areaId, deleteTasks == true, userId, ct);
+        return r is null ? Results.NotFound() : Results.Ok(new { moved = r.Moved, deletedTasks = r.DeletedTasks });
+    }
+    catch (AreaDeleteBlockedException ex) { return Results.Conflict(new { error = ex.Message, orphans = ex.Orphans }); }
 });
 
 // 선택 작업들을 묶어 새 영역으로 분리·이동 — **taskId(SAIGE productId·attempt 누적 키) 유지** [SAIGE v2.6 §2.5].
