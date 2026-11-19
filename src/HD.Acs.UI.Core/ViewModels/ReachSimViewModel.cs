@@ -136,6 +136,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
             }
             try { ApplyAreaWalls(await _api.GetAreasAsync(TankId)); }
             catch { ApplyAreaWalls(Array.Empty<AreaDto>()); }   // 면 필터 없이 계속
+            await LoadSettingsAsync();   // 리프트·차체 설정 입력칸(실패해도 조사는 계속)
             await SurveyAsync();
         }
         catch (Exception ex) { StatusMessage = $"선창 조회 실패: {ex.Message}"; }

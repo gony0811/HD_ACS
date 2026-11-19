@@ -408,3 +408,15 @@ public sealed record AreaDeleteOutcome(bool Blocked, string? Message, IReadOnlyL
 
 /// <summary>서버 리프트 운영 방식(<c>GET /api/settings/lift</c>) — Mode = "Off" | "Auto" | "Fixed", FixedStrokeMm = 고정 높이(고정 모드만).</summary>
 public sealed record LiftSettingsDto(string Mode, double? FixedStrokeMm);
+
+/// <summary>
+/// 리치·간섭 화면의 리프트·차체 설정(서버 <c>/api/settings/reach-sim</c>) — 지금 적용 중인 값과 화면에서 덮어쓴 설정 키.
+/// 저장하면 서버가 덮어쓰기 파일에 써서 바로 다시 읽는다(시뮬레이션·배차 리프트 높이 모두 다음 요청부터).
+/// </summary>
+public sealed record ReachSettingsDto(
+    string LiftMode, double? FixedStrokeMm, double MountZMm, double AmrHeightMm, bool SupportColumn,
+    double MaxEntryJointTravelDeg, IReadOnlyList<string>? Overridden = null, string? OverrideFile = null, string? Warning = null);
+
+/// <summary>리치 설정 저장 요청 — null 항목은 덮어쓰지 않는다(appsettings.json 값). 보낸 값으로 덮어쓰기 파일을 통째로 바꾼다.</summary>
+public sealed record ReachSettingsUpdateDto(
+    string? LiftMode, double? FixedStrokeMm, double? MountZMm, double? AmrHeightMm, bool? SupportColumn, double? MaxEntryJointTravelDeg);

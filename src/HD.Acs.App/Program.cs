@@ -29,6 +29,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // "localhost"면 로컬 UI 전용 [SW-34]. 하드코딩하지 않고 설정으로만 전환한다.
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
+// 리치·간섭 화면에서 바꾼 리프트·차체 설정 — appsettings.json 다음에 읽어 그 값을 이긴다(파일 없으면 무시) [ReachRuntimeSettings]
+builder.Configuration.AddJsonFile(ReachRuntimeSettings.FileName, optional: true, reloadOnChange: true);
+
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 
 // Windows 서비스(sc.exe 등록)로 실행될 때 SCM 시작/정지 신호에 응답 — 없으면 시작이 1053 시간 초과로 실패한다.
@@ -53,6 +56,8 @@ builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddSingleton<AmrRobotModelStore>();   // AMR 이 알려 준 코봇 모델 값(d6 등) 대조 결과
+builder.Services.AddSingleton(sp => new ReachRuntimeSettings(sp.GetRequiredService<IConfiguration>(),
+    Path.Combine(builder.Environment.ContentRootPath, ReachRuntimeSettings.FileName)));
 builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
@@ -969,6 +974,13 @@ app.MapGet("/api/settings/lift", (IConfiguration cfg) =>
     var l = LiftSettings.From(cfg);
     return Results.Ok(new { enabled = l.Enabled, mode = l.Mode.ToString(), fixedStrokeMm = l.FixedStrokeMm, warning = l.Warning });
 });
+// 리치·간섭 화면의 리프트·차체 설정 — 저장하면 다음 요청부터 시뮬레이션·배차(liftStrokeMm) 모두 새 값(재시작 불필요).
+// 진행 중 run 이 있으면 거부(지령 리프트 높이가 run 도중 바뀌지 않게). DELETE = 덮어쓰기 해제(appsettings.json 값).
+app.MapGet("/api/settings/reach-sim", (ReachRuntimeSettings s) => Results.Ok(s.Read()));
+app.MapPut("/api/settings/reach-sim", async (ReachSettingsUpdate req, ReachRuntimeSettings s, AcsDbContext db, ILogger<ReachRuntimeSettings> log) =>
+    await SaveReachSettings(req, s, db, log, reset: false));
+app.MapDelete("/api/settings/reach-sim", async (string? userId, ReachRuntimeSettings s, AcsDbContext db, ILogger<ReachRuntimeSettings> log) =>
+    await SaveReachSettings(new ReachSettingsUpdate(null, null, null, null, null, null, userId), s, db, log, reset: true));
 app.MapGet("/api/integrations/llm",async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
 
 app.MapPost("/api/planning/assistant/propose", async (ProposeRequest req, PlanningAssistantService svc, CancellationToken ct) =>
@@ -1463,6 +1475,29 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
         .FirstOrDefaultAsync(c => c.MapId == mapId && c.MapVersion == map.Version);
     return cal is null ? Results.NotFound() : Results.Ok(cal);
 });
+
+// 리치·간섭 화면 설정 저장 — 검사 → 진행 중 run 가드 → 덮어쓰기 파일 저장·설정 다시 읽기 → 감사로그
+static async Task<IResult> SaveReachSettings(ReachSettingsUpdate req, ReachRuntimeSettings s, AcsDbContext db, Microsoft.Extensions.Logging.ILogger log, bool reset)
+{
+    var errors = ReachRuntimeSettings.Validate(req);
+    if (errors.Count > 0) return Results.BadRequest(new { error = string.Join(" / ", errors), reasons = errors });
+    var active = await db.ScenarioRuns.AsNoTracking()
+        .Where(r => r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER").Select(r => r.RunId).FirstOrDefaultAsync();
+    if (active != Guid.Empty)
+        return Results.Conflict(new { error = $"진행 중인 run({active})이 있어 바꿀 수 없습니다 — 지령 리프트 높이가 run 도중 바뀌지 않게. run 을 끝내거나 중단한 뒤 저장하세요." });
+    var before = s.Overrides();
+    var view = reset ? s.Reset() : s.Save(req);
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "operator",
+        Action = reset ? "REACH_SETTINGS_RESET" : "REACH_SETTINGS_UPDATE",
+        Target = ReachRuntimeSettings.FileName,
+        Detail = JsonSerializer.Serialize(new { before, after = s.Overrides() }),
+    });
+    await db.SaveChangesAsync();
+    log.LogInformation("리치 설정 {Action}: {Values}", reset ? "초기화(appsettings.json 값)" : "저장", reset ? "-" : ReachRuntimeSettings.Describe(req));
+    return Results.Ok(view);
+}
 
 // 계획 어시스턴트 API 공통 예외 → HTTP 상태 매핑
 static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
