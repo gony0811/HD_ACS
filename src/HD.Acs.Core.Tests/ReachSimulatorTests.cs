@@ -203,6 +203,27 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 차체_윗면_바로_위에_달아도_BASE는_차체와_간섭으로_세지_않고_받침_기둥은_잰다()
+    {
+        // 2026-11-19 현장: 차체 765 + 160 mm 받침 기둥(리프트 단면) 위에 코봇 → BASE 927
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var low = Symmetric175 with { LiftEnabled = false, MountZMm = 927, AmrHeightMm = 887 };   // BASE 가 차체 윗면 40 mm 위
+        var r = ReachSimulator.Evaluate(low, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        foreach (var stage in r.Stages)
+            foreach (var s in stage.Solutions)
+                Assert.DoesNotContain(s.Parts, p => p.Name == "BASE·J1" && p.NearestPlane == "AMR 차체");
+
+        var support = low with { AmrHeightMm = 765, SupportColumn = true };
+        var rs = ReachSimulator.Evaluate(support, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var col = Assert.Single(rs.Stages[2].Chosen!.Parts, p => p.Name == "받침 기둥");
+        Assert.Equal(floor + 0.765, col.A[2], 9);
+        Assert.Equal(floor + 0.927, col.B[2], 9);
+        Assert.False((low with { AmrHeightMm = 765 }).HasColumn(927));    // 받침 기둥 설정이 없으면 종전대로 빠진다
+    }
+
+    [Fact]
     public void 관절_한계는_FR5_WML_사양_비대칭이다()
     {
         var m = ReachRobotModel.Default;

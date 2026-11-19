@@ -74,6 +74,19 @@ public sealed record ReachRobotModel
     /// <summary>판정에 쓸 리프트 높이 — 리프트를 쓰지 않으면 0.</summary>
     public double EffectiveStrokeMm(double strokeMm) => LiftEnabled ? strokeMm : 0;
 
+    /// <summary>
+    /// 리프트를 쓰지 않을 때 코봇을 받치는 고정 기둥이 있는가 — 있으면 리프트 기둥과 같은 단면(<see cref="ColumnHalfMm"/>)으로
+    /// 차체 윗면 → BASE 사이를 "받침 기둥"으로 두고 간섭(자기 간섭·탱크 면)을 잰다. 설정 <c>Acs:Reach:SupportColumn</c>, 기본 false.
+    /// (2026-11-19 현장: 차체 약 765 mm 위에 리프트와 같은 가로세로의 130 mm 기둥을 두고 코봇 장착)
+    /// </summary>
+    public bool SupportColumn { get; init; }
+
+    /// <summary>차체 윗면 → BASE 사이 기둥(리프트 또는 받침)을 간섭 판정에 넣는가.</summary>
+    public bool HasColumn(double baseZMm) => (LiftEnabled || SupportColumn) && baseZMm > AmrHeightMm + 1;
+
+    /// <summary>기둥 부품 이름 — 리프트를 쓰면 "리프트 기둥", 아니면 "받침 기둥".</summary>
+    public string ColumnName => LiftEnabled ? "리프트 기둥" : "받침 기둥";
+
     public double AmrFrontMm { get; init; } = 395;
     public double AmrRearMm { get; init; } = 365;
     public double AmrHalfWidthMm { get; init; } = 350;
@@ -1196,9 +1209,13 @@ public static partial class ReachSimulator
         var self = SelfBoxes(m, f.BaseZMm);
         var segs = ArmSegments(m, fr);
         var core = segs[^1];
-        var parts = (m.LiftEnabled ? new[] { Column(m, planes, f) } : Array.Empty<ReachPart>())
+        // BASE·J1 은 받침(리프트 기둥 또는 차체 윗면)에 붙어 있는 부품이라 자기 간섭을 재지 않는다(SelfClearance·HD_AMR
+        // CobotEnvelope 와 같은 규칙). 리프트를 떼고 차체 윗면 바로 위(예: 927 mm)에 달면 BASE 캡슐 반경이 차체 윗면을 파고들어
+        // 자세와 무관하게 모든 해가 간섭으로 나왔다. 탱크 면과는 그대로 잰다.
+        var parts = (m.HasColumn(f.BaseZMm) ? new[] { Column(m, planes, f) } : Array.Empty<ReachPart>())
             .Concat(segs[..^1].Select(s =>
-                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f, s.NearColumn ? self[..2] : self)))
+                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f,
+                    s.Name == "BASE·J1" ? Array.Empty<SelfBox>() : s.NearColumn ? self[..2] : self)))
             .Concat(m.ToolBoxes.Select(t =>
                 WithSelf(ToolBoxPart(m, t, fr[6], f, planes), core.A, core.B, core.RadiusMm, f, self)))
             .ToArray();
@@ -1223,18 +1240,19 @@ public static partial class ReachSimulator
 
     /// <summary>
     /// 자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).
-    /// 리프트를 쓰지 않으면(<see cref="ReachRobotModel.LiftEnabled"/> = false) 기둥은 빠진다.
+    /// 리프트를 쓰지 않으면(<see cref="ReachRobotModel.LiftEnabled"/> = false) 기둥은 빠진다 — 단 받침 기둥
+    /// (<see cref="ReachRobotModel.SupportColumn"/>)이 있으면 같은 단면의 고정 기둥으로 둔다.
     /// </summary>
     private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm)
     {
         var body = new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm });
         var tower = new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
             new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm });
-        if (!m.LiftEnabled) return new[] { body, tower };
+        if (!m.HasColumn(baseZMm)) return new[] { body, tower };
         return new[]
         {
             body, tower,
-            new SelfBox("리프트 기둥", new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
+            new SelfBox(m.ColumnName, new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
                 new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
         };
     }
@@ -1247,7 +1265,7 @@ public static partial class ReachSimulator
             .SelectMany(z => new[] { (h, h), (h, -h), (-h, h), (-h, -h) }.Select(c => f.AmrToDrawing(c.Item1, c.Item2, z)))
             .ToList();
         var (cl, code) = Clearance(corners, 0, planes, skipFloor: true);
-        return new ReachPart("리프트 기둥", f.AmrToDrawing(0, 0, m.AmrHeightMm), f.AmrToDrawing(0, 0, f.BaseZMm), h / 1000.0, cl, code);
+        return new ReachPart(m.ColumnName, f.AmrToDrawing(0, 0, m.AmrHeightMm), f.AmrToDrawing(0, 0, f.BaseZMm), h / 1000.0, cl, code);
     }
 
     /// <summary>팔 부품의 탱크 면 여유와 차체·신호탑·기둥 여유 중 작은 쪽. a·b 는 BASE 기준 mm.</summary>
