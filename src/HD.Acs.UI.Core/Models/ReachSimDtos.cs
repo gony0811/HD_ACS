@@ -94,3 +94,26 @@ public sealed record ReachStationCandidateDto(double X, double Y, double Theta, 
 /// </summary>
 public sealed record ReachReportDto(string TaskHeader, string TaskRows, string IkHeader, string IkRows,
     int Areas, int Tasks, int Possible, int Caution, int Impossible);
+
+/// <summary>정차 묶음 최적화(set cover) 작업 — State = RUNNING | DONE | FAILED | CANCELLED, Done/Total = 판정한 후보 수.</summary>
+public sealed record SetCoverJobDto(Guid JobId, string TankId, int Level, string WallCode, string State, int Done, int Total,
+    string? Error, SetCoverPlanDto? Result);
+
+/// <summary>
+/// 정차 묶음 최적화 결과 — 면·층 하나. SafeCovered = 순회 여유 목표 이상으로 덮은 용접선, ClearCovered = 간섭 없이(여유 부족) 덮은 수,
+/// CurrentStations·CurrentClear = 지금 배치의 정차 수·간섭 없이 닿는 수, Uncovered = 어느 후보로도 닿지 못한 작업.
+/// </summary>
+public sealed record SetCoverPlanDto(string TankId, int Level, string WallCode, int Welds, int SafeCovered, int ClearCovered,
+    int CurrentStations, int CurrentClear, List<SetCoverStationDto> Stations, List<Guid> Uncovered,
+    int Cells, long Evaluations, long ElapsedMs, List<ReachWeldVerdictDto>? UncoveredSeams = null);
+
+/// <summary>제안 정차 하나 — 순번·도면 정차(x, y, θ rad)·리프트·Tier(Safe|Clear)·순회 최소 여유·맡은 용접선.</summary>
+public sealed record SetCoverStationDto(int No, double X, double Y, double Theta, double StrokeMm, string Tier, double? MinMarginDeg,
+    double[] Window, List<Guid> TaskIds, List<ReachWeldVerdictDto> Seams);
+
+/// <summary>정차 묶음 최적화 적용 결과 — 새 영역(물려받음·X 영역 여부), 지운 기존 영역 수, 시나리오 새 연결 수, 옮긴 작업 수.</summary>
+public sealed record SetCoverApplyResultDto(string TankId, int Level, string WallCode, List<SetCoverAppliedAreaDto> Areas,
+    int DeletedAreas, int ScenarioLinksAdded, int TasksMoved);
+
+public sealed record SetCoverAppliedAreaDto(Guid AreaId, string Name, int TaskCount, bool Inherited, bool Unreachable,
+    double? StationX, double? StationY, double? StationTheta, double? LiftMm);
