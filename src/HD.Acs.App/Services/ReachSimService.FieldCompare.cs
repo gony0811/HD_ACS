@@ -105,7 +105,7 @@ public sealed partial class ReachSimService
             var wp = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
             _areaWall[area.AreaId] = area.WallCode;
             var pts = SeamPoints(wp, task);
-            var lift = Math.Clamp(f.LiftMm, 0, model.StrokeMaxMm);
+            var lift = model.LiftStrokeMm(f.LiftMm);
             var s = ReachSimulator.Survey(model, ReachSimulator.PlanesForLevel(ctx.WallPlanes, floorZ, area.Level),
                 new[] { station }, pts, Json<double[]>(wall.Normal), new[] { lift }, area.WallCode);
 

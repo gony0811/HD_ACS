@@ -54,9 +54,31 @@ public sealed record ReachRobotModel
     public double MountZMm { get; init; } = 1635;
     /// <summary>
     /// 차체 바닥이 층 바닥(멤브레인)보다 올라간 높이 [mm] — 주행 바닥 보호용 나무판 등. 차체·코봇 전체가 이만큼 위로 간다
-    /// (용접선 좌표는 그대로 층 바닥 기준). 설정 <c>Acs:Reach:AmrFloorOffsetMm</c>, 기본 0.
+    /// (용접선 좌표는 그대로 층 바닥 기준). 모든 층 공통 값 — 층별 값(<see cref="AmrFloorOffsetByLevelMm"/>)이 있으면 쓰지 않는다.
+    /// 설정 <c>Acs:Reach:AmrFloorOffsetMm</c> 에 숫자 하나, 기본 0.
     /// </summary>
     public double AmrFloorOffsetMm { get; init; }
+    /// <summary>
+    /// 층별 차체 바닥 올림 [mm] — 키 = 내부 층 번호(1부터, 맵 ID <c>{선창}-L{n}</c> 의 n · 화면 표기 L0 = 1). 적힌 층만 올리고 나머지 층은 0.
+    /// 층은 정차의 바닥 높이(<see cref="ReachStation.FloorZ"/>)를 <see cref="LevelFloorZ"/> 와 맞춰 찾는다.
+    /// 설정 <c>Acs:Reach:AmrFloorOffsetMm</c> 에 {"1": 25} 처럼 층 → mm.
+    /// </summary>
+    public IReadOnlyDictionary<int, double>? AmrFloorOffsetByLevelMm { get; init; }
+    /// <summary>선창 층 발판 높이 [m](<c>level_z</c>) — 층별 바닥 올림을 찾을 때 쓴다(선창마다 호출부가 넣는다).</summary>
+    public IReadOnlyList<double>? LevelFloorZ { get; init; }
+
+    /// <summary>
+    /// 이 바닥 높이 [m]에 선 차체의 바닥 올림 [mm] — 층별 값이 있으면 그 층 값(없는 층·층을 못 찾으면 0), 없으면 공통 값.
+    /// </summary>
+    public double FloorOffsetMm(double floorZ)
+    {
+        if (AmrFloorOffsetByLevelMm is not { } byLevel) return AmrFloorOffsetMm;
+        if (LevelFloorZ is not { } levels) return 0;
+        for (var i = 0; i < levels.Count; i++)
+            if (Math.Abs(levels[i] - floorZ) < 0.005)
+                return byLevel.TryGetValue(i + 1, out var v) ? v : 0;
+        return 0;
+    }
     /// <summary>
     /// 장착 yaw [도] — BASE +X 가 차체 +X 에서 반시계로 돈 각(HD_AMR T_A_B rz). 링크 기하·간섭은 바뀌지 않고 관절각 이름표(J1)만
     /// 달라지지만, 출발 자세(<see cref="StartJointsByWall"/>)·J1 한계를 실기와 맞추려면 실제 값이어야 한다. 설정 <c>Acs:Reach:MountYawDeg</c>.
@@ -71,8 +93,25 @@ public sealed record ReachRobotModel
     /// </summary>
     public bool LiftEnabled { get; init; } = true;
 
-    /// <summary>판정에 쓸 리프트 높이 — 리프트를 쓰지 않으면 0.</summary>
-    public double EffectiveStrokeMm(double strokeMm) => LiftEnabled ? strokeMm : 0;
+    /// <summary>
+    /// 리프트 고정 높이 [mm] — 값이 있으면 리프트를 그 높이에 세워 두고 쓰는 운영(<c>Acs:Lift:Mode = Fixed</c>)이다:
+    /// 후보 높이는 이 값 하나이고, 호출부가 넘긴 높이·영역 저장값과 무관하게 BASE 는 <see cref="MountZMm"/> + 이 값이다.
+    /// null 이면 자동(0~<see cref="StrokeMaxMm"/> 탐색). <see cref="LiftEnabled"/> = false 면 무시한다.
+    /// </summary>
+    public double? FixedStrokeMm { get; init; }
+
+    /// <summary>판정에 쓸 리프트 높이 — 리프트를 쓰지 않으면 0, 고정이면 고정 높이.</summary>
+    public double EffectiveStrokeMm(double strokeMm) => !LiftEnabled ? 0 : FixedStrokeMm ?? strokeMm;
+
+    /// <summary>저장값·요청값을 운영 리프트 높이로 — 미사용 0, 고정이면 고정 높이, 자동이면 0~<see cref="StrokeMaxMm"/> 로 자른 값.</summary>
+    public double LiftStrokeMm(double? requestedMm) =>
+        !LiftEnabled ? 0 : FixedStrokeMm ?? Math.Clamp(requestedMm ?? 0, 0, StrokeMaxMm);
+
+    /// <summary>조사·최적화가 훑을 리프트 후보 — 미사용 [0], 고정 [고정 높이], 자동 0~<see cref="StrokeMaxMm"/>(간격 stepMm).</summary>
+    public IReadOnlyList<double> StrokeCandidates(double stepMm) =>
+        !LiftEnabled ? new[] { 0.0 }
+        : FixedStrokeMm is { } h ? new[] { h }
+        : Enumerable.Range(0, (int)(StrokeMaxMm / stepMm) + 1).Select(i => i * stepMm).ToArray();
 
     /// <summary>
     /// 리프트를 쓰지 않을 때 코봇을 받치는 고정 기둥이 있는가 — 있으면 리프트 기둥과 같은 단면(<see cref="ColumnHalfMm"/>)으로
@@ -1099,7 +1138,7 @@ public static partial class ReachSimulator
             _cos = Math.Cos(st.Yaw); _sin = Math.Sin(st.Yaw);
             _ox = st.X + (_cos * dF - _sin * dL) / 1000.0;
             _oy = st.Y + (_sin * dF + _cos * dL) / 1000.0;
-            _floor = st.FloorZ + m.AmrFloorOffsetMm / 1000.0;   // 차체가 서 있는 면(나무판 위)
+            _floor = st.FloorZ + m.FloorOffsetMm(st.FloorZ) / 1000.0;   // 차체가 서 있는 면(나무판 위 — 층별)
             _mc = Math.Cos(m.MountYawDeg * Math.PI / 180); _ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
             BaseZMm = m.MountZMm + m.EffectiveStrokeMm(strokeMm);
         }

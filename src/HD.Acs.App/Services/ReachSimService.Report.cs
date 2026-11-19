@@ -96,7 +96,7 @@ public sealed partial class ReachSimService
     private List<string> ReportArea(InspectionAreaEntity a, WallEntity wall, AreaSetup setup, bool optimize,
         StringBuilder taskRows, StringBuilder ikRows, CancellationToken ct)
     {
-        var lift = Math.Clamp(a.StationLiftMm ?? 0, 0, _model.StrokeMaxMm);
+        var lift = _model.LiftStrokeMm(a.StationLiftMm);
         var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
         var evals = new TaskEval[tasks.Count];
         Parallel.For(0, tasks.Count, new ParallelOptions { CancellationToken = ct }, i => evals[i] = EvaluateTask(a, setup, tasks[i], lift));

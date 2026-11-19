@@ -38,8 +38,16 @@ public class ReachFieldBacktestTests
 
     public static ReachRobotModel FieldModel()
     {
-        var m = ReachSimService.ModelFrom(
-            new ConfigurationBuilder().AddJsonFile(Find(Path.Combine("HD.Acs.App", "appsettings.json"))).Build());
+        // 운영 설정 위에 그날(2026-11-11) 장비 형상을 고정한다 — 리프트 장착(BASE 1635 + 리프트 높이, 차체 887).
+        // 리프트를 떼어 낸 뒤(2026-11-17, BASE 927)의 appsettings 를 그대로 쓰면 실적 행의 리프트 높이가 무시돼 판정이 깨진다.
+        var m = ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddJsonFile(Find(Path.Combine("HD.Acs.App", "appsettings.json")))
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Acs:Lift:Mode"] = "Auto", ["Acs:Reach:MountZMm"] = "1635",
+                ["Acs:Reach:AmrHeightMm"] = "887", ["Acs:Reach:SupportColumn"] = "false",
+            })
+            .Build());
         return double.TryParse(Environment.GetEnvironmentVariable("HDACS_BT_ELBOW"), NumberStyles.Float, CultureInfo.InvariantCulture, out var e)
             ? m with { MinElbowBendDeg = e } : m;   // 기준값을 바꿔 가며 볼 때만
     }

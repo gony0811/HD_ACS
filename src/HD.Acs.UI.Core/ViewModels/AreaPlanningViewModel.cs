@@ -133,12 +133,22 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// <summary>정차 리프트 높이 [mm, 0~1000] — 이 영역을 검사할 때 AMR 리프트를 맞출 높이. 빈값=등록 시 배차 기본 0, 수정 시 기존 값 유지.</summary>
     [ObservableProperty] private double? _stationLiftMm;
     /// <summary>
-    /// 서버 리프트 사용 여부(<c>Acs:Lift:Enabled</c>) — false 면 영역 폼 리프트 칸을 끈다(서버가 지령·판정을 0 으로 고정).
-    /// 구서버·조회 실패면 true(종전).
+    /// 영역 폼 리프트 칸을 쓸 수 있는가 — 서버 리프트 방식(<c>Acs:Lift:Mode</c>)이 자동일 때만 true. 미사용(0)·고정(고정 높이)이면
+    /// 서버가 지령·판정 높이를 정하므로 칸을 끈다(저장된 값은 지우지 않는다). 구서버·조회 실패면 true(종전).
     /// </summary>
     [ObservableProperty] private bool _liftEnabled = true;
-    public string LiftHint => LiftEnabled ? "" : "리프트 미사용(서버 Acs:Lift:Enabled = false) — 모든 지령·판정에서 리프트 0";
-    partial void OnLiftEnabledChanged(bool value) => OnPropertyChanged(nameof(LiftHint));
+    /// <summary>서버 리프트 방식 — "Off" | "Auto" | "Fixed".</summary>
+    [ObservableProperty] private string _liftMode = "Auto";
+    /// <summary>고정 모드의 리프트 높이 [mm].</summary>
+    [ObservableProperty] private double? _liftFixedMm;
+    public string LiftHint => LiftMode switch
+    {
+        "Off" => "리프트 미사용(서버 Acs:Lift:Mode = Off) — 모든 지령·판정에서 리프트 0",
+        "Fixed" => $"리프트 고정 {LiftFixedMm ?? 0:0} mm(서버 Acs:Lift:Mode = Fixed) — 모든 지령·판정이 이 높이, 영역 값은 쓰지 않음",
+        _ => "",
+    };
+    partial void OnLiftModeChanged(string value) { LiftEnabled = value == "Auto"; OnPropertyChanged(nameof(LiftHint)); }
+    partial void OnLiftFixedMmChanged(double? value) => OnPropertyChanged(nameof(LiftHint));
 
     /// <summary>서버 <c>Acs:Area:StationStandoffM</c>(경사면) 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
     public const double DefaultStandoffM = 0.8;
@@ -258,8 +268,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [RelayCommand]
     public async Task LoadAsync()
     {
-        try { LiftEnabled = await _api.GetLiftEnabledAsync() ?? true; }
-        catch (Exception) { LiftEnabled = true; }   // 조회 실패는 종전 동작(칸 켬) — 서버가 어차피 0 으로 고정한다
+        try
+        {
+            var lift = await _api.GetLiftSettingsAsync();
+            LiftFixedMm = lift?.FixedStrokeMm;
+            LiftMode = lift?.Mode is "Off" or "Fixed" ? lift.Mode : "Auto";
+        }
+        catch (Exception) { LiftMode = "Auto"; }   // 조회 실패는 종전 동작(칸 켬) — 서버가 어차피 높이를 정한다
         try
         {
             var g = await _api.GetTankGeometryAsync(TankId);
