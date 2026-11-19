@@ -68,10 +68,13 @@ public sealed class AcsApiClient : IAcsApiClient
     public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default) =>
         StartRunAsync(scenarioId, robotId, null, ct);
 
-    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, CancellationToken ct)
+    public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, CancellationToken ct) =>
+        StartRunAsync(scenarioId, robotId, round, false, ct);
+
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, bool restart, CancellationToken ct)
     {
         var resp = await _http.PostAsJsonAsync("/api/runs",
-            new { ScenarioId = scenarioId, RobotId = robotId, Round = round }, ct);
+            new { ScenarioId = scenarioId, RobotId = robotId, Round = round, Restart = restart }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(활성 run 존재)·400의 {error} 메시지 노출
         var body = await resp.Content.ReadFromJsonAsync<StartRunResult>(ct);
         return body?.RunId ?? Guid.Empty;

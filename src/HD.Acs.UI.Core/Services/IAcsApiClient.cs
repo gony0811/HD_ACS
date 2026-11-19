@@ -24,6 +24,10 @@ public interface IAcsApiClient
     /// <summary>미션 시작 + 가스검사 회차(1|2, null = 지정 안 함). 기본 구현 = 회차 없이 시작(기존 대역 무수정).</summary>
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, CancellationToken ct) =>
         StartRunAsync(scenarioId, robotId, ct);
+    /// <summary>미션 시작 — <paramref name="restart"/> = 이어할 수 있는 중단 run이 있어도 처음부터(운영자 확인 후).
+    /// false 면 서버가 409(RESUMABLE_RUN_EXISTS)로 거부한다. 기본 구현은 restart 없이 보낸다(구서버 호환).</summary>
+    Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, bool restart, CancellationToken ct) =>
+        StartRunAsync(scenarioId, robotId, round, ct);
     /// <summary>리페어 run — 지정한 용접선(TASK)만 검사. optimize = 시작 전에 그 용접선만 놓고 정차점 최적화를 돌려 반영.
     /// null = 서버 미지원(구빌드). 거부(400·409)는 예외.</summary>
     Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,

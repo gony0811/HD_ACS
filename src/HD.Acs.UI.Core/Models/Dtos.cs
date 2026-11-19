@@ -80,7 +80,7 @@ public sealed record RepairStopDto(Guid AreaId, string AreaName, double X, doubl
 /// <summary>GET /api/runs/resumable — 로봇의 가장 최근 재개 가능 run(미종결 작업 보유).</summary>
 public sealed record ResumableRunDto(
     Guid RunId, Guid ScenarioId, string State, DateTimeOffset StartedAt,
-    int Pending, int Done, int Skipped);
+    int Pending, int Done, int Skipped, string? ScenarioName = null);
 
 /// <summary>GET /api/internal/tanks/{id}/task-results — 용접선의 가장 최근 검사 결과(run 무관). Status = FINISHED | FAILED.</summary>
 public sealed record TaskLatestResultDto(Guid TaskId, Guid AreaId, string Status, DateTimeOffset At,

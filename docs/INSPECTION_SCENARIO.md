@@ -82,6 +82,12 @@ stateDiagram-v2
   로봇의 최근 run 1개만 후보로 본다. (배경: 정차 이격 수정 후 이어하기 → 전날 중단 run이 전날 좌표로 재개되어 로봇이 엉뚱한 곳으로 이동)
 - 동일 로봇에 활성(RUNNING/WAITING_FLOOR_TRANSFER) run이 있으면 새 시작·타 run 재개 거부(409).
 - **새 run 시작 = 여전히 선창 전체 전개**(정기검사 사이클) — 완료 이력은 run 스코프이며 run 간 이월되지 않는다.
+- **[2026-11-19] 이어할 수 있는 중단 run이 있으면 새 시작은 확인 후에만** — 로봇의 가장 최근 run이 ABORTED이고 남은 정차
+  (PENDING·DISPATCHED)가 있으면 `POST /api/runs`는 409 `code=RESUMABLE_RUN_EXISTS`(+`resumable{runId, done, skipped, pending…}`)로
+  거부하고 run을 만들지 않는다. 운영자가 확인하면 `restart=true`로 다시 요청 → 새 run(감사로그 `RUN_RESTART_OVER_RESUMABLE`).
+  새 run이 생기면 옛 run은 "가장 최근 run만 재개" 규칙으로 더 이상 이어할 수 없기 때문이다. 재검사(리페어) run은 대상 아님.
+  (배경: 2026-11-11 비상정지로 중단된 run[완료 2·남은 2] 대신 새 run이 시작되어 끝낸 영역부터 다시 검사했고, 이어하기는 새 run만 이어갔다)
+  이어하기 성공·거부도 감사로그(`RUN_RESUME`·`RUN_RESUME_REJECTED` — 거부 사유 포함)에 남는다.
   이력의 영구 기록은 `hist.inspection_result`(리포트/추적용).
 
 ### 3.2 미션(층) 수준 (Stateless 상태머신 [ADR-010])

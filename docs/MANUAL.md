@@ -259,6 +259,8 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 **중단·이어하기**: 미션 컨트롤 바의 **"중단"**은 후속 배차만 멈춘다(진행 중 정차는 완주·결과 기록, 즉시 정지는 ■비상정지).
 **"이어하기"**는 로봇의 가장 최근 미완료 run을 재개 — **완료·스킵된 영역은 건너뛰고** 남은 작업만 재배차한다
 (중단 시점에 배차만 됐던 정차는 재검사). 같은 로봇에 진행 중 run이 있으면 새 "미션 시작"은 409로 거부된다.
+중단된 run에 남은 작업이 있는데 **"미션 시작"**을 누르면 확인 창이 뜬다 — **'아니오' 후 "이어하기"**로 남은 영역만 진행한다.
+'예'를 누르면 시나리오 전체를 처음부터 다시 검사하고, 중단된 run은 더 이상 이어할 수 없다(감사로그 `RUN_RESTART_OVER_RESUMABLE`).
 완료 이력은 run 단위 — **새 run은 항상 선창 전체 재검사**(정기검사 사이클)이며, 영구 이력은 `hist.inspection_result`.
 
 **용접선 재검사(리페어)**: 영역 검사에서 실패한 용접선만 골라 다시 검사한다. 영역 전체를 다시 돌리지 않는다.
@@ -350,7 +352,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
 | `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
 | `GET /api/scenarios/{id}/area-stations` | 계획 정차점(도면 프레임, 배차와 같은 산출식) + 도착 허용 오차 — 로봇 상태 카드 "계획 정차점까지" 표시용. 없는 시나리오 404 |
-| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
+| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409. 가장 최근 run이 중단(ABORTED)이고 남은 정차가 있으면 409 `code=RESUMABLE_RUN_EXISTS`(run 미생성) — 처음부터 다시 하려면 `restart: true` |
 | `GET /api/tanks/{tankId}/geometry` | **[SAIGE §4.6.1 대외 계약]** 선창 파라미터+유도값 — **mm 정수**·각도 deg, `derived{beam,wCeil,height}`. 없는 선창 404 |
 | `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
 | `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
