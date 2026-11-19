@@ -887,11 +887,21 @@ app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDb
     try
     {
         var result = await InspectionProfileService.SyncAsync(db, req, ct);
+        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
+        var configured = ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source));
+        if (AmrTeachingService.Normalize(req.TeachingPositions, req.StartJointsByWall) is { } teaching)
+        {
+            // AMR 교시 위치가 설정(Acs:Reach:StartJoints)과 다르면 리치 시뮬레이터는 AMR 값을 쓴다 — 무엇이 달라졌는지 알린다
+            var diff = AmrTeachingService.Differences(configured.StartJointsByWall, teaching.Starts);
+            if (robotModels.ReportStarts(source, diff) && diff.Count > 0)
+                logs.CreateLogger("RobotModelCheck").LogWarning(
+                    "출발 자세(교시 위치)가 설정과 다르다 — 리치 시뮬레이터는 {Source} 값을 쓴다: {Diff}", source, string.Join(" / ", diff));
+            result = result with { StartJointsOverride = diff.Count > 0 ? diff : null };
+        }
         if (req.Robot is not { } robot) return Results.Ok(result);
         // AMR 과 ACS 가 같은 코봇 모델 값(d6·손목 여유·초점 거리)을 쓰는지 대조 — 다르면 시뮬레이션과 실제 동작이 어긋난다
-        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
-        var mismatch = RobotModelCheck.Compare(ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source)), robot);
-        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        var mismatch = RobotModelCheck.Compare(configured, robot);
         if (robotModels.Report(source, robot, mismatch) && mismatch.Count > 0)
             logs.CreateLogger("RobotModelCheck").LogWarning("코봇 모델 값이 {Source} 와 다르다 — {Mismatch}", source, string.Join(" / ", mismatch));
         return Results.Ok(result with { RobotModelMismatch = mismatch.Count > 0 ? mismatch : null });
@@ -929,6 +939,9 @@ app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, 
         }),
         // AMR 이 마지막으로 알려 준 코봇 모델 값과 ACS 설정의 차이(서버 기동 후 받은 것만)
         robotModels = robotModels.All.Select(e => new { e.Source, e.Model.LinksMm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
+        // AMR 교시 위치에서 온 면별 출발 자세 — 리치 시뮬레이터가 설정(Acs:Reach:StartJoints)보다 먼저 쓴다
+        teaching = (await db.AmrTeachings.AsNoTracking().OrderBy(x => x.Source).ToListAsync(ct))
+            .Select(x => new { x.Source, x.ReceivedAt, x.ChangedAt, startJointsByWall = AmrTeachingService.StartsOf(x) }),
     });
 });
 

@@ -313,6 +313,16 @@ CREATE TABLE IF NOT EXISTS ref.inspection_profile_assignment (
   amr_profile_id int  NOT NULL,
   PRIMARY KEY (source, seam_type, wall_code, direction)
 );
+-- HD_AMR 교시 위치(홈 위치_2·작업 준비 위치 …)와 면별 운영 ② 출발 관절각 — 프로필 전송 때 함께 온다(AMR 하나 = 행 하나).
+-- 리치 시뮬레이터가 Acs:Reach:StartJoints 설정보다 이 값을 먼저 쓴다(재교시가 자동 반영).
+CREATE TABLE IF NOT EXISTS ref.amr_teaching (
+  source             text PRIMARY KEY,
+  teaching_positions jsonb NOT NULL DEFAULT '[]',
+  start_joints       jsonb NOT NULL DEFAULT '{}',
+  content_hash       text NOT NULL DEFAULT '',
+  received_at        timestamptz NOT NULL DEFAULT now(),
+  changed_at         timestamptz NOT NULL DEFAULT now()
+);
 
 -- ─────────────── 벽면(Wall) LAYER (ref) [SPEC v3 §3: 파라미터에서 자동 생성] ───────────────
 -- 통짜 면 1개 = 행 1개(층 슬라이스 안 함, 층 소속은 영역이 가짐). PK (tank_id, wall_code).

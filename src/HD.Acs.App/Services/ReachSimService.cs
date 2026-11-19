@@ -50,6 +50,7 @@ public sealed partial class ReachSimService
         _poseError = PoseErrorFrom(config);
         _scanProfileName = config?["Acs:Reach:ScanProfileName"];
         _useAmrProfiles = config?.GetValue("Acs:Reach:UseAmrProfiles", true) ?? true;
+        _useAmrStartJoints = config?.GetValue("Acs:Reach:UseAmrStartJoints", true) ?? true;
     }
 
     /// <summary>정차 최적화가 보는 위치 오차 조건(<c>Acs:Reach:PoseError</c>) — 꺼져 있으면 null.</summary>
@@ -81,6 +82,8 @@ public sealed partial class ReachSimService
     public SeamScanProfile? ProfileOf(IReadOnlyList<double[]> seamPoints) =>
         _seamProfiles.TryGetValue(seamPoints, out var p) ? p : null;
 
+    private readonly bool _useAmrStartJoints;
+
     /// <summary>순회 프로필이 어디서 왔는지 — "AMR {이름} v{버전}" 또는 "설정"(appsettings · 포괄 근사).</summary>
     public string ScanProfileSource { get; private set; } = "설정";
 
@@ -103,6 +106,15 @@ public sealed partial class ReachSimService
         }
         var model = _config is null ? _baseModel : ModelFrom(_config, kind);
         if (geo?.LevelZ is { } lz) model = model with { LevelFloorZ = Json<double[]>(lz) };
+        // HD_AMR 교시 위치(홈 위치_2·작업 준비 위치 …)에서 온 면별 출발 자세 — 받은 면은 설정(Acs:Reach:StartJoints)보다 먼저 쓴다
+        // (AMR 이 다시 교시하면 다음 프로필 전송부터 판정이 따라간다). 받은 적이 없으면 설정 그대로(구버전 AMR)
+        if (_useAmrStartJoints
+            && await AmrTeachingService.LoadStartJointsAsync(_db, ct, ProfileSourceFor(_config, kind), OtherProfileSources(_config, kind)) is { } amrStarts)
+        {
+            var merged = new Dictionary<string, double[]>(model.StartJointsByWall, StringComparer.OrdinalIgnoreCase);
+            foreach (var (wall, j) in amrStarts.Starts) merged[wall] = j;
+            model = model with { StartJointsByWall = merged };
+        }
         var profileOf = (Func<string, string, string, SeamScanProfile?>)((_, _, _) => null);
         var sourceText = "설정";
         var source = ProfileSourceFor(_config, kind);
