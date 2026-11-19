@@ -464,7 +464,7 @@ public class ReachSimulatorTests
     [Fact]
     public void 진입_경로가_없으면_자세가_닿아도_도달불가다()
     {
-        // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·140° 안의 진입점이 없다.
+        // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·이동 한계 안의 진입점이 없다.
         var (sm, v, floor) = MidWall();
         var away = ApproachJoints(ReachRobotModel.Default, sm, 12, v, floor).ToArray();
         away[0] += away[0] > 0 ? -170 : 170;
@@ -492,8 +492,11 @@ public class ReachSimulatorTests
         Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 30.0, -80, 90, -70, 80, 170 }));   // J6 는 보지 않는다
         Assert.Contains("팔꿈치 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, -100, -90, 90, 0 }));
         Assert.Contains("손목 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, -90, -90, 0 }));
-        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 40, 90, 0 }));          // 130° — 140° 한계 안
-        Assert.Contains("J4 150°", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 60, 90, 0 }));
+        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 40, 90, 0 }));          // 130° — 한계 안
+        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 60, 90, 0 }));          // 150° — 160° 한계 안
+        Assert.Contains("J4 170°", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 80, 90, 0 }));
+        Assert.Contains("J4 150° 이동 > 140°",                                                                 // 설정으로 낮추면 그 값으로
+            ReachSimulator.BranchChangeReason(m with { MaxEntryJointTravelDeg = 140 }, start, new[] { 0.0, -90, 100, 60, 90, 0 }));
     }
 
     [Fact]

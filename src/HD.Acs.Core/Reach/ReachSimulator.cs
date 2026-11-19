@@ -196,8 +196,13 @@ public sealed record ReachRobotModel
     public IReadOnlyDictionary<string, double[]> StartJointsByWall { get; init; } = new Dictionary<string, double[]>();
 
     // ── 운영 ② 진입 규칙 — HD_AMR CobotInspectionMoveStep(2026-11-02 c490bb1·6791a6d)과 같은 값. 바뀌면 함께 맞출 것. ──
-    /// <summary>출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — MaxEntryJointTravelDeg.</summary>
-    public double MaxEntryJointTravelDeg { get; init; } = 140;
+    /// <summary>
+    /// 출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — 넘으면 가지 전환으로 본다. 2026-11-19 140 → 160(사용자 지시,
+    /// HD_AMR 파라미터 <c>inspection.maxEntryJointTravelDeg</c> 와 같은 값). 설정 <c>Acs:Reach:MaxEntryJointTravelDeg</c>.
+    /// </summary>
+    public double MaxEntryJointTravelDeg { get; init; } = DefaultMaxEntryJointTravelDeg;
+    /// <summary><see cref="MaxEntryJointTravelDeg"/> 기본값 [도].</summary>
+    public const double DefaultMaxEntryJointTravelDeg = 160;
     /// <summary>
     /// 자세 사이(② → 정렬 준비 → 초점, 시작점 ② → 중간·끝점 ②) 관절별(J1~J5) 최대 변화 [도]. 운영은 이 사이를 광축 방향 직선 이동이나
     /// 같은 자세의 짧은 이동으로 잇는다(관절 변화 수십 도 이내). 넘으면 다른 IK 가지로 갈아탄 해라 운영이 갈 수 없다 — 도달 불가.
@@ -740,7 +745,7 @@ public static partial class ReachSimulator
     // ② 해를 고를 때는 J6 을 보지 않는다(광축 둘레 회전은 J6 만 바꾼다). 진입 경로는 J6 을 본다 — HD_AMR 은 진입점·경로를
     // ② 접근점 자세(J6 = 운영 값) 그대로 풀기 때문에 위치가 달라지면 J6 이 달라지고, 그 값이 관절 이동량·J6 안전 범위에 걸린다
     // (실기 2026-11-12 PU: 면 방향 536~828 mm 떨어진 용접선 7건이 "진입 관절 이동 221°"·"J6 안전 범위 밖"으로 거부).
-    // 손목 반전 해는 J5 부호 반전으로 따로 거른다(HD_AMR IsWristFlip — 140° 완화로 이동 한계만으로는 통과할 수 있다).
+    // 손목 반전 해는 J5 부호 반전으로 따로 거른다(HD_AMR IsWristFlip — 이동 한계 완화로 이동 한계만으로는 통과할 수 있다).
 
     /// <summary>TCP(도면)에서 광축이 면을 바라보는 자세의 IK 해(범위 밖 관절은 ±360 감음).</summary>
     private static List<double[]> SolveIk(ReachRobotModel m, BaseFrame f, double[] tcpDrawing, double[] wallNormal) =>
@@ -808,7 +813,7 @@ public static partial class ReachSimulator
     /// <summary>
     /// 평면 경유 진입 — 출발 TCP 를 ② 접근점 이격 평면에서 <see cref="ReachRobotModel.PlanarRetreatMm"/> 더 물러난 후퇴 평면에
     /// 투영하고, 진입점 후보(① 들어갈 점 직접: 면 방향 500mm 이내일 때만 ② 투영점부터 100mm 간격, 500mm 까지)마다
-    /// 진입 해(같은 가지·관절 이동 ≤140°·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
+    /// 진입 해(같은 가지·관절 이동 ≤ MaxEntryJointTravelDeg·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
     /// 관절 튐·팔꿈치 반전·손목 특이점·자기 간섭을 본다. 자세는 전 구간 ② 자세로 고정.
     /// </summary>
     /// <summary>이 면이 평면 경유 진입을 쓰는가 — <see cref="ReachRobotModel.PlanarEntryWalls"/> 가 없으면 모든 면.</summary>

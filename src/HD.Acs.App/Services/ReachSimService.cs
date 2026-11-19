@@ -200,6 +200,8 @@ public sealed partial class ReachSimService
             MinFlangeReachMm = config.GetValue("Acs:Reach:MinFlangeReachMm", d.MinFlangeReachMm),
             MinElbowBendDeg = config.GetValue("Acs:Reach:MinElbowBendDeg", d.MinElbowBendDeg),
             // 손목 여유 |J5| — 경로(진입·순회)는 HD_AMR 과 같은 10°, 판정 자세는 그보다 넉넉한 15°
+            // 출발 자세 → ② 해 관절별 최대 이동(가지 전환 판정) — HD_AMR inspection.maxEntryJointTravelDeg 와 같게
+            MaxEntryJointTravelDeg = EntryTravelFrom(config.GetValue<double?>("Acs:Reach:MaxEntryJointTravelDeg"), d.MaxEntryJointTravelDeg),
             PlanarWristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:WristMarginDeg"), d.PlanarWristMarginDeg),
             WristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:PostureWristMarginDeg"), d.WristMarginDeg),
             CheckEntryJ6 = config.GetValue("Acs:Reach:CheckEntryJ6", d.CheckEntryJ6),
@@ -300,6 +302,10 @@ public sealed partial class ReachSimService
     /// <summary>코봇 BASE 높이 설정 [mm] — 300~3000 만 받는다(밖이면 기본값).</summary>
     public static double MountZFrom(double? v, double fallback) =>
         v is { } x && double.IsFinite(x) && x >= 300 && x <= 3000 ? x : fallback;
+
+    /// <summary>진입 관절 이동 한계 설정 [도] — 30~360 만 받는다(밖이면 기본값).</summary>
+    public static double EntryTravelFrom(double? v, double fallback) =>
+        v is { } x && double.IsFinite(x) && x >= 30 && x <= 360 ? x : fallback;
 
     /// <summary>차체 윗면 높이 설정 [mm] — 300~1500 만 받는다(밖이면 기본값).</summary>
     public static double AmrHeightFrom(double? v, double fallback) =>

@@ -74,6 +74,10 @@ public class LiftDisabledTests
         Assert.Equal(0, none.AmrFloorOffsetMm);
         Assert.Equal(1635, ReachSimService.MountZFrom(50, 1635));     // 범위 밖 = 기본값
         Assert.Equal(887, ReachSimService.AmrHeightFrom(50, 887));
+        Assert.Equal(160, ReachSimService.ModelFrom(Config(null)).MaxEntryJointTravelDeg);        // 설정 없음 = 기본 160
+        Assert.Equal(150, ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Acs:Reach:MaxEntryJointTravelDeg"] = "150" }).Build()).MaxEntryJointTravelDeg);
+        Assert.Equal(160, ReachSimService.EntryTravelFrom(10, 160));                              // 범위 밖 = 기본값
         Assert.Equal(765, ReachSimService.AmrHeightFrom(765, 887));
         Assert.Equal(0, ReachSimService.FloorOffsetFrom(-10));
         Assert.Equal(0, ReachSimService.FloorOffsetFrom(900));
