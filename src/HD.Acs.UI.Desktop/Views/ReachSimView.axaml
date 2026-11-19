@@ -152,6 +152,36 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 정차 묶음 최적화 (탐욕 set cover) -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="정차 묶음 최적화 (set cover)" FontWeight="SemiBold" />
+                        <TextBlock Text="선택 층·면의 용접선 전부를 덮는 정차 수를 줄입니다 — 정차 후보 격자마다 용접선별 운영 판정을 풀고, 아직 덮이지 않은 용접선을 영역 크기 상한(가로 1.44 m · 경사·수직벽 세로 2.9 m) 창 하나 안에서 가장 많이 덮는 정차부터 고릅니다(여유 확보 → 간섭 없음 순). 정차 하나 = 영역 하나. 조회 전용 — 영역은 바꾸지 않습니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="격자 [m]" VerticalAlignment="Center" />
+                            <NumericUpDown Classes="field" Width="110" Minimum="0.1" Maximum="1" Increment="0.1" FormatString="0.0#"
+                                           Value="{Binding SetCoverGridStepM}"
+                                           ToolTip.Tip="정차 후보 간격 — 작을수록 정차가 조금 줄지만 오래 걸립니다(천장 L4 기준 0.3 m 약 4.5분 · 0.5 m 약 1.2분)." />
+                            <Button Content="이 층·면 최적화" Command="{Binding RunSetCoverCommand}" IsEnabled="{Binding !IsSetCovering}" />
+                            <Button Content="중지" Command="{Binding CancelSetCoverCommand}" IsVisible="{Binding IsSetCovering}" />
+                        </StackPanel>
+                        <Button Content="제안대로 영역 다시 구성 (적용)" Command="{Binding ApplySetCoverCommand}" IsEnabled="{Binding CanApplySetCover}"
+                                ToolTip.Tip="그 면·층 영역을 제안 정차대로 다시 만듭니다 — 정차·리프트 덮어쓰기, 못 닿는 용접선은 X 영역. taskId·검사 기록 유지, 영역 ID 물려주기. 진행 중 run 이 있거나 계산 뒤 작업이 바뀌었으면 거부됩니다." />
+                        <TextBlock Text="{Binding SetCoverSummary}" FontSize="11.5" TextWrapping="Wrap" />
+                        <DataGrid ItemsSource="{Binding SetCoverRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserSortColumns="False"
+                                  HeadersVisibility="Column" MaxHeight="240">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding No}" Width="40" />
+                                <DataGridTextColumn Header="정차 (x, y) 방향" Binding="{Binding Station}" Width="*" />
+                                <DataGridTextColumn Header="리프트" Binding="{Binding Lift}" Width="70" />
+                                <DataGridTextColumn Header="용접선" Binding="{Binding Welds}" Width="58" />
+                                <DataGridTextColumn Header="최소 여유" Binding="{Binding Margin}" Width="70" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </Border>
+
                 <!-- 보고서 백데이터 -->
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel Spacing="5">

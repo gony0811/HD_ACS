@@ -64,7 +64,9 @@ builder.Services.AddSingleton(sp => new ReachRuntimeSettings(sp.GetRequiredServi
 builder.Services.AddSingleton(sp => new AmrFactsheetService(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IServiceScopeFactory>(),
     sp.GetRequiredService<ILogger<AmrFactsheetService>>(), Path.Combine(builder.Environment.ContentRootPath, AmrFactsheetService.FileName)));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AmrFactsheetService>());
-builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
+builder.Services.AddScoped<ReachSimService>();
+builder.Services.AddScoped<SetCoverApplyService>();   // 정차 묶음 최적화 결과를 영역에 적용
+builder.Services.AddSingleton<SetCoverJobs>();   // 정차 묶음 최적화(set cover) 작업 — 면 하나에 수 분   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
 builder.Services.AddScoped<RobotStateService>();
@@ -376,6 +378,40 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/report",
         var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
         return Results.File(bytes, "text/csv; charset=utf-8", $"reach-report-{tankId}-{(ik ? "ik" : "tasks")}.csv");
     });
+
+// 정차 묶음 최적화(탐욕 set cover) — 면·층 하나의 용접선을 덮는 정차 수 최소(영역 크기 상한 유지). 작업으로 돌리고 진행·결과를 조회한다(조회 전용).
+app.MapPost("/api/reach-sim/tanks/{tankId}/set-cover", (string tankId, SetCoverRequest req, SetCoverJobs jobs) =>
+{
+    if (req.Level < 1 || string.IsNullOrWhiteSpace(req.WallCode)) return Results.BadRequest(new { error = "level(1 이상)·wallCode 가 필요합니다" });
+    var o = HD.Acs.Core.Reach.SetCoverOptions.Default;
+    if (req.GridStepM is { } g && (!double.IsFinite(g) || g < 0.1 || g > 1)) return Results.BadRequest(new { error = "gridStepM 은 0.1~1.0 m" });
+    if (req.ReachRadiusM is { } r && (!double.IsFinite(r) || r < 1 || r > 4)) return Results.BadRequest(new { error = "reachRadiusM 은 1~4 m" });
+    if (req.MaxStrokes is { } m && (m < 1 || m > 11)) return Results.BadRequest(new { error = "maxStrokes 는 1~11" });
+    o = o with { GridStepM = req.GridStepM ?? o.GridStepM, ReachRadiusM = req.ReachRadiusM ?? o.ReachRadiusM, MaxStrokes = req.MaxStrokes ?? o.MaxStrokes };
+    var job = jobs.Start(tankId, req.Level, req.WallCode.Trim().ToUpperInvariant(), o);
+    return Results.Ok(new { job.JobId });
+});
+app.MapGet("/api/reach-sim/set-cover/{jobId:guid}", (Guid jobId, SetCoverJobs jobs) =>
+    jobs.Get(jobId) is { } j
+        ? Results.Ok(new { j.JobId, j.TankId, j.Level, j.WallCode, j.State, j.Done, j.Total, j.StartedAt, j.EndedAt, j.Error, j.Result })
+        : Results.NotFound(new { error = "작업이 없습니다(끝난 지 1시간이 지났거나 서버가 재시작됨)" }));
+// 정차 묶음 최적화 결과 적용 — 그 면·층 영역을 제안 정차대로 다시 구성(taskId·검사 기록 유지, 영역 ID 물려주기, 감사로그 SET_COVER_APPLY)
+app.MapPost("/api/reach-sim/set-cover/{jobId:guid}/apply", async (Guid jobId, SetCoverApplyRequest? req, SetCoverJobs jobs,
+    SetCoverApplyService svc, CancellationToken ct) =>
+{
+    if (jobs.Get(jobId) is not { } j) return Results.NotFound(new { error = "작업이 없습니다(끝난 지 1시간이 지났거나 서버가 재시작됨) — 다시 계산하세요" });
+    if (j.State != "DONE" || j.Result is null) return Results.Conflict(new { error = $"작업이 끝나지 않았습니다({j.State})" });
+    if (j.Applied) return Results.Conflict(new { error = "이미 적용한 결과입니다 — 다시 계산하세요" });
+    try
+    {
+        var r = await svc.ApplyAsync(j.Result, req?.UserId, ct);
+        j.Applied = true;
+        return Results.Ok(r);
+    }
+    catch (AreaSplitException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.Status); }
+});
+app.MapDelete("/api/reach-sim/set-cover/{jobId:guid}", (Guid jobId, SetCoverJobs jobs) =>
+    jobs.Cancel(jobId) ? Results.Ok() : Results.NotFound(new { error = "진행 중인 작업이 없습니다" }));
 
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/split-plan",
     async (Guid areaId, int? maxGroups, string? branch, ReachSimService sim, CancellationToken ct) =>
@@ -1524,6 +1560,9 @@ static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
 app.Run();
 
 // Round = 가스검사 회차(1|2, 선택) — 가스검사 선창의 지령 params.round 로 나간다. 용접검사 선창은 무시.
+// 정차 묶음 최적화 요청 — 격자 간격[m]·정차 반경[m]·리프트 후보 수(선택, 없으면 기본 0.3·2.8·4)
+public sealed record SetCoverApplyRequest(string? UserId = null);
+public sealed record SetCoverRequest(int Level, string WallCode, double? GridStepM = null, double? ReachRadiusM = null, int? MaxStrokes = null);
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null);
 public sealed record GasResendRequest(Guid? RunId = null, List<Guid>? ResultIds = null, string? UserId = null);
 public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null, int? Round = null);

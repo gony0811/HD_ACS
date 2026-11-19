@@ -107,11 +107,15 @@ public sealed partial class ReachSimViewModel : ObservableObject
 
     public bool HasYawChoice => YawOptions.Count > 1;
 
-    public ReachSimViewModel(IAcsApiClient api, IProjectDialogService? dialogs = null)
+    public ReachSimViewModel(IAcsApiClient api, IProjectDialogService? dialogs = null, Abstractions.IDialogService? confirm = null)
     {
         _api = api;
         _dialogs = dialogs;
+        _confirm = confirm;
     }
+
+    /// <summary>되돌리기 어려운 동작(정차 묶음 최적화 적용)의 확인 창 — 없으면(테스트) 묻지 않는다.</summary>
+    private readonly Abstractions.IDialogService? _confirm;
 
     /// <summary>탱크 면을 읽고 현재 층·면을 조사한다.</summary>
     [RelayCommand]
@@ -522,6 +526,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
                 all.AddRange(part);
             }
             _mapAreas = all;
+            _mapIsSetCover = false;
             RebuildAreaMap();
             if (AreaMapMode) { SceneChanged?.Invoke(this, EventArgs.Empty); ViewReset?.Invoke(this, EventArgs.Empty); }
             else AreaMapMode = true;
@@ -570,7 +575,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
             + (perLevel.Count > 1 ? $"  |  층별 가능/대상: {string.Join(" · ", perLevel)}" : "")
             + $"  |  면별 가능/대상: {string.Join(" · ", perWall)}"
             + $"  |  영역 {shown.Count}개 중 용접선이 전부 가능한 영역 {areaOk} · 하나라도 불가인 영역 {areaBad}"
-            + "  — 저장된 정차·리프트 기준";
+            + (_mapIsSetCover ? "  — 정차 묶음 최적화 제안(영역 음영 = 제안 정차가 맡는 범위, 빨강 = 어느 정차로도 못 닿음)" : "  — 저장된 정차·리프트 기준");
     }
 
     // ── 보고서 백데이터(CSV) ─────────────────────────────────────────
