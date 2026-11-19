@@ -415,7 +415,8 @@ public sealed record LiftSettingsDto(string Mode, double? FixedStrokeMm);
 /// </summary>
 public sealed record ReachSettingsDto(
     string LiftMode, double? FixedStrokeMm, double MountZMm, double AmrHeightMm, bool SupportColumn,
-    double MaxEntryJointTravelDeg, IReadOnlyList<string>? Overridden = null, string? OverrideFile = null, string? Warning = null);
+    double MaxEntryJointTravelDeg, IReadOnlyList<string>? Overridden = null, string? OverrideFile = null, string? Warning = null,
+    IReadOnlyList<string>? AmrReported = null);   // AMR factsheet 로 보고돼 appsettings 대신 쓰이는 키
 
 /// <summary>리치 설정 저장 요청 — null 항목은 덮어쓰지 않는다(appsettings.json 값). 보낸 값으로 덮어쓰기 파일을 통째로 바꾼다.</summary>
 public sealed record ReachSettingsUpdateDto(

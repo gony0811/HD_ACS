@@ -53,7 +53,7 @@
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel Spacing="5" IsEnabled="{Binding SettingsAvailable}">
                         <TextBlock Text="리프트 · 차체 설정" FontWeight="SemiBold" />
-                        <TextBlock Text="appsettings.json 의 리프트·코봇 장착 값을 여기서 바꿉니다. [설정 적용]이면 서버가 바로 다시 읽어 이 화면의 조사·정차 최적화·보고서·검사 가능 지도와 배차 지령의 리프트 높이에 함께 쓰입니다(재시작 불필요, 진행 중 run 이 있으면 거부). 바꾸지 않은 항목은 appsettings.json 값 그대로입니다."
+                        <TextBlock Text="appsettings.json 의 리프트·코봇 장착 값을 여기서 바꿉니다. [설정 적용]이면 서버가 바로 다시 읽어 이 화면의 조사·정차 최적화·보고서·검사 가능 지도와 배차 지령의 리프트 높이에 함께 쓰입니다(재시작 불필요, 진행 중 run 이 있으면 거부). 바꾸지 않은 항목은 AMR 이 factsheet 로 보고한 값(티칭 출발 자세·리프트·장착 보정 T_A_B·코봇 값), 보고가 없으면 appsettings.json 값입니다. 우선순위: appsettings.json &lt; AMR 보고 &lt; 이 화면."
                                    Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
                         <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="4">
                             <TextBlock Grid.Row="0" Text="리프트 운영" VerticalAlignment="Center" />
@@ -78,7 +78,7 @@
                         </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <Button Content="설정 적용 · 다시 조사" Command="{Binding SaveSettingsCommand}" IsEnabled="{Binding !IsSavingSettings}" />
-                            <Button Content="appsettings.json 값으로" Command="{Binding ResetSettingsCommand}" IsEnabled="{Binding !IsSavingSettings}" />
+                            <Button Content="화면 설정 지우기" Command="{Binding ResetSettingsCommand}" IsEnabled="{Binding !IsSavingSettings}" />
                             <Button Content="다시 읽기" Command="{Binding LoadSettingsCommand}" />
                         </StackPanel>
                         <TextBlock Text="리프트 고정·자동으로 바꾸면 BASE·차체 높이도 리프트 장착 형상(1635·887, 받침 기둥 끔)으로 맞추세요. HD_AMR 의 리프트 설정·진입 한계는 자동으로 맞춰지지 않습니다."

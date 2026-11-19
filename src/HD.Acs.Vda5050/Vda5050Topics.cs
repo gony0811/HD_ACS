@@ -17,6 +17,9 @@ public static class Vda5050Topics
         => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/state";
     public static string Connection(RobotRef r, string prefix = DefaultPrefix, string ver = DefaultVersion)
         => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/connection";
+    /// <summary>factsheet(§7.3) — AMR 이 retained 로 발행(연결·factsheetRequest·설정 변경 때).</summary>
+    public static string Factsheet(RobotRef r, string prefix = DefaultPrefix, string ver = DefaultVersion)
+        => $"{prefix}/{ver}/{r.Manufacturer}/{r.SerialNumber}/factsheet";
 
     /// <summary>
     /// 진단용 — 모든 identity의 connection 토픽. 구독 목록(ref.robot)에 없는 로봇이 브로커에

@@ -31,6 +31,8 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
 
     public event Func<RobotRef, Vda5050State, Task>? StateReceived;
     public event Func<RobotRef, Vda5050Connection, Task>? ConnectionReceived;
+    /// <summary>factsheet(§7.3) 원문 — HD 확장(hdAmr)은 호스트가 해석한다.</summary>
+    public event Func<RobotRef, string, Task>? FactsheetReceived;
 
     /// <summary>
     /// 수신 경로 진단(미구독 identity·토픽 형식·파싱 실패·최초 수신).
@@ -96,6 +98,7 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         _robotsByTopicKey[$"{robot.Manufacturer}/{robot.SerialNumber}"] = robot;
         await _client.SubscribeAsync(Vda5050Topics.State(robot), MqttQualityOfServiceLevel.AtLeastOnce, ct);
         await _client.SubscribeAsync(Vda5050Topics.Connection(robot), MqttQualityOfServiceLevel.AtLeastOnce, ct);
+        await _client.SubscribeAsync(Vda5050Topics.Factsheet(robot), MqttQualityOfServiceLevel.AtLeastOnce, ct);   // retained — 구독 즉시 최신
     }
 
     /// <summary>
@@ -152,6 +155,13 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
         => PublishInstantActionsAsync(robot, new Vda5050InstantActions
         {
             Actions = { new VdaAction { ActionType = "cancelOrder", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
+        }, ct);
+
+    /// <summary>factsheet 다시 보내기 요청 — VDA 5050 2.0 표준 instantAction [§7.3]. AMR 이 ONLINE 이 될 때 보낸다.</summary>
+    public Task FactsheetRequestAsync(RobotRef robot, CancellationToken ct = default)
+        => PublishInstantActionsAsync(robot, new Vda5050InstantActions
+        {
+            Actions = { new VdaAction { ActionType = "factsheetRequest", ActionId = Guid.NewGuid().ToString(), BlockingType = "NONE" } }
         }, ct);
 
     private void Stamp(Vda5050Header msg, RobotRef robot, string topic)
@@ -219,6 +229,11 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
                     if (state == null) break;
                     ReportFirstMessage(key, channel, topic, Describe(state));
                     if (StateReceived != null) await StateReceived(robot, state);
+                    break;
+                case "factsheet":
+                    if (string.IsNullOrWhiteSpace(payload)) break;   // retained 삭제
+                    ReportFirstMessage(key, channel, topic, $"{payload.Length}B");
+                    if (FactsheetReceived != null) await FactsheetReceived(robot, payload);
                     break;
                 case "connection":
                     var conn = JsonSerializer.Deserialize<Vda5050Connection>(payload);

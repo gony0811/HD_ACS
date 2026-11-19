@@ -123,7 +123,7 @@ public sealed partial class ReachSimViewModel
         finally { IsSavingSettings = false; }
     }
 
-    /// <summary>화면에서 덮어쓴 값을 모두 지우고 appsettings.json 값으로 돌아간 뒤 다시 조사한다.</summary>
+    /// <summary>화면에서 덮어쓴 값을 모두 지우고 AMR 보고·appsettings.json 값으로 돌아간 뒤 다시 조사한다.</summary>
     [RelayCommand]
     public async Task ResetSettingsAsync()
     {
@@ -134,7 +134,7 @@ public sealed partial class ReachSimViewModel
             var r = await _api.ResetReachSettingsAsync();
             if (r is null) { SettingsStatus = "서버가 설정 초기화를 지원하지 않습니다(구빌드)."; return; }
             ApplySettings(r);
-            SettingsStatus = "appsettings.json 값으로 되돌림 — " + DescribeSettings(r);
+            SettingsStatus = "화면 설정 지움(AMR 보고·appsettings.json 값) — " + DescribeSettings(r);
             ClearOptima();
             await SurveyAsync();
         }
@@ -153,10 +153,13 @@ public sealed partial class ReachSimViewModel
             _ => "리프트 자동(0~1000 mm)",
         };
         var n = s.Overridden?.Count ?? 0;
+        var amr = s.AmrReported?.Count ?? 0;
         return $"{lift} · BASE {s.MountZMm.ToString("0", ci)} mm · 차체 {s.AmrHeightMm.ToString("0", ci)} mm"
                + (s.SupportColumn ? " · 받침 기둥" : "")
                + $" · 진입 한계 {s.MaxEntryJointTravelDeg.ToString("0", ci)}°"
-               + (n > 0 ? $" · 화면에서 바꾼 항목 {n}개" : " · appsettings.json 값")
+               + (n > 0 ? $" · 화면에서 바꾼 항목 {n}개" : "")
+               + (amr > 0 ? $" · AMR 보고 값 {amr}개" : "")
+               + (n == 0 && amr == 0 ? " · appsettings.json 값" : "")
                + (s.Warning is { Length: > 0 } w ? $" · 경고: {w}" : "");
     }
 }

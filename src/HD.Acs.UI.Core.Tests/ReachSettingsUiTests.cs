@@ -65,6 +65,17 @@ public class ReachSettingsUiTests
     }
 
     [Fact]
+    public void AMR_보고_값_수를_요약에_보인다()
+    {
+        var s = new HD.Acs.UI.Models.ReachSettingsDto("Off", null, 927, 765, true, 160,
+            Overridden: new[] { "Acs:Lift:Mode" }, AmrReported: new[] { "Acs:Reach:MountZMm", "Acs:Lift:Mode" });
+        var text = ReachSimViewModel.DescribeSettings(s);
+        Assert.Contains("화면에서 바꾼 항목 1개", text);
+        Assert.Contains("AMR 보고 값 2개", text);
+        Assert.DoesNotContain("appsettings.json 값", text);
+    }
+
+    [Fact]
     public async Task 바꾼_항목만_저장하고_다시_조사한다()
     {
         var (vm, s) = Make();
@@ -112,6 +123,6 @@ public class ReachSettingsUiTests
         await vm.ResetSettingsAsync();
         Assert.Equal(1, s.Deletes);
         Assert.Equal(1, s.Surveys);
-        Assert.Contains("appsettings.json 값으로 되돌림", vm.SettingsStatus);
+        Assert.Contains("화면 설정 지움", vm.SettingsStatus);
     }
 }
