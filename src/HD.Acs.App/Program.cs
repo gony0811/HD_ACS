@@ -30,6 +30,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
 // 리치·간섭 화면에서 바꾼 리프트·차체 설정 — appsettings.json 다음에 읽어 그 값을 이긴다(파일 없으면 무시) [ReachRuntimeSettings]
+// AMR 이 factsheet(VDA §7.3)로 보고한 티칭 출발 자세·리프트·장착 보정·코봇 값 — 화면 설정보다 먼저 읽는다
+// (우선순위: appsettings.json < AMR 보고 < 리치·간섭 화면 설정) [AmrFactsheetService]
+builder.Configuration.AddJsonFile(AmrFactsheetService.FileName, optional: true, reloadOnChange: true);
 builder.Configuration.AddJsonFile(ReachRuntimeSettings.FileName, optional: true, reloadOnChange: true);
 
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
@@ -58,6 +61,9 @@ builder.Services.AddScoped<TankShapeQueryService>();
 builder.Services.AddSingleton<AmrRobotModelStore>();   // AMR 이 알려 준 코봇 모델 값(d6 등) 대조 결과
 builder.Services.AddSingleton(sp => new ReachRuntimeSettings(sp.GetRequiredService<IConfiguration>(),
     Path.Combine(builder.Environment.ContentRootPath, ReachRuntimeSettings.FileName)));
+builder.Services.AddSingleton(sp => new AmrFactsheetService(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<AmrFactsheetService>>(), Path.Combine(builder.Environment.ContentRootPath, AmrFactsheetService.FileName)));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AmrFactsheetService>());
 builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
@@ -976,6 +982,10 @@ app.MapGet("/api/settings/lift", (IConfiguration cfg) =>
 });
 // 리치·간섭 화면의 리프트·차체 설정 — 저장하면 다음 요청부터 시뮬레이션·배차(liftStrokeMm) 모두 새 값(재시작 불필요).
 // 진행 중 run 이 있으면 거부(지령 리프트 높이가 run 도중 바뀌지 않게). DELETE = 덮어쓰기 해제(appsettings.json 값).
+// AMR factsheet(VDA §7.3) — 로봇별 최신 보고·반영 여부·설정 키
+app.MapGet("/api/integrations/amr-factsheets", (AmrFactsheetService f) => Results.Ok(f.All));
+app.MapGet("/api/robots/{robotId}/factsheet", (string robotId, AmrFactsheetService f) =>
+    f.Get(robotId) is { } e ? Results.Ok(e) : Results.NotFound(new { error = $"{robotId} 의 factsheet 를 아직 받지 못했습니다" }));
 app.MapGet("/api/settings/reach-sim", (ReachRuntimeSettings s) => Results.Ok(s.Read()));
 app.MapPut("/api/settings/reach-sim", async (ReachSettingsUpdate req, ReachRuntimeSettings s, AcsDbContext db, ILogger<ReachRuntimeSettings> log) =>
     await SaveReachSettings(req, s, db, log, reset: false));

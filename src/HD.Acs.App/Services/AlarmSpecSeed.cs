@@ -42,6 +42,8 @@ public static class AlarmSpecSeed
             "AMR이 비드 자동 검출 대신 작업자 입력을 기다림(팝업 표시 중, 타워램프 녹색 점멸) — 실패 아님. AMR 화면에서 비드선을 지정하면 검사가 이어지고 알람이 해제된다 [VDA §6.4 manualBeadInputRequired]"),
         ("COBOT_ZONE_OBSTACLE", "WARNING", "코봇 반경 장애물 — AMR 주행 정지",
             "AMR이 주행 중 라이다로 코봇 반경 안의 장애물을 감지해 그 자리에 정지(타워램프 황색·부저) — 실패 아님. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 알람이 해제된다. 주행 제한 시간까지 안 사라지면 정차가 실패로 보고된다 [VDA §6.4 cobotZoneObstacle, HD_AMR 파라미터 cobotGuard.enabled]"),
+        ("AMR_CONFIG_CHANGED", "WARNING", "AMR 설정 변경 — 티칭·리프트·장착 보정",
+            "AMR이 factsheet로 보고한 설정(면별 출발 자세 티칭·리프트 운영·장착 보정 T_A_B·코봇 값)이 바뀜 — ACS가 리치 시뮬레이션·배차 설정에 반영함. 옛 설정으로 고른 영역 정차·리프트는 정차점 최적화로 다시 확인할 것 [VDA §7.3]"),
         ("ORDER_REJECTED_DEVICE_FAULT", "WARNING", "장치 알람 — Order 거부",
             "AMR이 장치 HEAVY 알람 중 Order 거부(WARNING, 기존 orderId 유지) — 실행 없음, ACS는 정차를 PENDING 복귀 후 RESET 뒤 재배차 [HD_AMR 장치통신 HEAVY알람 §4.2]"),
     };

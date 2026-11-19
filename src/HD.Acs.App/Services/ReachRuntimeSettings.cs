@@ -15,7 +15,8 @@ public sealed record ReachSettingsUpdate(
 /// <summary>지금 적용 중인 값 + 화면에서 덮어쓴 키.</summary>
 public sealed record ReachSettingsView(
     string LiftMode, double? FixedStrokeMm, double MountZMm, double AmrHeightMm, bool SupportColumn,
-    double MaxEntryJointTravelDeg, IReadOnlyList<string> Overridden, string OverrideFile, string? Warning);
+    double MaxEntryJointTravelDeg, IReadOnlyList<string> Overridden, string OverrideFile, string? Warning,
+    IReadOnlyList<string>? AmrReported = null);
 
 /// <summary>
 /// 리치·간섭 화면에서 바꾸는 운영 설정 — <c>Acs:Lift:Mode</c>·<c>FixedStrokeMm</c>, <c>Acs:Reach:MountZMm</c>·<c>AmrHeightMm</c>·
@@ -55,17 +56,23 @@ public sealed class ReachRuntimeSettings
         return new ReachSettingsView(
             lift.Mode.ToString(), lift.FixedStrokeMm,
             model.MountZMm, model.AmrHeightMm, model.SupportColumn, model.MaxEntryJointTravelDeg,
-            Overrides().Keys.ToList(), Path, lift.Warning);
+            Overrides().Keys.ToList(), Path, lift.Warning, AmrReportedKeys());
     }
 
+    /// <summary>AMR factsheet 로 보고돼 반영된 화면 항목 키(<see cref="AmrFactsheetService.FileName"/>, 기본 <c>Acs:Reach</c> 묶음만).</summary>
+    public IReadOnlyList<string> AmrReportedKeys() =>
+        ReadKeys(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path) ?? ".", AmrFactsheetService.FileName)).Keys.ToList();
+
     /// <summary>덮어쓰기 파일에 적힌 키 → 값.</summary>
-    public IReadOnlyDictionary<string, string> Overrides()
+    public IReadOnlyDictionary<string, string> Overrides() => ReadKeys(Path);
+
+    private static IReadOnlyDictionary<string, string> ReadKeys(string path)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!File.Exists(Path)) return map;
+        if (!File.Exists(path)) return map;
         try
         {
-            var root = JsonNode.Parse(File.ReadAllText(Path));
+            var root = JsonNode.Parse(File.ReadAllText(path));
             foreach (var key in Keys)
             {
                 JsonNode? n = root;
