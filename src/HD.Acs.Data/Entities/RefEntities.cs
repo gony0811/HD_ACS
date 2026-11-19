@@ -166,6 +166,17 @@ public class InspectionProfileAssignmentEntity
     public int AmrProfileId { get; set; }
 }
 
+// HD_AMR 교시 위치 사본 — 프로필 전송 때 함께 온다(AMR 하나 = 행 하나). 리치 시뮬레이터 출발 자세(②)의 정본.
+public class AmrTeachingEntity
+{
+    public string Source { get; set; } = "";                 // 보낸 AMR(serialNumber)
+    public string TeachingPositions { get; set; } = "[]";    // jsonb [{key, joints[6]}, …] 도
+    public string StartJoints { get; set; } = "{}";          // jsonb {면 코드: [J1..J6]} 도 — 면별 운영 ② 출발 자세
+    public string ContentHash { get; set; } = "";
+    public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.UtcNow;   // 마지막으로 받은 시각
+    public DateTimeOffset ChangedAt { get; set; } = DateTimeOffset.UtcNow;    // 값이 마지막으로 바뀐 시각
+}
+
 // 선창 파라메트릭 정의 [SPEC v3 §2] — 팔각 단면 파라미터. 등록 시 §3 면 자동 생성.
 public class TankGeometryEntity
 {

@@ -29,6 +29,7 @@ public class AcsDbContext : DbContext
     public DbSet<TankGeometryEntity> TankGeometries => Set<TankGeometryEntity>();
     public DbSet<InspectionProfileEntity> InspectionProfiles => Set<InspectionProfileEntity>();
     public DbSet<InspectionProfileAssignmentEntity> InspectionProfileAssignments => Set<InspectionProfileAssignmentEntity>();
+    public DbSet<AmrTeachingEntity> AmrTeachings => Set<AmrTeachingEntity>();
     public DbSet<WallEntity> Walls => Set<WallEntity>();
     public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
     public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
@@ -116,6 +117,10 @@ public class AcsDbContext : DbContext
 
         mb.Entity<InspectionProfileAssignmentEntity>(e => { e.ToTable("inspection_profile_assignment", "ref");
             e.HasKey(x => new { x.Source, x.SeamType, x.WallCode, x.Direction }); });
+
+        mb.Entity<AmrTeachingEntity>(e => { e.ToTable("amr_teaching", "ref"); e.HasKey(x => x.Source);
+            e.Property(x => x.TeachingPositions).HasColumnType("jsonb");
+            e.Property(x => x.StartJoints).HasColumnType("jsonb"); });
 
         mb.Entity<TankGeometryEntity>(e => { e.ToTable("tank_geometry", "ref"); e.HasKey(x => x.TankId);
             e.Property(x => x.LevelZ).HasColumnType("jsonb"); });

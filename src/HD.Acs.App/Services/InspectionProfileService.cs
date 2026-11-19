@@ -24,13 +24,21 @@ public sealed record ProfileAssignment(string? SeamType, string? WallCode, strin
 /// 프로필 동기화 요청. Full = 보낸 목록이 그 AMR 의 전체다(목록에 없는 프로필은 삭제된 것으로 표시).
 /// Assignments = 지정표 전체(주면 그 AMR 의 표를 통째로 바꾼다, null = 건드리지 않는다).
 /// Robot = AMR 이 쓰는 코봇 모델 값(d6·손목 여유·초점 거리) — ACS 설정과 다르면 응답과 로그로 알린다(저장·적용하지 않는다).
+/// TeachingPositions·StartJointsByWall = AMR 교시 위치와 면별 운영 ② 출발 관절각 — 저장하고 리치 시뮬레이터 출발 자세로 쓴다
+/// (<see cref="AmrTeachingService"/>). 둘 다 없으면(구버전 AMR) 저장값을 건드리지 않는다.
 /// </summary>
 public sealed record ProfileSyncRequest(string? Source, bool Full, IReadOnlyList<ProfileUpload>? Profiles,
-    IReadOnlyList<ProfileAssignment>? Assignments = null, AmrRobotModel? Robot = null);
+    IReadOnlyList<ProfileAssignment>? Assignments = null, AmrRobotModel? Robot = null,
+    IReadOnlyList<TeachingJointsUpload>? TeachingPositions = null, IReadOnlyDictionary<string, double[]>? StartJointsByWall = null);
 
 /// <param name="RobotModelMismatch">AMR 이 보낸 코봇 모델 값이 ACS 설정과 다른 항목(같거나 보내지 않았으면 null).</param>
+/// <param name="TeachingPositions">받은 교시 위치 수(보내지 않았으면 null).</param>
+/// <param name="StartJoints">받은(또는 교시 위치에서 만든) 면별 출발 자세 수(보내지 않았으면 null).</param>
+/// <param name="TeachingChanged">교시 위치·출발 자세가 저장값과 달라 새로 저장했는지.</param>
+/// <param name="StartJointsOverride">AMR 출발 자세가 ACS 설정과 다른 면 — ACS 는 이 면들에서 설정 대신 AMR 값을 쓴다(같으면 null).</param>
 public sealed record ProfileSyncResult(int Added, int Changed, int Unchanged, int Removed, IReadOnlyList<string> ChangedNames,
-    int Assignments = 0, bool AssignmentsChanged = false, IReadOnlyList<string>? RobotModelMismatch = null);
+    int Assignments = 0, bool AssignmentsChanged = false, IReadOnlyList<string>? RobotModelMismatch = null,
+    int? TeachingPositions = null, int? StartJoints = null, bool TeachingChanged = false, IReadOnlyList<string>? StartJointsOverride = null);
 
 /// <summary>용접선에 쓸 순회 프로필 — 경유점과 어느 프로필인지(이름·버전).</summary>
 public sealed record SeamScanProfile(string Name, int Version, IReadOnlyList<ScanWaypoint> Waypoints);
@@ -81,6 +89,7 @@ public static class InspectionProfileService
                 throw new ProfileSyncException($"지정표: {seam}/{wall}/{dir} 가 중복됩니다.");
         }
         if (table.Count > MaxAssignments) throw new ProfileSyncException($"지정표가 너무 깁니다({table.Count} > {MaxAssignments}).");
+        var teaching = AmrTeachingService.Normalize(req.TeachingPositions, req.StartJointsByWall);   // 잘못된 값이면 DB 를 건드리기 전에 400
 
         var existing = await db.InspectionProfiles.Where(x => x.Source == source).ToListAsync(ct);
         var byId = existing.ToDictionary(x => x.AmrProfileId);
@@ -153,8 +162,11 @@ public static class InspectionProfileService
             }
         }
 
-        var result = new ProfileSyncResult(added, changed, unchanged, removed, changedNames, table.Count, assignmentsChanged);
-        if (added + changed + removed > 0 || assignmentsChanged)
+        var teachingChanged = teaching is { } t && await AmrTeachingService.UpsertAsync(db, source, t.Positions, t.Starts, ct);
+
+        var result = new ProfileSyncResult(added, changed, unchanged, removed, changedNames, table.Count, assignmentsChanged,
+            TeachingPositions: teaching?.Positions.Count, StartJoints: teaching?.Starts.Count, TeachingChanged: teachingChanged);
+        if (added + changed + removed > 0 || assignmentsChanged || teachingChanged)
             db.AuditLogs.Add(new AuditLogEntity
             {
                 UserId = source, Action = "INSPECTION_PROFILE_SYNC", Target = $"{added + changed + removed} profiles",

@@ -97,6 +97,17 @@ public static class SchemaEnsure
           PRIMARY KEY (source, seam_type, wall_code, direction)
         )
         """,
+        // db/migrations/2026-11-19_amr_teaching.sql — HD_AMR 교시 위치(리치 시뮬레이터 출발 자세) 사본
+        """
+        CREATE TABLE IF NOT EXISTS ref.amr_teaching (
+          source             text PRIMARY KEY,
+          teaching_positions jsonb NOT NULL DEFAULT '[]',
+          start_joints       jsonb NOT NULL DEFAULT '{}',
+          content_hash       text NOT NULL DEFAULT '',
+          received_at        timestamptz NOT NULL DEFAULT now(),
+          changed_at         timestamptz NOT NULL DEFAULT now()
+        )
+        """,
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

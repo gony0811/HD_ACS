@@ -45,6 +45,16 @@ public sealed class AmrRobotModelStore
 
     public IReadOnlyList<Entry> All => _bySource.Values.OrderBy(e => e.Source).ToList();
 
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _startDiffs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>출발 자세 차이(설정 ↔ AMR 교시 위치)를 기록한다. 직전과 달라졌으면 true(로그를 한 번만 남기려고).</summary>
+    public bool ReportStarts(string source, IReadOnlyList<string> diff)
+    {
+        var changed = !_startDiffs.TryGetValue(source, out var old) || !old.SequenceEqual(diff);
+        _startDiffs[source] = diff;
+        return changed;
+    }
+
     /// <summary>보고를 기록한다. 대조 결과가 직전과 달라졌으면 true(로그를 한 번만 남기려고).</summary>
     public bool Report(string source, AmrRobotModel model, IReadOnlyList<string> mismatch)
     {
