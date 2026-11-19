@@ -40,13 +40,18 @@ public class ReachFieldBacktestTests
     {
         // 운영 설정 위에 그날(2026-11-11) 장비 형상을 고정한다 — 리프트 장착(BASE 1635 + 리프트 높이, 차체 887).
         // 리프트를 떼어 낸 뒤(2026-11-17, BASE 927)의 appsettings 를 그대로 쓰면 실적 행의 리프트 높이가 무시돼 판정이 깨진다.
+        // 천장 출발 자세도 그날의 홈 위치_2(팔을 위로 든 자세 — 2026-11-19 에 다시 교시되기 전 값)로 고정한다.
+        var fixedCfg = new Dictionary<string, string?>
+        {
+            ["Acs:Lift:Mode"] = "Auto", ["Acs:Reach:MountZMm"] = "1635",
+            ["Acs:Reach:AmrHeightMm"] = "887", ["Acs:Reach:SupportColumn"] = "false",
+        };
+        double[] home2Then = { 0.158, 59.456, -140.907, 80.848, 90.048, -179.696 };
+        for (var i = 0; i < home2Then.Length; i++)
+            fixedCfg[$"Acs:Reach:StartJoints:T:{i}"] = home2Then[i].ToString(CultureInfo.InvariantCulture);
         var m = ReachSimService.ModelFrom(new ConfigurationBuilder()
             .AddJsonFile(Find(Path.Combine("HD.Acs.App", "appsettings.json")))
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Acs:Lift:Mode"] = "Auto", ["Acs:Reach:MountZMm"] = "1635",
-                ["Acs:Reach:AmrHeightMm"] = "887", ["Acs:Reach:SupportColumn"] = "false",
-            })
+            .AddInMemoryCollection(fixedCfg)
             .Build());
         return double.TryParse(Environment.GetEnvironmentVariable("HDACS_BT_ELBOW"), NumberStyles.Float, CultureInfo.InvariantCulture, out var e)
             ? m with { MinElbowBendDeg = e } : m;   // 기준값을 바꿔 가며 볼 때만
