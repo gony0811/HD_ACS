@@ -201,6 +201,10 @@ public interface IAcsApiClient
     Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
     /// <summary>서버 리프트 사용 여부(<c>Acs:Lift:Enabled</c>). null = 모름(구서버) — 호출 측은 사용으로 본다.</summary>
     Task<bool?> GetLiftEnabledAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
+    /// <summary>서버 리프트 운영 방식(<c>Acs:Lift:Mode</c> — Off | Auto | Fixed). null = 모름(구서버) — 호출 측은 자동으로 본다.
+    /// 기본 구현은 <see cref="GetLiftEnabledAsync"/> 로 미사용/자동만 구분한다.</summary>
+    async Task<LiftSettingsDto?> GetLiftSettingsAsync(CancellationToken ct = default) =>
+        await GetLiftEnabledAsync(ct) is { } on ? new LiftSettingsDto(on ? "Auto" : "Off", null) : null;
 
     // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] — mapId당 1곳, 운영자 수동 디스패치 ──
     Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default) =>

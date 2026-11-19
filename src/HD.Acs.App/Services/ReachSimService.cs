@@ -91,15 +91,18 @@ public sealed partial class ReachSimService
     /// </summary>
     private async Task<ReachRobotModel> BaseAsync(string? tankId, CancellationToken ct)
     {
-        var raw = tankId is null ? null
-            : await _db.TankGeometries.AsNoTracking().Where(t => t.TankId == tankId).Select(t => t.InspectionKind).FirstOrDefaultAsync(ct);
-        var kind = InspectionKinds.TryNormalize(raw, out var k) && k is not null ? k : InspectionKinds.Weld;
-        if (_resolved.TryGetValue(kind, out var hit))
+        var geo = tankId is null ? null
+            : await _db.TankGeometries.AsNoTracking().Where(t => t.TankId == tankId)
+                .Select(t => new { t.InspectionKind, t.LevelZ }).FirstOrDefaultAsync(ct);
+        var kind = InspectionKinds.TryNormalize(geo?.InspectionKind, out var k) && k is not null ? k : InspectionKinds.Weld;
+        var key = $"{kind}|{tankId}";   // 층별 바닥 올림은 선창의 층 높이에 묶이므로 선창마다 따로
+        if (_resolved.TryGetValue(key, out var hit))
         {
             (_profileOf, ScanProfileSource) = (hit.ProfileOf, hit.Source);
             return hit.Model;
         }
         var model = _config is null ? _baseModel : ModelFrom(_config, kind);
+        if (geo?.LevelZ is { } lz) model = model with { LevelFloorZ = Json<double[]>(lz) };
         var profileOf = (Func<string, string, string, SeamScanProfile?>)((_, _, _) => null);
         var sourceText = "설정";
         var source = ProfileSourceFor(_config, kind);
@@ -116,7 +119,7 @@ public sealed partial class ReachSimService
             model = model with { ScanTiltProfile = tilt };
             sourceText = $"AMR {e.Name} v{e.Version}";
         }
-        _resolved[kind] = (model, profileOf, sourceText);
+        _resolved[key] = (model, profileOf, sourceText);
         (_profileOf, ScanProfileSource) = (profileOf, sourceText);
         return model;
     }
@@ -149,7 +152,8 @@ public sealed partial class ReachSimService
             .Where(s => s.J is { Length: 6 })
             .ToDictionary(s => s.Code, s => s.J!, StringComparer.OrdinalIgnoreCase);
         var d = ReachRobotModel.Default;
-        var liftEnabled = LiftEnabledFrom(config);
+        var lift = LiftSettings.From(config);
+        var liftEnabled = lift.Enabled;
         var stages = d.StageStandoffsMm.ToArray();
         stages[0] = config.GetValue("Acs:Reach:ApproachStandoffMm", stages[0]);
         var scanStandoff = config.GetValue("Acs:Reach:ScanStandoffMm", stages[0]);   // 없으면 ② 접근 이격(점1 Top = ② 접근점)
@@ -162,11 +166,15 @@ public sealed partial class ReachSimService
             MountYawDeg = config.GetValue("Acs:Reach:MountYawDeg", 0.0),
             // 코봇 BASE 높이(차체 바닥 기준)·차체가 층 바닥보다 올라간 높이(나무판 등) — 범위 밖이면 기본값
             MountZMm = MountZFrom(config.GetValue<double?>("Acs:Reach:MountZMm"), d.MountZMm),
-            AmrFloorOffsetMm = FloorOffsetFrom(config.GetValue<double?>("Acs:Reach:AmrFloorOffsetMm")),
+            // 숫자 하나 = 모든 층, {"1": 25} = 층별(내부 층 번호 — 화면 L0 = 1) — 적힌 층만 올린다
+            AmrFloorOffsetMm = FloorOffsetFrom(FloorOffsetScalar(config)),
+            AmrFloorOffsetByLevelMm = FloorOffsetsByLevel(config),
             // 리프트를 쓰지 않으면 후보 높이는 0 하나(StrokeMaxMm 0 → 조사·최적화·보고서·지도 모두 0 으로 고정)이고,
             // 리프트 기둥은 차체 충돌 방지(자기 간섭)·면 간섭 판정에서 빠진다
             LiftEnabled = liftEnabled,
             StrokeMaxMm = liftEnabled ? d.StrokeMaxMm : 0,
+            // 리프트 고정 모드 — 후보 높이는 고정값 하나, 저장값·요청값과 무관하게 그 높이로 판정
+            FixedStrokeMm = lift.FixedStrokeMm,
             // 리프트 대신 고정 받침 기둥(리프트와 같은 단면, 차체 윗면 → BASE) — 리프트를 쓰지 않을 때만 의미가 있다
             SupportColumn = config.GetValue("Acs:Reach:SupportColumn", false),
             // 차체 윗면 높이 — 바꾸면 차체 윗면에 얹힌 신호탑도 같은 만큼 옮긴다(신호탑 자체 높이는 그대로)
@@ -287,7 +295,7 @@ public sealed partial class ReachSimService
     /// 리프트 사용 여부 — 설정 <c>Acs:Lift:Enabled</c>(기본 true). HD_AMR 에서 리프트를 끈(<c>Telescopic:Enabled = false</c>) AMR 이면
     /// false 로 둔다: 지령의 <c>liftStrokeMm</c> 은 항상 0, 정차 시뮬레이션·최적화는 리프트 0 만, 리프트 기둥은 간섭 판정에서 제외.
     /// </summary>
-    public static bool LiftEnabledFrom(IConfiguration? config) => config?.GetValue("Acs:Lift:Enabled", true) ?? true;
+    public static bool LiftEnabledFrom(IConfiguration? config) => LiftSettings.From(config).Enabled;
 
     /// <summary>코봇 BASE 높이 설정 [mm] — 300~3000 만 받는다(밖이면 기본값).</summary>
     public static double MountZFrom(double? v, double fallback) =>
@@ -296,6 +304,26 @@ public sealed partial class ReachSimService
     /// <summary>차체 윗면 높이 설정 [mm] — 300~1500 만 받는다(밖이면 기본값).</summary>
     public static double AmrHeightFrom(double? v, double fallback) =>
         v is { } x && double.IsFinite(x) && x >= 300 && x <= 1500 ? x : fallback;
+
+    /// <summary><c>Acs:Reach:AmrFloorOffsetMm</c> 가 숫자 하나면 그 값(모든 층), 층별 객체이거나 없으면 null.</summary>
+    private static double? FloorOffsetScalar(IConfiguration? config) =>
+        double.TryParse(config?["Acs:Reach:AmrFloorOffsetMm"], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    /// <summary>
+    /// <c>Acs:Reach:AmrFloorOffsetMm</c> 가 층별 객체({"1": 25})면 층 → mm(층 번호 1 이상·값 0~500 만, 나머지는 버림), 아니면 null.
+    /// </summary>
+    public static IReadOnlyDictionary<int, double>? FloorOffsetsByLevel(IConfiguration? config)
+    {
+        var children = config?.GetSection("Acs:Reach:AmrFloorOffsetMm").GetChildren().ToList();
+        if (children is not { Count: > 0 }) return null;
+        var map = new Dictionary<int, double>();
+        foreach (var c in children)
+            if (int.TryParse(c.Key, out var level) && level >= 1
+                && double.TryParse(c.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mm))
+                map[level] = FloorOffsetFrom(mm);
+        return map;
+    }
 
     /// <summary>차체 바닥 올림(나무판 등) 설정 [mm] — 0~500 만 받는다(밖이면 0).</summary>
     public static double FloorOffsetFrom(double? v) =>
@@ -327,8 +355,8 @@ public sealed partial class ReachSimService
         : double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v
         : null;
 
-    private IReadOnlyList<double> Strokes => Enumerable.Range(0, (int)(_model.StrokeMaxMm / StrokeStepMm) + 1)
-        .Select(i => i * StrokeStepMm).ToArray();
+    /// <summary>리프트 후보 — 미사용 [0], 고정 [고정 높이], 자동 0~1000 (<see cref="ReachRobotModel.StrokeCandidates"/>).</summary>
+    private IReadOnlyList<double> Strokes => _model.StrokeCandidates(StrokeStepMm);
 
     /// <summary>
     /// 선창(층·면 필터)의 용접선마다 정차·리프트를 훑어 간섭 없이 닿는지 판정한다. 선창이 없으면 null.
@@ -340,7 +368,7 @@ public sealed partial class ReachSimService
         ReachBranchRule branch = ReachBranchRule.MaxMargin, double? strokeMm = null, bool areaLift = false)
     {
         _model = (await BaseAsync(tankId, ct)) with { BranchRule = branch };
-        var strokes = strokeMm is { } fixedStroke ? new[] { Math.Clamp(fixedStroke, 0, _model.StrokeMaxMm) } : Strokes;
+        var strokes = strokeMm is { } fixedStroke ? new[] { _model.LiftStrokeMm(fixedStroke) } : Strokes;
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -413,7 +441,7 @@ public sealed partial class ReachSimService
         var surveyed = strokeMm is null
             ? ReachSimulator.Survey(_model, setup.Planes, new[] { setup.Stations[yawIndex] }, pts, setup.Normal, Strokes, area.WallCode)
             : null;
-        var h = Math.Clamp(strokeMm ?? surveyed?.StrokeMm ?? 0, 0, _model.StrokeMaxMm);
+        var h = _model.LiftStrokeMm(strokeMm ?? surveyed?.StrokeMm);
         // 중간·끝점은 조사와 같게 시작점 초점 자세부터 앞 점 초점 해를 따라간다(운영은 시작점 초점 자세에서 용접선을 따라 스캔한다).
         point = Math.Clamp(point, 0, 2);
         double[]? seed = null;
@@ -522,7 +550,7 @@ public sealed partial class ReachSimService
             if (tasks.Count == 0 || !ctx.Walls.TryGetValue(a.WallCode, out var wall)) continue;
             var setup = Setup(ctx, a, wall);
             var saved = setup.Stations[0];
-            var savedLift = Math.Clamp(a.StationLiftMm ?? 0.0, 0, _model.StrokeMaxMm);   // 리프트를 쓰지 않으면 0
+            var savedLift = _model.LiftStrokeMm(a.StationLiftMm);   // 미사용 0 · 고정이면 고정 높이
             if (SearchSpace(a, wall, setup) is not { } space)
             {
                 list.Add(new RepairStop(a.AreaId, a.Name, saved.X, saved.Y, saved.Yaw, savedLift, false, tasks.Count, 0, 0, 0, 0, 0,
@@ -577,7 +605,7 @@ public sealed partial class ReachSimService
         if (r is null) return null;
         var p = r.Pick;
         return new NearestStop(a.AreaId, a.Name, Math.Round(p.Station.X, 3), Math.Round(p.Station.Y, 3), Math.Round(p.Station.Yaw, 4),
-            Math.Clamp(p.StrokeMm ?? a.StationLiftMm ?? 0.0, 0, _model.StrokeMaxMm), r.Full, Math.Round(r.TravelM, 3), Math.Round(r.BaselineTravelM, 3),
+            _model.LiftStrokeMm(p.StrokeMm ?? a.StationLiftMm), r.Full, Math.Round(r.TravelM, 3), Math.Round(r.BaselineTravelM, 3),
             r.Evaluated, sw.ElapsedMilliseconds);
     }
 
@@ -695,7 +723,7 @@ public sealed partial class ReachSimService
         var lateral = -rx * space.InwardH[1] + ry * space.InwardH[0];
         var dyaw = thetaRad - space.FacingYaw;
         var yawDeg = Math.Atan2(Math.Sin(dyaw), Math.Cos(dyaw)) * 180 / Math.PI;
-        var strokes = strokeMm is { } h ? new[] { Math.Clamp(h, 0, _model.StrokeMaxMm) } : Strokes;
+        var strokes = strokeMm is { } h ? new[] { _model.LiftStrokeMm(h) } : Strokes;
         var c = StationOptimizer.Evaluate(_model, setup.Planes, space, dist, lateral, yawDeg, seams, setup.Normal, strokes,
             surveyInfeasible: true, wallCode: a.WallCode);
         if (_poseError is { } pe) c = StationOptimizer.WithPoseError(_model, setup.Planes, space, c, seams, setup.Normal, strokes, pe, ct, a.WallCode);

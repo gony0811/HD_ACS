@@ -36,4 +36,18 @@ public class LiftSettingTests
         Assert.True((await LoadWith("{\"enabled\":true}")).LiftEnabled);
         Assert.True((await LoadWith(null)).LiftEnabled);   // 구서버(404) = 종전대로 켬
     }
+
+    [Fact]
+    public async Task 고정_모드면_폼_칸을_끄고_고정_높이를_안내한다()
+    {
+        var f = await LoadWith("{\"enabled\":true,\"mode\":\"Fixed\",\"fixedStrokeMm\":350}");
+        Assert.False(f.LiftEnabled);
+        Assert.Equal("Fixed", f.LiftMode);
+        Assert.Contains("리프트 고정 350 mm", f.LiftHint);
+
+        var auto = await LoadWith("{\"enabled\":true,\"mode\":\"Auto\",\"fixedStrokeMm\":null}");
+        Assert.True(auto.LiftEnabled);
+        Assert.Equal("", auto.LiftHint);
+        Assert.False((await LoadWith("{\"enabled\":false,\"mode\":\"Off\"}")).LiftEnabled);
+    }
 }

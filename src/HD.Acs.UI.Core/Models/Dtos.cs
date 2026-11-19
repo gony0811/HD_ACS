@@ -405,3 +405,6 @@ public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, st
 /// 삭제됐으면 Moved = "작업 → 받은 영역" 문구, DeletedTasks = 함께 지운 작업 이름.
 /// </summary>
 public sealed record AreaDeleteOutcome(bool Blocked, string? Message, IReadOnlyList<string> Moved, IReadOnlyList<string> DeletedTasks);
+
+/// <summary>서버 리프트 운영 방식(<c>GET /api/settings/lift</c>) — Mode = "Off" | "Auto" | "Fixed", FixedStrokeMm = 고정 높이(고정 모드만).</summary>
+public sealed record LiftSettingsDto(string Mode, double? FixedStrokeMm);

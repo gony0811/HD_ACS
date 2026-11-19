@@ -203,6 +203,28 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 층별_바닥_올림은_그_층에_선_정차에만_적용된다()
+    {
+        // 나무판은 0단(내부 L1)에만 — 2층 정차는 그대로
+        var (sm, v, floor) = MidWall();                                   // floor = 2층 발판 높이
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var levels = new[] { 0.0, floor, floor + 2.4, floor + 4.8 };
+        var l1Only = Symmetric175 with { LevelFloorZ = levels, AmrFloorOffsetByLevelMm = new Dictionary<int, double> { [1] = 110 } };
+        var l2Only = l1Only with { AmrFloorOffsetByLevelMm = new Dictionary<int, double> { [2] = 110 } };
+        Assert.Equal(110, l1Only.FloorOffsetMm(0));
+        Assert.Equal(0, l1Only.FloorOffsetMm(floor));
+        Assert.Equal(0, l1Only.FloorOffsetMm(99));                         // 층을 못 찾으면 0
+        Assert.Equal(110, (Symmetric175 with { AmrFloorOffsetMm = 110 }).FloorOffsetMm(floor));   // 공통 값 = 모든 층
+
+        var r0 = ReachSimulator.Evaluate(Symmetric175, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var r1 = ReachSimulator.Evaluate(l1Only, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var r2 = ReachSimulator.Evaluate(l2Only, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(r0.ColumnTop[2], r1.ColumnTop[2], 9);                 // 다른 층 올림은 영향 없음
+        Assert.Equal(r0.ColumnTop[2] + 0.110, r2.ColumnTop[2], 9);          // 이 층 올림만 BASE 를 올린다
+    }
+
+    [Fact]
     public void 차체_윗면_바로_위에_달아도_BASE는_차체와_간섭으로_세지_않고_받침_기둥은_잰다()
     {
         // 2026-11-19 현장: 차체 765 + 160 mm 받침 기둥(리프트 단면) 위에 코봇 → BASE 927

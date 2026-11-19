@@ -59,6 +59,16 @@ public class LiftDisabledTests
         Assert.True(support.SupportColumn);
         Assert.Equal(HD.Acs.Core.Reach.ReachRobotModel.Default.TowerTopMm - 122, support.TowerTopMm, 9);   // 신호탑은 차체 윗면과 함께 내려간다
 
+        var byLevel = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Acs:Reach:AmrFloorOffsetMm:1"] = "25", ["Acs:Reach:AmrFloorOffsetMm:3"] = "900", ["Acs:Reach:AmrFloorOffsetMm:x"] = "10",
+        }).Build());
+        Assert.Equal(0, byLevel.AmrFloorOffsetMm);                       // 층별이면 공통 값은 0
+        Assert.Equal(25, byLevel.AmrFloorOffsetByLevelMm![1]);
+        Assert.Equal(0, byLevel.AmrFloorOffsetByLevelMm[3]);             // 범위 밖(0~500) = 0
+        Assert.Equal(2, byLevel.AmrFloorOffsetByLevelMm.Count);          // 층 번호가 아닌 키는 버림
+        Assert.Null(m.AmrFloorOffsetByLevelMm);                          // 숫자 하나 = 모든 층 공통
+
         var none = ReachSimService.ModelFrom(Config(null));      // 없으면 종전 1635·0
         Assert.Equal(1635, none.MountZMm);
         Assert.Equal(0, none.AmrFloorOffsetMm);
@@ -69,7 +79,7 @@ public class LiftDisabledTests
         Assert.Equal(0, ReachSimService.FloorOffsetFrom(900));
     }
 
-    private static async Task<(AcsDbContext Db, MissionService Missions, Guid ScenarioId)> Seed(bool liftEnabled)
+    private static async Task<(AcsDbContext Db, MissionService Missions, Guid ScenarioId)> Seed(IConfiguration cfg)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -104,14 +114,16 @@ public class LiftDisabledTests
         await db.SaveChangesAsync();
 
         var dispatcher = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
-            hub: null!, Config(liftEnabled), NullLogger<InspectionDispatcher>.Instance);
+            hub: null!, cfg, NullLogger<InspectionDispatcher>.Instance);
         var missions = new MissionService(db, new Vda5050MasterClient("localhost"), dispatcher, NullLogger<MissionService>.Instance);
         return (db, missions, sc.ScenarioId);
     }
 
-    private static async Task<double> QueuedLift(bool liftEnabled)
+    private static Task<double> QueuedLift(bool liftEnabled) => QueuedLift(Config(liftEnabled));
+
+    private static async Task<double> QueuedLift(IConfiguration cfg)
     {
-        var (db, missions, scenarioId) = await Seed(liftEnabled);
+        var (db, missions, scenarioId) = await Seed(cfg);
         var runId = await missions.StartRunAsync(scenarioId, "AMR-01");
         var wi = await db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId);
         return JsonNode.Parse(wi.Actions!)![0]!["params"]!["liftStrokeMm"]!.GetValue<double>();
@@ -122,5 +134,62 @@ public class LiftDisabledTests
     {
         Assert.Equal(600, await QueuedLift(liftEnabled: true));    // 종전 — 영역 저장값
         Assert.Equal(0, await QueuedLift(liftEnabled: false));
+    }
+
+    private static IConfiguration Lift(params (string Key, string Value)[] kv) => new ConfigurationBuilder()
+        .AddInMemoryCollection(kv.ToDictionary(p => "Acs:Lift:" + p.Key, p => (string?)p.Value)).Build();
+
+    [Fact]
+    public void 리프트_모드를_읽는다_Mode_가_없으면_종전_Enabled()
+    {
+        Assert.Equal(LiftMode.Auto, LiftSettings.From(null).Mode);
+        Assert.Equal(LiftMode.Auto, LiftSettings.From(Config(null)).Mode);
+        Assert.Equal(LiftMode.Auto, LiftSettings.From(Config(true)).Mode);
+        Assert.Equal(LiftMode.Off, LiftSettings.From(Config(false)).Mode);
+
+        Assert.Equal(LiftMode.Off, LiftSettings.From(Lift(("Mode", "off"), ("Enabled", "true"))).Mode);   // Mode 가 우선, 대소문자 무시
+        var f = LiftSettings.From(Lift(("Mode", "Fixed"), ("FixedStrokeMm", "350")));
+        Assert.Equal((LiftMode.Fixed, 350.0, (string?)null), (f.Mode, f.FixedStrokeMm!.Value, f.Warning));
+        Assert.True(f.Enabled);
+
+        foreach (var bad in new[] { "1200", "-5", "abc" })   // 범위 밖·숫자 아님 → 0 mm 고정 + 경고
+        {
+            var b = LiftSettings.From(Lift(("Mode", "Fixed"), ("FixedStrokeMm", bad)));
+            Assert.Equal(0, b.FixedStrokeMm);
+            Assert.NotNull(b.Warning);
+        }
+        var missing = LiftSettings.From(Lift(("Mode", "Fixed")));
+        Assert.Equal(0, missing.FixedStrokeMm);
+        var unknown = LiftSettings.From(Lift(("Mode", "Manual")));
+        Assert.Equal(LiftMode.Auto, unknown.Mode);
+        Assert.NotNull(unknown.Warning);
+    }
+
+    [Fact]
+    public void 고정_모드면_모델_후보와_판정_높이가_고정값_하나()
+    {
+        var m = ReachSimService.ModelFrom(Lift(("Mode", "Fixed"), ("FixedStrokeMm", "350")));
+        Assert.True(m.LiftEnabled);
+        Assert.Equal(350, m.FixedStrokeMm);
+        Assert.Equal(new[] { 350.0 }, m.StrokeCandidates(100));
+        Assert.Equal(350, m.EffectiveStrokeMm(0));       // 호출부가 다른 높이를 넘겨도 고정값
+        Assert.Equal(350, m.LiftStrokeMm(800));         // 영역 저장값 무시
+        Assert.Equal(350, m.LiftStrokeMm(null));
+
+        var auto = ReachSimService.ModelFrom(Lift(("Mode", "Auto")));
+        Assert.Equal(11, auto.StrokeCandidates(100).Count);
+        Assert.Equal(800, auto.LiftStrokeMm(800));
+        Assert.Equal(1000, auto.LiftStrokeMm(1500));
+        var off = ReachSimService.ModelFrom(Lift(("Mode", "Off")));
+        Assert.Equal(new[] { 0.0 }, off.StrokeCandidates(100));
+        Assert.Equal(0, off.LiftStrokeMm(800));
+    }
+
+    [Fact]
+    public async Task 고정_모드면_지령의_리프트는_영역_저장값과_무관하게_고정값()
+    {
+        Assert.Equal(350, await QueuedLift(Lift(("Mode", "Fixed"), ("FixedStrokeMm", "350"))));
+        Assert.Equal(600, await QueuedLift(Lift(("Mode", "Auto"))));
+        Assert.Equal(0, await QueuedLift(Lift(("Mode", "Off"))));
     }
 }

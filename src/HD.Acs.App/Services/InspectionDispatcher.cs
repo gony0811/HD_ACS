@@ -29,11 +29,12 @@ public sealed class InspectionDispatcher
     private readonly RobotErrorTracker _tracker;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
-    /// <summary>리프트 사용 여부(<c>Acs:Lift:Enabled</c>) — false 면 모든 지령의 <c>liftStrokeMm</c> 은 0(영역 저장값·최적화 결과 무시).</summary>
-    private readonly bool _liftEnabled;
+    /// <summary>리프트 운영 방식(<c>Acs:Lift:Mode</c>) — 미사용이면 모든 지령의 <c>liftStrokeMm</c> 은 0, 고정이면 고정 높이
+    /// (둘 다 영역 저장값·최적화 결과 무시), 자동이면 영역 저장값.</summary>
+    private readonly LiftSettings _lift;
 
-    /// <summary>지령에 실을 리프트 높이 — 리프트를 쓰지 않으면 항상 0.</summary>
-    private double LiftForOrder(double? liftMm) => _liftEnabled ? liftMm ?? 0.0 : 0.0;
+    /// <summary>지령에 실을 리프트 높이 — 미사용 0, 고정이면 고정 높이, 자동이면 주어진 값(없으면 0).</summary>
+    private double LiftForOrder(double? liftMm) => _lift.ForOrder(liftMm);
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
@@ -50,7 +51,8 @@ public sealed class InspectionDispatcher
             InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true),
             RobustYawDeg: config.GetValue("Acs:Dispatch:NearestStation:RobustYawDeg", 3.0));
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
-        _liftEnabled = ReachSimService.LiftEnabledFrom(config);
+        _lift = LiftSettings.From(config);
+        if (_lift.Warning is { } lw) _log.LogWarning("리프트 설정: {Warning}", lw);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
         // 검사 종류별 지령 만들기 — 가스검사 등 새 종류는 여기에 구현을 더한다
@@ -696,8 +698,8 @@ public sealed class InspectionDispatcher
             prm["attempt"] = attempt;
             if (o["liftFixed"]?.GetValue<bool>() != true)   // 리페어 정차 최적화가 고른 리프트는 영역 저장값으로 덮지 않는다
                 prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
-            // 리프트를 쓰지 않으면 큐 전개 이후 설정이 바뀐 run 까지 포함해 발행 직전에 0 으로 고정한다
-            if (!_liftEnabled) prm["liftStrokeMm"] = 0.0;
+            // 미사용(0)·고정(고정 높이)은 큐 전개 이후 설정이 바뀐 run 까지 포함해 발행 직전에 다시 맞춘다
+            if (_lift.Mode != LiftMode.Auto) prm["liftStrokeMm"] = _lift.ForOrder(null);
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction

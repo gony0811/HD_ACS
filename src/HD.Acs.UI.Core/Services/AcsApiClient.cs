@@ -721,6 +721,19 @@ public sealed class AcsApiClient : IAcsApiClient
             ? e.GetBoolean() : null;
     }
 
+    public async Task<LiftSettingsDto?> GetLiftSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/lift", ct);
+        if (!resp.IsSuccessStatusCode) return null;   // 구서버(404) — 자동으로 본다
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        double? fixedMm = body.TryGetProperty("fixedStrokeMm", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.Number ? f.GetDouble() : null;
+        if (body.TryGetProperty("mode", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String)
+            return new LiftSettingsDto(m.GetString()!, fixedMm);
+        // mode 가 없는 구서버 — enabled 만 본다
+        return body.TryGetProperty("enabled", out var e) && e.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? new LiftSettingsDto(e.GetBoolean() ? "Auto" : "Off", null) : null;
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
