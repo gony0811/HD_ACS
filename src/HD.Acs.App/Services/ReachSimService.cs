@@ -167,6 +167,11 @@ public sealed partial class ReachSimService
             // 리프트 기둥은 차체 충돌 방지(자기 간섭)·면 간섭 판정에서 빠진다
             LiftEnabled = liftEnabled,
             StrokeMaxMm = liftEnabled ? d.StrokeMaxMm : 0,
+            // 리프트 대신 고정 받침 기둥(리프트와 같은 단면, 차체 윗면 → BASE) — 리프트를 쓰지 않을 때만 의미가 있다
+            SupportColumn = config.GetValue("Acs:Reach:SupportColumn", false),
+            // 차체 윗면 높이 — 바꾸면 차체 윗면에 얹힌 신호탑도 같은 만큼 옮긴다(신호탑 자체 높이는 그대로)
+            AmrHeightMm = AmrHeightFrom(config.GetValue<double?>("Acs:Reach:AmrHeightMm"), d.AmrHeightMm),
+            TowerTopMm = d.TowerTopMm - d.AmrHeightMm + AmrHeightFrom(config.GetValue<double?>("Acs:Reach:AmrHeightMm"), d.AmrHeightMm),
             ToolZMm = config.GetValue("Acs:Reach:ToolZMm", d.ToolZMm),
             StageStandoffsMm = stages,
             PlanarRetreatMm = config.GetValue("Acs:Reach:PlanarRetreatMm", d.PlanarRetreatMm),
@@ -287,6 +292,10 @@ public sealed partial class ReachSimService
     /// <summary>코봇 BASE 높이 설정 [mm] — 300~3000 만 받는다(밖이면 기본값).</summary>
     public static double MountZFrom(double? v, double fallback) =>
         v is { } x && double.IsFinite(x) && x >= 300 && x <= 3000 ? x : fallback;
+
+    /// <summary>차체 윗면 높이 설정 [mm] — 300~1500 만 받는다(밖이면 기본값).</summary>
+    public static double AmrHeightFrom(double? v, double fallback) =>
+        v is { } x && double.IsFinite(x) && x >= 300 && x <= 1500 ? x : fallback;
 
     /// <summary>차체 바닥 올림(나무판 등) 설정 [mm] — 0~500 만 받는다(밖이면 0).</summary>
     public static double FloorOffsetFrom(double? v) =>

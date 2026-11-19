@@ -51,10 +51,20 @@ public class LiftDisabledTests
         Assert.Equal(927, m.MountZMm);
         Assert.Equal(110, m.AmrFloorOffsetMm);
 
+        var support = ReachSimService.ModelFrom(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Acs:Reach:AmrHeightMm"] = "765", ["Acs:Reach:SupportColumn"] = "true",
+        }).Build());
+        Assert.Equal(765, support.AmrHeightMm);
+        Assert.True(support.SupportColumn);
+        Assert.Equal(HD.Acs.Core.Reach.ReachRobotModel.Default.TowerTopMm - 122, support.TowerTopMm, 9);   // 신호탑은 차체 윗면과 함께 내려간다
+
         var none = ReachSimService.ModelFrom(Config(null));      // 없으면 종전 1635·0
         Assert.Equal(1635, none.MountZMm);
         Assert.Equal(0, none.AmrFloorOffsetMm);
         Assert.Equal(1635, ReachSimService.MountZFrom(50, 1635));     // 범위 밖 = 기본값
+        Assert.Equal(887, ReachSimService.AmrHeightFrom(50, 887));
+        Assert.Equal(765, ReachSimService.AmrHeightFrom(765, 887));
         Assert.Equal(0, ReachSimService.FloorOffsetFrom(-10));
         Assert.Equal(0, ReachSimService.FloorOffsetFrom(900));
     }
