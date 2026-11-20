@@ -61,11 +61,20 @@ public sealed class RobotErrorTracker
     public static bool IsObstacleHold(string errorType) =>
         string.Equals(errorType, CobotZoneObstacleType, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용. 작업자 입력 요청·장애물 대기는 세지 않는다.</summary>
+    /// <summary>
+    /// 배터리 보호 임시 해제 errorType — AMR이 BMS 고장으로 저전력 판정을 끄고 운용하는 동안 WARNING으로 상주시킨다 [VDA §6.4].
+    /// 고장 보고가 아니라 운영 상태 경고이므로 오류 상태 판정(<see cref="HasActiveErrors"/>)에서 뺀다.
+    /// </summary>
+    public const string BatteryGuardBypassedType = "batteryGuardBypassed";
+
+    public static bool IsBatteryGuardBypass(string errorType) =>
+        string.Equals(errorType, BatteryGuardBypassedType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용. 작업자 입력 요청·장애물 대기·배터리 보호 해제는 세지 않는다.</summary>
     public bool HasActiveErrors(string robotId)
     {
         if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
-        lock (active) return active.Any(t => !IsOperatorNotice(t) && !IsObstacleHold(t));
+        lock (active) return active.Any(t => !IsOperatorNotice(t) && !IsObstacleHold(t) && !IsBatteryGuardBypass(t));
     }
 
     /// <summary>로봇이 마지막 state에서 해당 errorType을 보고 중인가 (예: communicationLostPause — run 중단 시 cancelOrder 판정).</summary>

@@ -237,6 +237,10 @@ public sealed class RobotStateService
         if (disappeared.Any(RobotErrorTracker.IsObstacleHold))
             await ClearNoticeAlarmAsync(robot.RobotId, "COBOT_ZONE_OBSTACLE", "코봇 반경 장애물 해소", ct);
 
+        // 배터리 보호 해제가 끝남(AMR 설정을 끄고 재시작) — 알람 해제 기록.
+        if (disappeared.Any(RobotErrorTracker.IsBatteryGuardBypass))
+            await ClearNoticeAlarmAsync(robot.RobotId, "BATTERY_GUARD_BYPASSED", "배터리 보호 다시 켜짐", ct);
+
         if (state.Errors.Count == 0) return;
 
         // orderRejectedDeviceFault: 알람 직전 발행 Order가 경합으로 거부된 경우 — 실패 아님, 정차를 PENDING 복귀(멱등).
@@ -317,6 +321,11 @@ public sealed class RobotStateService
                     // 주행 중이라 액션은 WAITING 그대로다. 끝내 안 사라지면 AMR이 주행 실패로 종결한다(그때 실패 정책).
                     AddErrorAlarm("COBOT_ZONE_OBSTACLE", robot.RobotId,
                         "코봇 반경 장애물 — AMR 주행 정지, 장애물을 치우면 다시 출발(타워램프 황색·부저)", err);
+                    break;
+                case var t when RobotErrorTracker.IsBatteryGuardBypass(t):
+                    // 배터리 보호 임시 해제 — 실패 아님(운영 상태 경고). 알람·로그만, 배차·실패 집계는 건드리지 않는다.
+                    AddErrorAlarm("BATTERY_GUARD_BYPASSED", robot.RobotId,
+                        "배터리 보호 해제 중 — AMR이 BMS 잔량을 무시하고 운용(팩 전압 확인 필요)", err);
                     break;
                 case var t when DeviceFaults.IsLinkLost(t):
                     // 장치통신 HEAVY알람 §5.2: AMR이 이미 임무 중단(남은 액션 FAILED → 액션 종결 경로가 실패 집계).
