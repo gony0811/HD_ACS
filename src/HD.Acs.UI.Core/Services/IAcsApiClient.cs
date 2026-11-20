@@ -209,6 +209,21 @@ public interface IAcsApiClient
     /// 기본 구현은 <see cref="GetLiftEnabledAsync"/> 로 미사용/자동만 구분한다.</summary>
     async Task<LiftSettingsDto?> GetLiftSettingsAsync(CancellationToken ct = default) =>
         await GetLiftEnabledAsync(ct) is { } on ? new LiftSettingsDto(on ? "Auto" : "Off", null) : null;
+    /// <summary>정차 묶음 최적화(set cover) 시작 — 작업 번호. null = 구서버(미지원). 격자·반경은 null 이면 서버 기본(0.3 m·2.8 m).</summary>
+    Task<Guid?> StartSetCoverAsync(string tankId, int level, string wallCode, double? gridStepM = null, double? reachRadiusM = null,
+        CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+    /// <summary>정차 묶음 최적화 작업 상태·결과. null = 작업 없음.</summary>
+    Task<SetCoverJobDto?> GetSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverJobDto?>(null);
+    /// <summary>정차 묶음 최적화 결과를 영역에 적용(그 면·층 영역을 다시 구성). 거부(409·400)는 예외 메시지에 사유. null = 구서버.</summary>
+    Task<SetCoverApplyResultDto?> ApplySetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverApplyResultDto?>(null);
+    /// <summary>정차 묶음 최적화 중지.</summary>
+    Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
+    /// <summary>리치·간섭 화면의 리프트·차체 설정(지금 적용 중인 값). null = 구서버(미지원).</summary>
+    Task<ReachSettingsDto?> GetReachSettingsAsync(CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
+    /// <summary>설정 저장 — 서버가 바로 적용(재시작 불필요). 진행 중 run 이면 409, 범위 밖 400(예외 메시지에 사유). null = 구서버.</summary>
+    Task<ReachSettingsDto?> SaveReachSettingsAsync(ReachSettingsUpdateDto settings, CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
+    /// <summary>화면에서 덮어쓴 값을 모두 지움(appsettings.json 값으로). null = 구서버.</summary>
+    Task<ReachSettingsDto?> ResetReachSettingsAsync(CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
 
     // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] — mapId당 1곳, 운영자 수동 디스패치 ──
     Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default) =>

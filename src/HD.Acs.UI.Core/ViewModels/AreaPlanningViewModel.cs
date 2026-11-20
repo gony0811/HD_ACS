@@ -347,6 +347,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// 입력 코너(층-로컬 v) 사전 검증 후 면-전체 v로 환산해 반환. 위반 시 StatusMessage를 채우고 null.
     /// 서버가 최종 판정하지만, 흔한 실수는 왕복 전에 알린다(등록·수정 공통).
     /// </summary>
+    /// <summary>층 구간 경계 허용 오차 [m] — 서버 <c>LevelBands</c> 의 ε(0.005)와 맞춘다.</summary>
+    public const double LevelEdgeTolM = 0.005;
+
     private double[][]? InputCornersFaceGlobal()
     {
         var local = InputCorners();
@@ -360,7 +363,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 : "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다.";
             return null;
         }
-        if (mav > SliceH + 1e-6 || miv < -1e-6) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
+        // 경계에 붙은 코너는 0.1 mm 반올림 저장으로 구간 밖 수십 μm 가 될 수 있다 — 서버 층 판정(LevelBands ε 5 mm)과 같은 여유를 둔다.
+        if (mav > SliceH + LevelEdgeTolM || miv < -LevelEdgeTolM) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장(각 코너 v)
         return local.Select(p => new[] { p[0], p[1] + off }).ToArray();
     }

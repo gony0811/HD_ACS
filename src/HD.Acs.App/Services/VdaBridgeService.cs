@@ -54,6 +54,19 @@ public sealed class VdaBridgeService : BackgroundService
                 _log.LogError(ex, "state 처리 실패 (robot={Robot}, order={Order}) — 메시지 스킵", robot.RobotId, state.OrderId);
             }
         };
+        // factsheet(§7.3) — AMR 의 티칭 출발 자세·리프트·장착 보정·코봇 값을 설정 층에 반영
+        _vda.FactsheetReceived += async (robot, json) =>
+        {
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<AmrFactsheetService>().HandleAsync(robot, json, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "factsheet 처리 실패 (robot={Robot}) — 메시지 스킵", robot.RobotId);
+            }
+        };
         _vda.ConnectionReceived += async (robot, conn) =>
         {
             try
@@ -65,6 +78,10 @@ public sealed class VdaBridgeService : BackgroundService
                 // 재접속 동기화 후 층 전환 대기 중이던 Run의 릴리즈 재시도 [ADR-002, Q9]
                 if (conn.ConnectionState == "ONLINE")
                 {
+                    // 연결될 때마다 factsheet 를 다시 묻는다(retained 가 있어도 지금 값으로) [§7.3]
+                    try { await _vda.FactsheetRequestAsync(robot, ct); }
+                    catch (Exception ex) { _log.LogWarning("factsheetRequest 발행 실패 (robot={Robot}): {Err}", robot.RobotId, ex.Message); }
+
                     var db = svc.GetRequiredService<AcsDbContext>();
                     var waiting = await db.ScenarioRuns
                         .Where(r => r.RobotId == robot.RobotId && r.State == "WAITING_FLOOR_TRANSFER")

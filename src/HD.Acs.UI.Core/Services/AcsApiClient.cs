@@ -738,6 +738,68 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
+    public async Task<Guid?> StartSetCoverAsync(string tankId, int level, string wallCode, double? gridStepM = null, double? reachRadiusM = null,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/set-cover",
+            new { level, wallCode, gridStepM, reachRadiusM }, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;   // 구서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        return body.TryGetProperty("jobId", out var id) ? id.GetGuid() : null;
+    }
+
+    public async Task<SetCoverJobDto?> GetSetCoverAsync(Guid jobId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/reach-sim/set-cover/{jobId}", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<SetCoverJobDto>(ct);
+    }
+
+    public async Task<SetCoverApplyResultDto?> ApplySetCoverAsync(Guid jobId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/reach-sim/set-cover/{jobId}/apply", new { userId = "operator" }, ct);
+        if (resp.StatusCode is HttpStatusCode.MethodNotAllowed
+            || resp.StatusCode == HttpStatusCode.NotFound && !(await resp.Content.ReadAsStringAsync(ct)).Contains("error", StringComparison.Ordinal))
+            return null;   // 구서버(라우트 없음)
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<SetCoverApplyResultDto>(ct);
+    }
+
+    public async Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) =>
+        await _http.DeleteAsync($"/api/reach-sim/set-cover/{jobId}", ct);
+
+    public async Task<ReachSettingsDto?> GetReachSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/reach-sim", ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;   // 구서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
+    public async Task<ReachSettingsDto?> SaveReachSettingsAsync(ReachSettingsUpdateDto settings, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync("/api/settings/reach-sim", new
+        {
+            liftMode = settings.LiftMode, fixedStrokeMm = settings.FixedStrokeMm,
+            mountZMm = settings.MountZMm, amrHeightMm = settings.AmrHeightMm,
+            supportColumn = settings.SupportColumn, maxEntryJointTravelDeg = settings.MaxEntryJointTravelDeg,
+            userId = "operator",
+        }, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
+    public async Task<ReachSettingsDto?> ResetReachSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync("/api/settings/reach-sim?userId=operator", ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
         if (resp.IsSuccessStatusCode) return;

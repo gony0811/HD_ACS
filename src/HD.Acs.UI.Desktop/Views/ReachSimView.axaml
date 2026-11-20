@@ -49,6 +49,44 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 리프트·차체 설정 (서버 설정 — 적용하면 바로 반영) -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5" IsEnabled="{Binding SettingsAvailable}">
+                        <TextBlock Text="리프트 · 차체 설정" FontWeight="SemiBold" />
+                        <TextBlock Text="appsettings.json 의 리프트·코봇 장착 값을 여기서 바꿉니다. [설정 적용]이면 서버가 바로 다시 읽어 이 화면의 조사·정차 최적화·보고서·검사 가능 지도와 배차 지령의 리프트 높이에 함께 쓰입니다(재시작 불필요, 진행 중 run 이 있으면 거부). 바꾸지 않은 항목은 AMR 이 factsheet 로 보고한 값(티칭 출발 자세·리프트·장착 보정 T_A_B·코봇 값), 보고가 없으면 appsettings.json 값입니다. 우선순위: appsettings.json &lt; AMR 보고 &lt; 이 화면."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="4">
+                            <TextBlock Grid.Row="0" Text="리프트 운영" VerticalAlignment="Center" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" Classes="field" MinWidth="240" ItemsSource="{Binding LiftModeLabels}" SelectedIndex="{Binding LiftModeIndex}" />
+                            <TextBlock Grid.Row="1" Text="고정 높이 [mm]" VerticalAlignment="Center" IsVisible="{Binding IsFixedLift}" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="1" Classes="field" MinWidth="160" HorizontalAlignment="Left" IsVisible="{Binding IsFixedLift}"
+                                           Minimum="0" Maximum="1000" Increment="50" FormatString="0" Value="{Binding SettingFixedStrokeMm}" />
+                            <TextBlock Grid.Row="2" Text="코봇 BASE 높이 [mm]" VerticalAlignment="Center" />
+                            <NumericUpDown Grid.Row="2" Grid.Column="1" Classes="field" MinWidth="160" HorizontalAlignment="Left"
+                                           Minimum="300" Maximum="3000" Increment="10" FormatString="0" Value="{Binding SettingMountZMm}"
+                                           ToolTip.Tip="Acs:Reach:MountZMm — 차체 바닥 기준 BASE 높이(리프트 완전 하강). 리프트 장착 형상 1635, 탈거·받침 기둥 927." />
+                            <TextBlock Grid.Row="3" Text="차체 윗면 [mm]" VerticalAlignment="Center" />
+                            <NumericUpDown Grid.Row="3" Grid.Column="1" Classes="field" MinWidth="160" HorizontalAlignment="Left"
+                                           Minimum="300" Maximum="1500" Increment="5" FormatString="0" Value="{Binding SettingAmrHeightMm}"
+                                           ToolTip.Tip="Acs:Reach:AmrHeightMm — 차체 윗면 높이(신호탑도 같은 만큼 이동). 리프트 장착 887, 실측 765." />
+                            <CheckBox Grid.Row="4" Grid.Column="1" Content="받침 기둥 (리프트 대신 차체 윗면 → BASE 고정 기둥)" IsChecked="{Binding SettingSupportColumn}" FontSize="11.5"
+                                      ToolTip.Tip="Acs:Reach:SupportColumn — 리프트 미사용일 때만 간섭 판정에 들어갑니다." />
+                            <TextBlock Grid.Row="5" Text="진입 관절 한계 [°]" VerticalAlignment="Center" />
+                            <NumericUpDown Grid.Row="5" Grid.Column="1" Classes="field" MinWidth="160" HorizontalAlignment="Left"
+                                           Minimum="30" Maximum="360" Increment="5" FormatString="0" Value="{Binding SettingEntryTravelDeg}"
+                                           ToolTip.Tip="Acs:Reach:MaxEntryJointTravelDeg — 출발 자세 → ② 해 관절별 최대 이동(가지 전환 판정). HD_AMR inspection.maxEntryJointTravelDeg 와 같게." />
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="설정 적용 · 다시 조사" Command="{Binding SaveSettingsCommand}" IsEnabled="{Binding !IsSavingSettings}" />
+                            <Button Content="화면 설정 지우기" Command="{Binding ResetSettingsCommand}" IsEnabled="{Binding !IsSavingSettings}" />
+                            <Button Content="다시 읽기" Command="{Binding LoadSettingsCommand}" />
+                        </StackPanel>
+                        <TextBlock Text="리프트 고정·자동으로 바꾸면 BASE·차체 높이도 리프트 장착 형상(1635·887, 받침 기둥 끔)으로 맞추세요. HD_AMR 의 리프트 설정·진입 한계는 자동으로 맞춰지지 않습니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding SettingsStatus}" FontSize="11.5" TextWrapping="Wrap" Margin="2,-6,0,0" />
+
                 <!-- 정차·리프트 조정 -->
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel Spacing="4">
@@ -111,6 +149,36 @@
                             <Button Content="제안대로 분리 적용" Command="{Binding ApplySplitCommand}" IsEnabled="{Binding CanApplySplit}" />
                         </StackPanel>
                         <TextBlock Text="{Binding SplitPlanText}" FontSize="11.5" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 정차 묶음 최적화 (탐욕 set cover) -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="정차 묶음 최적화 (set cover)" FontWeight="SemiBold" />
+                        <TextBlock Text="선택 층·면의 용접선 전부를 덮는 정차 수를 줄입니다 — 정차 후보 격자마다 용접선별 운영 판정을 풀고, 아직 덮이지 않은 용접선을 영역 크기 상한(가로 1.44 m · 경사·수직벽 세로 2.9 m) 창 하나 안에서 가장 많이 덮는 정차부터 고릅니다(여유 확보 → 간섭 없음 순). 정차 하나 = 영역 하나. 조회 전용 — 영역은 바꾸지 않습니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="격자 [m]" VerticalAlignment="Center" />
+                            <NumericUpDown Classes="field" Width="110" Minimum="0.1" Maximum="1" Increment="0.1" FormatString="0.0#"
+                                           Value="{Binding SetCoverGridStepM}"
+                                           ToolTip.Tip="정차 후보 간격 — 작을수록 정차가 조금 줄지만 오래 걸립니다(천장 L4 기준 0.3 m 약 4.5분 · 0.5 m 약 1.2분)." />
+                            <Button Content="이 층·면 최적화" Command="{Binding RunSetCoverCommand}" IsEnabled="{Binding !IsSetCovering}" />
+                            <Button Content="중지" Command="{Binding CancelSetCoverCommand}" IsVisible="{Binding IsSetCovering}" />
+                        </StackPanel>
+                        <Button Content="제안대로 영역 다시 구성 (적용)" Command="{Binding ApplySetCoverCommand}" IsEnabled="{Binding CanApplySetCover}"
+                                ToolTip.Tip="그 면·층 영역을 제안 정차대로 다시 만듭니다 — 정차·리프트 덮어쓰기, 못 닿는 용접선은 X 영역. taskId·검사 기록 유지, 영역 ID 물려주기. 진행 중 run 이 있거나 계산 뒤 작업이 바뀌었으면 거부됩니다." />
+                        <TextBlock Text="{Binding SetCoverSummary}" FontSize="11.5" TextWrapping="Wrap" />
+                        <DataGrid ItemsSource="{Binding SetCoverRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserSortColumns="False"
+                                  HeadersVisibility="Column" MaxHeight="240">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding No}" Width="40" />
+                                <DataGridTextColumn Header="정차 (x, y) 방향" Binding="{Binding Station}" Width="*" />
+                                <DataGridTextColumn Header="리프트" Binding="{Binding Lift}" Width="70" />
+                                <DataGridTextColumn Header="용접선" Binding="{Binding Welds}" Width="58" />
+                                <DataGridTextColumn Header="최소 여유" Binding="{Binding Margin}" Width="70" />
+                            </DataGrid.Columns>
+                        </DataGrid>
                     </StackPanel>
                 </Border>
 
