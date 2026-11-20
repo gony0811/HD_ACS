@@ -13,7 +13,7 @@ namespace HD.Acs.App.Services;
 /// </summary>
 public static class SchemaEnsure
 {
-    private static readonly string[] Statements =
+    internal static readonly string[] Statements =
     {
         // db/migrations/2026-09-21_run_task_totals.sql
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS total_tasks int",
@@ -98,11 +98,12 @@ public static class SchemaEnsure
         )
         """,
         // db/migrations/2026-11-19_amr_teaching.sql — HD_AMR 교시 위치(리치 시뮬레이터 출발 자세) 사본
+        // 주의: ExecuteSqlRaw 는 SQL 을 string.Format 으로 다루므로 중괄호 리터럴('{}')을 쓰면 기동 시 예외 — jsonb_build_object() 사용
         """
         CREATE TABLE IF NOT EXISTS ref.amr_teaching (
           source             text PRIMARY KEY,
           teaching_positions jsonb NOT NULL DEFAULT '[]',
-          start_joints       jsonb NOT NULL DEFAULT '{}',
+          start_joints       jsonb NOT NULL DEFAULT jsonb_build_object(),
           content_hash       text NOT NULL DEFAULT '',
           received_at        timestamptz NOT NULL DEFAULT now(),
           changed_at         timestamptz NOT NULL DEFAULT now()
