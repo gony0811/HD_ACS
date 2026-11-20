@@ -41,7 +41,21 @@ builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:Listen
 // 콘솔·Rider 실행에서는 아무 동작도 하지 않는다 [ADR-011, INSTALL_MANUAL 9단계].
 builder.Host.UseWindowsService(o => o.ServiceName = "HDACS-App");
 
-builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
+// 앱 로그 — 콘솔 + 날짜별 파일. OS 서비스로 돌면 콘솔 출력은 어디에도 남지 않아, 현장에서 "무엇을 눌렀는지"를
+// 사후에 확인할 수 없었다(2026-11-11 이어하기 문의). [Acs:Log] FileEnabled(기본 true)·Dir(기본 실행 폴더의 logs)·RetainDays(기본 31).
+builder.Host.UseSerilog((ctx, cfg) =>
+{
+    cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console();
+    if (ctx.Configuration.GetValue("Acs:Log:FileEnabled", true))
+    {
+        var dir = ctx.Configuration["Acs:Log:Dir"];
+        if (string.IsNullOrWhiteSpace(dir)) dir = Path.Combine(AppContext.BaseDirectory, "logs");
+        cfg.WriteTo.File(Path.Combine(dir, "acs-.log"), rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: Math.Clamp(ctx.Configuration.GetValue("Acs:Log:RetainDays", 31), 1, 365),
+            shared: true, fileSizeLimitBytes: 200L * 1024 * 1024, rollOnFileSizeLimit: true,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}");
+    }
+});
 
 builder.Services.AddDbContext<AcsDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("Default"))
@@ -338,6 +352,14 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
         : await sim.OptimizeAsync(tankId, level, wallCode, areaId, ct, BranchRuleOf(branch), lift != "seam") is { } r
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
+
+// 면·층 정차 집합 덮개(set cover) — 영역 구분 없이 용접선 전부를 가장 적은 정차로 덮는 정차 후보(조회 전용).
+app.MapGet("/api/reach-sim/tanks/{tankId}/cover-plan",
+    async (string tankId, int level, string wallCode, double? step, double? reach, int? yaws, bool? skipEntry, double? minMargin, string? dump, ReachSimService sim, CancellationToken ct) =>
+        await sim.CoverPlanAsync(tankId, level, wallCode, Math.Clamp(step ?? 0.3, 0.1, 2), Math.Clamp(reach ?? 1.8, 0.5, 3),
+            Math.Clamp(yaws ?? 4, 1, 24), ct, skipEntry ?? false, minMargin ?? 0, dump) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = "선창·면이 없거나 용접선이 없음" }));
 
 // 영역을 도면 (x, y, theta[rad])에 세웠을 때의 판정(조회 전용) — 위치 오차 표본 판정 포함. strokeMm 을 주면 그 리프트로 고정.
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/station-eval",
@@ -934,11 +956,21 @@ app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDb
     try
     {
         var result = await InspectionProfileService.SyncAsync(db, req, ct);
+        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
+        var configured = ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source));
+        if (AmrTeachingService.Normalize(req.TeachingPositions, req.StartJointsByWall) is { } teaching)
+        {
+            // AMR 교시 위치가 설정(Acs:Reach:StartJoints)과 다르면 리치 시뮬레이터는 AMR 값을 쓴다 — 무엇이 달라졌는지 알린다
+            var diff = AmrTeachingService.Differences(configured.StartJointsByWall, teaching.Starts);
+            if (robotModels.ReportStarts(source, diff) && diff.Count > 0)
+                logs.CreateLogger("RobotModelCheck").LogWarning(
+                    "출발 자세(교시 위치)가 설정과 다르다 — 리치 시뮬레이터는 {Source} 값을 쓴다: {Diff}", source, string.Join(" / ", diff));
+            result = result with { StartJointsOverride = diff.Count > 0 ? diff : null };
+        }
         if (req.Robot is not { } robot) return Results.Ok(result);
         // AMR 과 ACS 가 같은 코봇 모델 값(d6·손목 여유·초점 거리)을 쓰는지 대조 — 다르면 시뮬레이션과 실제 동작이 어긋난다
-        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
-        var mismatch = RobotModelCheck.Compare(ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source)), robot);
-        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        var mismatch = RobotModelCheck.Compare(configured, robot);
         if (robotModels.Report(source, robot, mismatch) && mismatch.Count > 0)
             logs.CreateLogger("RobotModelCheck").LogWarning("코봇 모델 값이 {Source} 와 다르다 — {Mismatch}", source, string.Join(" / ", mismatch));
         return Results.Ok(result with { RobotModelMismatch = mismatch.Count > 0 ? mismatch : null });
@@ -976,6 +1008,9 @@ app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, 
         }),
         // AMR 이 마지막으로 알려 준 코봇 모델 값과 ACS 설정의 차이(서버 기동 후 받은 것만)
         robotModels = robotModels.All.Select(e => new { e.Source, e.Model.LinksMm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
+        // AMR 교시 위치에서 온 면별 출발 자세 — 리치 시뮬레이터가 설정(Acs:Reach:StartJoints)보다 먼저 쓴다
+        teaching = (await db.AmrTeachings.AsNoTracking().OrderBy(x => x.Source).ToListAsync(ct))
+            .Select(x => new { x.Source, x.ReceivedAt, x.ChangedAt, startJointsByWall = AmrTeachingService.StartsOf(x) }),
     });
 });
 
@@ -1126,9 +1161,13 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, 
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 {
     if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
-    try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId, round: req.Round) }); }
+    try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId, round: req.Round,
+                                                                       restart: req.Restart ?? false) }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException or RunRequestInvalidException)
     { return Results.BadRequest(new { error = ex.Message }); }
+    // 이어할 수 있는 중단 run — UI 가 확인 창을 띄우고 restart=true 로 다시 보낸다
+    catch (ResumableRunExistsException ex)
+    { return Results.Conflict(new { error = ex.Message, code = "RESUMABLE_RUN_EXISTS", resumable = ex.Run }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -1563,7 +1602,8 @@ app.Run();
 // 정차 묶음 최적화 요청 — 격자 간격[m]·정차 반경[m]·리프트 후보 수(선택, 없으면 기본 0.3·2.8·4)
 public sealed record SetCoverApplyRequest(string? UserId = null);
 public sealed record SetCoverRequest(int Level, string WallCode, double? GridStepM = null, double? ReachRadiusM = null, int? MaxStrokes = null);
-public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null);
+/// <param name="Restart">이어할 수 있는 중단 run이 있어도 처음부터 새로 시작(운영자 확인 후) — 없으면 409 RESUMABLE_RUN_EXISTS.</param>
+public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null, bool? Restart = null);
 public sealed record GasResendRequest(Guid? RunId = null, List<Guid>? ResultIds = null, string? UserId = null);
 public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null, int? Round = null);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
