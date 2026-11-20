@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using HD.Acs.App.Hubs;
 using HD.Acs.Core.Planning;
+using HD.Acs.Core.Reach;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
@@ -14,12 +15,14 @@ namespace HD.Acs.App.Services;
 
 /// <summary>
 /// AMR 이 factsheet(§7.3) 확장 <c>hdAmr</c> 로 보고한 값 — 해석 결과.
-/// StartJointsByWall = 면 코드 → 운영 ② 출발 관절각, MountPose = T_A_B [x,y,z,rx,ry,rz](미보정이면 null).
+/// StartJointsByWall = 면 코드 → 운영 ② 출발 관절각, MountPose = T_A_B [x,y,z,rx,ry,rz](미보정이면 null),
+/// SafeJ6 = 티칭과 함께 온 J6 안전 범위·대기(홈) 각도(구버전 AMR 이면 null).
 /// </summary>
 public sealed record AmrFactsheet(
     int ConfigVersion, string? ChangedAt, IReadOnlyList<string> Changed, IReadOnlyDictionary<string, string> Fingerprints,
     string? TeachingLiftMode, IReadOnlyDictionary<string, double[]> StartJointsByWall,
-    string? LiftMode, double? FixedStrokeMm, double[]? MountPose, double[]? LinksMm, double? MaxEntryJointTravelDeg)
+    string? LiftMode, double? FixedStrokeMm, double[]? MountPose, double[]? LinksMm, double? MaxEntryJointTravelDeg,
+    AmrSafeJ6? SafeJ6 = null)
 {
     /// <summary>factsheet 원문에서 hdAmr 확장을 읽는다. 확장이 없거나 형식이 틀리면 null(무시).</summary>
     public static AmrFactsheet? Parse(string json)
@@ -47,7 +50,29 @@ public sealed record AmrFactsheet(
             hd["changed"] is JsonArray ch ? ch.Select(Str).OfType<string>().ToList() : new List<string>(),
             fps, Str(hd["teaching"]?["liftMode"]), starts,
             Str(hd["lift"]?["mode"]), Num(hd["lift"]?["fixedStrokeMm"]),
-            Arr(hd["mount"]?["tAB"], 6), Arr(hd["cobot"]?["linksMm"], 6), Num(hd["cobot"]?["maxEntryJointTravelDeg"]));
+            Arr(hd["mount"]?["tAB"], 6), Arr(hd["cobot"]?["linksMm"], 6), Num(hd["cobot"]?["maxEntryJointTravelDeg"]),
+            hd["teaching"]?["safeJ6"] is JsonObject j6
+            && Num(j6["minDeg"]) is { } lo && Num(j6["maxDeg"]) is { } hi && Num(j6["standbyDeg"]) is { } sb
+                ? new AmrSafeJ6(lo, hi, sb) : null);
+    }
+}
+
+/// <summary>AMR 의 J6 안전 범위 [도]·대기(홈) 자세 J6 [도] — HD_AMR 파라미터 <c>inspection.safeJ6MinDeg/MaxDeg/StandbyDeg</c> 적용값.</summary>
+public sealed record AmrSafeJ6(double MinDeg, double MaxDeg, double StandbyDeg)
+{
+    /// <summary>
+    /// 툴 장착 보정 [도, (−180, 180]] — 대기 자세에서 센서 헤드가 용접검사 기준(J6 −180°, 장착 0°)과 같은 쪽을 향한다고 보고
+    /// J6 + 장착 보정 ≡ −180° 가 되게 잡는다(대기 0° → 180°, 대기 −180° → 0° — 가스검사 설정 <c>Kinds:GAS</c> 와 같은 규칙).
+    /// </summary>
+    public double ToolMountRollDeg
+    {
+        get
+        {
+            var r = (-180 - StandbyDeg) % 360;
+            if (r <= -180) r += 360;
+            if (r > 180) r -= 360;
+            return Math.Abs(r) < 1e-9 ? 0 : r;
+        }
     }
 }
 
@@ -104,8 +129,21 @@ public sealed class AmrFactsheetService : BackgroundService
         var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string N(double v) => v.ToString("R", ci);
         if (sections.Contains("teaching"))
+        {
             foreach (var (code, j) in f.StartJointsByWall)
                 for (var i = 0; i < 6; i++) d[$"{reachPrefix}StartJoints:{code}:{i}"] = N(j[i]);
+            // J6 안전 범위·대기 자세 — 출발 자세 J6 와 짝이므로 티칭과 함께 반영한다. 판정 자세 J6 는 대기 자세(HD_AMR 수직 검사 J6 = 대기),
+            // 툴 장착 보정은 대기 자세 기준으로 맞춘다(appsettings 의 OperationJ6Deg·ToolMountRollDeg 가 남아 가리지 않게 명시).
+            // 범위가 대기 자세를 포함하지 않는 등 잘못된 값이면 싣지 않는다(설정 읽기도 기본값으로 되돌리므로).
+            if (f.SafeJ6 is { } j6 && ReachRobotModel.ResolveSafeJ6Range(j6.MinDeg, j6.MaxDeg, j6.StandbyDeg).Ok)
+            {
+                d[$"{reachPrefix}SafeJ6MinDeg"] = N(j6.MinDeg);
+                d[$"{reachPrefix}SafeJ6MaxDeg"] = N(j6.MaxDeg);
+                d[$"{reachPrefix}SafeJ6StandbyDeg"] = N(j6.StandbyDeg);
+                d[$"{reachPrefix}OperationJ6Deg"] = N(j6.StandbyDeg);
+                d[$"{reachPrefix}ToolMountRollDeg"] = N(j6.ToolMountRollDeg);
+            }
+        }
         if (sections.Contains("lift") && f.LiftMode is { } m && Enum.TryParse<LiftMode>(m, true, out var mode) && Enum.IsDefined(mode))
         {
             if (mode == Services.LiftMode.Fixed && !(f.FixedStrokeMm is { } fx && fx >= 0 && fx <= LiftSettings.MaxStrokeMm))

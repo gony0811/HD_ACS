@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.23** |
+| 문서 버전 | **1.24** |
 | 작성일 | 2026-08-27 (최종 개정 2026-11-20) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
@@ -27,6 +27,7 @@
 | 개정 1.21 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.attempt` 추가**(§8.7). 1.20 의 "시험은 attempt 를 싣지 않는다" 를 바꾼다: ACS 가 시험에도 본검사와 **같은 taskId 별 누적 attempt**(본검사 액션 수 + 시험 수 + 1, 1~255)를 발급해 싣고, 발급 기록을 남겨 이후 본검사가 더 큰 번호를 받는다. AMR 은 도달 후 작업자가 수동 촬영(검사 프로필·시퀀스 화면)하면 그 `CAPTURE_REQ` 에 시험의 taskId·attempt 를 싣는다 — 시험 촬영도 세이지에 그 용접선 결과로 들어가고, 이후 본검사 결과가 최신으로 대신한다. 선택 필드라 하위 호환 |
 | 개정 1.22 | 2026-11-17 — **`seamType` 에 `CROSS4_L`·`CROSS4_R` 추가**(§8.1·§8.2, canonical 10값). 기준은 **면을 정면으로 마주 봤을 때(로봇·카메라 시점)** 十자의 수직 용접선이 작업(가로 top–top 한 칸)의 왼쪽에 있으면 `CROSS4_L`, 오른쪽에 있으면 `CROSS4_R` — **작업 시작점/끝점 기준이 아니다.** ACS 는 정면 기준 값만 보내고, 용접선 시작→끝 방향이 교시 때와 반대인 경우의 보정(L/R 바꿔 고르기)은 HD_AMR 이 한다(2026-11-17 협의 — 프로필 경유점은 작업물 X = 시작→끝 으로 실행되므로). 참고: ACS 생성 작업은 u 오름차순이라 정면에서 본 시작→끝이 좌현·마구리(PL/PM/PU/F/A)는 왼쪽→오른쪽, 우현(SL/SM/SU)은 오른쪽→왼쪽이다. 접미 없는 `CROSS4` 는 그대로 유효(AMR 면별 기본값). 바닥·천장은 정면 좌우가 없어 ACS 가 정하지 않는다. ACS 는 가로지르는 수직 용접선이 작업 가운데에서 치우친 쪽으로 좌우를 판정·적용하는 수단을 둔다(`POST /api/tanks/{tankId}/cross4-sides`, 1 cm 미만이면 판정 불가). **단 CT1 도면 데이터는 가로 CROSS4 536개 모두 수직선이 정가운데라 자동으로는 정해지지 않는다** — 실물의 수 mm 치우침은 도면에 없으므로 면·층 단위 규칙으로 운영자가 지정한다(계획 화면 유형 선택 또는 어시스턴트 `setSeamType`) |
 | 개정 1.20 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.taskId` 추가**(§8.7). 대상 용접선의 taskId 를 본검사 `startWeldInspection` 의 `params.taskId` 와 **같은 표기**(ACS 내부 uuid 문자열)로 싣는다. 종전엔 `jobRef`(`TEST-SEAM-{taskId}`) 문자열 안에만 있어 AMR 이 잘라 읽어야 했다. 선택 필드라 하위 호환(부재 = 종전과 같음, `jobRef` 는 그대로). `attempt` 는 싣지 않는다(시험은 검사가 아니라 attempt 누적에 넣지 않는다). HD_AMR 쪽 사용 여부는 확인 필요 |
+| 개정 1.24 | 2026-11-20 — **factsheet `teaching.safeJ6` 추가** `[N26]`(§7.3). AMR 이 티칭과 함께 적용 중인 J6 안전 범위·대기(홈) 각도(`minDeg`·`maxDeg`·`standbyDeg` — HD_AMR 파라미터 `inspection.safeJ6MinDeg/MaxDeg/StandbyDeg`)를 보고한다. 출발 자세 J6 와 짝이라 teaching 묶음에 들어가며, 값이 바뀌면 teaching 지문이 바뀌어 다시 보고된다. ACS 는 범위가 대기 자세를 포함할 때만 반영(J6 안전 범위·대기 자세·판정 J6 = 대기 자세·툴 장착 보정 = −180° − 대기 자세). 선택 필드 — 구버전 AMR 은 싣지 않으며 ACS 는 종전 설정을 쓴다. **양측 구현 — 실기 미확인** |
 | 개정 1.23 | 2026-11-20 — **factsheet 채널 사용 — AMR 설정 보고(연결 시 초기 정보 + 변경 보고)** `[N26]`(§2.1 표·§5 표·신설 §7.3·부록 C). AMR 은 `factsheet`(QoS 1, **retain**)를 ① 브로커 접속 직후 ② ACS 의 표준 instantAction `factsheetRequest`(ACS 는 AMR `connection` ONLINE 을 받을 때마다 보냄) ③ 보고 값이 바뀔 때(티칭 저장·리프트 설정·장착 보정 T_A_B·코봇 값 — 주기 확인 5 s) 발행한다. HD 값은 확장 객체 `hdAmr`(면별 ② 출발 관절각·리프트 운영·T_A_B·링크 치수·진입 관절 한계 + 설정 버전·묶음 지문·바뀐 묶음). ACS 는 리치 시뮬레이션·배차 설정 층으로 반영(우선순위 appsettings.json < AMR 보고 < 리치·간섭 화면), 진행 중 run 이 있으면 끝난 뒤 반영, 버전이 오르면 `AMR_CONFIG_CHANGED` 알람. **양측 구현(2026-11-20) — 실기·실브로커 미확인** |
 | 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.16 | 2026-11-12 — **`position.drawingPos`에 용접선 끝점 면 좌표 `uEnd`·`vEnd` 추가(선택 필드, §8.1) [N15]**. AMR은 `u,v`(시작점)를 원점으로, `uEnd,vEnd − u,v`의 큰 축을 면 위 용접선 방향으로 삼아 촬영 위치(CAPTURE_REQ `PosX/PosY`)를 면 좌표로 환산한다(작업물 좌표계 X+ = 시작→끝, 면의 손잡이는 `wall_code`로 판정 — T·SM·SL·SU는 왼손). 종전에는 용접선 시작점 기준 좌표가 그대로 나가 CROSS4 교차 팔의 음수 좌표를 비전이 `ERR_POSITION`으로 거부했다(실기 11-12 03:53, 56점 중 17점). 끝점이 없거나(구버전 ACS) 면 축에서 10° 넘게 비스듬하면 AMR은 종전 방식으로 보낸다. 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기. 높이 `h`가 음수인 경유점(교차 중심, 프로필 Z −12)은 그대로 음수로 나가므로 비전 측 수용 여부 협의 필요 |
@@ -630,6 +631,7 @@ retain 이므로 ACS 가 재기동·재구독하면 마지막 값을 바로 받�
 | `teaching.liftMode` | string | 운영 중인 티칭 세트(`SHORT`·`LONG`) |
 | `teaching.startJointsByWall` | object | 면 코드 → **운영 ② 출발 관절각** [J1..J6, 도]. 규칙(HD_AMR `SequenceEntry` 와 같음): 상부 면(T·PU·SU) = 그 면 검사 준비 슬롯, 없으면 홈 위치_2 / 하부 면(B·PL·SL) = 홈 위치_3 이 티칭돼 있으면 그 면 검사 준비 슬롯, 없으면 홈 위치_3 / 그 외 = 작업 준비 위치. 티칭이 없는 면은 싣지 않는다 |
 | `teaching.poses` | object | 기준 자세 관절각 — `home`·`home15`·`home16`·`home2`·`home3`·`ready` 중 티칭된 것 |
+| `teaching.safeJ6` `(1.24)` | object, 선택 | 적용 중인 J6 안전 범위·대기(홈) 각도 `{minDeg, maxDeg, standbyDeg}` [도, 실제 관절값] — HD_AMR `WObjAttitude` 적용값(파라미터 `inspection.safeJ6MinDeg/MaxDeg/StandbyDeg`, 잘못된 값이면 기본값으로 되돌린 뒤의 값). 출발 자세 J6 와 같은 기준이다 |
 | `lift.enabled` | bool | 리프트 사용(`Telescopic:Enabled`) |
 | `lift.mode` | string | ACS 리프트 운영 방식으로 옮긴 값 — 사용 = `Auto`, 미사용·서 있는 높이 0 = `Off`, 미사용·높이 &gt; 0 = `Fixed` |
 | `lift.fixedStrokeMm` | number \| null | `Fixed` 일 때 그 높이(= `disabledStrokeMm`) |
@@ -640,7 +642,7 @@ retain 이므로 ACS 가 재기동·재구독하면 마지막 값을 바로 받�
 
 **ACS 반영 규칙**
 
-- 설정 키로 옮겨 설정 층 `appsettings.amr-reported.json` 에 쓰고 바로 다시 읽는다: `teaching.startJointsByWall` → `Acs:Reach:StartJoints:{면}`, `lift.mode`·`fixedStrokeMm` → `Acs:Lift:Mode`·`FixedStrokeMm`, `mount.tAB` z·rz → `Acs:Reach:MountZMm`(300~3000 mm 만)·`MountYawDeg`, `cobot` → `Acs:Reach:LinksMm`·`MaxEntryJointTravelDeg`(30~360° 만). 그 AMR 이 가스검사 종류의 `ProfileSource` 로 지정돼 있으면 리치 키는 `Acs:Reach:Kinds:GAS:` 아래로.
+- 설정 키로 옮겨 설정 층 `appsettings.amr-reported.json` 에 쓰고 바로 다시 읽는다: `teaching.startJointsByWall` → `Acs:Reach:StartJoints:{면}`, `teaching.safeJ6` → `Acs:Reach:SafeJ6MinDeg`·`SafeJ6MaxDeg`·`SafeJ6StandbyDeg` + `OperationJ6Deg`(= 대기 자세 — HD_AMR 수직 검사 J6) + `ToolMountRollDeg`(= −180° − 대기 자세, (−180, 180] — 대기 자세에서 센서 헤드 방향이 용접검사 기준과 같다고 봄; 범위가 대기 자세를 포함하지 않으면 다섯 키 모두 싣지 않음), `lift.mode`·`fixedStrokeMm` → `Acs:Lift:Mode`·`FixedStrokeMm`, `mount.tAB` z·rz → `Acs:Reach:MountZMm`(300~3000 mm 만)·`MountYawDeg`, `cobot` → `Acs:Reach:LinksMm`·`MaxEntryJointTravelDeg`(30~360° 만). 그 AMR 이 가스검사 종류의 `ProfileSource` 로 지정돼 있으면 리치 키는 `Acs:Reach:Kinds:GAS:` 아래로.
 - 우선순위: **appsettings.json < AMR 보고 < 리치·간섭 화면 설정**. 화면에서 바꾼 키는 AMR 값을 가린다(감사로그에 기록).
 - 진행 중 run(RUNNING·WAITING_FLOOR_TRANSFER)이 있으면 반영을 미루고 끝난 뒤 반영(run 도중 지령 리프트 높이가 바뀌지 않게).
 - AMR 이 둘 이상이고 같은 키의 값이 다르면 그 키는 반영하지 않는다(로그·감사로그).

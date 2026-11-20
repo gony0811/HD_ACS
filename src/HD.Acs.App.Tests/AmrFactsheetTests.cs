@@ -81,6 +81,48 @@ public class AmrFactsheetTests : IDisposable
         Assert.Null(AmrFactsheet.Parse("not json"));
     }
 
+    /// <summary>티칭과 함께 온 J6 안전 범위·대기 자세 — 판정 J6·툴 장착 보정까지 맞춰 반영, 잘못된 범위는 싣지 않는다.</summary>
+    [Theory]
+    [InlineData(0, -140, 40, "180")]       // 가스검사 꼴 — 대기 0°(툴 180° 장착)
+    [InlineData(-180, -320, -140, "0")]    // 용접검사 기본
+    public void 티칭의_J6_안전_범위를_대기_자세와_함께_반영한다(double standby, double lo, double hi, string roll)
+    {
+        var node = JsonNode.Parse(Body(2))!;
+        node["hdAmr"]!["teaching"]!["safeJ6"] = new JsonObject { ["minDeg"] = lo, ["maxDeg"] = hi, ["standbyDeg"] = standby };
+        var f = AmrFactsheet.Parse(node.ToJsonString())!;
+        Assert.Equal(new AmrSafeJ6(lo, hi, standby), f.SafeJ6);
+
+        var k = AmrFactsheetService.ConfigKeys(f, new HashSet<string> { "teaching" });
+        Assert.Equal(lo.ToString(System.Globalization.CultureInfo.InvariantCulture), k["Acs:Reach:SafeJ6MinDeg"]);
+        Assert.Equal(hi.ToString(System.Globalization.CultureInfo.InvariantCulture), k["Acs:Reach:SafeJ6MaxDeg"]);
+        Assert.Equal(k["Acs:Reach:SafeJ6StandbyDeg"], k["Acs:Reach:OperationJ6Deg"]);
+        Assert.Equal(roll, k["Acs:Reach:ToolMountRollDeg"]);
+        Assert.False(AmrFactsheetService.ConfigKeys(f, new HashSet<string> { "mount" }).Keys.Any(x => x.Contains("SafeJ6")));   // teaching 묶음
+
+        // appsettings 에 용접검사 값(OperationJ6Deg 180 · ToolMountRollDeg 0)이 있어도 AMR 보고가 가린다
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Acs:Reach:SafeJ6MinDeg"] = "-320", ["Acs:Reach:SafeJ6MaxDeg"] = "-140",
+                ["Acs:Reach:OperationJ6Deg"] = "180", ["Acs:Reach:ToolMountRollDeg"] = "0",
+            })
+            .AddInMemoryCollection(k.ToDictionary(x => x.Key, x => (string?)x.Value)).Build();
+        var m = ReachSimService.ModelFrom(cfg);
+        Assert.Equal((lo, hi, standby), (m.SafeJ6MinDeg, m.SafeJ6MaxDeg, m.SafeJ6StandbyDeg));
+        Assert.Equal(standby, m.OperationJ6Deg);
+        Assert.Equal(double.Parse(roll), m.ToolMountRollDeg);
+    }
+
+    [Fact]
+    public void 대기_자세를_포함하지_않는_J6_범위는_싣지_않는다()
+    {
+        var node = JsonNode.Parse(Body(2))!;
+        node["hdAmr"]!["teaching"]!["safeJ6"] = new JsonObject { ["minDeg"] = -320, ["maxDeg"] = -140, ["standbyDeg"] = 0 };
+        var k = AmrFactsheetService.ConfigKeys(AmrFactsheet.Parse(node.ToJsonString())!, new HashSet<string> { "teaching" });
+        Assert.True(k.ContainsKey("Acs:Reach:StartJoints:T:0"));     // 출발 자세는 그대로
+        Assert.DoesNotContain(k.Keys, x => x.Contains("SafeJ6") || x.Contains("OperationJ6") || x.Contains("ToolMountRoll"));
+        Assert.Null(AmrFactsheet.Parse(Body(2))!.SafeJ6);            // 구버전 AMR — 범위 없음
+    }
+
     /// <summary>HD_AMR AcsFactsheet.Build 가 실제로 만든 본문(Data/amr_factsheet_v7.json — 리프트 꺼짐·서 있는 높이 300)을 그대로 읽는다.</summary>
     [Fact]
     public void HD_AMR_이_만든_본문을_그대로_읽는다()
