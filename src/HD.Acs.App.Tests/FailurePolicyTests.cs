@@ -110,6 +110,40 @@ public class FailurePolicyTests
         Assert.Equal("ABORTED", (await c.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);   // COMPLETED로 덮이지 않음
     }
 
+    /// <summary>
+    /// 2026-11-21 현장: 중단 → 이어하기로 같은 정차를 다시 배차. 이전 Order 의 취소(FAILED)·미실행(WAITING) 액션이 남아 있어도
+    /// 이번 Order 액션이 전부 끝나면 정차는 DONE — 실패로 보지 않는다.
+    /// </summary>
+    [Fact]
+    public async Task ReDispatchedStop_IgnoresPreviousOrderActions()
+    {
+        var c = await Stop(("FINISHED", "OK"));   // 이번 Order 액션(order_id 없이 생성) — 아래에서 태그
+        var db = c.Db;
+        var cur = await db.OrderActions.SingleAsync();
+        cur.OrderId = c.Mission.OrderId;
+        foreach (var (st, why) in new[] { ("WAITING", (string?)null), ("FAILED", "cancelled by cancelOrder") })
+            db.OrderActions.Add(new OrderActionEntity
+            {
+                ActionId = Guid.NewGuid(), MissionId = c.Mission.MissionId, WorkItemId = c.Wi.WorkItemId, TaskId = c.TaskIds[0],
+                ActionType = "startWeldInspection", Status = st, OrderId = Guid.NewGuid().ToString(),
+                Result = why is null ? null : JsonSerializer.Serialize(new { ActionStatus = st, ResultDescription = why }),
+            });
+        var wi = await db.WorkItems.SingleAsync();
+        wi.Status = "DISPATCHED"; wi.OrderId = c.Mission.OrderId;
+        (await db.ScenarioRuns.SingleAsync()).State = "RUNNING";
+        await db.SaveChangesAsync();
+        db.Alarms.RemoveRange(db.Alarms); await db.SaveChangesAsync();
+
+        var acts = InspectionDispatcher.CurrentOrderActions(await db.OrderActions.ToListAsync(), c.Mission.OrderId);
+        Assert.Equal(cur.ActionId, Assert.Single(acts).ActionId);
+
+        var d = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
+            hub: null!, new ConfigurationBuilder().Build(), NullLogger<InspectionDispatcher>.Instance);
+        await d.HandleStopOutcomeAsync(c.Mission, default);
+        Assert.Equal("DONE", (await db.WorkItems.AsNoTracking().SingleAsync()).Status);
+        Assert.Empty(await db.Alarms.AsNoTracking().ToListAsync());
+    }
+
     [Fact]
     public async Task FailedStop_EndsRun_AndCountsAsFailedTask()
     {

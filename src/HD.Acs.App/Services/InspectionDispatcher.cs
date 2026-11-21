@@ -685,6 +685,10 @@ public sealed class InspectionDispatcher
             .Where(g => g is not null).Select(g => g!.Value).Distinct().ToList();
         var issuedByTask = await IssuedAttemptsAsync(_db, stopTaskIds, ct);
 
+        // 이 미션에서 앞서 발행한 Order 의 미종결 액션 정리 — 새 Order 를 보내면 AMR 은 이전 Order 액션을 더 보고하지 않는다.
+        // 남겨 두면 "전 액션 종결" 판정이 영원히 끝나지 않는다(2026-11-21 현장: 중단 직후 이어하기 → 다음 영역으로 넘어가지 않음).
+        await CloseSupersededActionsAsync(mission.MissionId, ct);
+
         foreach (var an in actionsJson)
         {
             var o = an!.AsObject();
@@ -715,7 +719,7 @@ public sealed class InspectionDispatcher
             {
                 ActionId = actionId, MissionId = mission.MissionId, WorkItemId = wi.WorkItemId,
                 TaskId = taskId, NodeSequenceId = 0, ActionType = vda.ActionType, BlockingType = "HARD",
-                Params = o["position"]?.ToJsonString(), Status = "WAITING", Attempts = attempt,
+                Params = o["position"]?.ToJsonString(), Status = "WAITING", Attempts = attempt, OrderId = orderId,
             });
         }
 
@@ -743,6 +747,31 @@ public sealed class InspectionDispatcher
         if (runStateChanged) await PushRunStateAsync(run.RunId, run.State, ct);
         await PushWorkItemAsync(run.RunId, tracked, ct);
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
+    }
+
+    /// <summary>앞선 Order 의 미종결 액션(WAITING·INITIALIZING·RUNNING·PAUSED)을 FAILED(미실행·대체)로 닫는다.</summary>
+    internal const string SupersededDescription = "superseded — 새 Order 로 대체(이 Order 로는 실행 안 됨)";
+    private async Task CloseSupersededActionsAsync(Guid missionId, CancellationToken ct)
+    {
+        var stale = await _db.OrderActions
+            .Where(a => a.MissionId == missionId && a.Status != "FINISHED" && a.Status != "FAILED").ToListAsync(ct);
+        foreach (var a in stale)
+        {
+            a.Status = "FAILED";
+            a.Result = JsonSerializer.Serialize(new { ActionStatus = "FAILED", ResultDescription = SupersededDescription });
+        }
+        if (stale.Count > 0)
+            _log.LogInformation("Mission {Mission}: 이전 Order 미종결 액션 {N}건을 대체 처리(FAILED·미실행).", missionId, stale.Count);
+    }
+
+    /// <summary>
+    /// 정차 결과 판정에 쓸 액션 — 이번 Order(orderId) 액션만. order_id 가 없는 옛 기록(이 열 추가 전)은 그대로 전부.
+    /// 같은 정차를 중단·이어하기로 다시 배차하면 이전 Order 의 실패(취소)가 이번 결과를 실패로 만들지 않게 한다.
+    /// </summary>
+    internal static List<OrderActionEntity> CurrentOrderActions(IReadOnlyCollection<OrderActionEntity> acts, string? orderId)
+    {
+        var cur = orderId is null ? new List<OrderActionEntity>() : acts.Where(a => a.OrderId == orderId).ToList();
+        return cur.Count > 0 ? cur : acts.ToList();
     }
 
     public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW,
@@ -899,7 +928,8 @@ public sealed class InspectionDispatcher
             .FirstOrDefaultAsync(w => w.OrderId == mission.OrderId && w.Status == "DISPATCHED", ct);
         if (wi is not null)
         {
-            var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct);
+            var acts = CurrentOrderActions(
+                await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct), wi.OrderId);
             string? failureSummary = null;
             (AlarmEntity Entity, string Severity, string Title)? alarm = null;
             bool anyFailed = acts.Any(a => a.Status == "FAILED");

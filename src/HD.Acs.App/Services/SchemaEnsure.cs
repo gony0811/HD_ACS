@@ -32,6 +32,8 @@ public static class SchemaEnsure
         "ALTER TABLE ref.tank_geometry ADD COLUMN IF NOT EXISTS inspection_kind text NOT NULL DEFAULT 'WELD'",
         // db/migrations/2026-11-15_run_round.sql — 가스검사 회차(1|2, NULL=미지정)
         "ALTER TABLE run.scenario_run ADD COLUMN IF NOT EXISTS round int",
+        // db/migrations/2026-11-21_order_action_order_id.sql — 액션이 속한 Order(중단 뒤 이어하기 정체 방지)
+        "ALTER TABLE run.order_action ADD COLUMN IF NOT EXISTS order_id text",
         // db/migrations/2026-11-15_gas_result.sql — 가스 측정 결과 + 세이지 전송 상태(새 테이블)
         """
         CREATE TABLE IF NOT EXISTS hist.gas_result (

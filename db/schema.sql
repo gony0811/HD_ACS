@@ -496,7 +496,8 @@ CREATE TABLE run.order_action (
     -- WAITING | INITIALIZING | RUNNING | FINISHED | FAILED  (VDA5050 actionStatus)
   result           jsonb,              -- 성공/실패 응답 [ADR-004]
   attempts         int NOT NULL DEFAULT 0,
-  created_at       timestamptz NOT NULL DEFAULT now()   -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
+  created_at       timestamptz NOT NULL DEFAULT now(),  -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
+  order_id         text                -- 발행 Order(정차). 중단·이어하기로 같은 정차를 다시 배차해도 이번 Order 액션만 정차 종결에 쓴다
 );
 CREATE INDEX ix_orderaction_mission ON run.order_action (mission_id, node_sequence_id);
 

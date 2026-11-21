@@ -97,8 +97,14 @@ public sealed class RobotStateService
             // 전 액션 종결 + (마지막 노드 도달 OR 현재 정차 전 액션 FAILED) → 현재 정차 종결.
             // 주행 실패 시 AMR은 노드 미도달 상태로 전 액션을 FAILED 종결한다(drivingFailed, AMR 회신 §3.1)
             // — 도달 조건만 보면 work_item이 DISPATCHED로 정체하므로 전-FAILED도 종결로 취급한다.
+            // 이번 Order 액션만 센다(order_id 가 붙은 기록이 없으면 옛 기록 — 미션 전체). 이전 Order 의 미실행 액션이
+            // 남아 있어도 정차 종결이 막히지 않게 한다(2026-11-21 현장: 중단 → 이어하기 뒤 다음 영역으로 넘어가지 않음).
+            var curOrderId = mission.OrderId;
+            bool tagged = curOrderId is not null
+                && await _db.OrderActions.AnyAsync(x => x.MissionId == mission.MissionId && x.OrderId == curOrderId, ct);
             var remaining = await _db.OrderActions.CountAsync(
-                x => x.MissionId == mission.MissionId && x.Status != "FINISHED" && x.Status != "FAILED", ct);
+                x => x.MissionId == mission.MissionId && (!tagged || x.OrderId == curOrderId)
+                     && x.Status != "FINISHED" && x.Status != "FAILED", ct);
             var lastSeq = await _db.OrderNodes.Where(n => n.MissionId == mission.MissionId)
                 .MaxAsync(n => (int?)n.SequenceId, ct) ?? 0;
             bool stopSettled = remaining == 0 && state.LastNodeSequenceId >= lastSeq;
@@ -108,9 +114,9 @@ public sealed class RobotStateService
                     .FirstOrDefaultAsync(w => w.OrderId == mission.OrderId && w.Status == "DISPATCHED", ct);
                 if (curWi is not null)
                 {
-                    var stopActs = await _db.OrderActions.AsNoTracking()
-                        .Where(a => a.WorkItemId == curWi.WorkItemId).Select(a => a.Status).ToListAsync(ct);
-                    stopSettled = stopActs.Count > 0 && stopActs.All(s => s == "FAILED");
+                    var stopActs = InspectionDispatcher.CurrentOrderActions(await _db.OrderActions.AsNoTracking()
+                        .Where(a => a.WorkItemId == curWi.WorkItemId).ToListAsync(ct), curWi.OrderId);
+                    stopSettled = stopActs.Count > 0 && stopActs.All(a => a.Status == "FAILED");
                     if (stopSettled)
                         _log.LogWarning("Mission {Mission}: 노드 미도달 상태에서 전 액션 FAILED — 주행 실패로 정차 종결 처리.",
                             mission.MissionId);

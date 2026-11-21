@@ -63,6 +63,7 @@ public class OrderActionEntity
     public int NodeSequenceId { get; set; }
     public Guid? TaskId { get; set; }
     public Guid? WorkItemId { get; set; }             // greedy 배차 시 소속 작업항목 (완료/실패 집계 키)
+    public string? OrderId { get; set; }              // 발행한 Order(정차) — 같은 정차를 다시 배차하면 이전 Order 의 액션과 구분
     public string ActionType { get; set; } = "";
     public string BlockingType { get; set; } = "HARD";
     public string? Params { get; set; }               // jsonb
