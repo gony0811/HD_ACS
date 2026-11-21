@@ -12,15 +12,15 @@ namespace HD.Acs.App.Tests;
 /// <summary>정차 묶음 최적화 결과 적용 — 면·층 영역을 제안 정차대로 다시 구성(taskId 유지·영역 ID 물려주기·X 영역·시나리오·거부).</summary>
 public class SetCoverApplyTests
 {
-    private static readonly Guid A1 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid A2 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
-    private static readonly Guid A3 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000003");
-    private static readonly Guid Scenario = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
-    private static readonly Guid[] T = Enumerable.Range(1, 9).Select(i => Guid.Parse($"cccccccc-0000-0000-0000-00000000000{i}")).ToArray();
+    internal static readonly Guid A1 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    internal static readonly Guid A2 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
+    internal static readonly Guid A3 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000003");
+    internal static readonly Guid Scenario = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
+    internal static readonly Guid[] T = Enumerable.Range(1, 9).Select(i => Guid.Parse($"cccccccc-0000-0000-0000-00000000000{i}")).ToArray();
     private static readonly double V = 3.63 + 1.5 - 3.9776;   // L2 SM 수직벽 v
 
     /// <summary>L2 SM — 영역 3개(A1: T0·T1, A2: T2·T3, A3: T4·T5·T6), 가로 용접선 한 줄 + T7(임시 제외) + T8(다른 층 — 건드리지 않음).</summary>
-    private static async Task<AcsDbContext> SeedAsync()
+    internal static async Task<AcsDbContext> SeedAsync()
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var geom = new TankGeometry(31.785, 10.1497, Math.PI / 4, 3.9776, 6.9097, Math.PI / 4, 2.8976, new[] { 0.0, 3.63, 6.63, 10.53 });

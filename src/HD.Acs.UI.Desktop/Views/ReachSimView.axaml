@@ -152,6 +152,33 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 균등 격자 재분할 -->
+                <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="균등 격자 재분할 (영역 다시 묶기)" FontWeight="SemiBold" />
+                        <TextBlock Text="선택 층·면의 영역을 칸 크기로 다시 나눠 용접선을 묶습니다 — 정차 묶음 최적화(set cover)로 흩어 놓은 영역을 격자 영역으로 되돌릴 때 씁니다. 칸 경계는 용접선 끝점에 맞춥니다(용접선이 칸을 가로지르지 않음). taskId·검사 기록 유지, 영역 ID 물려주기. 적용하면 이 면·층의 정차 덮어쓰기·리프트가 지워지므로 이어서 정차점 최적화를 돌려 다시 정합니다."
+                                   Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="칸 가로 [m]" VerticalAlignment="Center" />
+                            <NumericUpDown Classes="field" Width="110" Minimum="0.3" Maximum="1.44" Increment="0.12" FormatString="0.0##"
+                                           Value="{Binding GridCellUM}" />
+                            <TextBlock Text="세로 [m]" VerticalAlignment="Center" />
+                            <NumericUpDown Classes="field" Width="110" Minimum="0" Maximum="2.9" Increment="0.12" FormatString="0.0##"
+                                           Value="{Binding GridCellVM}"
+                                           ToolTip.Tip="0 = 가로와 같게. 경사·수직벽(SL·PL·SM·PM·SU·PU)은 2.9 m 까지, 그 밖의 면은 1.44 m 까지." />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="1.44 m" Command="{Binding SetGridCellCommand}" CommandParameter="1.44" />
+                            <Button Content="1.08 m" Command="{Binding SetGridCellCommand}" CommandParameter="1.08" />
+                            <Button Content="미리보기" Command="{Binding PreviewGridCommand}" IsEnabled="{Binding CanGrid}" />
+                            <Button Content="격자로 다시 나누기 (적용)" Command="{Binding ApplyGridCommand}" IsEnabled="{Binding CanGrid}"
+                                    ToolTip.Tip="이 층·면 영역을 격자로 다시 만듭니다(확인 창). 진행 중 run 에 남아 있으면 거부됩니다." />
+                        </StackPanel>
+                        <CheckBox Content="적용 뒤 이 층·면 정차점 최적화 실행 (결과 적용은 위 최적화 표에서)" IsChecked="{Binding GridOptimizeAfter}" />
+                        <TextBlock Text="{Binding GridSummary}" FontSize="11.5" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
                 <!-- 정차 묶음 최적화 (탐욕 set cover) -->
                 <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10">
                     <StackPanel Spacing="5">

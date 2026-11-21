@@ -216,6 +216,12 @@ public interface IAcsApiClient
     Task<SetCoverJobDto?> GetSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverJobDto?>(null);
     /// <summary>정차 묶음 최적화 결과를 영역에 적용(그 면·층 영역을 다시 구성). 거부(409·400)는 예외 메시지에 사유. null = 구서버.</summary>
     Task<SetCoverApplyResultDto?> ApplySetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverApplyResultDto?>(null);
+    /// <summary>
+    /// 균등 격자 재분할 — 면·층 영역을 칸 크기[m]로 다시 나눠 용접선을 묶는다. apply=false 미리보기 / true 적용(정차 덮어쓰기·리프트는 지워짐).
+    /// null = 구서버. 거부(400·409)는 예외 메시지에 사유.
+    /// </summary>
+    Task<GridAreasResponseDto?> GridAreasAsync(string tankId, int level, string wallCode, double cellUM, double? cellVM, bool apply,
+        CancellationToken ct = default) => Task.FromResult<GridAreasResponseDto?>(null);
     /// <summary>정차 묶음 최적화 중지.</summary>
     Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
     /// <summary>리치·간섭 화면의 리프트·차체 설정(지금 적용 중인 값). null = 구서버(미지원).</summary>

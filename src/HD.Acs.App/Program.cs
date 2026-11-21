@@ -80,6 +80,7 @@ builder.Services.AddSingleton(sp => new AmrFactsheetService(sp.GetRequiredServic
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AmrFactsheetService>());
 builder.Services.AddScoped<ReachSimService>();
 builder.Services.AddScoped<SetCoverApplyService>();   // 정차 묶음 최적화 결과를 영역에 적용
+builder.Services.AddScoped<AreaGridService>();        // 면·층 영역을 균등 격자로 다시 나눔(용접선 묶기)
 builder.Services.AddSingleton<SetCoverJobs>();   // 정차 묶음 최적화(set cover) 작업 — 면 하나에 수 분   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
 builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
@@ -434,6 +435,21 @@ app.MapPost("/api/reach-sim/set-cover/{jobId:guid}/apply", async (Guid jobId, Se
 });
 app.MapDelete("/api/reach-sim/set-cover/{jobId:guid}", (Guid jobId, SetCoverJobs jobs) =>
     jobs.Cancel(jobId) ? Results.Ok() : Results.NotFound(new { error = "진행 중인 작업이 없습니다" }));
+
+// 균등 격자 재분할 — 면·층 영역을 칸 크기(예 1.44, 1.08 m)로 다시 나눠 용접선을 묶는다. apply=false(기본) 미리보기 / true 적용.
+// 정차 덮어쓰기·리프트는 지운다(적용 뒤 영역별 정차 최적화). taskId·검사 기록 유지, 영역 ID 물려주기, 감사로그 AREA_GRID_REGROUP.
+app.MapPost("/api/reach-sim/tanks/{tankId}/grid-areas", async (string tankId, bool? apply, GridAreasRequest req, AreaGridService svc, CancellationToken ct) =>
+{
+    if (req.Level < 1 || string.IsNullOrWhiteSpace(req.WallCode)) return Results.BadRequest(new { error = "level(1 이상)·wallCode 가 필요합니다" });
+    var wall = req.WallCode.Trim().ToUpperInvariant();
+    try
+    {
+        if (apply != true) return Results.Ok(new { applied = false, preview = await svc.PreviewAsync(tankId, req.Level, wall, req.CellUM, req.CellVM, ct) });
+        var (preview, result) = await svc.ApplyAsync(tankId, req.Level, wall, req.CellUM, req.CellVM, req.UserId, ct);
+        return Results.Ok(new { applied = true, preview, result });
+    }
+    catch (AreaSplitException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.Status); }
+});
 
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/split-plan",
     async (Guid areaId, int? maxGroups, string? branch, ReachSimService sim, CancellationToken ct) =>
@@ -1601,6 +1617,8 @@ app.Run();
 // Round = 가스검사 회차(1|2, 선택) — 가스검사 선창의 지령 params.round 로 나간다. 용접검사 선창은 무시.
 // 정차 묶음 최적화 요청 — 격자 간격[m]·정차 반경[m]·리프트 후보 수(선택, 없으면 기본 0.3·2.8·4)
 public sealed record SetCoverApplyRequest(string? UserId = null);
+// 균등 격자 재분할 요청 — 칸 가로[m](0.3~1.44)·세로[m](생략 = 가로와 같게, 면별 상한까지)
+public sealed record GridAreasRequest(int Level, string WallCode, double CellUM, double? CellVM = null, string? UserId = null);
 public sealed record SetCoverRequest(int Level, string WallCode, double? GridStepM = null, double? ReachRadiusM = null, int? MaxStrokes = null);
 /// <param name="Restart">이어할 수 있는 중단 run이 있어도 처음부터 새로 시작(운영자 확인 후) — 없으면 409 RESUMABLE_RUN_EXISTS.</param>
 public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null, bool? Restart = null);

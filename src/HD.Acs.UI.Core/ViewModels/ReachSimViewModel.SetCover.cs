@@ -32,7 +32,7 @@ public sealed partial class ReachSimViewModel
     private bool _setCoverApplied;
 
     partial void OnSetCoverPlanChanged(SetCoverPlanDto? value) => OnPropertyChanged(nameof(CanApplySetCover));
-    partial void OnIsSetCoveringChanged(bool value) => OnPropertyChanged(nameof(CanApplySetCover));
+    partial void OnIsSetCoveringChanged(bool value) { OnPropertyChanged(nameof(CanApplySetCover)); OnPropertyChanged(nameof(CanGrid)); }
     partial void OnIsApplyingSetCoverChanged(bool value) => OnPropertyChanged(nameof(CanApplySetCover));
 
     /// <summary>

@@ -115,5 +115,13 @@ public sealed record SetCoverStationDto(int No, double X, double Y, double Theta
 public sealed record SetCoverApplyResultDto(string TankId, int Level, string WallCode, List<SetCoverAppliedAreaDto> Areas,
     int DeletedAreas, int ScenarioLinksAdded, int TasksMoved);
 
+/// <summary>균등 격자 재분할 응답 — Applied=false 면 미리보기만(Result 없음).</summary>
+public sealed record GridAreasResponseDto(bool Applied, GridAreasPreviewDto Preview, SetCoverApplyResultDto? Result = null);
+
+public sealed record GridAreasPreviewDto(string TankId, int Level, string WallCode, double CellUM, double CellVM,
+    int AreasBefore, int AreasAfter, int Tasks, int LeftoverAreas, bool Busy, List<GridAreaCellDto> Cells);
+
+public sealed record GridAreaCellDto(string Name, int Row, int Col, int TaskCount, double UMin, double VMin, double UMax, double VMax, bool Leftover);
+
 public sealed record SetCoverAppliedAreaDto(Guid AreaId, string Name, int TaskCount, bool Inherited, bool Unreachable,
     double? StationX, double? StationY, double? StationTheta, double? LiftMm);

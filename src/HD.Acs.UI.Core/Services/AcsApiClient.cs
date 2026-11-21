@@ -767,6 +767,19 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<SetCoverApplyResultDto>(ct);
     }
 
+    public async Task<GridAreasResponseDto?> GridAreasAsync(string tankId, int level, string wallCode, double cellUM, double? cellVM, bool apply,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync(
+            $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/grid-areas?apply={(apply ? "true" : "false")}",
+            new { level, wallCode, cellUM, cellVM, userId = "operator" }, ct);
+        if (resp.StatusCode is HttpStatusCode.MethodNotAllowed
+            || resp.StatusCode == HttpStatusCode.NotFound && !(await resp.Content.ReadAsStringAsync(ct)).Contains("error", StringComparison.Ordinal))
+            return null;   // 구서버(라우트 없음)
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<GridAreasResponseDto>(ct);
+    }
+
     public async Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) =>
         await _http.DeleteAsync($"/api/reach-sim/set-cover/{jobId}", ct);
 
