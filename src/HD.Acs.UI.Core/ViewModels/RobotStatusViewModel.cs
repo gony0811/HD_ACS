@@ -414,13 +414,11 @@ public sealed partial class RobotStatusViewModel : ObservableObject
                 return;
             }
 
-            // drawing = R(-yaw) * (map - translation)
-            double px = mapX.Value - cal.Tx, py = mapY.Value - cal.Ty;
-            double cos = Math.Cos(cal.YawRad), sin = Math.Sin(cal.YawRad);
-            double drawingX = cos * px + sin * py;
-            double drawingY = -sin * px + cos * py;
+            // drawing = A⁻¹ · (map − t) (강체면 R(−yaw))
+            var tf = cal.Transform;
+            var (drawingX, drawingY) = tf.MapToDrawing(mapX.Value, mapY.Value);
             Position = FormatPosition(drawingX, drawingY);
-            double? drawingYaw = mapTheta is double th ? TankViewModel.MapThetaToDrawing(th, cal.YawRad) : null;
+            double? drawingYaw = mapTheta is double th ? tf.MapThetaToDrawing(th) : null;
             Heading = drawingYaw is double dyaw ? $"{dyaw * 180.0 / Math.PI:F0}°" : "-";
 
             _lastDrawing = (robotId, mapId, drawingX, drawingY, drawingYaw);

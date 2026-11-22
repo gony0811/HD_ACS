@@ -81,7 +81,7 @@ public sealed class SeamPlanningService
             var cal = await _db.MapCalibrations.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.MapId == map.MapId && c.MapVersion == map.Version, ct);
             if (cal is null) { missing.Add($"L{level}({map.MapId} v{map.Version}): 유효 T_W_D 없음"); continue; }
-            calibByLevel[level] = (map.MapId, new DrawingTransform(cal.Tx, cal.Ty, cal.YawRad));
+            calibByLevel[level] = (map.MapId, WeldInspectionPayload.ResolveTransform(map.Version, cal.MapVersion, cal.Tx, cal.Ty, cal.YawRad, cal.A11, cal.A12, cal.A21, cal.A22));
         }
         if (missing.Count > 0)
             throw new CalibrationMissingException(missing);

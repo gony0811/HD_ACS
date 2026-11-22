@@ -16,7 +16,8 @@ public sealed record ProjectDoc(
 public sealed record CalibrationDoc(
     string MapId,
     CalibrationPointDoc[] Points,
-    double Tx, double Ty, double YawRad, double RmsM);
+    double Tx, double Ty, double YawRad, double RmsM,
+    string? Model = null);   // "affine" 이면 열 때 affine 으로 다시 푼다. null(구파일) = 강체
 
 public sealed record CalibrationPointDoc(
     double DrawingXM, double DrawingYM, double MapX, double MapY);

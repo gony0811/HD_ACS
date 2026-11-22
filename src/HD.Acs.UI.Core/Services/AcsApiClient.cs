@@ -229,9 +229,13 @@ public sealed class AcsApiClient : IAcsApiClient
 
     private sealed record RotateResult(string MapId, double Deg, int Rotated);
 
-    public async Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default)
+    public Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default)
+        => SolveCalibrationAsync(mapId, null, ct);
+
+    public async Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, string? model, CancellationToken ct = default)
     {
-        var resp = await _http.PostAsync($"/api/maps/{mapId}/calibration/solve", content: null, ct);
+        string query = model is null ? "" : $"?model={Uri.EscapeDataString(model)}";
+        var resp = await _http.PostAsync($"/api/maps/{mapId}/calibration/solve{query}", content: null, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 404/400(<2점)의 {error} 메시지를 예외로 노출
         return (await resp.Content.ReadFromJsonAsync<CalibrationSolveResultDto>(ct))!;
     }

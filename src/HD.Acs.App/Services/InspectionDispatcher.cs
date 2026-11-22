@@ -550,7 +550,8 @@ public sealed class InspectionDispatcher
             try
             {
                 var t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion,
-                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22);
                 tWdByLevel[level] = (mapId, t);
             }
             catch (CalibrationInvalidException ex)
@@ -801,7 +802,8 @@ public sealed class InspectionDispatcher
             ?? throw new KeyNotFoundException($"map '{mapId}' 없음");
         var cal = await _db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
             .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
-        var tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+        var tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22);
 
         // 정차점(standoff) 도면 → 맵 (배차와 동일식 StationDrawingOf)
         var (sdx, sdy, syaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));

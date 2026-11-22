@@ -473,7 +473,7 @@ public sealed partial class TankViewModel : ObservableObject
 
     // ── 로봇 마커 좌표 변환: 맵 → 도면 (T_W_D 역변환) ────────────────────────
     // 로봇 보고는 맵 좌표, 3D 씬은 도면 좌표 — 역변환 없이 찍으면 T_W_D(tx,ty,yaw)만큼 어긋나 보인다.
-    private readonly Dictionary<string, (double Tx, double Ty, double Yaw, DateTimeOffset LoadedAt)> _calByMapId = new();
+    private readonly Dictionary<string, (CalTransform T, DateTimeOffset LoadedAt)> _calByMapId = new();
     private readonly Dictionary<string, DateTimeOffset> _calMissing = new();   // 미보정 층 — 재조회 폭주 방지(TTL)
 
     /// <summary>
@@ -548,12 +548,9 @@ public sealed partial class TankViewModel : ObservableObject
             bool have = _calByMapId.TryGetValue(mapId, out var c);
             if (have)
             {
-                // drawing = R(−yaw) · (map − t)
-                double px = mx - c.Tx, py = my - c.Ty;
-                double cos = Math.Cos(-c.Yaw), sin = Math.Sin(-c.Yaw);
-                dx = cos * px - sin * py;
-                dy = sin * px + cos * py;
-                if (RobotTheta is double th) dTheta = MapThetaToDrawing(th, c.Yaw);
+                // drawing = A⁻¹ · (map − t) (강체면 R(−yaw))
+                (dx, dy) = c.T.MapToDrawing(mx, my);
+                if (RobotTheta is double th) dTheta = c.T.MapThetaToDrawing(th);
                 calibrated = true;
             }
             // 층 z: mapId "{tank}-L{n}" → level_z[n-1]
@@ -609,7 +606,7 @@ public sealed partial class TankViewModel : ObservableObject
             var cal = await _api.GetCalibrationAsync(mapId);
             if (cal is not null)
             {
-                _calByMapId[mapId] = (cal.Tx, cal.Ty, cal.YawRad, DateTimeOffset.UtcNow);
+                _calByMapId[mapId] = (cal.Transform, DateTimeOffset.UtcNow);
                 _calMissing.Remove(mapId);
             }
             else

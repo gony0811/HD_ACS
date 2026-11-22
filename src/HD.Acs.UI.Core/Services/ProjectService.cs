@@ -68,7 +68,7 @@ public sealed class ProjectService : IProjectService
             var points = await _api.GetCalibrationPointsAsync(mapId, ct);
             calibrations.Add(new CalibrationDoc(mapId,
                 points.Select(p => new CalibrationPointDoc(p.DrawingXM, p.DrawingYM, p.MapX, p.MapY)).ToArray(),
-                cal.Tx, cal.Ty, cal.YawRad, cal.RmsM));
+                cal.Tx, cal.Ty, cal.YawRad, cal.RmsM, cal.IsAffine ? "affine" : null));
         }
 
         var scenarios = new List<ScenarioDoc>();
@@ -202,7 +202,7 @@ public sealed class ProjectService : IProjectService
                 await _api.CaptureCalibrationPointAsync(cal.MapId, p.DrawingXM, p.DrawingYM, "m", _operatorId,
                     ct, p.MapX, p.MapY);
             if (cal.Points.Length >= 2)
-                await _api.SolveCalibrationAsync(cal.MapId, ct);
+                await _api.SolveCalibrationAsync(cal.MapId, cal.Model ?? "rigid", ct);
 
             // 가져오기 API가 다른 서버를 향하거나 구버전 서버에서 일부 요청이 누락돼도
             // 성공으로 가장하지 않는다. 실제 서버 상태를 다시 읽어 파일 내용과 대조한다.

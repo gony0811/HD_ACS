@@ -39,14 +39,18 @@ public static class WeldInspectionPayload
 {
     /// <summary>맵버전 일치 검증 후 T_W_D 반환. calMapVersion==null 또는 !=mapVersion 이면 거부 [§2.5].</summary>
     public static DrawingTransform ResolveTransform(int mapVersion, int? calMapVersion,
-        double tx, double ty, double yawRad)
+        double tx, double ty, double yawRad,
+        double? a11 = null, double? a12 = null, double? a21 = null, double? a22 = null)
     {
         if (calMapVersion is null)
             throw new CalibrationInvalidException($"유효 T_W_D 없음 (맵버전 {mapVersion}에 등록된 캘리브레이션 없음).");
         if (calMapVersion != mapVersion)
             throw new CalibrationInvalidException(
                 $"T_W_D 맵버전 불일치: 캘리브레이션 v{calMapVersion} ≠ 맵 v{mapVersion} — 맵 재생성 후 재캘리브레이션 필요.");
-        return new DrawingTransform(tx, ty, yawRad);
+        // 선형부 4값이 모두 있으면 affine, 아니면 강체(종전)
+        var affine = a11 is double p11 && a12 is double p12 && a21 is double p21 && a22 is double p22
+            ? new AffineLinear(p11, p12, p21, p22) : null;
+        return new DrawingTransform(tx, ty, yawRad, affine);
     }
 
     /// <summary>

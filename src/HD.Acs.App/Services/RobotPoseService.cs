@@ -36,7 +36,8 @@ public sealed class RobotPoseService(AcsDbContext db)
         var cal = await db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
             .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
         DrawingTransform t = WeldInspectionPayload.ResolveTransform(   // 무효면 CalibrationInvalidException
-            map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+            map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22);
 
         var (x, y) = t.MapToDrawing(mx, my);
         double? theta = ctx.ReportedTheta is double th ? t.MapYawToDrawing(th) : null;

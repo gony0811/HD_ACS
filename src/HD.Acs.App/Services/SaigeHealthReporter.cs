@@ -116,7 +116,8 @@ public sealed class SaigeHealthReporter : BackgroundService
             .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
         if (map is null) return Hold(robotId, $"map '{mapId}' 미등록");
         Core.Geometry.DrawingTransform tWd;
-        try { tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0); }
+        try { tWd = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22); }
         catch (CalibrationInvalidException ex) { return Hold(robotId, ex.Message); }
         _positionWarned.Remove(robotId);
 

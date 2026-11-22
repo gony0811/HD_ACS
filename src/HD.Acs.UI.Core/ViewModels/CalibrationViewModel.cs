@@ -93,16 +93,34 @@ public sealed partial class CalibrationViewModel : ObservableObject
             if (Calibration is not { } c) return "저장된 T_W_D 없음 — 계산 후 확인할 수 있습니다.";
             if (RobotReportedX is not double mx || RobotReportedY is not double my)
                 return "이 층을 보고 중인 로봇이 없어 확인할 수 없습니다.";
-            var (x, y, head) = CalibrationPreview.ToDrawing(mx, my, RobotReportedTheta, c.Tx, c.Ty, c.YawRad);
+            var (x, y, head) = CalibrationPreview.ToDrawing(mx, my, RobotReportedTheta, c.Transform);
             return "로봇 표시: " + CalibrationPreview.Describe(x, y, head, _originOx, _originOy);
         }
     }
 
     public string CalibrationSummary => SolveResult is { } s
-        ? $"tx={s.Tx:F4} m, ty={s.Ty:F4} m, yaw={s.YawRad:F5} rad, RMS={s.RmsM:F4} m (최대 {s.MaxResidualM:F4}), 점 {s.PointCount}"
+        ? $"{ModelLabel(s.IsAffine)} · tx={s.Tx:F4} m, ty={s.Ty:F4} m, yaw={s.YawRad:F5} rad, RMS={s.RmsM:F4} m (최대 {s.MaxResidualM:F4}), 점 {s.PointCount}"
+          + (s.IsAffine ? AffineDetail(s) : "")
         : Calibration is { } c
-            ? $"tx={c.Tx:F4} m, ty={c.Ty:F4} m, yaw={c.YawRad:F5} rad, RMS={c.RmsM:F4} m, 점 {c.PointCount} (등록 {c.RegisteredAt:yyyy-MM-dd HH:mm})"
+            ? $"{ModelLabel(c.IsAffine)} · tx={c.Tx:F4} m, ty={c.Ty:F4} m, yaw={c.YawRad:F5} rad, RMS={c.RmsM:F4} m, 점 {c.PointCount} (등록 {c.RegisteredAt:yyyy-MM-dd HH:mm})"
             : "저장된 T_W_D 없음 — 기준점 3~4점을 측정하세요.";
+
+    private static string ModelLabel(bool affine) => affine ? "맵 왜곡 보정(affine)" : "강체(회전·이동)";
+
+    private static string AffineDetail(CalibrationSolveResultDto s)
+    {
+        var parts = new List<string>();
+        if (s.RigidRmsM is double r) parts.Add($"강체로 풀면 RMS {r:F4} m");
+        if (s.ScaleMin is double lo && s.ScaleMax is double hi) parts.Add($"축척 {lo:F4}~{hi:F4}");
+        if (s.LooRmsM is double l) parts.Add($"한 점씩 빼고 예측한 오차 {l:F4} m");
+        return parts.Count == 0 ? "" : "\n" + string.Join(" · ", parts);
+    }
+
+    /// <summary>맵 왜곡 보정(affine)으로 계산할지. 층을 바꾸면 그 층에 저장된 모델로 맞춰진다.</summary>
+    [ObservableProperty] private bool _useAffine;
+
+    public const int AffineMinPoints = 4;
+    public string AffineHint => $"SLAM 맵이 실제보다 늘거나 줄어 강체로는 잔차가 남는 층에 씁니다. 기준점 {AffineMinPoints}개 이상(권장 6개 이상, 길이·폭 양쪽으로 넓게).";
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -135,6 +153,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
             Points.Clear();
             foreach (var p in await _api.GetCalibrationPointsAsync(SelectedMapId)) Points.Add(p);
             Calibration = await _api.GetCalibrationAsync(SelectedMapId);
+            UseAffine = Calibration?.IsAffine ?? false;   // 이 층에 저장된 모델로 맞춘다
             SolveResult = null;
             RaiseDerived();
         }
@@ -316,7 +335,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
         if (SelectedMapId is null) return;
         try
         {
-            SolveResult = await _api.SolveCalibrationAsync(SelectedMapId);
+            SolveResult = await _api.SolveCalibrationAsync(SelectedMapId, UseAffine ? "affine" : "rigid");
             Calibration = await _api.GetCalibrationAsync(SelectedMapId);
             UpdateResiduals(SolveResult);
             var worst = Candidates.Where(c => c.ResidualM.HasValue).OrderByDescending(c => c.ResidualM).FirstOrDefault();
@@ -331,11 +350,10 @@ public sealed partial class CalibrationViewModel : ObservableObject
 
     private void UpdateResiduals(CalibrationSolveResultDto s)
     {
-        double cos = Math.Cos(s.YawRad), sin = Math.Sin(s.YawRad);
+        var t = new CalTransform(s.Tx, s.Ty, s.YawRad, s.A11, s.A12, s.A21, s.A22);
         foreach (var c in Candidates.Where(c => c.IsMeasured && c.MapX.HasValue && c.MapY.HasValue))
         {
-            double mx = cos * c.DrawingX - sin * c.DrawingY + s.Tx;
-            double my = sin * c.DrawingX + cos * c.DrawingY + s.Ty;
+            var (mx, my) = t.DrawingToMap(c.DrawingX, c.DrawingY);
             c.ResidualM = Distance(mx, my, c.MapX!.Value, c.MapY!.Value);
         }
     }
@@ -459,19 +477,13 @@ public static class CalibrationPreview
 {
     public static (double X, double Y, double? HeadingDeg) ToDrawing(
         double mapX, double mapY, double? thetaMap, double tx, double ty, double yaw)
+        => ToDrawing(mapX, mapY, thetaMap, new CalTransform(tx, ty, yaw));
+
+    public static (double X, double Y, double? HeadingDeg) ToDrawing(
+        double mapX, double mapY, double? thetaMap, CalTransform t)
     {
-        double ux = mapX - tx, uy = mapY - ty;
-        double cos = Math.Cos(yaw), sin = Math.Sin(yaw);
-        double x = cos * ux + sin * uy;
-        double y = -sin * ux + cos * uy;
-        double? head = null;
-        if (thetaMap is double th)
-        {
-            double a = (th - yaw) * 180 / Math.PI;
-            while (a <= -180) a += 360;
-            while (a > 180) a -= 360;
-            head = a;
-        }
+        var (x, y) = t.MapToDrawing(mapX, mapY);
+        double? head = thetaMap is double th ? t.MapThetaToDrawing(th) * 180 / Math.PI : null;
         return (x, y, head);
     }
 

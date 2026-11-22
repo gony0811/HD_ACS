@@ -1116,7 +1116,8 @@ app.MapPost("/api/robots/{robotId}/goto",
     var cal = await db.MapCalibrations.AsNoTracking().Where(c => c.MapId == mapId)
         .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync();
     DrawingTransform t;
-    try { t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0); }
+    try { t = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22); }
     catch (CalibrationInvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
     var (mx, my) = t.DrawingToMap(req.XDrawing, req.YDrawing);
@@ -1240,34 +1241,24 @@ app.MapPost("/api/maps/{mapId}/calibration/points/rotate",
     catch (CalibrationPointService.ValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-// 최소자승 계산·저장 — RMS가 임계값 초과여도 저장하되 warning 반환
+// 최소자승 계산·저장 — RMS가 임계값 초과여도 저장하되 warning 반환.
+// ?model=rigid|affine (생략 = 이 맵에 저장된 모델 유지, 없으면 rigid). affine = 맵이 실제보다 늘거나 줄어든 층 보정.
 app.MapPost("/api/maps/{mapId}/calibration/solve",
-    async (string mapId, AcsDbContext db, IConfiguration config) =>
+    async (string mapId, string? model, CalibrationPointService svc, IConfiguration config) =>
 {
-    var map = await db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId);
-    if (map is null) return Results.NotFound(new { error = $"map '{mapId}' 없음" });
-
-    var points = await db.MapCalibrationPoints.AsNoTracking()
-        .Where(p => p.MapId == mapId && p.MapVersion == map.Version).ToListAsync();
-    if (points.Count < 2)
-        return Results.BadRequest(new { error = "대응쌍이 2개 미만입니다. 최소 2점(권장 3점) 캡처 후 계산하세요." });
-
-    var pairs = points
-        .Select(p => (((double X, double Y))(p.DrawingXM, p.DrawingYM), ((double X, double Y))(p.MapX, p.MapY)))
-        .ToList();
-    var (t, rms, maxResidual) = DrawingTransform.Solve(pairs);
-
-    var cal = await db.MapCalibrations.FindAsync(mapId, map.Version)
-              ?? db.MapCalibrations.Add(new MapCalibrationEntity { MapId = mapId, MapVersion = map.Version }).Entity;
-    cal.Tx = t.Tx; cal.Ty = t.Ty; cal.YawRad = t.YawRad;
-    cal.RmsM = rms; cal.PointCount = points.Count; cal.RegisteredAt = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync();
-
-    double rmsWarn = config.GetValue("Acs:Calibration:RmsWarnM", 0.05);
-    string? warning = rms > rmsWarn
-        ? $"등록 잔차 RMS {rms:F4}m 가 임계값 {rmsWarn:F3}m 를 초과합니다. 기준점 재캡처를 권장합니다."
-        : null;
-    return Results.Ok(new { tx = t.Tx, ty = t.Ty, yawRad = t.YawRad, rmsM = rms, maxResidualM = maxResidual, pointCount = points.Count, warning });
+    try
+    {
+        var r = await svc.SolveAsync(mapId, model, config.GetValue("Acs:Calibration:RmsWarnM", 0.05));
+        return Results.Ok(new
+        {
+            tx = r.T.Tx, ty = r.T.Ty, yawRad = r.T.YawRad, rmsM = r.RmsM, maxResidualM = r.MaxResidualM,
+            pointCount = r.PointCount, warning = r.Warning,
+            model = r.Model, a11 = r.T.Affine?.A11, a12 = r.T.Affine?.A12, a21 = r.T.Affine?.A21, a22 = r.T.Affine?.A22,
+            rigidRmsM = r.RigidRmsM, looRmsM = r.LooRmsM, scaleMin = r.ScaleMin, scaleMax = r.ScaleMax
+        });
+    }
+    catch (CalibrationPointService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (CalibrationPointService.ValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 // 현재 유효 T_W_D — 맵버전 불일치(구버전 캘리브레이션)면 404 [§2.5]

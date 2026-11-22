@@ -327,7 +327,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `DELETE /api/maps/{mapId}/calibration/points/{id}` | 대응쌍 삭제 |
 | `PUT /api/maps/{mapId}/calibration/points/{id}` | 대응쌍 수정(id 유지) — `{ drawingX, drawingY, mapX, mapY, unit?, userId? }`. 없음 404 · 비유한 값 400 |
 | `POST /api/maps/{mapId}/calibration/points/rotate` | 도면 좌표만 원점 기준 회전(맵 좌표 불변) — `{ deg, userId? }`. 입력 프레임 180°/±90° 오류 교정, 기준점 0개면 400 |
-| `POST /api/maps/{mapId}/calibration/solve` | 최소자승 계산·저장 → `{ tx, ty, yawRad, rmsM, maxResidualM, pointCount, warning? }` |
+| `POST /api/maps/{mapId}/calibration/solve?model=rigid\|affine` | 최소자승 계산·저장 → `{ tx, ty, yawRad, rmsM, maxResidualM, pointCount, warning?, model, a11~a22?, rigidRmsM, looRmsM?, scaleMin, scaleMax }`. `model` 생략 = 이 맵에 저장된 모델 유지(없으면 rigid). `affine` 은 SLAM 맵이 실제보다 늘거나 줄어든 층 보정용 — 기준점 4개 이상(권장 6개 이상), 한 줄 배치·거울상이면 400 |
 | `GET /api/maps/{mapId}/calibration` | 현재 유효 T_W_D (맵버전 불일치 시 404) |
 
 ### 용접선·시나리오
