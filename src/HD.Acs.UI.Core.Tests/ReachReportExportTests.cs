@@ -95,7 +95,7 @@ public class ReachReportExportTests
             Assert.Contains("TASK 6 — 가능 3 · 가능(주의) 0 · 불가 3", vm.ReportSummary);
             Assert.Contains(path, vm.ReportSummary);
             Assert.Contains("보고서 저장 완료", vm.StatusMessage);
-            Assert.Contains("L4-PU", dialogs.Suggested);
+            Assert.Contains("L3-PU", dialogs.Suggested);
             Assert.False(vm.IsReporting);
         }
         finally { Cleanup(path); }

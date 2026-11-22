@@ -171,6 +171,36 @@ public class ManualBeadInputTests
         Assert.False(RobotErrorTracker.IsOperatorNotice("cobotZoneObstacle"));
     }
 
+    /// <summary>배터리 보호 임시 해제(BMS 고장 조치) — 경고 알람 1건, 오류 상태 판정·정차·run 은 그대로, 사라지면 해제.</summary>
+    [Fact]
+    public async Task 배터리_보호_해제는_경고_알람만_남기고_오류로_세지_않는다()
+    {
+        var env = Build();
+        await SeedDispatchedRunAsync(env.Db);
+        Vda5050State Bypassed() => new()
+        {
+            Errors = { new VdaError { ErrorType = "batteryGuardBypassed", ErrorLevel = "WARNING",
+                ErrorDescription = "배터리 보호 임시 해제 중 — BMS SoC 0.0% (판정 Critical) 무시, 정상 모드로 운용" } },
+        };
+
+        await env.States.HandleStateAsync(Robot, Bypassed());
+        await env.States.HandleStateAsync(Robot, Bypassed());   // 반복 보고 — 중복 없음
+
+        var alarm = await env.Db.Alarms.AsNoTracking().SingleAsync();
+        Assert.Equal("BATTERY_GUARD_BYPASSED", alarm.AlarmCode);
+        Assert.Null(alarm.ClearedAt);
+        Assert.Contains("SoC 0.0%", DescriptionOf(alarm));
+        Assert.False(env.Tracker.HasActiveErrors(RobotId));      // SAIGE 로봇 상태가 ERROR 로 가지 않는다
+        var wi = await env.Db.WorkItems.AsNoTracking().SingleAsync();
+        Assert.Equal(("DISPATCHED", 0), (wi.Status, wi.Attempts));
+        Assert.Equal("RUNNING", (await env.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);
+
+        await env.States.HandleStateAsync(Robot, new Vda5050State());   // AMR 이 보호를 다시 켬
+
+        Assert.NotNull((await env.Db.Alarms.AsNoTracking().SingleAsync()).ClearedAt);
+        Assert.True(RobotErrorTracker.IsBatteryGuardBypass("BATTERYGUARDBYPASSED"));
+    }
+
     [Theory]
     [InlineData("manualBeadInputRequired", true)]
     [InlineData("MANUALBEADINPUTREQUIRED", true)]

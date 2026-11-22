@@ -65,20 +65,29 @@ public sealed class AcsApiClient : IAcsApiClient
         return await resp.Content.ReadFromJsonAsync<RunProgressDto>(ct);
     }
 
-    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
+    public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default) =>
+        StartRunAsync(scenarioId, robotId, null, ct);
+
+    public Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, CancellationToken ct) =>
+        StartRunAsync(scenarioId, robotId, round, false, ct);
+
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, bool restart, CancellationToken ct)
     {
         var resp = await _http.PostAsJsonAsync("/api/runs",
-            new { ScenarioId = scenarioId, RobotId = robotId }, ct);
+            new { ScenarioId = scenarioId, RobotId = robotId, Round = round, Restart = restart }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 409(활성 run 존재)·400의 {error} 메시지 노출
         var body = await resp.Content.ReadFromJsonAsync<StartRunResult>(ct);
         return body?.RunId ?? Guid.Empty;
     }
 
-    public async Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
-        bool optimize = true, CancellationToken ct = default)
+    public Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
+        bool optimize = true, CancellationToken ct = default) => StartRepairRunAsync(robotId, taskIds, scenarioId, optimize, null, ct);
+
+    public async Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId,
+        bool optimize, int? round, CancellationToken ct)
     {
         var resp = await _http.PostAsJsonAsync("/api/runs/repair",
-            new { RobotId = robotId, TaskIds = taskIds, ScenarioId = scenarioId, Optimize = optimize }, ct);
+            new { RobotId = robotId, TaskIds = taskIds, ScenarioId = scenarioId, Optimize = optimize, Round = round }, ct);
         if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버
         await EnsureSuccessOrThrowAsync(resp, ct);
         return await resp.Content.ReadFromJsonAsync<RepairRunStartedDto>(ct);
@@ -430,14 +439,22 @@ public sealed class AcsApiClient : IAcsApiClient
     public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
         double originOx, double originOy, string userId,
-        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default)
+        double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default) =>
+        await RegisterTankGeometryAsync(tankId, lengthL, wFloor, thetaLowDeg, hLow, hWall, thetaUpDeg, hUp, levelZ,
+            originOx, originOy, userId, reachZMin, reachZMax, null, ct);
+
+    public async Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId,
+        double? reachZMin, double? reachZMax, string? inspectionKind, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/geometry", new
         {
             LengthL = lengthL, WFloor = wFloor, ThetaLowDeg = thetaLowDeg, HLow = hLow,
             HWall = hWall, ThetaUpDeg = thetaUpDeg, HUp = hUp,
             LevelZ = levelZ, OriginOx = originOx, OriginOy = originOy, UserId = userId,
-            ReachZMin = reachZMin, ReachZMax = reachZMax
+            ReachZMin = reachZMin, ReachZMax = reachZMax,
+            InspectionKind = inspectionKind   // null = 기존 선창은 유지, 새 선창은 WELD
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 검증 실패 400 reasons 메시지 노출
         return (await resp.Content.ReadFromJsonAsync<GeometryResult>(ct))?.WallsGenerated ?? 0;
@@ -462,7 +479,7 @@ public sealed class AcsApiClient : IAcsApiClient
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
         double? stationStandoffM = null, Guid? areaId = null, double? stationMaxBackwardMm = null,
-        CancellationToken ct = default)
+        double? stationLiftMm = null, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("/api/areas", new
         {
@@ -470,6 +487,7 @@ public sealed class AcsApiClient : IAcsApiClient
             Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta, UserId = userId,
             StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm,
+            StationLiftMm = stationLiftMm,   // null=배차 기본 0
             AreaId = areaId   // null=서버 발급. 지정=식별자 보존 등록(.hdacs 재적재)
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위 400·층유도실패 400·중복 409·면없음 404 메시지 노출
@@ -479,13 +497,14 @@ public sealed class AcsApiClient : IAcsApiClient
 
     public async Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
-        double? stationMaxBackwardMm = null, CancellationToken ct = default)
+        double? stationMaxBackwardMm = null, double? stationLiftMm = null, CancellationToken ct = default)
     {
         var resp = await _http.PutAsJsonAsync($"/api/areas/{areaId}", new
         {
             Name = name, Corners = corners,
             StationX = stationX, StationY = stationY, StationTheta = stationTheta,
-            StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm, UserId = userId
+            StationStandoffM = stationStandoffM, StationMaxBackwardMm = stationMaxBackwardMm, UserId = userId,
+            StationLiftMm = stationLiftMm   // null=서버가 기존 리프트 높이 유지
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404 메시지 노출
         var r = await resp.Content.ReadFromJsonAsync<IdResult>(ct);
@@ -522,6 +541,26 @@ public sealed class AcsApiClient : IAcsApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task<AreaDeleteOutcome> DeleteAreaAsync(Guid areaId, bool deleteTasks, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync(
+            $"/api/areas/{areaId}?deleteTasks={(deleteTasks ? "true" : "false")}&userId={Uri.EscapeDataString(userId)}", ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var c = await resp.Content.ReadFromJsonAsync<DeleteConflictBody>(cancellationToken: ct);
+            return new AreaDeleteOutcome(true, c?.Error, Array.Empty<string>(), c?.Orphans ?? new List<string>());
+        }
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<DeleteOkBody>(cancellationToken: ct);
+        return new AreaDeleteOutcome(false, null,
+            body?.Moved?.Select(m => $"{m.TaskName ?? m.TaskId.ToString()[..8]} → {m.ToAreaName}").ToList() ?? new List<string>(),
+            body?.DeletedTasks ?? new List<string>());
+    }
+
+    private sealed record DeleteConflictBody(string? Error, List<string>? Orphans);
+    private sealed record DeleteMoveBody(Guid TaskId, string? TaskName, Guid ToAreaId, string ToAreaName, int NewSeq);
+    private sealed record DeleteOkBody(List<DeleteMoveBody>? Moved, List<string>? DeletedTasks);
+
     public async Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
         int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default)
@@ -548,6 +587,33 @@ public sealed class AcsApiClient : IAcsApiClient
             Points = points    // null=기존 유지, []=지움 [VDA §8.5.1]
         }, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);   // 경계 밖 400·seq 중복 409·없음 404 메시지 노출
+    }
+
+    public async Task<IReadOnlyList<string>?> GetTankIdsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/internal/tanks", ct);
+        if (IsUnsupportedRoute(resp)) return null;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<string>>(ct) ?? new();
+    }
+
+    public async Task<bool> RenameTankAsync(string tankId, string newTankId, string userId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/tanks/{Uri.EscapeDataString(tankId)}/rename",
+            new { NewTankId = newTankId, UserId = userId }, ct);
+        // 없는 선창도 404 지만 그때는 본문에 사유가 있다 — 본문 없는 404·405 만 "경로 없음(구빌드)"로 본다
+        if (IsUnsupportedRoute(resp) && (resp.Content.Headers.ContentLength ?? 0) == 0) return false;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return true;
+    }
+
+    public async Task<Cross4SideResultDto?> ClassifyCross4SidesAsync(string tankId, bool apply, string userId, CancellationToken ct = default)
+    {
+        var url = $"/api/tanks/{Uri.EscapeDataString(tankId)}/cross4-sides?apply={(apply ? "true" : "false")}&userId={Uri.EscapeDataString(userId)}";
+        var resp = await _http.PostAsync(url, null, ct);
+        if (IsUnsupportedRoute(resp) && (resp.Content.Headers.ContentLength ?? 0) == 0) return null;   // 구빌드 서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<Cross4SideResultDto>(ct);
     }
 
     public async Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default)
@@ -653,7 +719,104 @@ public sealed class AcsApiClient : IAcsApiClient
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<LlmStatusDto>(ct) : null;
     }
 
+    public async Task<bool?> GetLiftEnabledAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/lift", ct);
+        if (!resp.IsSuccessStatusCode) return null;   // 구서버(404) — 사용으로 본다
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        return body.TryGetProperty("enabled", out var e) && e.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? e.GetBoolean() : null;
+    }
+
+    public async Task<LiftSettingsDto?> GetLiftSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/lift", ct);
+        if (!resp.IsSuccessStatusCode) return null;   // 구서버(404) — 자동으로 본다
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        double? fixedMm = body.TryGetProperty("fixedStrokeMm", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.Number ? f.GetDouble() : null;
+        if (body.TryGetProperty("mode", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String)
+            return new LiftSettingsDto(m.GetString()!, fixedMm);
+        // mode 가 없는 구서버 — enabled 만 본다
+        return body.TryGetProperty("enabled", out var e) && e.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? new LiftSettingsDto(e.GetBoolean() ? "Auto" : "Off", null) : null;
+    }
+
     /// <summary>비성공 응답이면 서버 {error} 필드를 담아 예외를 던진다(캡처 409 / solve 400 등 UX 메시지).</summary>
+    public async Task<Guid?> StartSetCoverAsync(string tankId, int level, string wallCode, double? gridStepM = null, double? reachRadiusM = null,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/set-cover",
+            new { level, wallCode, gridStepM, reachRadiusM }, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;   // 구서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        return body.TryGetProperty("jobId", out var id) ? id.GetGuid() : null;
+    }
+
+    public async Task<SetCoverJobDto?> GetSetCoverAsync(Guid jobId, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"/api/reach-sim/set-cover/{jobId}", ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<SetCoverJobDto>(ct);
+    }
+
+    public async Task<SetCoverApplyResultDto?> ApplySetCoverAsync(Guid jobId, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/reach-sim/set-cover/{jobId}/apply", new { userId = "operator" }, ct);
+        if (resp.StatusCode is HttpStatusCode.MethodNotAllowed
+            || resp.StatusCode == HttpStatusCode.NotFound && !(await resp.Content.ReadAsStringAsync(ct)).Contains("error", StringComparison.Ordinal))
+            return null;   // 구서버(라우트 없음)
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<SetCoverApplyResultDto>(ct);
+    }
+
+    public async Task<GridAreasResponseDto?> GridAreasAsync(string tankId, int level, string wallCode, double cellUM, double? cellVM, bool apply,
+        CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync(
+            $"/api/reach-sim/tanks/{Uri.EscapeDataString(tankId)}/grid-areas?apply={(apply ? "true" : "false")}",
+            new { level, wallCode, cellUM, cellVM, userId = "operator" }, ct);
+        if (resp.StatusCode is HttpStatusCode.MethodNotAllowed
+            || resp.StatusCode == HttpStatusCode.NotFound && !(await resp.Content.ReadAsStringAsync(ct)).Contains("error", StringComparison.Ordinal))
+            return null;   // 구서버(라우트 없음)
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<GridAreasResponseDto>(ct);
+    }
+
+    public async Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) =>
+        await _http.DeleteAsync($"/api/reach-sim/set-cover/{jobId}", ct);
+
+    public async Task<ReachSettingsDto?> GetReachSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("/api/settings/reach-sim", ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;   // 구서버
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
+    public async Task<ReachSettingsDto?> SaveReachSettingsAsync(ReachSettingsUpdateDto settings, CancellationToken ct = default)
+    {
+        var resp = await _http.PutAsJsonAsync("/api/settings/reach-sim", new
+        {
+            liftMode = settings.LiftMode, fixedStrokeMm = settings.FixedStrokeMm,
+            mountZMm = settings.MountZMm, amrHeightMm = settings.AmrHeightMm,
+            supportColumn = settings.SupportColumn, maxEntryJointTravelDeg = settings.MaxEntryJointTravelDeg,
+            userId = "operator",
+        }, ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
+    public async Task<ReachSettingsDto?> ResetReachSettingsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync("/api/settings/reach-sim?userId=operator", ct);
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) return null;
+        await EnsureSuccessOrThrowAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<ReachSettingsDto>(ct);
+    }
+
     private static async Task EnsureSuccessOrThrowAsync(HttpResponseMessage resp, CancellationToken ct)
     {
         if (resp.IsSuccessStatusCode) return;

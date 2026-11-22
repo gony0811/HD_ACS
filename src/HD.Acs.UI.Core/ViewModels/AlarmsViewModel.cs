@@ -251,6 +251,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
         var t = head.Trim();
         if (t.Equals(ManualBeadInputType, StringComparison.OrdinalIgnoreCase)) return "warn";   // 작업자 입력 대기 — 실패 아님
         if (t.Equals("cobotZoneObstacle", StringComparison.OrdinalIgnoreCase)) return "warn";   // 장애물로 주행 정지 — 사라지면 재출발
+        if (t.Equals("batteryGuardBypassed", StringComparison.OrdinalIgnoreCase)) return "warn";   // 배터리 보호 해제 중 — 운영 상태 경고
         if (t.Equals("batteryCritical", StringComparison.OrdinalIgnoreCase)) return "fail";
         if (t.Equals("batteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
         if (t.Equals("orderRejectedBatteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";
@@ -310,8 +311,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
             if (workFloors.Count > 0 && (robot.ReportedMapId is null || !workFloors.Contains(robot.ReportedMapId)))
             {
                 floorMismatch = robot.ReportedMapId is null
-                    ? $"AMR이 층을 보고하지 않습니다 · 남은 작업 층 {string.Join(", ", workFloors)}"
-                    : $"AMR 현재 층 {robot.ReportedMapId} · 남은 작업 층 {string.Join(", ", workFloors)}";
+                    ? $"AMR이 층을 보고하지 않습니다 · 남은 작업 층 {string.Join(", ", workFloors.Select(LevelLabel.WithMapId))}"
+                    : $"AMR 현재 층 {LevelLabel.WithMapId(robot.ReportedMapId)} · 남은 작업 층 {string.Join(", ", workFloors.Select(LevelLabel.WithMapId))}";
                 floorWorked = robot.ReportedMapId is not null && Mission.WorkItems.Any(w => w.MapId == robot.ReportedMapId);
             }
         }

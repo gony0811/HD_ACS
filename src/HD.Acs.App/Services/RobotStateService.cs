@@ -24,20 +24,32 @@ public sealed class RobotStateService
     private readonly MissionService _missions;
     private readonly ILogger<RobotStateService> _log;
 
+    /// <summary>보고 층을 맞췄다는 안내를 (로봇, 보고값, 맞춘 값)마다 한 번만 남긴다 — state 는 2초마다 온다.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> NormalizedLogged = new();
+
     public RobotStateService(AcsDbContext db, IHubContext<MonitoringHub> hub,
         InspectionDispatcher dispatcher, ProgressService progress,
-        RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log)
+        RobotErrorTracker errorTracker, MissionService missions, ILogger<RobotStateService> log,
+        GasLinkTracker? gasLink = null)
     {
         _db = db; _hub = hub; _dispatcher = dispatcher; _progress = progress;
         _errorTracker = errorTracker; _missions = missions; _log = log;
+        _gasLink = gasLink;
     }
+
+    private readonly GasLinkTracker? _gasLink;   // 가스 센서 상태·임계값 적용 확인(state.information)
 
     public async Task HandleStateAsync(RobotRef robot, Vda5050State state, CancellationToken ct = default)
     {
         // ── 1. robot_context 갱신 (보고값)
         var ctx = await _db.RobotContexts.FindAsync(new object[] { robot.RobotId }, ct)
                   ?? _db.RobotContexts.Add(new RobotContextEntity { RobotId = robot.RobotId }).Entity;
-        ctx.ReportedMapId = state.AgvPosition?.MapId;
+        // AMR 은 층만 알고 선창 이름은 ACS 가 준 값을 되돌려 보고한다 — 옛 이름·층만 보고해도 층 번호로 ACS 층 맵에 맞춘다
+        var rawMapId = state.AgvPosition?.MapId;
+        ctx.ReportedMapId = await ReportedMap.ResolveAsync(_db, rawMapId, ct);
+        if (ctx.ReportedMapId != rawMapId && NormalizedLogged.TryAdd($"{robot.RobotId}|{rawMapId}|{ctx.ReportedMapId}", 0))
+            _log.LogInformation("로봇 {Robot} 보고 층 '{Raw}' 를 층 번호로 '{Map}' 에 맞춤 (선창 ID 변경 직후·AMR 재시작 직후에 생긴다).",
+                robot.RobotId, rawMapId, ctx.ReportedMapId);
         ctx.ReportedX = state.AgvPosition?.X;
         ctx.ReportedY = state.AgvPosition?.Y;
         ctx.ReportedTheta = state.AgvPosition?.Theta;
@@ -47,6 +59,7 @@ public sealed class RobotStateService
         // errorType 에지 갱신을 **액션 대조보다 먼저** — 장치 HEAVY 알람(*LinkLost)이 처음 실린 state에서
         // AMR이 중단한 정차(액션 FAILED)가 종결되면 곧바로 DispatchNext가 불리는데, 그 배차 게이트가
         // 이번 state의 알람을 알아야 거부→재배차 연쇄가 생기지 않는다 [HD_AMR 장치통신 HEAVY알람 §5].
+        _gasLink?.Update(robot.RobotId, state.Information);
         var edges = _errorTracker.UpdateEdges(robot.RobotId, state.Errors.Select(e => e.ErrorType));
 
         // ── 2. 활성 미션 대조 (orderId 기준)
@@ -84,8 +97,14 @@ public sealed class RobotStateService
             // 전 액션 종결 + (마지막 노드 도달 OR 현재 정차 전 액션 FAILED) → 현재 정차 종결.
             // 주행 실패 시 AMR은 노드 미도달 상태로 전 액션을 FAILED 종결한다(drivingFailed, AMR 회신 §3.1)
             // — 도달 조건만 보면 work_item이 DISPATCHED로 정체하므로 전-FAILED도 종결로 취급한다.
+            // 이번 Order 액션만 센다(order_id 가 붙은 기록이 없으면 옛 기록 — 미션 전체). 이전 Order 의 미실행 액션이
+            // 남아 있어도 정차 종결이 막히지 않게 한다(2026-11-21 현장: 중단 → 이어하기 뒤 다음 영역으로 넘어가지 않음).
+            var curOrderId = mission.OrderId;
+            bool tagged = curOrderId is not null
+                && await _db.OrderActions.AnyAsync(x => x.MissionId == mission.MissionId && x.OrderId == curOrderId, ct);
             var remaining = await _db.OrderActions.CountAsync(
-                x => x.MissionId == mission.MissionId && x.Status != "FINISHED" && x.Status != "FAILED", ct);
+                x => x.MissionId == mission.MissionId && (!tagged || x.OrderId == curOrderId)
+                     && x.Status != "FINISHED" && x.Status != "FAILED", ct);
             var lastSeq = await _db.OrderNodes.Where(n => n.MissionId == mission.MissionId)
                 .MaxAsync(n => (int?)n.SequenceId, ct) ?? 0;
             bool stopSettled = remaining == 0 && state.LastNodeSequenceId >= lastSeq;
@@ -95,9 +114,9 @@ public sealed class RobotStateService
                     .FirstOrDefaultAsync(w => w.OrderId == mission.OrderId && w.Status == "DISPATCHED", ct);
                 if (curWi is not null)
                 {
-                    var stopActs = await _db.OrderActions.AsNoTracking()
-                        .Where(a => a.WorkItemId == curWi.WorkItemId).Select(a => a.Status).ToListAsync(ct);
-                    stopSettled = stopActs.Count > 0 && stopActs.All(s => s == "FAILED");
+                    var stopActs = InspectionDispatcher.CurrentOrderActions(await _db.OrderActions.AsNoTracking()
+                        .Where(a => a.WorkItemId == curWi.WorkItemId).ToListAsync(ct), curWi.OrderId);
+                    stopSettled = stopActs.Count > 0 && stopActs.All(a => a.Status == "FAILED");
                     if (stopSettled)
                         _log.LogWarning("Mission {Mission}: 노드 미도달 상태에서 전 액션 FAILED — 주행 실패로 정차 종결 처리.",
                             mission.MissionId);
@@ -224,6 +243,10 @@ public sealed class RobotStateService
         if (disappeared.Any(RobotErrorTracker.IsObstacleHold))
             await ClearNoticeAlarmAsync(robot.RobotId, "COBOT_ZONE_OBSTACLE", "코봇 반경 장애물 해소", ct);
 
+        // 배터리 보호 해제가 끝남(AMR 설정을 끄고 재시작) — 알람 해제 기록.
+        if (disappeared.Any(RobotErrorTracker.IsBatteryGuardBypass))
+            await ClearNoticeAlarmAsync(robot.RobotId, "BATTERY_GUARD_BYPASSED", "배터리 보호 다시 켜짐", ct);
+
         if (state.Errors.Count == 0) return;
 
         // orderRejectedDeviceFault: 알람 직전 발행 Order가 경합으로 거부된 경우 — 실패 아님, 정차를 PENDING 복귀(멱등).
@@ -304,6 +327,11 @@ public sealed class RobotStateService
                     // 주행 중이라 액션은 WAITING 그대로다. 끝내 안 사라지면 AMR이 주행 실패로 종결한다(그때 실패 정책).
                     AddErrorAlarm("COBOT_ZONE_OBSTACLE", robot.RobotId,
                         "코봇 반경 장애물 — AMR 주행 정지, 장애물을 치우면 다시 출발(타워램프 황색·부저)", err);
+                    break;
+                case var t when RobotErrorTracker.IsBatteryGuardBypass(t):
+                    // 배터리 보호 임시 해제 — 실패 아님(운영 상태 경고). 알람·로그만, 배차·실패 집계는 건드리지 않는다.
+                    AddErrorAlarm("BATTERY_GUARD_BYPASSED", robot.RobotId,
+                        "배터리 보호 해제 중 — AMR이 BMS 잔량을 무시하고 운용(팩 전압 확인 필요)", err);
                     break;
                 case var t when DeviceFaults.IsLinkLost(t):
                     // 장치통신 HEAVY알람 §5.2: AMR이 이미 임무 중단(남은 액션 FAILED → 액션 종결 경로가 실패 집계).
@@ -483,6 +511,13 @@ public sealed class RobotStateService
         ActionState a, RobotRef robot, CancellationToken ct)
     {
         oa.Result = System.Text.Json.JsonSerializer.Serialize(new { a.ActionStatus, a.ResultDescription });
+        // 가스검사 — 끝난 액션의 결과가 가스 측정 본문이면 저장해 둔다(세이지 전송은 SaigeGasResultSender 가 따로 돈다)
+        if (a.ActionStatus == "FINISHED" && GasResultRecorder.Create(mission.RunId, oa, a.ResultDescription, robot.RobotId) is { } gas)
+        {
+            _db.GasResults.Add(gas);
+            _log.LogInformation("가스 측정 결과 수신 — task={Task} round={Round} 판정 {Result} ({N}포인트)",
+                gas.TaskId, gas.Round, gas.Result, gas.PointCount);
+        }
         _db.InspectionResults.Add(new InspectionResultEntity
         {
             ResultId = Guid.NewGuid(),

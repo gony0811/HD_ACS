@@ -47,6 +47,10 @@ public sealed class SaigeHealthReporter : BackgroundService
 
     public const string HttpClientName = "saige";
 
+    private readonly GasLinkTracker? _gasLink;
+    /// <summary>이보다 오래된 센서 보고는 싣지 않는다(AMR 이 더는 보고하지 않는 값을 현재 상태인 척 보내지 않게).</summary>
+    internal static readonly TimeSpan SensorMaxAge = TimeSpan.FromSeconds(30);
+
     /// <summary>현재 연동 상태 — <c>GET /api/integrations/saige</c>. 정상 전송은 로그를 남기지 않으므로 이것이 "보내고 있다"의 근거다.</summary>
     public SaigeLinkStatus Status => _status;
 
@@ -54,9 +58,10 @@ public sealed class SaigeHealthReporter : BackgroundService
     internal int ConsecutiveFailures => _consecutiveFailures;
 
     public SaigeHealthReporter(IServiceScopeFactory scopes, IHttpClientFactory http,
-        RobotErrorTracker errors, IConfiguration config, ILogger<SaigeHealthReporter> log)
+        RobotErrorTracker errors, IConfiguration config, ILogger<SaigeHealthReporter> log, GasLinkTracker? gasLink = null)
     {
         _scopes = scopes; _http = http; _errors = errors; _log = log;
+        _gasLink = gasLink;
         _opt = config.GetSection("Acs:Saige").Get<SaigeOptions>() ?? new SaigeOptions();
         _status = SaigeLinkStatus.Initial(_opt);
     }
@@ -140,7 +145,8 @@ public sealed class SaigeHealthReporter : BackgroundService
             Position: new SaigeRobotPosition(level, x, y, yaw),
             Battery: (int)Math.Round(Math.Clamp(ctx.BatteryPct ?? 0, 0, 100)),
             Rssi: 100,  // 로봇 보고 항목에 통신 감도 없음 — 측정값이 아닌 고정값(현장 요청 2026-11-13, 종전 −1) [§9.3]
-            Timestamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            Timestamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Sensor: _gasLink?.Sensor(robotId, SensorMaxAge) is { } gs ? new SaigeGasSensor(gs.State, gs.ErrorCode, gs.Calibrated) : null);
     }
 
     private SaigeRobotHealth? Hold(string robotId, string reason)
@@ -289,7 +295,15 @@ public sealed record SaigeRobotLink(string RobotId, DateTimeOffset? LastSentAt, 
 
 /// <summary>robot-health-check 요청 본문 [§9.1]. JSON 키는 camelCase.</summary>
 public sealed record SaigeRobotHealth(
-    string RobotId, string Status, SaigeRobotPosition Position, int Battery, int Rssi, long Timestamp);
+    string RobotId, string Status, SaigeRobotPosition Position, int Battery, int Rssi, long Timestamp,
+    // 가스 센서 상태(선택) [포밍가스 규격 §4] — 가스검사 AMR 이 최근에 보고했을 때만 싣는다(용접검사 본문은 그대로)
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    SaigeGasSensor? Sensor = null);
+
+/// <summary>가스 센서 상태 [포밍가스 규격 §4] — state 는 AMR 보고값 그대로, errorCode 없으면 0, calibrated 는 AMR 이 줄 때만.</summary>
+public sealed record SaigeGasSensor(string State, int ErrorCode,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? Calibrated = null);
 
 /// <summary>도면 좌표 위치 — level 1-based, x·y mm 정수, yaw deg 소수 1자리.</summary>
 public sealed record SaigeRobotPosition(int Level, int X, int Y, double Yaw);

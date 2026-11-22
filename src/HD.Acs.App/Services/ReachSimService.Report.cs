@@ -55,7 +55,7 @@ public sealed partial class ReachSimService
     public async Task<ReachReport?> ReportAsync(string tankId, int? level, string? wallCode, Guid? areaId, bool optimize,
         CancellationToken ct, ReachBranchRule branch = ReachBranchRule.MaxMargin)
     {
-        _model = _baseModel with { BranchRule = branch };
+        _model = (await BaseAsync(tankId, ct)) with { BranchRule = branch };
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -96,7 +96,7 @@ public sealed partial class ReachSimService
     private List<string> ReportArea(InspectionAreaEntity a, WallEntity wall, AreaSetup setup, bool optimize,
         StringBuilder taskRows, StringBuilder ikRows, CancellationToken ct)
     {
-        var lift = Math.Clamp(a.StationLiftMm ?? 0, 0, _model.StrokeMaxMm);
+        var lift = _model.LiftStrokeMm(a.StationLiftMm);
         var tasks = a.Tasks.OrderBy(t => t.Seq).ToList();
         var evals = new TaskEval[tasks.Count];
         Parallel.For(0, tasks.Count, new ParallelOptions { CancellationToken = ct }, i => evals[i] = EvaluateTask(a, setup, tasks[i], lift));
@@ -109,7 +109,7 @@ public sealed partial class ReachSimService
             var seams = evals.Select(e => (IReadOnlyList<double[]>)e.Pts).ToList();
             alt = AreaLift.Evaluate(_model, setup.Planes, setup.Stations, seams, setup.Normal, Strokes, a.WallCode);
             if (optimize && SearchSpace(a, wall, setup) is { } space)
-                opt = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode);
+                opt = StationOptimizer.Optimize(_model, setup.Planes, space, seams, setup.Normal, Strokes, ct, a.WallCode, poseError: _poseError);
         }
         var moved = opt is not null && (Math.Abs(opt.Best.Station.X - opt.Baseline.Station.X) > 1e-6
             || Math.Abs(opt.Best.Station.Y - opt.Baseline.Station.Y) > 1e-6 || Math.Abs(opt.Best.Station.Yaw - opt.Baseline.Station.Yaw) > 1e-6

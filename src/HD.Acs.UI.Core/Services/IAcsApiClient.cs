@@ -21,10 +21,20 @@ public interface IAcsApiClient
 
     // ── 명령 ──────────────────────────────────────────────
     Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default);
+    /// <summary>미션 시작 + 가스검사 회차(1|2, null = 지정 안 함). 기본 구현 = 회차 없이 시작(기존 대역 무수정).</summary>
+    Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, CancellationToken ct) =>
+        StartRunAsync(scenarioId, robotId, ct);
+    /// <summary>미션 시작 — <paramref name="restart"/> = 이어할 수 있는 중단 run이 있어도 처음부터(운영자 확인 후).
+    /// false 면 서버가 409(RESUMABLE_RUN_EXISTS)로 거부한다. 기본 구현은 restart 없이 보낸다(구서버 호환).</summary>
+    Task<Guid> StartRunAsync(Guid scenarioId, string robotId, int? round, bool restart, CancellationToken ct) =>
+        StartRunAsync(scenarioId, robotId, round, ct);
     /// <summary>리페어 run — 지정한 용접선(TASK)만 검사. optimize = 시작 전에 그 용접선만 놓고 정차점 최적화를 돌려 반영.
     /// null = 서버 미지원(구빌드). 거부(400·409)는 예외.</summary>
     Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
         bool optimize = true, CancellationToken ct = default) => Task.FromResult<RepairRunStartedDto?>(null);
+    /// <summary>리페어 run + 가스검사 회차(1|2, null = 용접검사). 기본 구현 = 회차 없이 시작(기존 대역 무수정).</summary>
+    Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId,
+        bool optimize, int? round, CancellationToken ct) => StartRepairRunAsync(robotId, taskIds, scenarioId, optimize, ct);
     Task AbortRunAsync(Guid runId, CancellationToken ct = default);
     Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
     Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);
@@ -104,6 +114,13 @@ public interface IAcsApiClient
         double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
         double originOx, double originOy, string userId,
         double? reachZMin = null, double? reachZMax = null, CancellationToken ct = default);
+    /// <summary>선창 등록 + 검사 종류(WELD|GAS, null = 기존 선창은 유지·새 선창은 WELD). 기본 구현 = 검사 종류 없이 등록(기존 대역 무수정).</summary>
+    Task<int> RegisterTankGeometryAsync(string tankId, double lengthL, double wFloor, double thetaLowDeg,
+        double hLow, double hWall, double thetaUpDeg, double hUp, double[] levelZ,
+        double originOx, double originOy, string userId,
+        double? reachZMin, double? reachZMax, string? inspectionKind, CancellationToken ct = default) =>
+        RegisterTankGeometryAsync(tankId, lengthL, wFloor, thetaLowDeg, hLow, hWall, thetaUpDeg, hUp, levelZ,
+            originOx, originOy, userId, reachZMin, reachZMax, ct);
     Task<TankGeometryDto?> GetTankGeometryAsync(string tankId, CancellationToken ct = default);
     // v3.1 §8: level 지정 시 그 층 도달 가능 면만 + 면별 reachableVBand 반환.
     Task<IReadOnlyList<WallDto>> GetWallsAsync(string tankId, int? level = null, CancellationToken ct = default);
@@ -114,11 +131,11 @@ public interface IAcsApiClient
         double[][] corners,
         double? stationX, double? stationY, double? stationTheta, string userId,
         double? stationStandoffM = null, Guid? areaId = null, double? stationMaxBackwardMm = null,
-        CancellationToken ct = default);
+        double? stationLiftMm = null, CancellationToken ct = default);
     /// <summary>영역 수정(PUT) — areaId·면 유지, 이름·코너(면-전체 v)·정차 전체 교체. 반환=재유도된 층.</summary>
     Task<int> UpdateAreaAsync(Guid areaId, string name, double[][] corners,
         double? stationX, double? stationY, double? stationTheta, double? stationStandoffM, string userId,
-        double? stationMaxBackwardMm = null, CancellationToken ct = default);
+        double? stationMaxBackwardMm = null, double? stationLiftMm = null, CancellationToken ct = default);
     /// <summary>선택 작업들을 묶어 새 영역으로 분리·이동(taskId 유지). corners 미지정 시 서버가 작업 외접 사각형을 자동 생성.</summary>
     Task<(Guid AreaId, int Level, int MovedCount)> SplitTasksToNewAreaAsync(
         string tankId, string wallCode, string name, IReadOnlyList<Guid> taskIds, double[][]? corners,
@@ -127,6 +144,15 @@ public interface IAcsApiClient
         Task.FromResult((Guid.Empty, 0, 0));
     Task<IReadOnlyList<AreaDto>> GetAreasAsync(string tankId, string? wallCode = null, int? level = null, CancellationToken ct = default);
     Task DeleteAreaAsync(Guid areaId, CancellationToken ct = default);
+    /// <summary>
+    /// 영역 삭제 — 서버가 작업을 원래 영역으로 되돌린 뒤 지운다. 갈 곳이 없는 작업이 있으면 <c>Blocked</c>(삭제 안 됨),
+    /// <paramref name="deleteTasks"/> = true 면 그 작업도 함께 지운다. 기본 구현 = 종전 삭제(구서버·테스트 대역).
+    /// </summary>
+    async Task<AreaDeleteOutcome> DeleteAreaAsync(Guid areaId, bool deleteTasks, string userId, CancellationToken ct = default)
+    {
+        await DeleteAreaAsync(areaId, ct);
+        return new AreaDeleteOutcome(false, null, Array.Empty<string>(), Array.Empty<string>());
+    }
     Task<int> CreateAreaTaskAsync(Guid areaId, double startU, double startV, double endU, double endV,
         string seamType, string sectionDxfId, string profileId, string userId,
         int? seq = null, string? name = null, Guid? taskId = null, double[][]? points = null, CancellationToken ct = default);
@@ -145,6 +171,21 @@ public interface IAcsApiClient
     Task UpdateAreaTaskAsync(Guid taskId, double startU, double startV, double endU, double endV,
         string? seamType, string userId, int? seq = null, string? name = null, double[][]? points = null, CancellationToken ct = default);
     Task DeleteAreaTaskAsync(Guid taskId, CancellationToken ct = default);
+    /// <summary>서버에 등록된 선창 ID 목록(등록 순). null = 서버 미지원(구빌드).</summary>
+    Task<IReadOnlyList<string>?> GetTankIdsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string>?>(null);
+    /// <summary>
+    /// 선창 ID 변경 — 형상·면·영역·시나리오·층 맵을 함께 옮긴다(영역 ID·taskId 유지). false = 서버 미지원(구빌드).
+    /// 형식 오류 400 · 이미 쓰는 ID·진행 중 run 409 · 없는 선창 404 는 예외(메시지에 사유).
+    /// </summary>
+    Task<bool> RenameTankAsync(string tankId, string newTankId, string userId, CancellationToken ct = default) =>
+        Task.FromResult(false);
+    /// <summary>
+    /// CROSS4 작업의 정면 좌우(CROSS4_L/R) 판정 [VDA §8.2 · 1.22]. apply=false = 미리보기, true = 바뀐 작업 저장.
+    /// null = 서버 미지원(구빌드).
+    /// </summary>
+    Task<Cross4SideResultDto?> ClassifyCross4SidesAsync(string tankId, bool apply, string userId, CancellationToken ct = default) =>
+        Task.FromResult<Cross4SideResultDto?>(null);
     /// <summary>용접선 임시 제외/복귀 — enabled=false 면 검사(큐 전개·재개·재검사)에서 빠진다. false 반환 = 서버 미지원(구빌드).</summary>
     Task<bool> SetAreaTasksEnabledAsync(IReadOnlyList<Guid> taskIds, bool enabled, string userId, CancellationToken ct = default) =>
         Task.FromResult(false);
@@ -165,6 +206,33 @@ public interface IAcsApiClient
     Task<PlanApplyResultDto> ApplyPlanChangeSetAsync(Guid changeSetId, string userId, CancellationToken ct = default) =>
         throw new NotSupportedException("계획 어시스턴트 미지원 클라이언트");
     Task<LlmStatusDto?> GetLlmStatusAsync(CancellationToken ct = default) => Task.FromResult<LlmStatusDto?>(null);
+    /// <summary>서버 리프트 사용 여부(<c>Acs:Lift:Enabled</c>). null = 모름(구서버) — 호출 측은 사용으로 본다.</summary>
+    Task<bool?> GetLiftEnabledAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
+    /// <summary>서버 리프트 운영 방식(<c>Acs:Lift:Mode</c> — Off | Auto | Fixed). null = 모름(구서버) — 호출 측은 자동으로 본다.
+    /// 기본 구현은 <see cref="GetLiftEnabledAsync"/> 로 미사용/자동만 구분한다.</summary>
+    async Task<LiftSettingsDto?> GetLiftSettingsAsync(CancellationToken ct = default) =>
+        await GetLiftEnabledAsync(ct) is { } on ? new LiftSettingsDto(on ? "Auto" : "Off", null) : null;
+    /// <summary>정차 묶음 최적화(set cover) 시작 — 작업 번호. null = 구서버(미지원). 격자·반경은 null 이면 서버 기본(0.3 m·2.8 m).</summary>
+    Task<Guid?> StartSetCoverAsync(string tankId, int level, string wallCode, double? gridStepM = null, double? reachRadiusM = null,
+        CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+    /// <summary>정차 묶음 최적화 작업 상태·결과. null = 작업 없음.</summary>
+    Task<SetCoverJobDto?> GetSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverJobDto?>(null);
+    /// <summary>정차 묶음 최적화 결과를 영역에 적용(그 면·층 영역을 다시 구성). 거부(409·400)는 예외 메시지에 사유. null = 구서버.</summary>
+    Task<SetCoverApplyResultDto?> ApplySetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<SetCoverApplyResultDto?>(null);
+    /// <summary>
+    /// 균등 격자 재분할 — 면·층 영역을 칸 크기[m]로 다시 나눠 용접선을 묶는다. apply=false 미리보기 / true 적용(정차 덮어쓰기·리프트는 지워짐).
+    /// null = 구서버. 거부(400·409)는 예외 메시지에 사유.
+    /// </summary>
+    Task<GridAreasResponseDto?> GridAreasAsync(string tankId, int level, string wallCode, double cellUM, double? cellVM, bool apply,
+        CancellationToken ct = default) => Task.FromResult<GridAreasResponseDto?>(null);
+    /// <summary>정차 묶음 최적화 중지.</summary>
+    Task CancelSetCoverAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
+    /// <summary>리치·간섭 화면의 리프트·차체 설정(지금 적용 중인 값). null = 구서버(미지원).</summary>
+    Task<ReachSettingsDto?> GetReachSettingsAsync(CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
+    /// <summary>설정 저장 — 서버가 바로 적용(재시작 불필요). 진행 중 run 이면 409, 범위 밖 400(예외 메시지에 사유). null = 구서버.</summary>
+    Task<ReachSettingsDto?> SaveReachSettingsAsync(ReachSettingsUpdateDto settings, CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
+    /// <summary>화면에서 덮어쓴 값을 모두 지움(appsettings.json 값으로). null = 구서버.</summary>
+    Task<ReachSettingsDto?> ResetReachSettingsAsync(CancellationToken ct = default) => Task.FromResult<ReachSettingsDto?>(null);
 
     // ── 배터리 교체 장소 [HD_AMR 배터리관리 §6] — mapId당 1곳, 운영자 수동 디스패치 ──
     Task<IReadOnlyList<BatterySwapNodeDto>> GetBatterySwapNodesAsync(string? mapId = null, CancellationToken ct = default) =>

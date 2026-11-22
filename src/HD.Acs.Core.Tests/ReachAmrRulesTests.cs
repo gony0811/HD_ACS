@@ -5,7 +5,8 @@ namespace HD.Acs.Core.Tests;
 
 /// <summary>
 /// HD_AMR 리치 사전 점검과 맞춘 규칙 — 최소 플랜지 뻗음(면에 너무 가깝거나 리프트가 높은 정차), 팔 뻗음 상한(너무 먼 정차).
-/// 2026-11-11~12 천장(T) 실적: 리프트 100 mm 정차 52건 전부 "플랜지 뻗음 342mm &lt; 최소 350mm" 로 거부.
+/// 2026-11-11~12 천장(T) 실적: 리프트 100 mm 정차 52건 전부 "플랜지 뻗음 342mm &lt; 최소 350mm" 로 거부 →
+/// 2026-11-13 천장은 최소 뻗음 규칙 제외(근거 실측은 수직벽).
 /// </summary>
 public class ReachAmrRulesTests
 {
@@ -30,23 +31,33 @@ public class ReachAmrRulesTests
     }
 
     [Fact]
-    public void 리프트를_올려_뻗음이_모자라면_도달_불가다()
+    public void 수직벽에_너무_가까우면_뻗음이_모자라_도달_불가다()
     {
-        Assert.Null(ReachSimulator.FlangeShortReason(Field, Station, 0, OnCeiling, CeilingNormal));
-        Assert.Contains("플랜지 뻗음 부족", ReachSimulator.FlangeShortReason(Field, Station, 100, OnCeiling, CeilingNormal));
+        // 근거 실측(2026-09-28): 벽에서 1.0 m 정차 → 1000 − 400 − 365 = 235 mm < 350 mm (실기 공구 370 이면 230)
+        var wallNormal = new[] { -1.0, 0, 0 };   // 정차 앞 +x 쪽 벽, 안쪽 법선은 −x
+        var onWall = new[] { 1.0, 0, 1.6 };
+        Assert.Equal(235, ReachSimulator.FlangeReachMm(Field, Station, 0, onWall, wallNormal), 3);
+        Assert.Contains("플랜지 뻗음 부족", ReachSimulator.FlangeShortReason(Field, Station, 0, onWall, wallNormal));
+        Assert.Null(ReachSimulator.FlangeShortReason(Field, Station, 0, new[] { 1.2, 0, 1.6 }, wallNormal));   // 435 mm
+        Assert.Null(ReachSimulator.FlangeShortReason(Field with { MinFlangeReachMm = 0 }, Station, 0, onWall, wallNormal));
+    }
+
+    [Fact]
+    public void 천장은_최소_뻗음_규칙을_적용하지_않는다()
+    {
+        // 2026-11-11 리프트 100 정차 52건이 이 규칙(342 mm < 350 mm)으로만 거부됐다 — 천장은 접힌 팔에서도
+        // ② 자세 J5 가 90° 근처라 손목 특이점이 나지 않아 규칙을 뺀다(2026-11-13, HD_AMR 와 동시).
+        Assert.False(ReachSimulator.FlangeRuleApplies(CeilingNormal));
+        Assert.True(ReachSimulator.FlangeRuleApplies(new[] { -1.0, 0, 0 }));                          // 수직벽
+        Assert.True(ReachSimulator.FlangeRuleApplies(new[] { 0, -Math.Sqrt(0.5), -Math.Sqrt(0.5) }));   // 상부 경사면
+        Assert.True(ReachSimulator.FlangeRuleApplies(new[] { 0.0, 0, 1 }));                            // 바닥
+        Assert.Null(ReachSimulator.FlangeShortReason(Field, Station, 100, OnCeiling, CeilingNormal));
 
         var pts = new[] { OnCeiling, new[] { 0.6, 0.98, 2.8425 }, new[] { 0.6, 1.16, 2.8425 } };
         var m = Field with { CheckTraversal = false };
         var s = ReachSimulator.Survey(m, Planes, new[] { Station }, pts, CeilingNormal, new[] { 100.0 });
-        Assert.Equal(ReachVerdict.Unreachable, s.Verdict);
-        Assert.Contains("플랜지 뻗음 부족", s.Blocker);
-        // 리프트를 고를 수 있으면 모자라지 않는 높이(0)를 고른다
-        var free = ReachSimulator.Survey(m, Planes, new[] { Station }, pts, CeilingNormal, new[] { 0.0, 100, 200 });
-        Assert.NotEqual(ReachVerdict.Unreachable, free.Verdict);
-        Assert.Equal(0, free.StrokeMm);
-        // 규칙을 끄면(0) 종전 판정 — 리프트 100 도 닿는다
-        var off = ReachSimulator.Survey(m with { MinFlangeReachMm = 0 }, Planes, new[] { Station }, pts, CeilingNormal, new[] { 100.0 });
-        Assert.NotEqual(ReachVerdict.Unreachable, off.Verdict);
+        Assert.NotEqual(ReachVerdict.Unreachable, s.Verdict);
+        Assert.DoesNotContain("플랜지 뻗음 부족", s.Blocker ?? "");
     }
 
     [Fact]

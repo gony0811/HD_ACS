@@ -84,6 +84,15 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     [ObservableProperty] private string _reachZMaxText = "";      // 선택 — 코봇 도달 밴드 상한
     [ObservableProperty] private double _originOx;
     [ObservableProperty] private double _originOy;
+
+    // 검사 종류(용접/가스) — 선창 단위 값. 새 프로젝트 창에서 고르고, 현재 선창의 값은 배너에 표시한다.
+    public IReadOnlyList<InspectionKindOption> InspectionKindOptions => InspectionKindOption.All;
+    /// <summary>새 프로젝트 창의 선택값(선창을 읽으면 그 선창 값으로 맞춘다).</summary>
+    [ObservableProperty] private InspectionKindOption _selectedInspectionKind = InspectionKindOption.All[0];
+    /// <summary>현재 선창의 검사 종류 표시(서버 값. 구서버 = 용접검사).</summary>
+    [ObservableProperty] private string _inspectionKindLabel = InspectionKindOption.All[0].Label;
+    /// <summary>현재 선창의 검사 종류 코드(WELD|GAS).</summary>
+    [ObservableProperty] private string _inspectionKindCode = InspectionKindOption.Weld;
     [ObservableProperty] private string _derivedText = "-";
 
     // 선택 면 경계 폴리곤(캔버스 px) — 면 전체(회색 음영). 마구리(F/A)는 팔각, 그 외 직사각형.
@@ -121,6 +130,25 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // 정차 보정 후진 상한 [mm] — AMR 이 리치 부족 시 물러나도 되는 최대 거리 [VDA §4.4.2 N23]. null(빈값)=서버 설정 기본(400),
     // 0=이 영역은 후진 금지. 정차점 뒤 공간(맞은편 구조물·층 경계)이 좁은 영역만 줄인다 — 뒤 범퍼는 중심 뒤 365 + 이 값까지 간다.
     [ObservableProperty] private double? _stationMaxBackwardMm;
+    /// <summary>정차 리프트 높이 [mm, 0~1000] — 이 영역을 검사할 때 AMR 리프트를 맞출 높이. 빈값=등록 시 배차 기본 0, 수정 시 기존 값 유지.</summary>
+    [ObservableProperty] private double? _stationLiftMm;
+    /// <summary>
+    /// 영역 폼 리프트 칸을 쓸 수 있는가 — 서버 리프트 방식(<c>Acs:Lift:Mode</c>)이 자동일 때만 true. 미사용(0)·고정(고정 높이)이면
+    /// 서버가 지령·판정 높이를 정하므로 칸을 끈다(저장된 값은 지우지 않는다). 구서버·조회 실패면 true(종전).
+    /// </summary>
+    [ObservableProperty] private bool _liftEnabled = true;
+    /// <summary>서버 리프트 방식 — "Off" | "Auto" | "Fixed".</summary>
+    [ObservableProperty] private string _liftMode = "Auto";
+    /// <summary>고정 모드의 리프트 높이 [mm].</summary>
+    [ObservableProperty] private double? _liftFixedMm;
+    public string LiftHint => LiftMode switch
+    {
+        "Off" => "리프트 미사용(서버 Acs:Lift:Mode = Off) — 모든 지령·판정에서 리프트 0",
+        "Fixed" => $"리프트 고정 {LiftFixedMm ?? 0:0} mm(서버 Acs:Lift:Mode = Fixed) — 모든 지령·판정이 이 높이, 영역 값은 쓰지 않음",
+        _ => "",
+    };
+    partial void OnLiftModeChanged(string value) { LiftEnabled = value == "Auto"; OnPropertyChanged(nameof(LiftHint)); }
+    partial void OnLiftFixedMmChanged(double? value) => OnPropertyChanged(nameof(LiftHint));
 
     /// <summary>서버 <c>Acs:Area:StationStandoffM</c>(경사면) 기본값 — 이격 빈값일 때 자동 정차점 표시용(서버 설정을 바꾸면 함께 맞출 것).</summary>
     public const double DefaultStandoffM = 0.8;
@@ -206,7 +234,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // CROSS3*/CROSS4/CORNER* 는 HD_AMR 실행 게이트 OFF([협의 N13])라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
     // ⚠️ CROSS3/4 는 시작·끝점 2점만으로 교차 형상을 정의할 수 없다 — 교차 중심+가지 입력은 후속(제안: 데이터 모델 points 확장).
     public IReadOnlyList<string> SeamTypes { get; } =
-        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3" };
+        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3" };
     [ObservableProperty] private string _selectedSeamType = "LINE";
 
     // ── CROSS3/4 교차 그리기 [VDA §8.5.1, N13] — 중심+가지 클릭, 회전은 서버가 자동 유도·표시 ──
@@ -242,6 +270,13 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         try
         {
+            var lift = await _api.GetLiftSettingsAsync();
+            LiftFixedMm = lift?.FixedStrokeMm;
+            LiftMode = lift?.Mode is "Off" or "Fixed" ? lift.Mode : "Auto";
+        }
+        catch (Exception) { LiftMode = "Auto"; }   // 조회 실패는 종전 동작(칸 켬) — 서버가 어차피 높이를 정한다
+        try
+        {
             var g = await _api.GetTankGeometryAsync(TankId);
             if (g is not null) ApplyGeometry(g);
             await LoadWallsAsync();
@@ -273,7 +308,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         try
         {
             int n = await _api.RegisterTankGeometryAsync(TankId, LengthL, WFloor, ThetaLowDeg, HLow,
-                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax);
+                HWall, ThetaUpDeg, HUp, levelZ, OriginOx, OriginOy, _operatorId, reachMin, reachMax, SelectedInspectionKind.Code);
             StatusMessage = $"선창 파라미터 등록: {TankId} → {n}면 자동생성";
             await LoadAsync();
             return true;
@@ -301,8 +336,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var (areaId, level) = await _api.CreateAreaAsync(TankId, w.WallCode, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
-                _operatorId, StationStandoffM, stationMaxBackwardMm: StationMaxBackwardMm);
-            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 L{level}";
+                _operatorId, StationStandoffM, stationMaxBackwardMm: StationMaxBackwardMm, stationLiftMm: StationLiftMm);
+            StatusMessage = $"영역 등록: {w.WallCode}/{AreaName} (4점) → 유도 층 {LevelLabel.Of(level)}";
             await RefreshAreasAsync(select: areaId);   // 새 영역을 선택 → 바로 작업 등록·수정 가능
         }
         catch (Exception ex) { StatusMessage = $"영역 등록 실패: {ex.Message}"; }   // 면범위·층유도 400·중복 409
@@ -312,6 +347,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     /// 입력 코너(층-로컬 v) 사전 검증 후 면-전체 v로 환산해 반환. 위반 시 StatusMessage를 채우고 null.
     /// 서버가 최종 판정하지만, 흔한 실수는 왕복 전에 알린다(등록·수정 공통).
     /// </summary>
+    /// <summary>층 구간 경계 허용 오차 [m] — 서버 <c>LevelBands</c> 의 ε(0.005)와 맞춘다.</summary>
+    public const double LevelEdgeTolM = 0.005;
+
     private double[][]? InputCornersFaceGlobal()
     {
         var local = InputCorners();
@@ -325,7 +363,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 : "AREA 최대 크기는 u/v 각 1.44m(1440mm)입니다.";
             return null;
         }
-        if (mav > SliceH + 1e-6 || miv < -1e-6) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
+        // 경계에 붙은 코너는 0.1 mm 반올림 저장으로 구간 밖 수십 μm 가 될 수 있다 — 서버 층 판정(LevelBands ε 5 mm)과 같은 여유를 둔다.
+        if (mav > SliceH + LevelEdgeTolM || miv < -LevelEdgeTolM) { StatusMessage = $"코너 v가 선택 층 구간(0~{SliceH:0.###})을 벗어났습니다."; return null; }
         double off = VOff;   // 층-로컬 → 면-전체 v 변환 후 저장(각 코너 v)
         return local.Select(p => new[] { p[0], p[1] + off }).ToArray();
     }
@@ -346,9 +385,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             int level = await _api.UpdateAreaAsync(area.AreaId, AreaName, corners,
                 StationOverride ? StationX : null, StationOverride ? StationY : null, StationOverride ? StationTheta : null,
-                StationStandoffM, _operatorId, StationMaxBackwardMm);
-            StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 L{level} — areaId·작업 유지"
-                + (SelectedLevel is { } l && l.Level != level ? $" (층이 L{level}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
+                StationStandoffM, _operatorId, StationMaxBackwardMm, StationLiftMm);
+            StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 {LevelLabel.Of(level)} — areaId·작업 유지"
+                + (SelectedLevel is { } l && l.Level != level ? $" (층이 {LevelLabel.Of(level)}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
             await RefreshAreasAsync(select: area.AreaId);
         }
         catch (Exception ex) { StatusMessage = $"영역 수정 실패: {ex.Message}"; }   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404
@@ -369,7 +408,26 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     private async Task DeleteAreaAsync(AreaDto? area)
     {
         if (area is null) return;
-        try { await _api.DeleteAreaAsync(area.AreaId); StatusMessage = "영역 삭제됨."; await RefreshAreasAsync(); }
+        try
+        {
+            // 서버가 작업을 원래 영역으로 되돌린 뒤 영역을 지운다. 갈 곳이 없는 작업이 있으면 먼저 묻는다(되돌릴 수 없음).
+            var r = await _api.DeleteAreaAsync(area.AreaId, deleteTasks: false, _operatorId);
+            if (r.Blocked)
+            {
+                if (ConfirmAsync is null || !await ConfirmAsync(
+                        (r.Message ?? "옮겨 갈 영역이 없는 작업이 있습니다.") +
+                        "\n\n이 작업들은 영역과 함께 삭제되며 되돌릴 수 없습니다. 삭제할까요?", "영역 삭제"))
+                {
+                    StatusMessage = $"영역 삭제 취소 — 원래 영역으로 옮길 수 없는 작업 {r.DeletedTasks.Count}개: {string.Join(", ", r.DeletedTasks)}";
+                    return;
+                }
+                r = await _api.DeleteAreaAsync(area.AreaId, deleteTasks: true, _operatorId);
+            }
+            StatusMessage = "영역 삭제됨."
+                + (r.Moved.Count > 0 ? $" 작업 {r.Moved.Count}개를 원래 영역으로 되돌림: {string.Join(", ", r.Moved)}." : "")
+                + (r.DeletedTasks.Count > 0 ? $" 함께 삭제한 작업 {r.DeletedTasks.Count}개: {string.Join(", ", r.DeletedTasks)}." : "");
+            await RefreshAreasAsync();
+        }
         catch (Exception ex) { StatusMessage = $"영역 삭제 실패: {ex.Message}"; }
     }
 
@@ -427,7 +485,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var r = await _api.MoveToSeamStartTestAsync(robot.RobotId, task.TaskId);
             StatusMessage = r?.SeamStartW is { Length: >= 2 } sw
                 ? $"코봇 이동 시험 발행: {robot.RobotId} → seam 시작점 ({sw[0]:F2},{sw[1]:F2}) @{r.MapId}"
-                  + (r.LiftStrokeMm is { } lift ? $" · 리프트 {lift:0} mm" : "") + " (실행은 HD_AMR)"
+                  + (r.LiftStrokeMm is { } lift ? $" · 리프트 {lift:0} mm" : "")
+                  + (r.Attempt is { } at ? $" · attempt {at}" : "") + " (실행은 HD_AMR)"
                 : $"코봇 이동 시험 발행: {robot.RobotId} ← 용접선 seq {task.Seq}";
         }
         catch (Exception ex) { StatusMessage = $"코봇 이동 시험 실패: {ex.Message}"; }   // 409 run중/타층·404·400 사유
@@ -444,7 +503,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var robots = await _api.GetRobotsAsync();
             if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
             StatusMessage = $"용접선 seq {task.Seq} 검사 준비 — 이 용접선에 맞춰 정차 최적화 중…";
-            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId });
+            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId }, null, true, RoundProvider?.Invoke(), default);
             StatusMessage = r is null
                 ? "검사 실행 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."
                 : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} · {MissionViewModel.DescribeStops(r.Stops, true)} — 진행은 운영 화면에서 확인";
@@ -469,7 +528,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             var p = await _api.GetRobotDrawingPoseAsync(robot.RobotId);
             if (level is int lv && p.Level != lv)
             {
-                StatusMessage = $"AMR이 L{p.Level}({p.MapId})에 있습니다 — 이 영역은 L{lv}라 정차점으로 쓸 수 없습니다.";
+                StatusMessage = $"AMR이 {LevelLabel.Of(p.Level)}(맵 {p.MapId})에 있습니다 — 이 영역은 {LevelLabel.Of(lv)}라 정차점으로 쓸 수 없습니다.";
                 return;
             }
 
@@ -740,7 +799,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 _operatorId, StationStandoffM, StationMaxBackwardMm);
             SplitTasks.Clear();
             NotifySplitState();
-            StatusMessage = $"새 영역 분리 완료: {w.WallCode}/{AreaName} (L{level}) — 작업 {moved}건 이동 (taskId 유지)";
+            StatusMessage = $"새 영역 분리 완료: {w.WallCode}/{AreaName} ({LevelLabel.Of(level)}) — 작업 {moved}건 이동 (taskId 유지)";
             await RefreshAreasAsync(select: areaId);
         }
         catch (Exception ex) { StatusMessage = $"새 영역 분리 실패: {ex.Message}"; }
@@ -757,6 +816,122 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
 
     /// <summary>영역·작업이 등록/삭제되어 3D 오버레이 갱신이 필요함(등록/삭제가 모두 RefreshAreasAsync 경유).</summary>
     public event EventHandler? PlanningChanged;
+
+    // ── 새 프로젝트: 베이스 프로젝트 파일 ─────────────────────────────
+    /// <summary>새 프로젝트 창에서 고른 베이스 프로젝트 파일(.hdacs). null = 치수를 직접 입력해 빈 선창 생성.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBaseProject))]
+    private string? _baseProjectPath;
+
+    /// <summary>베이스 파일 요약(파일명·원래 선창·영역/작업/시나리오 수).</summary>
+    [ObservableProperty] private string _baseProjectInfo = "";
+
+    public bool HasBaseProject => BaseProjectPath is not null;
+
+    /// <summary>베이스 파일을 골랐다 — 형상 치수를 파일 값으로 채우고(창에서는 잠김) 요약을 만든다. 선창 ID 는 건드리지 않는다.</summary>
+    public void ApplyBaseProject(string path, ProjectDoc doc)
+    {
+        var g = doc.Geometry;
+        // 입력칸만 채운다(층 목록·면은 생성 뒤 LoadAsync 가 서버에서 다시 읽는다)
+        LengthL = g.LengthL; WFloor = g.WFloor; ThetaLowDeg = g.ThetaLowDeg; HLow = g.HLow;
+        HWall = g.HWall; ThetaUpDeg = g.ThetaUpDeg; HUp = g.HUp;
+        OriginOx = g.OriginOx; OriginOy = g.OriginOy;
+        ReachZMinText = g.ReachZMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
+        ReachZMaxText = g.ReachZMax?.ToString("0.###", CultureInfo.InvariantCulture) ?? "";
+        LevelZText = string.Join(", ", g.LevelZ.Select(z => z.ToString("0.###", CultureInfo.InvariantCulture)));
+        SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);   // 기본 = 베이스 파일 값(창에서 바꿀 수 있다)
+        BaseProjectInfo = $"{System.IO.Path.GetFileName(path)} — 원래 선창 {doc.TankId} · 영역 {doc.Areas.Length:N0} · " +
+                          $"작업 {doc.Areas.Sum(a => a.Tasks.Length):N0} · 시나리오 {doc.Scenarios?.Length ?? 0} · {InspectionKindOption.Of(g.InspectionKind).Label}";
+        BaseProjectPath = path;
+    }
+
+    public void ClearBaseProject() { BaseProjectPath = null; BaseProjectInfo = ""; }
+
+    // ── 선창 ID 변경 ──────────────────────────────────────────────────
+    /// <summary>바꿀 새 선창 ID(입력칸).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RenameTankCommand))]
+    private string _newTankId = "";
+
+    /// <summary>가스검사 회차(운영 화면에서 고른 값 — Shell 이 연결). 용접검사 선창이면 null.</summary>
+    public Func<int?>? RoundProvider { get; set; }
+
+    /// <summary>변경 전에 묻는 확인 창(Shell 이 연결). 없으면 묻지 않는다(테스트).</summary>
+    public Func<string, string, Task<bool>>? ConfirmAsync { get; set; }
+
+    /// <summary>선창 ID 가 바뀌었다 — Shell 이 모든 화면의 선창 ID·층 맵을 새 값으로 맞추고 다시 읽는다.</summary>
+    public event EventHandler<string>? TankRenamed;
+
+    private bool CanRenameTank() =>
+        !string.IsNullOrWhiteSpace(NewTankId) && !string.Equals(NewTankId.Trim(), TankId, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 선창 ID 변경 — 서버가 형상·면·영역·시나리오·층 맵·캘리브레이션을 한 번에 옮긴다(영역 ID·taskId 유지).
+    /// 세이지 조회 주소의 tankId 가 바뀌고, 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록되므로 변경 뒤 파일 ▸ 저장이 필요하다.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRenameTank))]
+    private async Task RenameTankAsync()
+    {
+        var (oldId, newId) = (TankId, NewTankId.Trim());
+        if (ConfirmAsync is not null && !await ConfirmAsync(
+                $"선창 ID 를 '{oldId}' → '{newId}' 로 바꿉니다.\n\n" +
+                "· 세이지(SAIGE) 조회 주소의 tankId 가 바뀝니다 — 세이지 쪽과 시점을 맞추세요.\n" +
+                "· AMR 은 층 번호만 확인하고 선창 이름은 다음 지령에서 받습니다(ACS·AMR 새 버전 필요).\n" +
+                "· 변경 뒤 [파일 ▸ 저장]을 하세요 — 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록됩니다.\n\n계속하시겠습니까?",
+                "선창 ID 변경"))
+            return;
+        try
+        {
+            if (!await _api.RenameTankAsync(oldId, newId, _operatorId))
+            {
+                StatusMessage = "선창 ID 변경 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요.";
+                return;
+            }
+            TankId = newId;
+            NewTankId = "";
+            TankRenamed?.Invoke(this, newId);
+            StatusMessage = $"선창 ID 변경: {oldId} → {newId} — [파일 ▸ 저장]으로 프로젝트 파일에 반영하세요.";
+        }
+        catch (Exception ex) { StatusMessage = $"선창 ID 변경 실패: {ex.Message}"; }   // 형식 400 · 이미 쓰는 ID·진행 중 run 409 · 없음 404
+    }
+
+    partial void OnTankIdChanged(string value) => RenameTankCommand.NotifyCanExecuteChanged();
+
+    /// <summary>
+    /// CROSS4 정면 좌우 자동 판정 [VDA §8.2 · 1.22] — 선창의 접미 없는 CROSS4 작업에 CROSS4_L/R 을 정한다.
+    /// 서버가 먼저 미리보기로 계산하고, 확인하면 적용한다. 정하지 못한 작업(세로·바닥/천장·가지를 그린 교차 등)은 그대로 —
+    /// 작업 목록에서 유형을 직접 고른다.
+    /// </summary>
+    [RelayCommand]
+    private async Task ClassifyCross4SidesAsync()
+    {
+        try
+        {
+            var preview = await _api.ClassifyCross4SidesAsync(TankId, apply: false, _operatorId);
+            if (preview is null) { StatusMessage = "CROSS4 좌우 판정: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
+            if (preview.Total == 0) { StatusMessage = "CROSS4 좌우 판정: 좌우가 정해지지 않은 CROSS4 작업이 없습니다."; return; }
+            var undecided = preview.Rows.Where(r => r.After is null)
+                .GroupBy(r => r.Reason ?? "").Select(g => $"  · {g.Key} {g.Count()}개");
+            if (preview.Changed == 0)
+            {
+                StatusMessage = $"CROSS4 좌우 판정: 정할 수 있는 작업이 없습니다(판정 불가 {preview.Undecided}개).";
+                return;
+            }
+            if (ConfirmAsync is not null && !await ConfirmAsync(
+                    $"CROSS4 작업 {preview.Total}개 중 {preview.Changed}개의 유형을 정면 기준 좌우로 바꿉니다.\n" +
+                    $"  CROSS4_L {preview.Left}개 · CROSS4_R {preview.Right}개 · 판정 불가 {preview.Undecided}개\n" +
+                    (preview.Undecided > 0 ? string.Join("\n", undecided) + "\n" : "") +
+                    "\n기준: 면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 L, 오른쪽에 있으면 R.\n" +
+                    "판정 불가 작업은 그대로 둡니다(작업 목록에서 직접 고르세요). 변경 뒤 [파일 ▸ 저장]을 하세요.\n\n계속하시겠습니까?",
+                    "CROSS4 좌우 판정"))
+                return;
+            var r = await _api.ClassifyCross4SidesAsync(TankId, apply: true, _operatorId);
+            StatusMessage = r is null ? "CROSS4 좌우 판정 실패: 서버 응답 없음"
+                : $"CROSS4 좌우 적용: L {r.Left} · R {r.Right} · 판정 불가 {r.Undecided} (변경 {r.Changed}개) — [파일 ▸ 저장]으로 반영하세요.";
+            await RefreshAreasAsync();
+        }
+        catch (Exception ex) { StatusMessage = $"CROSS4 좌우 판정 실패: {ex.Message}"; }
+    }
 
     private async Task RefreshAreasAsync(Guid? select = null)
     {
@@ -822,6 +997,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         for (int i = 0; i < 4; i++) SetCorner(i, c[i][0], c[i][1]);
         StationStandoffM = a.StationStandoffM;   // 이격이 자동 정차점을 바꾸므로 오프셋 환산보다 먼저
         StationMaxBackwardMm = a.StationMaxBackwardMm;
+        StationLiftMm = a.StationLiftMm;
         StationOverride = a.StationX is not null && a.StationY is not null;
         // 저장된 절대 좌표 → 자동 정차점 기준 오프셋(0.1mm 반올림 — 부동소수 먼지 제거)
         var auto = AutoStation ?? (0, 0);
@@ -1117,9 +1293,12 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             // 층 필터 목록 = level_z 길이만큼 L1..LN (기존 선택 층 유지)
             int keep = SelectedLevel?.Level ?? 1;
             Levels.Clear();
-            for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, $"L{i}"));
+            for (int i = 1; i <= g.LevelZ.Length; i++) Levels.Add(new LevelOption(i, LevelLabel.Of(i)));
             SelectedLevel = Levels.FirstOrDefault(x => x.Level == keep) ?? Levels.FirstOrDefault();
         }
+        SelectedInspectionKind = InspectionKindOption.Of(g.InspectionKind);
+        InspectionKindLabel = SelectedInspectionKind.Label;
+        InspectionKindCode = SelectedInspectionKind.Code;
         var d = g.Derived;
         _derB = d.B; _derWCeil = d.WCeil; _derH = d.H;   // 마구리 팔각 윤곽용
         DerivedText = $"B(전폭)={d.B:0.###}  W_ceil(천장폭)={d.WCeil:0.###}  H(전체높이)={d.H:0.###}";

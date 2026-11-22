@@ -16,6 +16,7 @@ public class ScenarioRunEntity
     /// <summary>리페어 run의 검사 대상 용접선(taskId json 배열). null = 일반 run(시나리오 영역 전체).
     /// 큐 전개와 재개(resume) 시 정차 재계산이 이 목록의 용접선만 싣는다.</summary>
     public string? TaskIds { get; set; }
+    public int? Round { get; set; }   // 가스검사 회차 1|2 → 지령 params.round (NULL = 미지정·용접검사)
     public List<MissionEntity> Missions { get; set; } = new();
 }
 
@@ -62,6 +63,7 @@ public class OrderActionEntity
     public int NodeSequenceId { get; set; }
     public Guid? TaskId { get; set; }
     public Guid? WorkItemId { get; set; }             // greedy 배차 시 소속 작업항목 (완료/실패 집계 키)
+    public string? OrderId { get; set; }              // 발행한 Order(정차) — 같은 정차를 다시 배차하면 이전 Order 의 액션과 구분
     public string ActionType { get; set; } = "";
     public string BlockingType { get; set; } = "HARD";
     public string? Params { get; set; }               // jsonb
@@ -69,6 +71,21 @@ public class OrderActionEntity
     public string? Result { get; set; }               // jsonb — 촬영 성공/실패 [ADR-004]
     public int Attempts { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;   // 재시도 시 최신 액션 판별
+}
+
+/// <summary>
+/// 코봇 이동 시험(moveToSeamStart) 발행 기록 [VDA §8.7]. 시험도 본검사와 같은 taskId 별 누적 attempt 를 받으므로
+/// (작업자가 시험 자세에서 수동 촬영할 때 그 taskId·attempt 를 비전에 싣는다), 발급한 번호를 여기에 남겨
+/// 다음 시도(본검사·시험 공통)가 그보다 큰 번호를 받게 한다. run·order_action 과 무관(검사 결과·진행률에 들어가지 않는다).
+/// </summary>
+public class SeamTestEntity
+{
+    public Guid TestId { get; set; }
+    public Guid TaskId { get; set; }
+    public string RobotId { get; set; } = "";
+    public string OrderId { get; set; } = "";
+    public int Attempt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -105,4 +122,27 @@ public class RobotContextEntity
     public double? BatteryPct { get; set; }
     public string? ConnectionState { get; set; }      // ONLINE | OFFLINE | CONNECTIONBROKEN
     public DateTimeOffset? ReportedAt { get; set; }
+}
+
+/// <summary>
+/// 가스 측정 결과 1건(용접선 1구간의 검사 1회) — 가스검사 AMR 이 액션 종료 때 보낸 본문과 세이지 전송 상태.
+/// 세이지가 내려가 있어도 잃지 않도록 받은 즉시 저장하고, 전송은 따로 돈다(보낼 때까지 PENDING).
+/// </summary>
+public class GasResultEntity
+{
+    public Guid ResultId { get; set; }
+    public Guid ActionId { get; set; }                // run.order_action — 액션 1개 = 결과 1건(중복 저장 방지 키)
+    public Guid RunId { get; set; }
+    public Guid? TaskId { get; set; }                 // ACS 내부 taskId(용접선)
+    public string? TankId { get; set; }
+    public string RobotId { get; set; } = "";
+    public int? Round { get; set; }                   // 검사 회차 1|2
+    public string Result { get; set; } = "";          // OK | NG | ERROR
+    public int PointCount { get; set; }
+    public string Body { get; set; } = "{}";          // jsonb — AMR 이 보낸 본문 그대로
+    public string SendState { get; set; } = "PENDING";   // PENDING | SENT | REJECTED(세이지가 형식 거부 — 재전송 안 함)
+    public int SendAttempts { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? SentAt { get; set; }
 }

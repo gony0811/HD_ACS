@@ -179,6 +179,9 @@ tools/publish_desktop.sh linux-x64
 - macOS 번들은 `Contents/MacOS/` 에 실행 파일·어셈블리·`appsettings.json` 을 두므로 **번들 안의 appsettings.json 을 편집해 서버 주소를 바꾼다**(또는 환경변수).
 - 서명: 기본 ad-hoc(`codesign -s -`) — **같은 Mac에서 만든 번들은 그대로 실행**된다. 다른 Mac으로 배포하면 Gatekeeper가 차단하므로 ① Finder에서 우클릭 ▸ 열기(1회) 또는 `xattr -dr com.apple.quarantine HD_ACS.app`, ② 정식 배포는 `HDACS_SIGN_IDENTITY="Developer ID Application: …"` 로 서명 후 notarization(`xcrun notarytool submit`). 폐쇄망 현장은 ①로 충분.
 - 아이콘(.icns)은 macOS에서 스크립트를 실행할 때만 생성된다(iconutil). Linux/Windows 호스트에서 만든 번들은 기본 아이콘.
+- **층 표기**: 화면에서는 맨 아래층을 **L0** 으로 부른다(L0·L1·L2·L3). 내부 층 번호와 맵 ID 는 그대로 1부터라 `L3` 은 맵 `CT1-L4`·영역 이름의 `L4` 와 같은 층이다 — 화면은 `L3 (맵 CT1-L4)` 처럼 둘을 함께 보인다. 종전 표기(L1~L4)로 되돌리려면 UI `appsettings.json` 의 `Acs:LevelLabelBase` 를 1 로(HD_AMR 은 `Vda5050:LevelLabelBase`).
+- **검사 종류**: 선창마다 용접검사(WELD)·가스검사(GAS) 중 하나를 갖는다. 파일 ▸ 새 프로젝트 창의 "검사 종류"에서 고르고, 계획 ▸ 영역·작업 위쪽 배너에 현재 선창의 값이 보인다. 기존 선창과 옛 프로젝트 파일은 용접검사다. 가스검사 선창은 운영 화면 미션 바에 **회차 선택(1회차·2회차, 필수)**이 보이고 미션·재검사 지령에 실린다. 가스 측정 결과는 받는 즉시 저장되고 `Acs:Saige:Gas:Enabled` 를 켜면 세이지로 전송된다. 세이지가 보내는 임계값(`PUT /api/gas/threshold`)은 AMR 로 전달된다. 설정·확인 방법·규격 대조는 `docs/SAIGE_GAS_INTERFACE.md`.
+- **베이스 프로젝트로 새 프로젝트**: 파일 ▸ 새 프로젝트 창에서 Tank 에 새 선창 ID 를 넣고 "베이스 프로젝트 [파일 선택…]"으로 기존 `.hdacs` 를 고르면, 그 파일의 형상·영역·작업·시나리오가 새 선창으로 복제된다. 영역 ID·taskId 는 새로 발급되고 캘리브레이션은 복사되지 않는다(층마다 다시 잡을 것). 서버에 이미 있는 선창 ID 로는 만들 수 없다. 같은 선창의 이름만 바꾸려면 계획 ▸ 영역·작업의 "선창 ID 변경"을 쓴다.
 - 파일 메뉴(새 프로젝트·열기·저장·다른 이름으로 저장)는 전 플랫폼에서 창 상단 앱바에 표시된다. macOS에서는 추가로 시스템 메뉴바(⌘N 새 프로젝트·⌘O 열기·⌘S 저장·⌘⇧S 다른 이름으로 저장)에도 같은 명령이 뜬다. 한글은 OS 시스템 폰트(Apple SD Gothic Neo / 맑은 고딕 / Noto CJK)로 폴백된다.
 - 3D 뷰 조작: 좌드래그 회전 · 우드래그(또는 휠 클릭 드래그) 이동 · 휠 확대/축소 · 우상단 "맞춤". 트랙패드는 두 손가락 스크롤=줌.
 - 표시 항목(3D 뷰·전개도 각각): 탭 안에서 **마우스 오른쪽 버튼을 드래그 없이 클릭**하면 메뉴가 뜬다 — 영역(채움·윤곽)·영역 이름·용접선·용접 시작·끝점·작업 순번(3D는 바닥 격자·지면 격자 추가)을 켜고 끌 수 있다. 여러 항목을 연달아 바꿔도 메뉴가 닫히지 않는다. 영역·작업이 많아 화면이 느리면 **"빠른 보기"**(윤곽·용접선만)를 쓴다. 기본값은 시작·끝점과 작업 순번이 꺼진 상태이며, 설정은 앱을 다시 켜면 기본값으로 돌아간다.
@@ -256,6 +259,8 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 **중단·이어하기**: 미션 컨트롤 바의 **"중단"**은 후속 배차만 멈춘다(진행 중 정차는 완주·결과 기록, 즉시 정지는 ■비상정지).
 **"이어하기"**는 로봇의 가장 최근 미완료 run을 재개 — **완료·스킵된 영역은 건너뛰고** 남은 작업만 재배차한다
 (중단 시점에 배차만 됐던 정차는 재검사). 같은 로봇에 진행 중 run이 있으면 새 "미션 시작"은 409로 거부된다.
+중단된 run에 남은 작업이 있는데 **"미션 시작"**을 누르면 확인 창이 뜬다 — **'아니오' 후 "이어하기"**로 남은 영역만 진행한다.
+'예'를 누르면 시나리오 전체를 처음부터 다시 검사하고, 중단된 run은 더 이상 이어할 수 없다(감사로그 `RUN_RESTART_OVER_RESUMABLE`).
 완료 이력은 run 단위 — **새 run은 항상 선창 전체 재검사**(정기검사 사이클)이며, 영구 이력은 `hist.inspection_result`.
 
 **용접선 재검사(리페어)**: 영역 검사에서 실패한 용접선만 골라 다시 검사한다. 영역 전체를 다시 돌리지 않는다.
@@ -347,7 +352,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/scenarios/{id}/areas` | 시나리오 검사 대상 영역 목록 [부분 검사 계획] |
 | `PUT /api/scenarios/{id}/areas` | 대상 영역 전체 교체 — `{ areaIds: [...] }`. 빈 배열=선창 전체 검사. 타 선창/미존재 영역 400 |
 | `GET /api/scenarios/{id}/area-stations` | 계획 정차점(도면 프레임, 배차와 같은 산출식) + 도착 허용 오차 — 로봇 상태 카드 "계획 정차점까지" 표시용. 없는 시나리오 404 |
-| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409 |
+| `POST /api/runs` | Run 시작 — `{ scenarioId, robotId }`. **시나리오 연결 영역만 전개(미연결=선창 전체)**, 층별 미션 분해 + 첫 미션 릴리즈 시도. 동일 로봇 활성 run 존재 시 409. 가장 최근 run이 중단(ABORTED)이고 남은 정차가 있으면 409 `code=RESUMABLE_RUN_EXISTS`(run 미생성) — 처음부터 다시 하려면 `restart: true` |
 | `GET /api/tanks/{tankId}/geometry` | **[SAIGE §4.6.1 대외 계약]** 선창 파라미터+유도값 — **mm 정수**·각도 deg, `derived{beam,wCeil,height}`. 없는 선창 404 |
 | `GET /api/tanks/{tankId}/walls?level=n` | **[SAIGE §4.6.2]** 면 10개(wallId 순) — `wallId`+`wallCode`, `uMax/vMax`, `shape`(RECTANGLE·POLYGON), `outline`(격벽 F·A는 팔각 8점), 전역 프레임. `level` 지정 시 도달 가능 면만+`reachableVBand`(mm) |
 | `GET /api/areas?tankId=&level=&wallId=` | **[SAIGE §4.6.3]** 영역 — `areaName`·`wallId`·`level`·`taskCount`·`corners`(4점, mm) |
@@ -358,8 +363,13 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/internal/area-tasks?tankId=` | 선창 전 작업 일괄 조회(단건 작업 조회 필드 + `areaId`) — UI 파일 ▸ 저장이 사용 |
 | `PUT /api/areas/{areaId}` | 영역 수정 — **areaId·소속 작업(taskId) 유지**. `{ name, corners, stationX/Y/Theta, stationStandoffM }` 전체 교체(정차 null=수동 지정 해제), 면은 변경 불가·층은 재유도. 면 범위/크기 상한(u 1.44m · v 1.44m, 경사면·수직벽 v 2.9m)/층 유도 실패·**기존 작업이 새 영역 밖**이면 400, 이름 중복 409, 없음 404. 화면: 계획 ▸ 영역·작업에서 영역 행 선택 → 폼에 값 채워짐 → [선택 영역 수정] |
 | `PUT /api/area-tasks/{taskId}` | 용접선 수정 — **taskId 유지**(검사 이력 키). 좌표 필수, seq/name/seamType은 생략 시 유지. 영역 밖 400·seq 중복 409 |
+| `POST /api/reach-sim/tanks/{id}/field-compare?wallCode=&date=&format=csv` | 현장 실적 대조(조회 전용) — 본문 = HD_AMR 앱 로그 텍스트. 로그의 실제 도착 자세·리프트로 시뮬레이터를 다시 돌려 현장 결과(성공·도달 실패·센서 실패…)와 판정을 비교한다. `summary`(성공 → 가능 수, 도달 실패 → 불가 수, 실패 단계별), `rows[]`(건별). 실행: `tools\compare_field_reach.ps1 -Log app-2026-11-12.log -Wall T` |
+| `POST /api/tanks/{tankId}/rename` `{newTankId, userId}` | **선창 ID 변경** — 형상·면·영역·시나리오·층 맵(`{선창}-L{층}`)·캘리브레이션·기준점·미션·정차 큐·로봇 보고 층을 한 트랜잭션으로 옮긴다. 영역 ID·taskId 유지. 새 ID 형식: 영문·숫자로 시작, 영문·숫자·`_`·`-`, 1~32자, `-L숫자` 로 끝날 수 없음(400). 이미 쓰는 ID·진행 중 run 409, 없는 선창 404. 감사로그 `TANK_RENAME`. 화면: 계획 ▸ 영역·작업 위쪽 "선창 ID 변경". **세이지 조회 주소의 tankId 가 바뀌고, 옛 `.hdacs` 를 열면 옛 ID 로 다시 등록되므로 변경 뒤 파일 ▸ 저장** |
+| `GET /api/internal/tanks` | 등록된 선창 ID 목록(등록 순) — 운영 UI 가 시작할 때 지금 선창을 찾는다 |
 | `GET /api/reach-sim/tanks/{id}/area-map?level=&wallCode=` | 검사 가능 지도 — 저장된 정차·리프트에서 용접선마다 검사 가능 여부(`seams[].ok` true/false, 임시 제외 = null)와 영역 집계(`possible` = 용접선 전부 가능). 화면: 계획 ▸ 리치·간섭 ▸ 3D 위 [검사 가능 지도] — 용접선 가능 = 초록 · 불가 = 빨강, 영역은 음영 |
 | `PUT /api/area-tasks/enabled` | 용접선 임시 제외/복귀 `{taskIds[], enabled, userId}` — `enabled=false` 인 용접선은 검사(큐 전개·이어하기의 남은 정차·재검사)에서 빠진다. 계획·taskId·검사 기록은 그대로. 화면: 계획 ▸ 영역·작업 ▸ 작업 목록의 [ENABLE]/[DISABLE] |
+| `PUT /api/inspection-profiles/sync` | HD_AMR 이 검사 프로필(순회 경유점) 전체 목록을 올려 보낸다 `{source, full, profiles[], assignments[]}` — 내용이 바뀐 프로필만 버전 +1, 지정표(유형 × 면 × 방향 → 프로필)는 통째로 교체. 운영자가 부르는 주소가 아니다(AMR 이 프로필 저장 때·5분마다 자동 전송) [ADR-014] |
+| `GET /api/inspection-profiles?detail=true` | 받은 검사 프로필과 지정표 `{profiles[], assignments[]}` — 버전·경유점 수·받은 시각·몇 조합에 지정됐는지(`assignedCount`). 리치 시뮬레이터는 용접선마다 지정표의 프로필로 순회를 판정한다. `detail=true` 면 경유점 포함 |
 | `GET /api/integrations/saige` | **SAIGE 연동 상태**(운영 확인) — `enabled`·`endpoint`·`healthy`·`lastOkAt`·`secondsSinceLastOk`·`totalSent/Failed/Rejected`·`consecutiveFailures`·`backoffUntil`·`lastError`·`robots[]`(로봇별 마지막 전송 status/level/x/y/battery/lastResult, 보류 중이면 `holdReason`). 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다. 실물 없이 시험: `tools/fake_saige_receiver.py` |
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |

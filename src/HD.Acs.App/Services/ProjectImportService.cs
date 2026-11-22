@@ -56,7 +56,9 @@ public sealed class ProjectImportService
             gr.HWall, gr.ThetaUpDeg * Math.PI / 180.0, gr.HUp,
             gr.LevelZ ?? Array.Empty<double>(), gr.OriginOx ?? 0, gr.OriginOy ?? 0,
             gr.ReachZMin, gr.ReachZMax);
-        var geomReasons = geom.Validate(gr.CheckHTotal, gr.CheckBeam, gr.CheckWCeil);
+        var geomReasons = geom.Validate(gr.CheckHTotal, gr.CheckBeam, gr.CheckWCeil).ToList();
+        if (!InspectionKinds.TryNormalize(gr.InspectionKind, out _))
+            geomReasons.Add($"검사 종류 '{gr.InspectionKind}'는 쓸 수 없습니다 — {string.Join(" · ", InspectionKinds.All)} 중 하나.");
         if (geomReasons.Count > 0)
             throw new ImportRejectedException(geomReasons.Select(r => "선창 파라미터: " + r).ToList());
 
@@ -153,7 +155,7 @@ public sealed class ProjectImportService
             _db.InspectionAreas.RemoveRange(await _db.InspectionAreas.Where(x => x.TankId == tankId).Include(x => x.Tasks).ToListAsync(ct));
             await _db.SaveChangesAsync(ct);
         }
-        await _geometry.RegisterAsync(tankId, geom, gr.CheckHTotal, gr.CheckBeam, gr.CheckWCeil, req.UserId, ct);
+        await _geometry.RegisterAsync(tankId, geom, gr.CheckHTotal, gr.CheckBeam, gr.CheckWCeil, req.UserId, ct, gr.InspectionKind);
         _db.InspectionAreas.AddRange(areas);
         _db.AreaTasks.AddRange(tasks);
         _db.AuditLogs.Add(new AuditLogEntity

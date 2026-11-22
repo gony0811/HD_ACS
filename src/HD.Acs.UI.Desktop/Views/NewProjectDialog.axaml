@@ -15,6 +15,24 @@
             <TextBlock Text="Tank" Classes="lbl" />
             <TextBox Width="110" Classes="field" Text="{Binding TankId}" />
         </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+            <TextBlock Text="검사 종류" Classes="lbl"
+                       ToolTip.Tip="이 선창에서 하는 검사. 같은 AMR·VDA 5050 을 쓰고 검사 장비만 다릅니다. 가스검사 선창은 아직 미션을 시작할 수 없습니다(지령 미구현)." />
+            <ComboBox MinWidth="150" ItemsSource="{Binding InspectionKindOptions}"
+                      SelectedItem="{Binding SelectedInspectionKind}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+            <TextBlock Text="베이스 프로젝트" Classes="lbl"
+                       ToolTip.Tip="(선택) 기존 프로젝트 파일(.hdacs)의 형상·영역·작업·시나리오를 위 Tank ID 의 새 선창으로 복제합니다." />
+            <Button x:Name="BrowseBaseButton" Content="파일 선택…" MinHeight="28" Margin="0,0,6,0" Click="BrowseBase_Click" />
+            <Button Content="해제" MinHeight="28" IsVisible="{Binding HasBaseProject}" Click="ClearBase_Click" />
+        </StackPanel>
+        <TextBlock x:Name="BaseInfoText" Text="{Binding BaseProjectInfo}" IsVisible="{Binding HasBaseProject}"
+                   TextWrapping="Wrap" FontSize="12" Margin="0,2,0,2" />
+        <TextBlock IsVisible="{Binding HasBaseProject}" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11.5"
+                   TextWrapping="Wrap" Margin="0,0,0,8"
+                   Text="치수는 베이스 파일 값을 씁니다(수정 불가). 영역 ID·taskId 는 새로 발급되고 캘리브레이션은 복사하지 않습니다. Tank 에는 서버에 없는 새 선창 ID 를 넣으세요." />
+        <StackPanel x:Name="GeometryPanel" IsEnabled="{Binding !HasBaseProject}">
         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
             <TextBlock Text="L / w_floor" Classes="lbl" />
             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding LengthL}" Margin="0,0,6,0" />
@@ -48,6 +66,7 @@
             <TextBlock Text="원점보정 ox,oy" Classes="lbl" />
             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding OriginOx}" Margin="0,0,6,0" />
             <NumericUpDown Classes="field" MinWidth="150" Value="{Binding OriginOy}" />
+        </StackPanel>
         </StackPanel>
 
         <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" Margin="0,2,0,4" FontSize="12" />

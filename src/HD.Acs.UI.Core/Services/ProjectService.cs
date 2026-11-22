@@ -81,7 +81,7 @@ public sealed class ProjectService : IProjectService
         var doc = new ProjectDoc(FormatVersion, tankId,
             new GeometryDoc(geom.LengthL, geom.WFloor, geom.ThetaLowDeg, geom.HLow,
                 geom.HWall, geom.ThetaUpDeg, geom.HUp, geom.LevelZ ?? Array.Empty<double>(),
-                geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax),
+                geom.OriginOx, geom.OriginOy, geom.ReachZMin, geom.ReachZMax, InspectionKindOption.Of(geom.InspectionKind).Code),
             areaDocs.ToArray(), calibrations.ToArray(), scenarios.ToArray());
 
         progress?.Report(new ProjectProgress("파일 기록", 0, 0));
@@ -98,6 +98,14 @@ public sealed class ProjectService : IProjectService
     public async Task<ProjectDoc> OpenAsync(string path, CancellationToken ct = default, IProgress<ProjectProgress>? progress = null)
     {
         progress?.Report(new ProjectProgress("파일 읽기", 0, 0));
+        var doc = await ReadAsync(path, ct);
+        await ImportAsync(doc, ct, progress);
+        CurrentPath = path;
+        return doc;
+    }
+
+    public async Task<ProjectDoc> ReadAsync(string path, CancellationToken ct = default)
+    {
         ProjectDoc doc;
         await using (var fs = File.OpenRead(path))
         {
@@ -116,7 +124,71 @@ public sealed class ProjectService : IProjectService
 
         ValidateIdentities(doc);
         ValidateAreaShapes(doc);   // 서버 규칙 위반을 DB를 건드리기 전에 거부(열기는 선창 재등록=기존 영역 삭제부터 시작)
+        return doc;
+    }
 
+    /// <summary>선창 ID 형식 — 서버 TankRenameService 와 같은 규칙(UI.Core 는 서버를 참조하지 않아 미러). 문제 없으면 null.</summary>
+    public static string? TankIdProblem(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return "새 선창 ID 를 입력하세요.";
+        if (!System.Text.RegularExpressions.Regex.IsMatch(id, @"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"))
+            return "선창 ID 는 영문·숫자로 시작하고 영문·숫자·'_'·'-' 만 쓸 수 있습니다(1~32자).";
+        if (System.Text.RegularExpressions.Regex.IsMatch(id, @"-L\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return "선창 ID 는 '-L숫자' 로 끝날 수 없습니다(층 표시와 겹칩니다).";
+        return null;
+    }
+
+    /// <summary>
+    /// 베이스 문서를 새 선창용으로 복제 — 영역·작업 ID 새 발급, 시나리오의 영역 연결은 새 ID 로 옮김, 캘리브레이션 제외.
+    /// </summary>
+    public static ProjectDoc Rebase(ProjectDoc source, string newTankId, string? inspectionKind = null)
+    {
+        var areaIdMap = new Dictionary<Guid, Guid>();
+        var areas = source.Areas.Select(a =>
+        {
+            var id = Guid.NewGuid();
+            if (a.SourceId is Guid old) areaIdMap[old] = id;
+            return a with
+            {
+                SourceId = id,
+                Tasks = a.Tasks.Select(t => t with { SourceId = Guid.NewGuid() }).ToArray(),
+            };
+        }).ToArray();
+        var scenarios = (source.Scenarios ?? Array.Empty<ScenarioDoc>())
+            .Select(s => s with { AreaIds = s.AreaIds.Where(areaIdMap.ContainsKey).Select(id => areaIdMap[id]).ToArray() })
+            .ToArray();
+        var geometry = inspectionKind is null ? source.Geometry : source.Geometry with { InspectionKind = InspectionKindOption.Of(inspectionKind).Code };
+        return source with { TankId = newTankId, Geometry = geometry, Areas = areas, Calibrations = Array.Empty<CalibrationDoc>(), Scenarios = scenarios };
+    }
+
+    public async Task<ProjectDoc> CreateFromBaseAsync(string basePath, string newTankId, CancellationToken ct = default,
+        IProgress<ProjectProgress>? progress = null, string? inspectionKind = null)
+    {
+        newTankId = newTankId?.Trim() ?? "";
+        if (TankIdProblem(newTankId) is { } problem) throw new InvalidOperationException(problem);
+
+        progress?.Report(new ProjectProgress("베이스 파일 읽기", 0, 0));
+        var source = await ReadAsync(basePath, ct);
+
+        // 가져오기는 대상 선창의 영역·작업을 통째로 바꾼다 — 이미 있는 선창 ID 로는 만들지 않는다.
+        progress?.Report(new ProjectProgress("선창 ID 확인", 0, 0));
+        var tanks = await _api.GetTankIdsAsync(ct);
+        bool exists = tanks is not null
+            ? tanks.Contains(newTankId, StringComparer.OrdinalIgnoreCase)
+            : await _api.GetTankGeometryAsync(newTankId, ct) is not null;   // 구빌드 서버
+        if (exists)
+            throw new InvalidOperationException(
+                $"선창 ID '{newTankId}' 는 서버에 이미 있습니다 — 다른 ID 를 쓰세요. DB는 변경하지 않았습니다.\n" +
+                "(같은 선창의 이름만 바꾸려면 계획 ▸ 영역·작업의 '선창 ID 변경'을 쓰세요.)");
+
+        var doc = Rebase(source, newTankId, inspectionKind);
+        await ImportAsync(doc, ct, progress);
+        CurrentPath = null;   // 새 프로젝트 — 저장 위치는 따로 고른다(베이스 파일을 덮어쓰지 않는다)
+        return doc;
+    }
+
+    private async Task ImportAsync(ProjectDoc doc, CancellationToken ct, IProgress<ProjectProgress>? progress)
+    {
         // DB 재적재: 선창 등록(면 재생성 — 기존 영역은 wall CASCADE로 정리) → 영역 → 작업.
         // 일괄 가져오기 1건(서버가 전수 검증 후 커밋 1회 — 거부 시 DB 무변경). 구빌드 서버면 단건 등록으로 폴백.
         int taskTotal = doc.Areas.Sum(a => a.Tasks.Length);
@@ -125,9 +197,6 @@ public sealed class ProjectService : IProjectService
 
         progress?.Report(new ProjectProgress("캘리브레이션·시나리오 복원", 0, 0));
         await RestoreCalibrationsAndScenariosAsync(doc, restoredAreaIds, ct);
-
-        CurrentPath = path;
-        return doc;
     }
 
     /// <summary>일괄 가져오기. 반환 = 파일 areaId → 서버 areaId(시나리오 재연결용). null = 서버 미지원.</summary>
@@ -136,7 +205,7 @@ public sealed class ProjectService : IProjectService
         var g = doc.Geometry;
         var request = new ProjectImportRequestDto(
             new ProjectImportGeometryDto(g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow, g.HWall, g.ThetaUpDeg, g.HUp,
-                g.LevelZ, g.OriginOx, g.OriginOy, null, null, null, _operatorId, g.ReachZMin, g.ReachZMax),
+                g.LevelZ, g.OriginOx, g.OriginOy, null, null, null, _operatorId, g.ReachZMin, g.ReachZMax, g.InspectionKind),
             doc.Areas.Select(a => new ProjectImportAreaDto(a.WallCode, a.Name, a.Corners,
                 a.UMin, a.VMin, a.UMax, a.VMax, a.StationX, a.StationY, a.StationTheta, a.StationStandoffM,
                 null, a.SourceId,
@@ -160,7 +229,7 @@ public sealed class ProjectService : IProjectService
         progress?.Report(new ProjectProgress("선창 등록", 0, 0));
         await _api.RegisterTankGeometryAsync(doc.TankId, g.LengthL, g.WFloor, g.ThetaLowDeg, g.HLow,
             g.HWall, g.ThetaUpDeg, g.HUp, g.LevelZ, g.OriginOx, g.OriginOy, _operatorId,
-            g.ReachZMin, g.ReachZMax, ct);
+            g.ReachZMin, g.ReachZMax, g.InspectionKind, ct);
 
         // 진행 단위 = REST 등록 건수(영역 + 작업). 대형 선창은 수천 건이라 이 단계가 열기 시간 대부분이다.
         int itemTotal = doc.Areas.Sum(a => 1 + a.Tasks.Length), itemDone = 0;

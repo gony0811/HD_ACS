@@ -80,7 +80,7 @@ public sealed record RepairStopDto(Guid AreaId, string AreaName, double X, doubl
 /// <summary>GET /api/runs/resumable — 로봇의 가장 최근 재개 가능 run(미종결 작업 보유).</summary>
 public sealed record ResumableRunDto(
     Guid RunId, Guid ScenarioId, string State, DateTimeOffset StartedAt,
-    int Pending, int Done, int Skipped);
+    int Pending, int Done, int Skipped, string? ScenarioName = null);
 
 /// <summary>GET /api/internal/tanks/{id}/task-results — 용접선의 가장 최근 검사 결과(run 무관). Status = FINISHED | FAILED.</summary>
 public sealed record TaskLatestResultDto(Guid TaskId, Guid AreaId, string Status, DateTimeOffset At,
@@ -325,7 +325,8 @@ public sealed record TankGeometryDto(
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double OriginOx, double OriginOy,
     TankDerivedDto Derived,
-    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
+    double? ReachZMin = null, double? ReachZMax = null,    // v3.1 §5-A 도달 밴드 보정(선택)
+    string? InspectionKind = null);                        // 검사 종류 WELD|GAS. 구서버(null) = WELD
 public sealed record TankDerivedDto(double WLow, double B, double WUp, double WCeil, double H);
 
 /// <summary>GET /api/internal/tanks/{id}/walls 항목 — 자동 생성된 면 [SPEC v3 §3].</summary>
@@ -351,7 +352,11 @@ public sealed record AreaDto(
     double[][]? Corners = null,    // 임의 4점 사각형 [[u,v]…]. bbox(u/v min·max)와 함께 반환
     double? StationStandoffM = null,    // 정차 이격 [m] — null=서버 설정 기본
     double? StationMaxBackwardMm = null,   // 정차 보정 후진 상한 [mm] — null=서버 설정 기본 [VDA §4.4.2 N23]
-    double? StationLiftMm = null);         // 정차 리프트 높이 [mm, 0~1000] — null=배차 기본 0
+    double? StationLiftMm = null)         // 정차 리프트 높이 [mm, 0~1000] — null=배차 기본 0
+{
+    /// <summary>층의 화면 표기(내부 층 번호 Level 은 1부터).</summary>
+    public string LevelText => HD.Acs.UI.Services.LevelLabel.Of(Level);
+}
 
 /// <summary>GET /api/internal/areas/{id}/tasks 항목 — ref.area_task (u,v) [SPEC v3 §4].</summary>
 public sealed record AreaTaskDto(
@@ -373,9 +378,18 @@ public sealed record AreaTaskDto(
 /// FrameOk=false면 바닥/천장(AMR u 미정의)이라 CROSS3 회전 불가.</summary>
 public sealed record CrossPreviewResult(string SeamType, double[][]? Points, double SnapResidualDeg, bool FrameOk);
 
+/// <summary>CROSS4 정면 좌우 판정 1건 [VDA §8.2 · 1.22]. After = 정한 값(null = 판정 불가, Reason 에 사유).</summary>
+public sealed record Cross4SideRowDto(Guid TaskId, Guid AreaId, string AreaName, string WallCode, int Level, int Seq, string? Name,
+    string Before, string? After, bool Changed, string? StartToEnd, string? Reason);
+
+/// <summary>CROSS4 정면 좌우 판정 요약 — Applied = 서버가 저장했는가.</summary>
+public sealed record Cross4SideResultDto(string TankId, bool Applied, int Total, int Left, int Right, int Undecided, int Changed,
+    IReadOnlyList<Cross4SideRowDto> Rows);
+
 /// <summary>코봇 seam 시작점 이동 시험 응답 [VDA §8 moveToSeamStart] — 발행된 Order·정차점·seam 시작 맵좌표.</summary>
 public sealed record SeamStartTestResultDto(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[]? SeamStartW,
-    double? LiftStrokeMm = null);   // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    double? LiftStrokeMm = null,    // 함께 보낸 리프트 높이[mm] — 구서버 응답이면 null
+    int? Attempt = null);           // 시험에 발급한 attempt(수동 촬영 때 비전에 실린다) — 구서버 응답이면 null
 
 /// <summary>GET /api/robots/{id}/drawing-pose — 로봇 보고 위치를 보고 층의 유효 T_W_D로 도면 좌표화(정차점 지정용).</summary>
 public sealed record RobotDrawingPoseDto(string RobotId, string MapId, int Level, double X, double Y, double? Theta,
@@ -441,3 +455,25 @@ public sealed record ResumePauseResultDto(string RobotId, string ActionType);
 /// <summary>SignalR "BatterySwapDispatched" 푸시 — 운영자 교체 디스패치 사실을 UI 이벤트 로그가 흡수.</summary>
 public sealed record BatterySwapDispatchedDto(string RobotId, string OrderId, string TargetNodeId,
     string MapId, string Reason, Guid? AbortedRunId);
+
+/// <summary>
+/// 영역 삭제 결과. Blocked = 원래 영역으로 옮길 수 없는 작업이 있어 삭제하지 않음(Message 에 사유, DeletedTasks 에 그 작업 이름).
+/// 삭제됐으면 Moved = "작업 → 받은 영역" 문구, DeletedTasks = 함께 지운 작업 이름.
+/// </summary>
+public sealed record AreaDeleteOutcome(bool Blocked, string? Message, IReadOnlyList<string> Moved, IReadOnlyList<string> DeletedTasks);
+
+/// <summary>서버 리프트 운영 방식(<c>GET /api/settings/lift</c>) — Mode = "Off" | "Auto" | "Fixed", FixedStrokeMm = 고정 높이(고정 모드만).</summary>
+public sealed record LiftSettingsDto(string Mode, double? FixedStrokeMm);
+
+/// <summary>
+/// 리치·간섭 화면의 리프트·차체 설정(서버 <c>/api/settings/reach-sim</c>) — 지금 적용 중인 값과 화면에서 덮어쓴 설정 키.
+/// 저장하면 서버가 덮어쓰기 파일에 써서 바로 다시 읽는다(시뮬레이션·배차 리프트 높이 모두 다음 요청부터).
+/// </summary>
+public sealed record ReachSettingsDto(
+    string LiftMode, double? FixedStrokeMm, double MountZMm, double AmrHeightMm, bool SupportColumn,
+    double MaxEntryJointTravelDeg, IReadOnlyList<string>? Overridden = null, string? OverrideFile = null, string? Warning = null,
+    IReadOnlyList<string>? AmrReported = null);   // AMR factsheet 로 보고돼 appsettings 대신 쓰이는 키
+
+/// <summary>리치 설정 저장 요청 — null 항목은 덮어쓰지 않는다(appsettings.json 값). 보낸 값으로 덮어쓰기 파일을 통째로 바꾼다.</summary>
+public sealed record ReachSettingsUpdateDto(
+    string? LiftMode, double? FixedStrokeMm, double? MountZMm, double? AmrHeightMm, bool? SupportColumn, double? MaxEntryJointTravelDeg);

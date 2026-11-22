@@ -28,6 +28,8 @@ using MQTTnet.Protocol;
 //     FAILED, resultDescription="FAIL;reason=INJECTED".
 //
 // 사용: dotnet run [brokerHost] [manufacturer] [serialNumber] [mapId]
+//   SIM_BROKER_PORT=n (기본 1883) · SIM_NO_UI=1 (창 없이 실행)
+//   SIM_GAS=1 (가스검사 AMR 흉내 — 검사 결과를 SAIGE 결과 본문 JSON 으로 보고)
 
 var initialMapId = args.ElementAtOrDefault(3) ?? "CT1-L1";
 var control = new SimulatorControlState(initialMapId, 95, 0, 0, 0);
@@ -81,7 +83,7 @@ var connTopic = Vda5050Topics.Connection(robot);
 var stateTopic = Vda5050Topics.State(robot);
 
 var options = new MqttClientOptionsBuilder()
-    .WithTcpServer(broker)
+    .WithTcpServer(broker, int.TryParse(Environment.GetEnvironmentVariable("SIM_BROKER_PORT"), out var brokerPort) ? brokerPort : null)
     .WithClientId($"sim-{robot.SerialNumber}")
     .WithKeepAlivePeriod(TimeSpan.FromSeconds(5))   // 통신단절 Fail-Safe §2.2 — 로봇·관제 동일 5 s
     // Last Will: 비정상 종료 시 CONNECTIONBROKEN (두절 감지의 근거 [ADR-002])
@@ -388,13 +390,20 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
                      && !movedSinceLastAction;
         var label = shared ? "정렬 공유(⑤~⑦)" : "정렬 포함(①~⑧)";
         var (simTaskId, simAttempt) = WeldInspectionParams.ReadTaskRef(action);
-        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label} · task={simTaskId} attempt={simAttempt}");
+        var simRound = WeldInspectionParams.ReadRound(action);
+        Console.WriteLine($"[SIM]   검사 시작: {jobRef} · {anchorGroupId} #{seqInGroup} · {label} · task={simTaskId} attempt={simAttempt}" +
+                          (simRound is int r0 ? $" round={r0}" : ""));
+        var simStartedAt = DateTimeOffset.UtcNow;
         await Task.Delay(shared ? sharedMs : fullMs);
 
         currentAnchorGroup = anchorGroupId;   // 성공 → 앵커 유효
         movedSinceLastAction = false;
         actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}";
+        // SIM_GAS=1 — 가스검사 AMR 흉내: 결과를 SAIGE 결과 본문(JSON)으로 싣는다 [HD_AMR 가스 디텍터 사양 §5.2]
+        actionState.ResultDescription = Environment.GetEnvironmentVariable("SIM_GAS") == "1"
+            ? WeldInspectionParams.GasResultJson(action, robot.SerialNumber, simStartedAt, DateTimeOffset.UtcNow)
+            : $"OK;anchor={(shared ? "SHARED" : "FULL")};jobRef={jobRef};attempt={simAttempt}" +
+              (simRound is int r1 ? $";round={r1}" : "");
         Console.WriteLine($"[SIM]   액션 완료: {action.ActionType} ({(shared ? "SHARED" : "FULL")})");
     }
     else if (action.ActionType == "moveToSeamStart")
@@ -413,18 +422,44 @@ async Task<bool> ExecuteActionAsync(VdaAction action)
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         string lift = "없음";
+        string seamTask = "-", seamAttempt = "-";
+        bool badTask = false, badAttempt = false;
         try
         {
             var prmParam = action.ActionParameters.FirstOrDefault(p => p.Key == "params");
-            if (prmParam?.Value is not null
-                && System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prmParam.Value))?["liftStrokeMm"] is { } ln)
+            var prmNode = prmParam?.Value is null ? null
+                : System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(prmParam.Value));
+            if (prmNode?["liftStrokeMm"] is { } ln)
                 lift = $"{ln.GetValue<double>():0}mm";
+            // params.taskId — 선택 필드, 실려 왔다면 uuid 여야 한다(본검사와 같은 규칙)
+            if (prmNode?["taskId"] is { } tk)
+            {
+                var ts = tk.GetValueKind() == System.Text.Json.JsonValueKind.String ? tk.GetValue<string>() : null;
+                if (ts is not null && Guid.TryParse(ts, out _)) seamTask = ts; else badTask = true;
+            }
+            // params.attempt — 선택 필드, 실려 왔다면 1~255 정수(본검사와 같은 규칙)
+            if (prmNode?["attempt"] is { } an)
+            {
+                if (an.GetValueKind() == System.Text.Json.JsonValueKind.Number && an.AsValue().TryGetValue<int>(out var av) && av is >= 1 and <= 255)
+                    seamAttempt = av.ToString();
+                else badAttempt = true;
+            }
         }
         catch { /* 로그용 — 파싱 실패 무해 */ }
         await Task.Delay(fullMs);
-        actionState.ActionStatus = "FINISHED";
-        actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift}";
-        Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift}");
+        if (badTask || badAttempt)
+        {
+            var field = badTask ? "params.taskId" : "params.attempt";
+            actionState.ActionStatus = "FAILED";
+            actionState.ResultDescription = $"PARAM;moveToSeamStart;{field}";
+            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 실패 — {field} 형식 오류");
+        }
+        else
+        {
+            actionState.ActionStatus = "FINISHED";
+            actionState.ResultDescription = $"OK;moveToSeamStart;lift={lift};task={seamTask};attempt={seamAttempt}";
+            Console.WriteLine($"[SIM]   코봇 seam 시작점 이동 시험 완료 → seamStartW={seam} lift={lift} task={seamTask} attempt={seamAttempt}");
+        }
     }
     else
     {
@@ -498,7 +533,9 @@ async Task PublishAsync<T>(string topic, T payload, bool retain = false)
 }
 });
 
-SimulatorUi.Run(control);
+// SIM_NO_UI=1 이면 창 없이 돈다(자동 검증용) — 끝내려면 프로세스를 종료한다.
+if (Environment.GetEnvironmentVariable("SIM_NO_UI") == "1") await simulatorTask;
+else SimulatorUi.Run(control);
 control.Stop();
 try { await simulatorTask; }
 catch (OperationCanceledException) { }
@@ -550,8 +587,43 @@ static class WeldInspectionParams
             if (prms.Value.TryGetProperty("attempt", out var at) &&
                 !(at.ValueKind == JsonValueKind.Number && at.TryGetInt32(out var atv) && atv is >= 1 and <= 255))
                 violations.Add("params.attempt");
+            // round — 가스검사 회차(선택). 실려 왔다면 1 또는 2 [HD_AMR 가스 디텍터 사양 §5.1 — 그 밖의 값은 AMR 이 거부]
+            if (prms.Value.TryGetProperty("round", out var rd) &&
+                !(rd.ValueKind == JsonValueKind.Number && rd.TryGetInt32(out var rdv) && rdv is 1 or 2))
+                violations.Add("params.round");
         }
         return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);
+    }
+
+    /// <summary>params.round(가스검사 회차 1|2). 없으면 null.</summary>
+    public static int? ReadRound(VdaAction action) =>
+        GetObject(action, "params") is { } p && p.TryGetProperty("round", out var rd) && rd.TryGetInt32(out var v) ? v : null;
+
+    /// <summary>
+    /// 가스 모드 결과 본문 — 실제 AMR 이 액션 종료 시 resultDescription 에 싣는 SAIGE 결과 JSON 과 같은 모양
+    /// [HD_AMR 가스 디텍터 사양 §5.2]. 값은 시뮬레이션(포인트 1개, 0.8 ppm, 임계 5 ppm → OK).
+    /// </summary>
+    public static string GasResultJson(VdaAction action, string robotId, DateTimeOffset startedAt, DateTimeOffset finishedAt)
+    {
+        var (taskId, _) = ReadTaskRef(action);
+        string tank = GetObject(action, "position") is { } pos && pos.TryGetProperty("drawingPos", out var dp)
+                      && dp.TryGetProperty("tank", out var tk) ? tk.GetString() ?? "" : "";
+        var body = new Dictionary<string, object?>
+        {
+            ["tankId"] = tank, ["taskId"] = taskId == "-" ? "" : taskId,
+        };
+        if (ReadRound(action) is int round) body["round"] = round;
+        body["robotId"] = robotId;
+        body["startedAt"] = startedAt.ToUnixTimeMilliseconds();
+        body["finishedAt"] = finishedAt.ToUnixTimeMilliseconds();
+        body["threshold"] = new { value = 5.0, unit = "ppm" };
+        body["result"] = "OK";
+        body["points"] = new[]
+        {
+            new { pointSeq = 1, result = "OK", scans = new[]
+                { new { retry = 0, u = 0, v = 0, value = 0.8, result = "OK", measuredAt = finishedAt.ToUnixTimeMilliseconds() } } },
+        };
+        return JsonSerializer.Serialize(body);
     }
 
     /// <summary>params.taskId·attempt 추출(검증 통과 후 호출). 미탑재(구버전 ACS)면 "-" / 1 — 실제 AMR 폴백과 동일.</summary>

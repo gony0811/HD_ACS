@@ -26,7 +26,7 @@ public static class AreaLift
         var table = new ReachSeamSurvey[seams.Count][];
         Parallel.For(0, seams.Count, i =>
             table[i] = strokesMm.Select(h => ReachSimulator.Survey(model, planes, stations, seams[i], wallNormal, new[] { h }, wallCode)).ToArray());
-        return Choose(strokesMm, table, model.TraverseMarginTargetDeg);
+        return Choose(strokesMm, table, model.TraverseMarginTargetDeg, model.MarginRankCapDeg);
     }
 
     /// <summary>
@@ -90,8 +90,10 @@ public static class AreaLift
 
         var needEntry = ReachSimulator.StartJoints(model, wallCode) is not null;
 
-        // 순위 — 여유 확보 간섭 없음(도면 순회 관절 여유 ≥ 목표) > 간섭 없음 > 도달 > 순회 최소 여유(목표에서 자름) > 낮은 높이.
+        // 순위 — 여유 확보 간섭 없음(도면 순회 관절 여유 ≥ 목표) > 간섭 없음 > 도달 > 순회 최소 여유(비교 상한까지) > 낮은 높이.
         var cap = model.TraverseMarginTargetDeg;
+        var rankCap = model.MarginRankCapDeg;
+        var marginUb = StationOptimizer.MarginKey(double.PositiveInfinity, cap, rankCap);   // 여유가 가질 수 있는 최대(가지치기 상한)
         var bestScore = (Safe: -1, Clear: -1, Reach: -1, Margin: double.NegativeInfinity, Miss: int.MaxValue);
         var bestStroke = double.PositiveInfinity;
         var bestRow = Array.Empty<ReachSeamSurvey>();
@@ -111,7 +113,7 @@ public static class AreaLift
             foreach (var u in ub.OrderByDescending(x => x.Clear).ThenByDescending(x => x.Reach).ThenBy(x => strokesMm[x.K]))
             {
                 var h = strokesMm[u.K];
-                if (!Better((u.Clear, u.Clear, u.Reach, cap, seams.Count - u.Reach), h)) continue;
+                if (!Better((u.Clear, u.Clear, u.Reach, marginUb, seams.Count - u.Reach), h)) continue;
                 int safeUb = u.Clear, clearUb = u.Clear, reachUb = u.Reach;
                 var minMargin = double.PositiveInfinity;
                 var row = new ReachSeamSurvey[seams.Count];
@@ -120,7 +122,7 @@ public static class AreaLift
                 {
                     if (!clearStays) { reachUb--; if (wasClear) clearUb--; }
                     if (wasClear) safeUb--;
-                    return !Better((safeUb, clearUb, reachUb, cap, seams.Count - reachUb), h);
+                    return !Better((safeUb, clearUb, reachUb, marginUb, seams.Count - reachUb), h);
                 }
                 // 진입 경로·도면 순회 — 용접선마다 독립이라 먼저 병렬로 풀고, 집계·가지치기는 아래에서 순서대로 한다(결과는 순차 계산과 같다).
                 var gate = new (bool Blocked, string? Blocker, double? Margin)[seams.Count];
@@ -160,7 +162,7 @@ public static class AreaLift
                     row[i] = Row(p, h, margin);
                 }
                 if (aborted) continue;
-                var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap), seams.Count - reachUb);
+                var score = (safeUb, clearUb, reachUb, StationOptimizer.MarginKey(double.IsPositiveInfinity(minMargin) ? null : minMargin, cap, rankCap), seams.Count - reachUb);
                 if (Better(score, h))
                 {
                     bestScore = score;
@@ -183,15 +185,15 @@ public static class AreaLift
     /// (여유 확보 간섭 없음 → 간섭 없음 → 도달 → 순회 최소 여유 → 낮은 높이, <see cref="StationOptimizer.Score"/>).
     /// </summary>
     public static AreaLiftResult Choose(IReadOnlyList<double> strokesMm, IReadOnlyList<IReadOnlyList<ReachSeamSurvey>> table,
-        double marginTargetDeg = ReachRobotModel.DefaultTraverseMarginTargetDeg)
+        double marginTargetDeg = ReachRobotModel.DefaultTraverseMarginTargetDeg, double marginCapDeg = double.PositiveInfinity)
     {
         var best = table.Select(BestOf).ToList();
         if (strokesMm.Count == 0) return new AreaLiftResult(0, best, best);
         var pick = 0;
-        var top = StationOptimizer.Score(table.Select(r => r[0]).ToList(), marginTargetDeg);
+        var top = StationOptimizer.Score(table.Select(r => r[0]).ToList(), marginTargetDeg, marginCapDeg);
         for (var k = 1; k < strokesMm.Count; k++)
         {
-            var s = StationOptimizer.Score(table.Select(r => r[k]).ToList(), marginTargetDeg);
+            var s = StationOptimizer.Score(table.Select(r => r[k]).ToList(), marginTargetDeg, marginCapDeg);
             var c = StationOptimizer.CompareScore(s, top);
             if (c > 0 || (c == 0 && strokesMm[k] < strokesMm[pick])) { pick = k; top = s; }
         }

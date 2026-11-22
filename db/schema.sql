@@ -143,7 +143,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType":            { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3"] },
+        "seamType":            { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3"] },
         "points":              { "type": "array" },
         "sectionDxfId":        { "type": "string" },
         "inspectionProfileId": { "type": "string" },
@@ -154,6 +154,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "liftStrokeMm":        { "type": "number", "minimum": 0, "maximum": 1000 },
         "taskId":              { "type": "string", "format": "uuid" },
         "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
+        "round":               { "enum": [1, 2] },
         "stationAdjust": {
           "type": "object",
           "required": ["maxForwardMm", "maxBackwardMm", "maxLateralMm", "maxThetaDeg"],
@@ -186,7 +187,9 @@ VALUES ('moveToSeamStart', 'NODE', 'HARD',
     "params": {
       "type": "object",
       "properties": {
-        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 }
+        "liftStrokeMm": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "taskId":       { "type": "string", "format": "uuid" },
+        "attempt":      { "type": "integer", "minimum": 1, "maximum": 255 }
       }
     },
     "position": {
@@ -281,8 +284,48 @@ CREATE TABLE ref.tank_geometry (
   reach_z_max double precision,            -- (선택, v3.1) 코봇 도달 밴드 상한 상대높이
   origin_ox   double precision NOT NULL DEFAULT 0,
   origin_oy   double precision NOT NULL DEFAULT 0,
+  inspection_kind text NOT NULL DEFAULT 'WELD',   -- 검사 종류: WELD(용접) | GAS(가스). 같은 AMR·VDA 5050, 검사 장비만 다름
   created_by  text,
   created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ─────────────── HD_AMR 검사 프로필 사본 (ref) ───────────────
+-- AMR 이 프로필을 저장할 때 전체 목록을 올려 보낸다. 내용이 바뀌면 version +1. 리치 시뮬레이터 순회 판정용.
+CREATE TABLE IF NOT EXISTS ref.inspection_profile (
+  source         text NOT NULL,
+  amr_profile_id int  NOT NULL,
+  name           text NOT NULL,
+  seam_type      text NOT NULL DEFAULT 'LINE',
+  pose_absolute  boolean NOT NULL DEFAULT false,
+  waypoints      jsonb NOT NULL DEFAULT '[]',
+  point_count    int  NOT NULL DEFAULT 0,
+  version        int  NOT NULL DEFAULT 1,
+  content_hash   text NOT NULL DEFAULT '',
+  amr_updated_at timestamptz,
+  received_at    timestamptz NOT NULL DEFAULT now(),
+  changed_at     timestamptz NOT NULL DEFAULT now(),
+  deleted        boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (source, amr_profile_id)
+);
+CREATE INDEX IF NOT EXISTS ix_inspection_profile_name ON ref.inspection_profile (name);
+-- 유형·면·진행 방향(H 가로 / V 세로)별 프로필 지정표 — AMR 이 통째로 올려 보낸다.
+CREATE TABLE IF NOT EXISTS ref.inspection_profile_assignment (
+  source         text NOT NULL,
+  seam_type      text NOT NULL,
+  wall_code      text NOT NULL,
+  direction      text NOT NULL,
+  amr_profile_id int  NOT NULL,
+  PRIMARY KEY (source, seam_type, wall_code, direction)
+);
+-- HD_AMR 교시 위치(홈 위치_2·작업 준비 위치 …)와 면별 운영 ② 출발 관절각 — 프로필 전송 때 함께 온다(AMR 하나 = 행 하나).
+-- 리치 시뮬레이터가 Acs:Reach:StartJoints 설정보다 이 값을 먼저 쓴다(재교시가 자동 반영).
+CREATE TABLE IF NOT EXISTS ref.amr_teaching (
+  source             text PRIMARY KEY,
+  teaching_positions jsonb NOT NULL DEFAULT '[]',
+  start_joints       jsonb NOT NULL DEFAULT '{}',
+  content_hash       text NOT NULL DEFAULT '',
+  received_at        timestamptz NOT NULL DEFAULT now(),
+  changed_at         timestamptz NOT NULL DEFAULT now()
 );
 
 -- ─────────────── 벽면(Wall) LAYER (ref) [SPEC v3 §3: 파라미터에서 자동 생성] ───────────────
@@ -401,7 +444,8 @@ CREATE TABLE run.scenario_run (
   -- 진행률 분모 고정 [SAIGE 연동 사양서 v2.6 §6.1/§6.4] — run 시작 시 큐 전개 시점에 1회 기록, 이후 불변.
   total_tasks    int,                     -- 전개된 TASK 총수 (NULL = 구버전 run → work_item 에서 폴백 산출)
   excluded_tasks int NOT NULL DEFAULT 0,  -- 유효 T_W_D 부재 등으로 큐에서 제외된 TASK 수 (분모 미포함)
-  task_ids       jsonb                    -- 리페어 run 의 검사 대상 taskId 배열 (NULL = 일반 run)
+  task_ids       jsonb,                   -- 리페어 run 의 검사 대상 taskId 배열 (NULL = 일반 run)
+  round          int                      -- 가스검사 회차 1|2 → 지령 params.round (NULL = 미지정·용접검사)
 );
 
 -- 층 단위 미션 (한 미션의 모든 노드는 같은 map_id)
@@ -456,9 +500,22 @@ CREATE TABLE run.order_action (
     -- WAITING | INITIALIZING | RUNNING | FINISHED | FAILED  (VDA5050 actionStatus)
   result           jsonb,              -- 성공/실패 응답 [ADR-004]
   attempts         int NOT NULL DEFAULT 0,
-  created_at       timestamptz NOT NULL DEFAULT now()   -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
+  created_at       timestamptz NOT NULL DEFAULT now(),  -- 재시도 시 최신 액션 판별 (작업 현황 드릴다운)
+  order_id         text                -- 발행 Order(정차). 중단·이어하기로 같은 정차를 다시 배차해도 이번 Order 액션만 정차 종결에 쓴다
 );
 CREATE INDEX ix_orderaction_mission ON run.order_action (mission_id, node_sequence_id);
+
+-- 코봇 이동 시험(moveToSeamStart) 발행 기록 [VDA §8.7] — 시험도 taskId 별 누적 attempt 를 받는다(수동 촬영 시 비전에 싣는다).
+-- 다음 attempt = order_action(그 taskId) 수 + seam_test(그 taskId) 수 + 1. 검사 결과·진행률에는 들어가지 않는다.
+CREATE TABLE run.seam_test (
+  test_id    uuid PRIMARY KEY,
+  task_id    uuid NOT NULL,
+  robot_id   text NOT NULL,
+  order_id   text NOT NULL,
+  attempt    int  NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_seam_test_task ON run.seam_test (task_id);
 
 -- 로봇 컨텍스트: 수동 지정값 vs 로봇 보고값 분리 보관 [Q9, GRAPH_DATA_MODEL 8.4]
 CREATE TABLE run.robot_context (
@@ -505,6 +562,29 @@ CREATE TABLE hist.inspection_result (
   occurred_at timestamptz NOT NULL   -- 대조 키 (타임스탬프 규약 Q2)
 );
 CREATE INDEX ix_inspresult_time ON hist.inspection_result (occurred_at);
+
+-- 가스 측정 결과(가스검사 AMR 이 액션 종료 때 보낸 본문) + 세이지 전송 상태. 받은 즉시 저장, 전송은 따로 돈다.
+-- send_state: PENDING(보낼 것) | SENT | REJECTED(세이지가 형식 거부 — 재전송 안 함). body = AMR 본문 그대로.
+CREATE TABLE IF NOT EXISTS hist.gas_result (
+  result_id     uuid PRIMARY KEY,
+  action_id     uuid NOT NULL,
+  run_id        uuid NOT NULL,
+  task_id       uuid,
+  tank_id       text,
+  robot_id      text NOT NULL,
+  round         int,
+  result        text NOT NULL,
+  point_count   int  NOT NULL DEFAULT 0,
+  body          jsonb NOT NULL,
+  send_state    text NOT NULL DEFAULT 'PENDING',
+  send_attempts int  NOT NULL DEFAULT 0,
+  last_error    text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  sent_at       timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_gas_result_action ON hist.gas_result (action_id);
+CREATE INDEX IF NOT EXISTS ix_gas_result_send ON hist.gas_result (send_state, created_at);
+CREATE INDEX IF NOT EXISTS ix_gas_result_run ON hist.gas_result (run_id);
 CREATE INDEX ix_inspresult_run  ON hist.inspection_result (run_id);
 
 -- ═══════════════════════════ ⑥ 알람 (alarm) ═══════════════════════════
@@ -532,6 +612,8 @@ INSERT INTO alarm.spec (alarm_code, severity, title, description) VALUES
   ('RESUME_REJECTED',    'WARNING', '재개 거부', 'AMR이 재개 요청을 거부(비상정지·배터리·측위/mapId·운전 모드 중 불충족) — 사유 해소 후 다시 재개 [HD_AMR 통신단절 Fail-Safe §4.2]'),
   ('DEVICE_LINK_LOST',   'CRITICAL','장치 통신 두절(HEAVY) — 현장 RESET 필요', '장치 6종(비전·Depth·레이저·I/O·코봇·AMR) 중 통신 두절 — AMR이 HEAVY 래치·임무 중단. errors[]에서 사라질 때(현장 RESET)까지 배차 보류, 해제 시 자동 재개 [HD_AMR 장치통신 HEAVY알람 §5]'),
   ('ORDER_REJECTED_DEVICE_FAULT', 'WARNING', '장치 알람 — Order 거부', 'AMR이 장치 HEAVY 알람 중 Order 거부(WARNING, 기존 orderId 유지) — 실행 없음, ACS는 정차를 PENDING 복귀 후 RESET 뒤 재배차 [HD_AMR 장치통신 HEAVY알람 §4.2]'),
+  ('AMR_CONFIG_CHANGED', 'WARNING', 'AMR 설정 변경 — 티칭·리프트·장착 보정', 'AMR이 factsheet로 보고한 설정(면별 출발 자세 티칭·리프트 운영·장착 보정 T_A_B·코봇 값)이 바뀜 — ACS가 리치 시뮬레이션·배차 설정에 반영함. 옛 설정으로 고른 영역 정차·리프트는 정차점 최적화로 다시 확인할 것 [VDA §7.3]'),
+  ('BATTERY_GUARD_BYPASSED', 'WARNING', '배터리 보호 해제 중 — BMS 잔량 무시', 'AMR이 BMS 고장 임시 조치로 배터리 보호를 끈 상태(HD_AMR appsettings PowerMode:BypassBatteryGuard=true) — 배터리 잔량과 무관하게 정상 모드로 Order를 받고 저전력 안전정지를 하지 않는다. 실제 잔량을 모르므로 팩 전압을 따로 확인할 것. AMR에서 설정을 끄고 재시작하면 해제된다 [VDA §6.4 batteryGuardBypassed]'),
   ('COBOT_ZONE_OBSTACLE', 'WARNING', '코봇 반경 장애물 — AMR 주행 정지', 'AMR이 주행 중 라이다로 코봇 반경 안의 장애물을 감지해 그 자리에 정지(타워램프 황색·부저) — 실패 아님. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 알람이 해제된다. 주행 제한 시간까지 안 사라지면 정차가 실패로 보고된다 [VDA §6.4 cobotZoneObstacle, HD_AMR 파라미터 cobotGuard.enabled]'),
   ('MANUAL_BEAD_INPUT_REQUIRED', 'WARNING', '수동 비드 입력 대기', 'AMR이 비드 자동 검출 대신 작업자 입력을 기다림(팝업 표시 중, 타워램프 녹색 점멸) — 실패 아님. AMR 화면에서 비드선을 지정하면 검사가 이어지고 알람이 해제된다 [VDA §6.4 manualBeadInputRequired]'),
   ('FLOOR_MISMATCH',     'WARNING', 'AMR 층 불일치 — 작업 지시 보류', '미션 시작·이어하기·다음 층 릴리스 때 AMR 보고 층(mapId)에 보낼 작업이 없음(작업이 다른 층에만 남았거나 AMR이 층을 보고하지 않음) — Order를 보내지 않음. AMR을 작업 층으로 옮기고 수동 층 변경 → 다음 층 릴리스'),

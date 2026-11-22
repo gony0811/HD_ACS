@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HD.Acs.UI.Abstractions;
 using HD.Acs.UI.Models;
 using HD.Acs.UI.Services;
 
@@ -48,9 +49,13 @@ public sealed partial class MissionViewModel : ObservableObject
     /// <summary>작업 현황 요약(예: "완료 5 / 전체 12 · 스킵 1").</summary>
     [ObservableProperty] private string _workSummary = "실행 중 작업 없음";
 
-    public MissionViewModel(IAcsApiClient api, IMonitoringClient monitoring)
+    /// <summary>확인 창 — 이어할 수 있는 run이 있는데 미션 시작을 누르면 묻는다. 없으면(테스트 등) 묻지 않고 시작하지 않는다.</summary>
+    private readonly IDialogService? _dialogs;
+
+    public MissionViewModel(IAcsApiClient api, IMonitoringClient monitoring, IDialogService? dialogs = null)
     {
         _api = api;
+        _dialogs = dialogs;
         monitoring.MissionProgressReceived += OnMissionProgress;
         monitoring.RunProgressReceived += OnRunProgress;
         monitoring.WorkItemProgressReceived += OnWorkItemProgress;
@@ -229,12 +234,37 @@ public sealed partial class MissionViewModel : ObservableObject
 
     private bool CanStartRun() => SelectedScenario is not null && !string.IsNullOrWhiteSpace(SelectedRobotId);
 
+    // ── 가스검사 회차 ── 가스검사 선창에서만 보이고 지령 params.round 로 나간다(용접검사 선창은 서버가 무시).
+    /// <summary>현재 선창이 가스검사인지 — Shell 이 선창의 검사 종류로 맞춘다.</summary>
+    [ObservableProperty] private bool _isGasTank;
+    public IReadOnlyList<string> RoundOptions { get; } = new[] { "1회차", "2회차" };
+    /// <summary>회차 선택(0 = 1회차, 1 = 2회차). 가스검사는 회차가 필수라 "없음"은 두지 않는다(세이지가 회차 없는 결과를 거부).</summary>
+    [ObservableProperty] private int _roundIndex;
+    /// <summary>미션·재검사 시작에 실을 회차 — 가스검사 선창이면 1 또는 2, 아니면 null.</summary>
+    public int? Round => IsGasTank ? (RoundIndex == 1 ? 2 : 1) : null;
+
     [RelayCommand(CanExecute = nameof(CanStartRun))]
     private async Task StartRunAsync()
     {
         try
         {
-            var runId = await _api.StartRunAsync(SelectedScenario!.ScenarioId, SelectedRobotId!);
+            // 이어할 수 있는 중단 run이 있으면 먼저 묻는다 — 새 run은 시나리오 전체를 처음부터 다시 싣고,
+            // 만들어지는 순간 그 run은 더 이상 이어할 수 없다(2026-11-11 현장: 끝낸 영역부터 다시 검사).
+            bool restart = false;
+            ResumableRunDto? resumable = null;
+            try { resumable = await _api.GetResumableRunAsync(SelectedRobotId!); }
+            catch { /* 확인 실패 — 서버 가드(409)가 최종 판정 */ }
+            if (resumable is { State: "ABORTED" } r)
+            {
+                var text = ResumableRunPrompt(r, SelectedScenario!.Name);
+                if (_dialogs is null || !await _dialogs.ConfirmAsync(text, "이어할 수 있는 작업이 있습니다"))
+                {
+                    StatusMessage = $"미션 시작 취소 — 중단된 run에 남은 정차 {r.Pending}곳이 있습니다. '이어하기'로 진행하세요.";
+                    return;
+                }
+                restart = true;
+            }
+            var runId = await _api.StartRunAsync(SelectedScenario!.ScenarioId, SelectedRobotId!, Round, restart, default);
             await RefreshRunAsync(runId);
             StatusMessage = $"미션 실행 시작: run {runId}";
         }
@@ -242,6 +272,19 @@ public sealed partial class MissionViewModel : ObservableObject
         {
             StatusMessage = $"미션 시작 실패: {ex.Message}";
         }
+    }
+
+    /// <summary>미션 시작 확인 창 문구 — 중단 run의 진행 상황과 새로 시작했을 때 잃는 것.</summary>
+    public static string ResumableRunPrompt(ResumableRunDto r, string? selectedScenario)
+    {
+        var name = r.ScenarioName ?? r.ScenarioId.ToString();
+        var started = r.StartedAt.ToLocalTime().ToString("MM-dd HH:mm");
+        return $"중단된 run이 있습니다 — 시나리오 {name} ({started} 시작)\n"
+             + $"완료 {r.Done} · 건너뜀 {r.Skipped} · 남은 정차 {r.Pending}\n\n"
+             + $"새로 시작하면 시나리오 '{selectedScenario}'의 모든 영역을 처음부터 다시 검사하고, "
+             + "중단된 run은 더 이상 이어할 수 없습니다.\n"
+             + "남은 영역만 진행하려면 '아니오'를 누르고 '이어하기'를 사용하세요.\n\n"
+             + "처음부터 새로 시작할까요?";
     }
 
     // ── 용접선 재검사(리페어 run) — 지정한 용접선만 다시 검사 ──
@@ -298,7 +341,7 @@ public sealed partial class MissionViewModel : ObservableObject
         try
         {
             // 소속 표시용 시나리오 — 지금 보고 있는 run의 것, 없으면 서버가 그 선창의 최근 run 시나리오를 쓴다
-            var r = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId, optimize);
+            var r = await _api.StartRepairRunAsync(SelectedRobotId!, taskIds, CurrentRun?.ScenarioId, optimize, Round, default);
             if (r is null) { StatusMessage = "재검사 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."; return; }
             await RefreshRunAsync(r.RunId);
             StatusMessage = $"재검사 시작: {what} · {DescribeStops(r.Stops, optimize)}";
@@ -580,7 +623,7 @@ public sealed partial class MissionViewModel : ObservableObject
         {
             var kind = Classify(m.State);
             if (kind == "done") done++;
-            var level = m.MapId.Contains('-') ? m.MapId[(m.MapId.LastIndexOf('-') + 1)..] : m.MapId;
+            var level = LevelLabel.OfMapId(m.MapId);   // 화면 표기(맵 ID 의 층 번호와 다를 수 있다)
 
             var floorItems = WorkItems.Where(w => w.MapId == m.MapId).ToList();
             double frac = floorItems.Count > 0
@@ -642,6 +685,7 @@ public sealed partial class WorkItemRow : ObservableObject
     public Guid AreaId { get; }
     public string AreaName { get; }
     public int Level { get; }
+    public string LevelText => LevelLabel.Of(Level);
     public string MapId { get; }
     public int Seq { get; }
     [ObservableProperty] private string _status;
@@ -709,7 +753,10 @@ public static class WorkOutcome
 }
 
 /// <summary>시나리오 검사 대상 영역 행 [부분 검사 계획] — 풀/대상 소속이 곧 선택 상태.</summary>
-public sealed record ScenarioAreaPick(Guid AreaId, string WallCode, int Level, string Name);
+public sealed record ScenarioAreaPick(Guid AreaId, string WallCode, int Level, string Name)
+{
+    public string LevelText => LevelLabel.Of(Level);
+}
 
 /// <summary>용접라인(액션) 행. Status: PLANNED(미배차) | WAITING | RUNNING | FINISHED | FAILED.</summary>
 public sealed partial class TaskRow : ObservableObject

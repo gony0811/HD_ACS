@@ -106,8 +106,8 @@ public class OperationStatusTests
         mon.Robot(State());   // CT1-L1
 
         Assert.Equal(("warn", "AMR 층 불일치 — 작업 지시 보류"), (vm.StatusKind, vm.StatusHeadline));
-        Assert.Contains("AMR 현재 층 CT1-L1", vm.StatusDetail);
-        Assert.Contains("남은 작업 층 CT1-L2", vm.StatusDetail);
+        Assert.Contains("AMR 현재 층 L0 (맵 CT1-L1)", vm.StatusDetail);
+        Assert.Contains("남은 작업 층 L1 (맵 CT1-L2)", vm.StatusDetail);
 
         // L1 작업을 마치고 넘어가는 정상 대기는 종전 문구(층 정보만 덧붙임)
         mission.WorkItems.Add(new WorkItemRow(new WorkItemDto(Guid.NewGuid(), Guid.NewGuid(), "F-01", 1, "CT1-L1", 0, "DONE", 0)));

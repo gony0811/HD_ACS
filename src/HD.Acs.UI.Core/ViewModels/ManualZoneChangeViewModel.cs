@@ -22,6 +22,15 @@ public sealed partial class ManualZoneChangeViewModel : ObservableObject
 
     [ObservableProperty] private string? _selectedRobotId;
     [ObservableProperty] private TankFloor? _selectedFloor;
+
+    /// <summary>선창 ID 가 바뀌면 층 목록의 맵 ID 를 새 선창 것으로 바꾸고 같은 층을 다시 고른다.</summary>
+    public void SetTank(string tankId)
+    {
+        
+        var level = SelectedFloor?.Level;
+        if (!TankLayout.Retarget(Floors, tankId)) return;
+        SelectedFloor = Floors.FirstOrDefault(f => f.Level == level) ?? Floors.FirstOrDefault();
+    }
     [ObservableProperty] private RobotContextDto? _context;
 
     [ObservableProperty] private string? _statusMessage;
@@ -91,7 +100,7 @@ public sealed partial class ManualZoneChangeViewModel : ObservableObject
         try
         {
             await _api.ManualZoneChangeAsync(SelectedRobotId, SelectedFloor.MapId, _operatorId);
-            StatusMessage = $"수동 층 변경 요청: {SelectedFloor.Level} ({SelectedFloor.MapId}) — 작업자 {_operatorId}";
+            StatusMessage = $"수동 층 변경 요청: {SelectedFloor.Label} (맵 {SelectedFloor.MapId}) — 작업자 {_operatorId}";
             await RefreshContextAsync();
         }
         catch (Exception ex)

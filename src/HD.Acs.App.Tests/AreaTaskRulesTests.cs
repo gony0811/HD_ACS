@@ -12,7 +12,7 @@ public class AreaTaskRulesTests
     [Theory]
     [InlineData("LINE")]
     [InlineData("CROSS3_R0")] [InlineData("CROSS3_R90")] [InlineData("CROSS3_R180")] [InlineData("CROSS3_R270")]
-    [InlineData("CROSS4")] [InlineData("CORNER2")] [InlineData("CORNER3")]
+    [InlineData("CROSS4")] [InlineData("CROSS4_L")] [InlineData("cross4_r")] [InlineData("CORNER2")] [InlineData("CORNER3")]
     [InlineData("line")]          // 대소문자 무시 수용(저장 시 canonical 정규화)
     [InlineData("CROSS")]         // legacy 별칭 → CROSS4 (§8.5.1 전환 유예)
     [InlineData("CORNER")]        // legacy 별칭 → CORNER3

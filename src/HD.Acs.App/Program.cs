@@ -29,13 +29,33 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // "localhost"면 로컬 UI 전용 [SW-34]. 하드코딩하지 않고 설정으로만 전환한다.
 // 5100은 NAMUGA 계열 배포 제품(CS01_P 등)이 쓰는 관례 포트라 개발/현장 PC 공존을 위해 회피.
 // 폐쇄망 OS 서비스 배포에서도 이 설정으로 고정 [ADR-011].
+// 리치·간섭 화면에서 바꾼 리프트·차체 설정 — appsettings.json 다음에 읽어 그 값을 이긴다(파일 없으면 무시) [ReachRuntimeSettings]
+// AMR 이 factsheet(VDA §7.3)로 보고한 티칭 출발 자세·리프트·장착 보정·코봇 값 — 화면 설정보다 먼저 읽는다
+// (우선순위: appsettings.json < AMR 보고 < 리치·간섭 화면 설정) [AmrFactsheetService]
+builder.Configuration.AddJsonFile(AmrFactsheetService.FileName, optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile(ReachRuntimeSettings.FileName, optional: true, reloadOnChange: true);
+
 builder.WebHost.UseUrls($"http://{builder.Configuration.GetValue("Acs:Api:ListenHost", "localhost")}:{builder.Configuration.GetValue("Acs:Api:ListenPort", 5199)}");
 
 // Windows 서비스(sc.exe 등록)로 실행될 때 SCM 시작/정지 신호에 응답 — 없으면 시작이 1053 시간 초과로 실패한다.
 // 콘솔·Rider 실행에서는 아무 동작도 하지 않는다 [ADR-011, INSTALL_MANUAL 9단계].
 builder.Host.UseWindowsService(o => o.ServiceName = "HDACS-App");
 
-builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
+// 앱 로그 — 콘솔 + 날짜별 파일. OS 서비스로 돌면 콘솔 출력은 어디에도 남지 않아, 현장에서 "무엇을 눌렀는지"를
+// 사후에 확인할 수 없었다(2026-11-11 이어하기 문의). [Acs:Log] FileEnabled(기본 true)·Dir(기본 실행 폴더의 logs)·RetainDays(기본 31).
+builder.Host.UseSerilog((ctx, cfg) =>
+{
+    cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console();
+    if (ctx.Configuration.GetValue("Acs:Log:FileEnabled", true))
+    {
+        var dir = ctx.Configuration["Acs:Log:Dir"];
+        if (string.IsNullOrWhiteSpace(dir)) dir = Path.Combine(AppContext.BaseDirectory, "logs");
+        cfg.WriteTo.File(Path.Combine(dir, "acs-.log"), rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: Math.Clamp(ctx.Configuration.GetValue("Acs:Log:RetainDays", 31), 1, 365),
+            shared: true, fileSizeLimitBytes: 200L * 1024 * 1024, rollOnFileSizeLimit: true,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}");
+    }
+});
 
 builder.Services.AddDbContext<AcsDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("Default"))
@@ -52,8 +72,18 @@ builder.Services.AddMemoryCache();                   // 진행률 조회 ~1초 T
 builder.Services.AddScoped<ProgressService>();
 builder.Services.AddScoped<RunQueryService>();
 builder.Services.AddScoped<TankShapeQueryService>();
-builder.Services.AddScoped<ReachSimService>();   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
+builder.Services.AddSingleton<AmrRobotModelStore>();   // AMR 이 알려 준 코봇 모델 값(d6 등) 대조 결과
+builder.Services.AddSingleton(sp => new ReachRuntimeSettings(sp.GetRequiredService<IConfiguration>(),
+    Path.Combine(builder.Environment.ContentRootPath, ReachRuntimeSettings.FileName)));
+builder.Services.AddSingleton(sp => new AmrFactsheetService(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<AmrFactsheetService>>(), Path.Combine(builder.Environment.ContentRootPath, AmrFactsheetService.FileName)));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AmrFactsheetService>());
+builder.Services.AddScoped<ReachSimService>();
+builder.Services.AddScoped<SetCoverApplyService>();   // 정차 묶음 최적화 결과를 영역에 적용
+builder.Services.AddScoped<AreaGridService>();        // 면·층 영역을 균등 격자로 다시 나눔(용접선 묶기)
+builder.Services.AddSingleton<SetCoverJobs>();   // 정차 묶음 최적화(set cover) 작업 — 면 하나에 수 분   // 리치·간섭 시뮬레이션(조회 전용, FR5-WML 모델)
 builder.Services.AddScoped<AreaSplitService>();   // 영역 재분할 적용(재분할 제안의 묶음을 한 트랜잭션으로)
+builder.Services.AddScoped<AreaDeleteService>();  // 영역 삭제 — 작업을 원래 영역으로 되돌린 뒤 삭제
 builder.Services.AddScoped<RobotStateService>();
 builder.Services.AddSingleton<RobotErrorTracker>();   // errorType edge 검출 — 알람 중복 방지 [§6.4]
 builder.Services.AddScoped<MissionService>();
@@ -61,19 +91,30 @@ builder.Services.AddScoped<BatterySwapService>();
 builder.Services.AddScoped<CommLossService>();   // 통신 단절 Fail-Safe ACS 반응 [HD_AMR 통신단절 Fail-Safe §6]
 builder.Services.AddScoped<SeamPlanningService>();
 builder.Services.AddScoped<TankGeometryService>();
+builder.Services.AddScoped<Cross4SideService>();   // CROSS4 정면 좌우(CROSS4_L/R) 판정·적용 [VDA §8.2 · 1.22]
+builder.Services.AddScoped<TankRenameService>();   // 선창 ID 변경(형상·면·영역·시나리오·층 맵을 한 트랜잭션으로)
 builder.Services.AddScoped<ProjectImportService>();   // .hdacs 일괄 가져오기(요청 1건·커밋 1회·전부 또는 전무)
 builder.Services.AddScoped<CalibrationPointService>();   // 기준점 수정·도면 좌표 회전(프레임 오입력 교정)
 builder.Services.AddScoped<RobotPoseService>();          // 로봇 보고 위치 → 도면 좌표(현재 위치를 정차점으로)
 builder.Services.AddHostedService<VdaBridgeService>();
 
 // SAIGE 연동 [SAIGE 연동 사양서 v2.6 §9] — 로봇 상태 push. Acs:Saige:Enabled=false(기본)면 유휴.
+// SAIGE 송수신 기록 — 보낸 본문과 응답(코드·본문)을 전용 파일(logs/saige-날짜.log)과 앱 로그에 남긴다
+builder.Services.AddSingleton<SaigeTrafficLog>();
+builder.Services.AddTransient<SaigeTrafficHandler>();
 builder.Services.AddHttpClient(SaigeHealthReporter.HttpClientName, c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["Acs:Saige:BaseUrl"] ?? "http://localhost:8080");
     c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Acs:Saige:TimeoutSec", 3));
-});
+})
+    .AddHttpMessageHandler<SaigeTrafficHandler>();
 builder.Services.AddSingleton<SaigeHealthReporter>();                      // 상태 조회 API가 같은 인스턴스를 읽는다
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeHealthReporter>());
+// 가스 측정 결과 전송(가스검사) — Acs:Saige:Gas:Enabled=false(기본)면 저장만 하고 보내지 않는다.
+builder.Services.AddSingleton<GasLinkTracker>();            // 가스 센서 상태·임계값 적용 확인(state.information)
+builder.Services.AddScoped<GasThresholdService>();          // SAIGE → ACS → AMR 임계값 전달
+builder.Services.AddSingleton<SaigeGasResultSender>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SaigeGasResultSender>());
 
 // 계획 자연어 어시스턴트 [ADR-013] — Ollama(로컬 LLM). Acs:Llm:Enabled=false(기본)면 어시스턴트 API는 503.
 // 변경안 엔진(PlanChangeSetEngine)은 LLM 없이도 동작(연산 JSON 직접 미리보기·적용).
@@ -104,15 +145,12 @@ using (var scope = app.Services.CreateScope())
         // EF 매핑 컬럼 선보장(추가형만, 멱등) — 아래 시드·이후 API가 새 컬럼을 읽기 전에.
         await SchemaEnsure.EnsureAsync(db, app.Logger);
 
+        // 기본 선창 맵 시드는 **맵이 하나도 없는 새 DB** 에서만 — 선창 ID 를 바꾼 뒤(POST /api/tanks/{id}/rename)
+        // 재기동할 때 옛 이름의 맵이 되살아나면 층 번호로 AMR 보고 층을 맞추는 규칙(ReportedMap)이 깨진다.
         const string seedTankId = "CT1";
-        var existingMapIds = await db.Maps.AsNoTracking()
-            .Where(m => m.TankId == seedTankId).Select(m => m.MapId).ToListAsync();
-        for (int level = 1; level <= 4; level++)
-        {
-            var mapId = $"{seedTankId}-L{level}";
-            if (!existingMapIds.Contains(mapId))
-                db.Maps.Add(new MapEntity { MapId = mapId, TankId = seedTankId, Level = level, Name = $"{seedTankId} L{level}" });
-        }
+        if (!await db.Maps.AsNoTracking().AnyAsync())
+            for (int level = 1; level <= 4; level++)
+                db.Maps.Add(new MapEntity { MapId = $"{seedTankId}-L{level}", TankId = seedTankId, Level = level, Name = $"{seedTankId} L{level}" });
         if (db.ChangeTracker.HasChanges())
         {
             await db.SaveChangesAsync();
@@ -153,6 +191,64 @@ app.MapHub<MonitoringHub>("/hubs/monitoring");
 
 // SAIGE 연동 상태 [운영 확인] — 정상 전송은 로그가 없으므로 "보내고 있는가"는 여기서 본다(lastOkAt·totalSent·robots[].lastSentAt).
 app.MapGet("/api/integrations/saige", (SaigeHealthReporter saige) => Results.Ok(saige.Status));
+// 가스 측정 결과 전송 상태(보낼 것·보낸 것·거부된 것 수, 마지막 오류)
+app.MapGet("/api/integrations/saige/gas", async (SaigeGasResultSender gas, AcsDbContext db, CancellationToken ct) =>
+    Results.Ok(await gas.StatusAsync(db, ct)));
+// 거부된(REJECTED) 가스 결과를 다시 보낼 것으로 되돌린다 — 세이지에서 검사를 시작하지 않아 409 로 거부된 결과 등.
+// runId·resultIds 로 범위를 줄일 수 있다(둘 다 없으면 거부된 것 전부).
+app.MapPost("/api/integrations/saige/gas/resend", async (GasResendRequest? req, AcsDbContext db, CancellationToken ct) =>
+{
+    var q = db.GasResults.Where(g => g.SendState == "REJECTED");
+    if (req?.RunId is Guid runId) q = q.Where(g => g.RunId == runId);
+    if (req?.ResultIds is { Count: > 0 } ids) q = q.Where(g => ids.Contains(g.ResultId));
+    var rows = await q.ToListAsync(ct);
+    foreach (var g in rows) { g.SendState = "PENDING"; g.LastError = null; }
+    if (rows.Count > 0)
+        db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+        {
+            UserId = req?.UserId ?? "", Action = "GAS_RESULT_RESEND", Target = req?.RunId?.ToString(),
+            Detail = System.Text.Json.JsonSerializer.Serialize(new { count = rows.Count }),
+        });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { requeued = rows.Count });
+});
+// 임계값 전달 SAIGE → ACS → AMR [포밍가스 규격 §3]. 200 = AMR 이 적용을 확인함(받은 값 그대로 반환) /
+// 400 = 값 검증 실패(AMR 이 거부한 경우 포함) / 503 = AMR 에 전달하지 못함(미연결·응답 없음).
+app.MapPut("/api/gas/threshold", async (GasThresholdRequest req, GasThresholdService svc, SaigeTrafficLog traffic,
+    HttpContext http, CancellationToken ct) =>
+{
+    // SAIGE → ACS 요청과 ACS 의 응답도 송수신 기록에 남긴다
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+    string url = $"{http.Request.Path}{http.Request.QueryString} (from {http.Connection.RemoteIpAddress})";
+    string reqBody = System.Text.Json.JsonSerializer.Serialize(req, json);
+    IResult Reply(int status, object body)
+    {
+        traffic.Record("IN", "PUT", url, reqBody, status, System.Text.Json.JsonSerializer.Serialize(body, json), sw.ElapsedMilliseconds);
+        return Results.Json(body, statusCode: status);
+    }
+    try { return Reply(200, await svc.ApplyAsync(req, ct)); }
+    catch (GasThresholdInvalidException ex) { return Reply(400, new { error = ex.Message }); }
+    catch (GasThresholdUndeliveredException ex) { return Reply(503, new { error = ex.Message }); }
+});
+// SAIGE 송수신 기록 — 최근 200건(오래된 것부터). 전체는 서버의 logs/saige-날짜.log 파일.
+app.MapGet("/api/integrations/saige/traffic", (int? limit, SaigeTrafficLog traffic) =>
+{
+    var all = traffic.Recent;
+    int n = Math.Clamp(limit ?? 50, 1, SaigeTrafficLog.RecentCapacity);
+    return Results.Ok(new { file = traffic.FilePath, items = all.Skip(Math.Max(0, all.Count - n)) });
+});
+// run 의 가스 측정 결과 목록(받은 순) — 판정·회차·세이지 전송 상태. body=true 면 AMR 본문 포함.
+app.MapGet("/api/runs/{runId:guid}/gas-results", async (Guid runId, bool? body, AcsDbContext db, CancellationToken ct) =>
+{
+    var rows = await db.GasResults.AsNoTracking().Where(g => g.RunId == runId).OrderBy(g => g.CreatedAt).ToListAsync(ct);
+    return Results.Ok(rows.Select(g => new
+    {
+        g.ResultId, g.ActionId, g.TaskId, g.TankId, g.RobotId, g.Round, g.Result, g.PointCount,
+        g.SendState, g.SendAttempts, g.LastError, g.CreatedAt, g.SentAt,
+        body = body == true ? System.Text.Json.Nodes.JsonNode.Parse(g.Body) : null,
+    }));
+});
 
 app.MapGet("/api/robots", async (AcsDbContext db) =>
     Results.Ok(await db.Robots.AsNoTracking().ToListAsync()));
@@ -217,6 +313,26 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/area-map",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
+// 현장 실적 대조(조회 전용) — 본문 = HD_AMR 앱 로그 텍스트(app-yyyy-MM-dd.log, 관련 줄만 추려 보내도 된다).
+// 로그의 실제 도착 자세·리프트로 시뮬레이터를 다시 돌려 현장 결과와 판정이 같은지 본다. date = 시각 앞에 붙일 날짜(표시용),
+// wallCode = 그 면만, format=csv 면 건별 표를 text/csv(UTF-8 BOM)로 내려준다. tools/compare_field_reach.ps1 이 쓴다.
+app.MapPost("/api/reach-sim/tanks/{tankId}/field-compare",
+    async (string tankId, string? wallCode, string? date, string? format, HttpRequest req, ReachSimService sim, CancellationToken ct) =>
+    {
+        var lines = new List<string>();
+        using (var reader = new StreamReader(req.Body, System.Text.Encoding.UTF8))
+            while (await reader.ReadLineAsync(ct) is { } line) lines.Add(line);
+        var parsed = HD.Acs.Core.Reach.AmrFieldLog.Parse(lines, date);
+        if (parsed.Attempts.Count == 0)
+            return Results.BadRequest(new { error = "로그에서 startWeldInspection 실적을 찾지 못했습니다 — HD_AMR 앱 로그(UTF-8)인지 확인하세요." });
+        var r = await sim.FieldCompareAsync(tankId, parsed.Attempts, wallCode, ct, parsed.Warnings);
+        if (r is null) return Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" });
+        if (!string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase)) return Results.Ok(r);
+        var csv = ReachSimService.FieldCompareCsvHeader + "\r\n" + string.Join("\r\n", r.Rows.Select(ReachSimService.FieldCompareCsvRow));
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"field-compare-{tankId}.csv");
+    });
+
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/tasks/{taskId:guid}",
     async (Guid areaId, Guid taskId, int? point, double? stroke, double? dF, double? dL, int? yaw, string? branch,
            ReachSimService sim, CancellationToken ct) =>
@@ -238,15 +354,31 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/station-optimize",
             ? Results.Ok(r)
             : Results.NotFound(new { error = $"선창 '{tankId}' 형상 없음" }));
 
+// 면·층 정차 집합 덮개(set cover) — 영역 구분 없이 용접선 전부를 가장 적은 정차로 덮는 정차 후보(조회 전용).
+app.MapGet("/api/reach-sim/tanks/{tankId}/cover-plan",
+    async (string tankId, int level, string wallCode, double? step, double? reach, int? yaws, bool? skipEntry, double? minMargin, string? dump, ReachSimService sim, CancellationToken ct) =>
+        await sim.CoverPlanAsync(tankId, level, wallCode, Math.Clamp(step ?? 0.3, 0.1, 2), Math.Clamp(reach ?? 1.8, 0.5, 3),
+            Math.Clamp(yaws ?? 4, 1, 24), ct, skipEntry ?? false, minMargin ?? 0, dump) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = "선창·면이 없거나 용접선이 없음" }));
+
+// 영역을 도면 (x, y, theta[rad])에 세웠을 때의 판정(조회 전용) — 위치 오차 표본 판정 포함. strokeMm 을 주면 그 리프트로 고정.
+app.MapGet("/api/reach-sim/areas/{areaId:guid}/station-eval",
+    async (Guid areaId, double x, double y, double theta, double? strokeMm, ReachSimService sim, CancellationToken ct) =>
+        await sim.EvaluateStationAsync(areaId, x, y, theta, strokeMm, ct) is { } r
+            ? Results.Ok(r)
+            : Results.NotFound(new { error = "영역·면이 없거나 검사할 용접선이 없음" }));
+
 // 배차 직전 정차 선택 미리보기(조회 전용) — 도면 (fromX, fromY)에서 가장 가까운 수행 가능한 정차. 배차(Acs:Dispatch:NearestStation)와 같은 계산.
 // 고를 곳이 없으면 picked=false(배차는 저장된 정차를 쓴다).
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/nearest-station",
     async (Guid areaId, double fromX, double fromY, double? fromYaw, bool? inPlace, double? robustM, int? maxEvaluations, IConfiguration cfg, ReachSimService sim, CancellationToken ct) =>
     {
         var opt = new HD.Acs.Core.Reach.NearestOptions(
-            robustM ?? cfg.GetValue("Acs:Dispatch:NearestStation:RobustM", cfg.GetValue("Acs:Dispatch:AllowedDevXy", 0.08)),
+            robustM ?? cfg.GetValue("Acs:Dispatch:NearestStation:RobustM", 0.3),
             maxEvaluations ?? cfg.GetValue("Acs:Dispatch:NearestStation:MaxEvaluations", 600),
-            InPlace: inPlace ?? cfg.GetValue("Acs:Dispatch:NearestStation:InPlace", true));
+            InPlace: inPlace ?? cfg.GetValue("Acs:Dispatch:NearestStation:InPlace", true),
+            RobustYawDeg: cfg.GetValue("Acs:Dispatch:NearestStation:RobustYawDeg", 3.0));
         var r = await sim.NearestStopAsync(areaId, fromX, fromY, opt, ct, fromYaw);
         return Results.Ok(new { picked = r is not null, stop = r });
     });
@@ -269,6 +401,55 @@ app.MapGet("/api/reach-sim/tanks/{tankId}/report",
         var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
         return Results.File(bytes, "text/csv; charset=utf-8", $"reach-report-{tankId}-{(ik ? "ik" : "tasks")}.csv");
     });
+
+// 정차 묶음 최적화(탐욕 set cover) — 면·층 하나의 용접선을 덮는 정차 수 최소(영역 크기 상한 유지). 작업으로 돌리고 진행·결과를 조회한다(조회 전용).
+app.MapPost("/api/reach-sim/tanks/{tankId}/set-cover", (string tankId, SetCoverRequest req, SetCoverJobs jobs) =>
+{
+    if (req.Level < 1 || string.IsNullOrWhiteSpace(req.WallCode)) return Results.BadRequest(new { error = "level(1 이상)·wallCode 가 필요합니다" });
+    var o = HD.Acs.Core.Reach.SetCoverOptions.Default;
+    if (req.GridStepM is { } g && (!double.IsFinite(g) || g < 0.1 || g > 1)) return Results.BadRequest(new { error = "gridStepM 은 0.1~1.0 m" });
+    if (req.ReachRadiusM is { } r && (!double.IsFinite(r) || r < 1 || r > 4)) return Results.BadRequest(new { error = "reachRadiusM 은 1~4 m" });
+    if (req.MaxStrokes is { } m && (m < 1 || m > 11)) return Results.BadRequest(new { error = "maxStrokes 는 1~11" });
+    o = o with { GridStepM = req.GridStepM ?? o.GridStepM, ReachRadiusM = req.ReachRadiusM ?? o.ReachRadiusM, MaxStrokes = req.MaxStrokes ?? o.MaxStrokes };
+    var job = jobs.Start(tankId, req.Level, req.WallCode.Trim().ToUpperInvariant(), o);
+    return Results.Ok(new { job.JobId });
+});
+app.MapGet("/api/reach-sim/set-cover/{jobId:guid}", (Guid jobId, SetCoverJobs jobs) =>
+    jobs.Get(jobId) is { } j
+        ? Results.Ok(new { j.JobId, j.TankId, j.Level, j.WallCode, j.State, j.Done, j.Total, j.StartedAt, j.EndedAt, j.Error, j.Result })
+        : Results.NotFound(new { error = "작업이 없습니다(끝난 지 1시간이 지났거나 서버가 재시작됨)" }));
+// 정차 묶음 최적화 결과 적용 — 그 면·층 영역을 제안 정차대로 다시 구성(taskId·검사 기록 유지, 영역 ID 물려주기, 감사로그 SET_COVER_APPLY)
+app.MapPost("/api/reach-sim/set-cover/{jobId:guid}/apply", async (Guid jobId, SetCoverApplyRequest? req, SetCoverJobs jobs,
+    SetCoverApplyService svc, CancellationToken ct) =>
+{
+    if (jobs.Get(jobId) is not { } j) return Results.NotFound(new { error = "작업이 없습니다(끝난 지 1시간이 지났거나 서버가 재시작됨) — 다시 계산하세요" });
+    if (j.State != "DONE" || j.Result is null) return Results.Conflict(new { error = $"작업이 끝나지 않았습니다({j.State})" });
+    if (j.Applied) return Results.Conflict(new { error = "이미 적용한 결과입니다 — 다시 계산하세요" });
+    try
+    {
+        var r = await svc.ApplyAsync(j.Result, req?.UserId, ct);
+        j.Applied = true;
+        return Results.Ok(r);
+    }
+    catch (AreaSplitException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.Status); }
+});
+app.MapDelete("/api/reach-sim/set-cover/{jobId:guid}", (Guid jobId, SetCoverJobs jobs) =>
+    jobs.Cancel(jobId) ? Results.Ok() : Results.NotFound(new { error = "진행 중인 작업이 없습니다" }));
+
+// 균등 격자 재분할 — 면·층 영역을 칸 크기(예 1.44, 1.08 m)로 다시 나눠 용접선을 묶는다. apply=false(기본) 미리보기 / true 적용.
+// 정차 덮어쓰기·리프트는 지운다(적용 뒤 영역별 정차 최적화). taskId·검사 기록 유지, 영역 ID 물려주기, 감사로그 AREA_GRID_REGROUP.
+app.MapPost("/api/reach-sim/tanks/{tankId}/grid-areas", async (string tankId, bool? apply, GridAreasRequest req, AreaGridService svc, CancellationToken ct) =>
+{
+    if (req.Level < 1 || string.IsNullOrWhiteSpace(req.WallCode)) return Results.BadRequest(new { error = "level(1 이상)·wallCode 가 필요합니다" });
+    var wall = req.WallCode.Trim().ToUpperInvariant();
+    try
+    {
+        if (apply != true) return Results.Ok(new { applied = false, preview = await svc.PreviewAsync(tankId, req.Level, wall, req.CellUM, req.CellVM, ct) });
+        var (preview, result) = await svc.ApplyAsync(tankId, req.Level, wall, req.CellUM, req.CellVM, req.UserId, ct);
+        return Results.Ok(new { applied = true, preview, result });
+    }
+    catch (AreaSplitException ex) { return Results.Json(new { error = ex.Message }, statusCode: ex.Status); }
+});
 
 app.MapGet("/api/reach-sim/areas/{areaId:guid}/split-plan",
     async (Guid areaId, int? maxGroups, string? branch, ReachSimService sim, CancellationToken ct) =>
@@ -341,11 +522,35 @@ app.MapPost("/api/tanks/{tankId}/geometry", async (string tankId, CreateTankGeom
         req.ReachZMin, req.ReachZMax);
     try
     {
-        int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId);
+        int n = await svc.RegisterAsync(tankId, geom, req.CheckHTotal, req.CheckBeam, req.CheckWCeil, req.UserId,
+            inspectionKind: req.InspectionKind);
         return Results.Ok(new { tankId, wallsGenerated = n });
     }
     catch (TankGeometryService.GeometryInvalidException ex)
     { return Results.BadRequest(new { error = ex.Message, reasons = ex.Reasons }); }
+});
+
+// 등록된 선창 ID 목록(운영 UI 가 시작할 때 지금 선창을 찾는다 — 선창 ID 를 바꾼 뒤에도 화면이 따라오게).
+app.MapGet("/api/internal/tanks", async (AcsDbContext db, CancellationToken ct) =>
+    Results.Ok(await db.TankGeometries.AsNoTracking().OrderBy(g => g.CreatedAt).Select(g => g.TankId).ToListAsync(ct)));
+
+// 선창 ID 변경 — 형상·면·영역·시나리오·층 맵(`{선창}-L{층}`)과 캘리브레이션·정차 큐·로봇 보고 층까지 한 트랜잭션.
+// 영역 ID·taskId 는 그대로. 진행 중 run 이 있으면 409. AMR 은 층만 검증하고 선창 이름은 다음 지령에서 받는다 [VDA §4.3].
+app.MapPost("/api/tanks/{tankId}/rename", async (string tankId, RenameTankRequest req, TankRenameService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.RenameAsync(tankId, req.NewTankId, req.UserId, ct)); }
+    catch (TankRenameService.InvalidException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (TankRenameService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (TankRenameService.ConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
+});
+
+// CROSS4 작업의 정면 좌우(CROSS4_L / CROSS4_R) 판정 [VDA §8.2 · 1.22] — apply=false(기본) = 미리보기, true = 바뀐 작업 저장.
+// overwrite=true 면 이미 L/R 인 작업도 다시 정한다. 정하지 못한 작업은 그대로(사유 표시).
+app.MapPost("/api/tanks/{tankId}/cross4-sides", async (string tankId, bool? apply, bool? overwrite, string? userId,
+    Cross4SideService svc, CancellationToken ct) =>
+{
+    try { return Results.Ok(await svc.ClassifyAsync(tankId, apply ?? false, overwrite ?? false, userId, ct)); }
+    catch (Cross4SideService.NotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
 });
 
 // ── 선창 형상 조회 — 같은 데이터를 두 규약으로 제공한다 ──
@@ -523,13 +728,16 @@ app.MapGet("/api/internal/areas", async (string? tankId, string? wallCode, int? 
     }));
 });
 
-app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, AcsDbContext db) =>
+app.MapDelete("/api/areas/{areaId:guid}", async (Guid areaId, bool? deleteTasks, string? userId, AreaDeleteService svc, CancellationToken ct) =>
 {
-    var a = await db.InspectionAreas.FindAsync(areaId);
-    if (a is null) return Results.NotFound();
-    db.InspectionAreas.Remove(a);   // area_task CASCADE
-    await db.SaveChangesAsync();
-    return Results.Ok();
+    // 작업은 원래 영역(분리 전 영역 또는 작업을 품는 같은 면의 영역)으로 되돌리고 영역만 지운다. taskId 유지.
+    // 갈 곳이 없는 작업이 있으면 409 — deleteTasks=true 로 다시 요청하면 그 작업은 함께 지운다.
+    try
+    {
+        var r = await svc.DeleteAsync(areaId, deleteTasks == true, userId, ct);
+        return r is null ? Results.NotFound() : Results.Ok(new { moved = r.Moved, deletedTasks = r.DeletedTasks });
+    }
+    catch (AreaDeleteBlockedException ex) { return Results.Conflict(new { error = ex.Message, orphans = ex.Orphans }); }
 });
 
 // 선택 작업들을 묶어 새 영역으로 분리·이동 — **taskId(SAIGE productId·attempt 누적 키) 유지** [SAIGE v2.6 §2.5].
@@ -757,6 +965,71 @@ app.MapPut("/api/area-tasks/{taskId:guid}", async (Guid taskId, UpdateAreaTaskRe
 
 // 용접선 임시 제외/복귀 — enabled=false 인 용접선은 큐 전개·재개·재검사에서 싣지 않는다(계획·taskId·검사 기록은 그대로).
 // 진행 중 run 은 시작 때 만든 큐를 쓰므로 다음 run(또는 이어하기의 남은 정차)부터 반영된다.
+// HD_AMR 검사 프로필 사본 — AMR 이 프로필을 저장할 때 전체 목록을 올려 보낸다(계획용 참조 데이터, 로봇 지령 아님).
+app.MapPut("/api/inspection-profiles/sync", async (ProfileSyncRequest req, AcsDbContext db, IConfiguration cfg,
+    AmrRobotModelStore robotModels, ILoggerFactory logs, CancellationToken ct) =>
+{
+    try
+    {
+        var result = await InspectionProfileService.SyncAsync(db, req, ct);
+        var source = string.IsNullOrWhiteSpace(req.Source) ? "AMR" : req.Source.Trim();
+        // 그 AMR 을 ProfileSource 로 지정한 검사 종류의 설정(Acs:Reach:Kinds:{종류})과 대조 — 지정이 없으면 기본 설정
+        var configured = ReachSimService.ModelFrom(cfg, ReachSimService.KindForSource(cfg, req.Source));
+        if (AmrTeachingService.Normalize(req.TeachingPositions, req.StartJointsByWall) is { } teaching)
+        {
+            // AMR 교시 위치가 설정(Acs:Reach:StartJoints)과 다르면 리치 시뮬레이터는 AMR 값을 쓴다 — 무엇이 달라졌는지 알린다
+            var diff = AmrTeachingService.Differences(configured.StartJointsByWall, teaching.Starts);
+            if (robotModels.ReportStarts(source, diff) && diff.Count > 0)
+                logs.CreateLogger("RobotModelCheck").LogWarning(
+                    "출발 자세(교시 위치)가 설정과 다르다 — 리치 시뮬레이터는 {Source} 값을 쓴다: {Diff}", source, string.Join(" / ", diff));
+            result = result with { StartJointsOverride = diff.Count > 0 ? diff : null };
+        }
+        if (req.Robot is not { } robot) return Results.Ok(result);
+        // AMR 과 ACS 가 같은 코봇 모델 값(d6·손목 여유·초점 거리)을 쓰는지 대조 — 다르면 시뮬레이션과 실제 동작이 어긋난다
+        var mismatch = RobotModelCheck.Compare(configured, robot);
+        if (robotModels.Report(source, robot, mismatch) && mismatch.Count > 0)
+            logs.CreateLogger("RobotModelCheck").LogWarning("코봇 모델 값이 {Source} 와 다르다 — {Mismatch}", source, string.Join(" / ", mismatch));
+        return Results.Ok(result with { RobotModelMismatch = mismatch.Count > 0 ? mismatch : null });
+    }
+    catch (ProfileSyncException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapGet("/api/inspection-profiles", async (bool? detail, IConfiguration cfg, AcsDbContext db, AmrRobotModelStore robotModels, CancellationToken ct) =>
+{
+    var reachName = cfg["Acs:Reach:ScanProfileName"];
+    var rows = await db.InspectionProfiles.AsNoTracking().OrderBy(x => x.Source).ThenBy(x => x.Name).ToListAsync(ct);
+    var assigned = await db.InspectionProfileAssignments.AsNoTracking()
+        .OrderBy(x => x.Source).ThenBy(x => x.SeamType).ThenBy(x => x.WallCode).ThenBy(x => x.Direction).ToListAsync(ct);
+    var names = rows.ToDictionary(x => (x.Source, x.AmrProfileId), x => x.Name);
+    var profiles = rows.Select(x =>
+    {
+        var (tilt, reason) = InspectionProfileService.ToTiltProfile(x);
+        return new
+        {
+            x.Source, x.AmrProfileId, x.Name, x.SeamType, x.PoseAbsolute, x.PointCount, x.Version, x.AmrUpdatedAt,
+            x.ReceivedAt, x.ChangedAt, x.Deleted,
+            reachUsable = tilt is not null, reachUnusableReason = reason,
+            usedForReach = !x.Deleted && tilt is not null && !string.IsNullOrWhiteSpace(reachName) && x.Name == reachName,
+            assignedCount = assigned.Count(a => a.Source == x.Source && a.AmrProfileId == x.AmrProfileId),
+            waypoints = detail == true ? InspectionProfileService.WaypointsOf(x) : null,
+        };
+    });
+    return Results.Ok(new
+    {
+        profiles,
+        assignments = assigned.Select(a => new
+        {
+            a.Source, a.SeamType, a.WallCode, a.Direction, a.AmrProfileId,
+            profileName = names.TryGetValue((a.Source, a.AmrProfileId), out var n) ? n : null,
+        }),
+        // AMR 이 마지막으로 알려 준 코봇 모델 값과 ACS 설정의 차이(서버 기동 후 받은 것만)
+        robotModels = robotModels.All.Select(e => new { e.Source, e.Model.LinksMm, e.Model.WristMarginDeg, e.Model.ToolLengthMm, e.Mismatch, e.ReceivedAt }),
+        // AMR 교시 위치에서 온 면별 출발 자세 — 리치 시뮬레이터가 설정(Acs:Reach:StartJoints)보다 먼저 쓴다
+        teaching = (await db.AmrTeachings.AsNoTracking().OrderBy(x => x.Source).ToListAsync(ct))
+            .Select(x => new { x.Source, x.ReceivedAt, x.ChangedAt, startJointsByWall = AmrTeachingService.StartsOf(x) }),
+    });
+});
+
 app.MapPut("/api/area-tasks/enabled", async (SetAreaTasksEnabledRequest req, AcsDbContext db) =>
 {
     var ids = (req.TaskIds ?? Array.Empty<Guid>()).Distinct().ToList();
@@ -787,7 +1060,25 @@ app.MapDelete("/api/area-tasks/{taskId:guid}", async (Guid taskId, AcsDbContext 
 });
 
 // ── 계획 자연어 어시스턴트 [ADR-013] — 제안(미리보기, DB 무변경) → 운영자 승인 → 적용(전부 또는 전무) ──
-app.MapGet("/api/integrations/llm", async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
+// 리프트 사용 여부(Acs:Lift:Enabled) — UI 가 영역 폼 리프트 칸을 끌지 정한다
+// 리프트 운영 방식 — enabled 는 구 UI 호환(Off 면 false). mode = Off | Auto | Fixed, fixedStrokeMm = 고정 높이(고정 모드만).
+app.MapGet("/api/settings/lift", (IConfiguration cfg) =>
+{
+    var l = LiftSettings.From(cfg);
+    return Results.Ok(new { enabled = l.Enabled, mode = l.Mode.ToString(), fixedStrokeMm = l.FixedStrokeMm, warning = l.Warning });
+});
+// 리치·간섭 화면의 리프트·차체 설정 — 저장하면 다음 요청부터 시뮬레이션·배차(liftStrokeMm) 모두 새 값(재시작 불필요).
+// 진행 중 run 이 있으면 거부(지령 리프트 높이가 run 도중 바뀌지 않게). DELETE = 덮어쓰기 해제(appsettings.json 값).
+// AMR factsheet(VDA §7.3) — 로봇별 최신 보고·반영 여부·설정 키
+app.MapGet("/api/integrations/amr-factsheets", (AmrFactsheetService f) => Results.Ok(f.All));
+app.MapGet("/api/robots/{robotId}/factsheet", (string robotId, AmrFactsheetService f) =>
+    f.Get(robotId) is { } e ? Results.Ok(e) : Results.NotFound(new { error = $"{robotId} 의 factsheet 를 아직 받지 못했습니다" }));
+app.MapGet("/api/settings/reach-sim", (ReachRuntimeSettings s) => Results.Ok(s.Read()));
+app.MapPut("/api/settings/reach-sim", async (ReachSettingsUpdate req, ReachRuntimeSettings s, AcsDbContext db, ILogger<ReachRuntimeSettings> log) =>
+    await SaveReachSettings(req, s, db, log, reset: false));
+app.MapDelete("/api/settings/reach-sim", async (string? userId, ReachRuntimeSettings s, AcsDbContext db, ILogger<ReachRuntimeSettings> log) =>
+    await SaveReachSettings(new ReachSettingsUpdate(null, null, null, null, null, null, userId), s, db, log, reset: true));
+app.MapGet("/api/integrations/llm",async (OllamaClient llm, CancellationToken ct) => Results.Ok(await llm.ProbeAsync(ct)));
 
 app.MapPost("/api/planning/assistant/propose", async (ProposeRequest req, PlanningAssistantService svc, CancellationToken ct) =>
     await PlanningCall(() => svc.ProposeAsync(req, ct)));
@@ -885,9 +1176,14 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, 
 
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 {
-    try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId) }); }
-    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException)
+    if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
+    try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId, round: req.Round,
+                                                                       restart: req.Restart ?? false) }); }
+    catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException or RunRequestInvalidException)
     { return Results.BadRequest(new { error = ex.Message }); }
+    // 이어할 수 있는 중단 run — UI 가 확인 창을 띄우고 restart=true 로 다시 보낸다
+    catch (ResumableRunExistsException ex)
+    { return Results.Conflict(new { error = ex.Message, code = "RESUMABLE_RUN_EXISTS", resumable = ex.Run }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotDeviceFaultException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -898,14 +1194,15 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 // scenarioId 생략 = 그 선창의 가장 최근 run 시나리오. 가드는 미션 시작과 같다(활성 run·미연결·장치 알람 409).
 app.MapPost("/api/runs/repair", async (StartRepairRunRequest req, MissionService missions) =>
 {
+    if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
     try
     {
         var r = await missions.StartRepairRunAsync(req.RobotId, req.TaskIds ?? new List<Guid>(), req.ScenarioId,
-            optimize: req.Optimize ?? true);
+            optimize: req.Optimize ?? true, round: req.Round);
         return Results.Ok(new { runId = r.RunId, stops = r.Stops });
     }
     catch (Exception ex) when (ex is RepairRequestException or CalibrationInvalidException or WeldPayloadSchemaException
-                                   or InvalidOperationException)
+                                   or InvalidOperationException or RunRequestInvalidException)
     { return Results.BadRequest(new { error = ex.Message }); }
     catch (RunConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
     catch (RobotNotConnectedException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -1271,6 +1568,29 @@ app.MapGet("/api/maps/{mapId}/calibration", async (string mapId, AcsDbContext db
     return cal is null ? Results.NotFound() : Results.Ok(cal);
 });
 
+// 리치·간섭 화면 설정 저장 — 검사 → 진행 중 run 가드 → 덮어쓰기 파일 저장·설정 다시 읽기 → 감사로그
+static async Task<IResult> SaveReachSettings(ReachSettingsUpdate req, ReachRuntimeSettings s, AcsDbContext db, Microsoft.Extensions.Logging.ILogger log, bool reset)
+{
+    var errors = ReachRuntimeSettings.Validate(req);
+    if (errors.Count > 0) return Results.BadRequest(new { error = string.Join(" / ", errors), reasons = errors });
+    var active = await db.ScenarioRuns.AsNoTracking()
+        .Where(r => r.State == "RUNNING" || r.State == "WAITING_FLOOR_TRANSFER").Select(r => r.RunId).FirstOrDefaultAsync();
+    if (active != Guid.Empty)
+        return Results.Conflict(new { error = $"진행 중인 run({active})이 있어 바꿀 수 없습니다 — 지령 리프트 높이가 run 도중 바뀌지 않게. run 을 끝내거나 중단한 뒤 저장하세요." });
+    var before = s.Overrides();
+    var view = reset ? s.Reset() : s.Save(req);
+    db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
+    {
+        UserId = req.UserId ?? "operator",
+        Action = reset ? "REACH_SETTINGS_RESET" : "REACH_SETTINGS_UPDATE",
+        Target = ReachRuntimeSettings.FileName,
+        Detail = JsonSerializer.Serialize(new { before, after = s.Overrides() }),
+    });
+    await db.SaveChangesAsync();
+    log.LogInformation("리치 설정 {Action}: {Values}", reset ? "초기화(appsettings.json 값)" : "저장", reset ? "-" : ReachRuntimeSettings.Describe(req));
+    return Results.Ok(view);
+}
+
 // 계획 어시스턴트 API 공통 예외 → HTTP 상태 매핑
 static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
 {
@@ -1285,8 +1605,16 @@ static async Task<IResult> PlanningCall<T>(Func<Task<T>> call)
 
 app.Run();
 
-public sealed record StartRunRequest(Guid ScenarioId, string RobotId);
-public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null);
+// Round = 가스검사 회차(1|2, 선택) — 가스검사 선창의 지령 params.round 로 나간다. 용접검사 선창은 무시.
+// 정차 묶음 최적화 요청 — 격자 간격[m]·정차 반경[m]·리프트 후보 수(선택, 없으면 기본 0.3·2.8·4)
+public sealed record SetCoverApplyRequest(string? UserId = null);
+// 균등 격자 재분할 요청 — 칸 가로[m](0.3~1.44)·세로[m](생략 = 가로와 같게, 면별 상한까지)
+public sealed record GridAreasRequest(int Level, string WallCode, double CellUM, double? CellVM = null, string? UserId = null);
+public sealed record SetCoverRequest(int Level, string WallCode, double? GridStepM = null, double? ReachRadiusM = null, int? MaxStrokes = null);
+/// <param name="Restart">이어할 수 있는 중단 run이 있어도 처음부터 새로 시작(운영자 확인 후) — 없으면 409 RESUMABLE_RUN_EXISTS.</param>
+public sealed record StartRunRequest(Guid ScenarioId, string RobotId, int? Round = null, bool? Restart = null);
+public sealed record GasResendRequest(Guid? RunId = null, List<Guid>? ResultIds = null, string? UserId = null);
+public sealed record StartRepairRunRequest(string RobotId, List<Guid>? TaskIds, Guid? ScenarioId = null, bool? Optimize = null, int? Round = null);
 public sealed record ZoneChangeRequest(string MapId, string UserId);
 public sealed record EmergencyStopRequest(string UserId);
 public sealed record GotoRequest(int Level, double XDrawing, double YDrawing, double? ThetaDrawing, string? UserId);
@@ -1307,13 +1635,16 @@ public sealed record SetAreaStationRequest(double? StationX, double? StationY, d
 public sealed record SetScenarioAreasRequest(Guid[]? AreaIds);
 public sealed record CreateSeamRequest(string TankId, int Level, string WallCode, string? SeamType,
     double[][] PathDrawing, double[] NormalDrawing, string? SectionDxfId, string? ProfileId, string? UserId);
+// 선창 ID 변경 — 새 ID 는 영문·숫자로 시작, 영문·숫자·'_'·'-', 1~32자('-L숫자' 로 끝날 수 없음).
+public sealed record RenameTankRequest(string? NewTankId, string? UserId);
 // 선창 파라미터 등록 [SPEC v3 §2/§8]. 각도는 deg 입력(서버가 rad 변환).
 public sealed record CreateTankGeometryRequest(
     double LengthL, double WFloor, double ThetaLowDeg, double HLow,
     double HWall, double ThetaUpDeg, double HUp,
     double[]? LevelZ, double? OriginOx, double? OriginOy,
     double? CheckHTotal, double? CheckBeam, double? CheckWCeil, string? UserId,
-    double? ReachZMin = null, double? ReachZMax = null);   // v3.1 §5-A 도달 밴드 보정(선택)
+    double? ReachZMin = null, double? ReachZMax = null,    // v3.1 §5-A 도달 밴드 보정(선택)
+    string? InspectionKind = null);                        // 검사 종류 WELD|GAS. null = 기존 선창은 유지, 새 선창은 WELD
 // 영역·작업 등록 [SPEC v3 §4] — 벽면-로컬 (u,v). Level은 v3.1에서 무시(서버가 §5-A로 유도).
 // Corners = 임의 4점 사각형[[u,v]…]. 미지정 시 UMin/VMin/UMax/VMax 로 사각형 폴백(하위호환).
 public sealed record CreateAreaRequest(string TankId, string WallCode, int Level, string Name,

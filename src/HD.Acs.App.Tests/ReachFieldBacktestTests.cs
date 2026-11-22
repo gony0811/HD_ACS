@@ -38,8 +38,21 @@ public class ReachFieldBacktestTests
 
     public static ReachRobotModel FieldModel()
     {
-        var m = ReachSimService.ModelFrom(
-            new ConfigurationBuilder().AddJsonFile(Find(Path.Combine("HD.Acs.App", "appsettings.json"))).Build());
+        // 운영 설정 위에 그날(2026-11-11) 장비 형상을 고정한다 — 리프트 장착(BASE 1635 + 리프트 높이, 차체 887).
+        // 리프트를 떼어 낸 뒤(2026-11-17, BASE 927)의 appsettings 를 그대로 쓰면 실적 행의 리프트 높이가 무시돼 판정이 깨진다.
+        // 천장 출발 자세도 그날의 홈 위치_2(팔을 위로 든 자세 — 2026-11-19 에 다시 교시되기 전 값)로 고정한다.
+        var fixedCfg = new Dictionary<string, string?>
+        {
+            ["Acs:Lift:Mode"] = "Auto", ["Acs:Reach:MountZMm"] = "1635",
+            ["Acs:Reach:AmrHeightMm"] = "887", ["Acs:Reach:SupportColumn"] = "false",
+        };
+        double[] home2Then = { 0.158, 59.456, -140.907, 80.848, 90.048, -179.696 };
+        for (var i = 0; i < home2Then.Length; i++)
+            fixedCfg[$"Acs:Reach:StartJoints:T:{i}"] = home2Then[i].ToString(CultureInfo.InvariantCulture);
+        var m = ReachSimService.ModelFrom(new ConfigurationBuilder()
+            .AddJsonFile(Find(Path.Combine("HD.Acs.App", "appsettings.json")))
+            .AddInMemoryCollection(fixedCfg)
+            .Build());
         return double.TryParse(Environment.GetEnvironmentVariable("HDACS_BT_ELBOW"), NumberStyles.Float, CultureInfo.InvariantCulture, out var e)
             ? m with { MinElbowBendDeg = e } : m;   // 기준값을 바꿔 가며 볼 때만
     }
@@ -82,7 +95,8 @@ public class ReachFieldBacktestTests
     public void FieldRows_AreJudgedLikeTheRobot()
     {
         var m = FieldModel();
-        var rows = Load().Where(r => r.Outcome is "OK" or "FLANGE" or "PRECHECK" or "REACH").ToList();
+        // FLANGE 52건은 AMR 이 출발 전에 최소 뻗음 규칙으로 막은 것이라 실제로 움직여 본 적이 없다 — 성공·실패 집계에서 뺀다.
+        var rows = Load().Where(r => r.Outcome is "OK" or "PRECHECK" or "REACH").ToList();
         var lines = new List<string>();
         int okPass = 0, ok = 0, failCaught = 0, fail = 0;
         foreach (var r in rows)
@@ -100,11 +114,14 @@ public class ReachFieldBacktestTests
         if (Environment.GetEnvironmentVariable("HDACS_BACKTEST_OUT") is { Length: > 0 } path)
             File.WriteAllLines(path, lines.Prepend($"# 성공 {okPass}/{ok} 가능 판정 · 실패 {failCaught}/{fail} 불가 판정"));
 
-        // AMR 이 리프트 100 에서 거부한 52건(플랜지 뻗음 342 mm < 350 mm)은 전부 불가로 판정해야 한다
-        Assert.All(rows.Where(r => r.Outcome == "FLANGE"), r => Assert.Equal(ReachVerdict.Unreachable, Judge(m, r).Verdict));
-        // 실제로 성공한 용접선을 불가로 막는 비율은 낮아야 하고(정차 후보를 잃는다), 실패는 절반 넘게 걸러야 한다
-        // (팔 뻗음 상한 30°: 실패 17건의 |J3| 최소 = 6°×5 · 27~28°×9 · 42° · 101°×2, 성공 51건 = 28°×2 · 42°×2 · 54° 이상 47건)
+        // 천장은 최소 뻗음 규칙 제외(2026-11-13) — AMR 이 리프트 100·200 에서 거부했던 52건을 이 규칙으로 막지 않는다
+        // (규칙을 빼면 34건 가능 · 18건은 다른 사유로 불가).
+        Assert.All(Load().Where(r => r.Outcome == "FLANGE"),
+            r => Assert.DoesNotContain("플랜지 뻗음 부족", Judge(m, r).Blocker ?? ""));
+        // 실제로 성공한 용접선을 불가로 막는 비율은 낮아야 하고(정차 후보를 잃는다), 실제 실패는 대부분 걸러야 한다
+        // (팔 뻗음 상한 30°: 실패 17건의 |J3| 최소 = 6°×5 · 27~28°×9 · 42° · 101°×2, 성공 51건 = 28°×2 · 42°×2 · 54° 이상 47건).
+        // 실패 집계는 종전 66/69 였으나 그중 52건이 움직여 보지 않은 FLANGE 였다 — 실제 실패만 보면 14/17.
         Assert.True(okPass >= ok * 0.9, $"성공 {ok}건 중 {okPass}건만 가능 판정");
-        Assert.True(failCaught >= fail * 0.9, $"실패 {fail}건 중 {failCaught}건만 불가 판정");
+        Assert.True(failCaught >= fail * 0.8, $"실패 {fail}건 중 {failCaught}건만 불가 판정");
     }
 }

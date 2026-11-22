@@ -31,7 +31,11 @@ public sealed partial class RobotStatusViewModel : ObservableObject
     [ObservableProperty] private string _position = "-";
     /// <summary>도면 프레임 heading(도, x축 기준 CCW) 표시 문자열. 위치와 동일 T_W_D 규칙(theta − yaw).</summary>
     [ObservableProperty] private string _heading = "-";
-    [ObservableProperty] private string _mapId = "-";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FloorText))]
+    private string _mapId = "-";
+    /// <summary>층 화면 표기 + 맵 ID (예: L3 (맵 CT1-L4)).</summary>
+    public string FloorText => LevelLabel.WithMapId(MapId);
     [ObservableProperty] private bool _driving;
     [ObservableProperty] private int _errors;
     [ObservableProperty] private string? _statusMessage;

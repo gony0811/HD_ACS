@@ -113,14 +113,14 @@ public class ReachAreaMapTests
         api.Areas.Add(new(Guid.NewGuid(), "CT1", "SM", 1, "c", 0, 0, 1, 1, null, null, null, 0, 3));
         api.Map["SM"] = new() { Verdict("SM", "L1-R01C01", true, 1, level: 1) };
         await vm.LoadAsync();
-        Assert.Equal(new[] { "전체", "L1", "L2", "L3", "L4" }, vm.AreaMapScopes);
+        Assert.Equal(new[] { "전체", "L0", "L1", "L2", "L3" }, vm.AreaMapScopes);
 
         await vm.ShowAreaMapAsync();
 
         Assert.Equal(new (int?, string?)[] { (1, "SM"), (4, "PU"), (4, "T") }, api.MapRequests);   // 모든 층, 영역이 있는 면만
         Assert.Equal(4, vm.Scene.Faces.Count);
         Assert.Contains("전체 층 용접선 9개 — 검사 가능 8 · 불가 1", vm.AreaMapSummary);
-        Assert.Contains("층별 가능/대상: L1 3/3 · L4 5/6", vm.AreaMapSummary);
+        Assert.Contains("층별 가능/대상: L0 3/3 · L3 5/6", vm.AreaMapSummary);
 
         var changes = 0;
         vm.SceneChanged += (_, _) => changes++;
@@ -128,7 +128,7 @@ public class ReachAreaMapTests
         Assert.Equal(1, vm.AreaMapLevel);
         Assert.Single(vm.Scene.Faces);
         Assert.Equal(3, Seams(vm.Scene).Count);
-        Assert.StartsWith("L1 용접선 3개 — 검사 가능 3 · 불가 0", vm.AreaMapSummary);
+        Assert.StartsWith("L0 용접선 3개 — 검사 가능 3 · 불가 0", vm.AreaMapSummary);
         Assert.DoesNotContain("층별", vm.AreaMapSummary);
         Assert.True(changes >= 1);
 
@@ -138,7 +138,7 @@ public class ReachAreaMapTests
 
         vm.AreaMapScopeIndex = 2;                                                        // 영역이 없는 층
         Assert.Empty(vm.Scene.Faces);
-        Assert.StartsWith("L2 용접선 0개", vm.AreaMapSummary);
+        Assert.StartsWith("L1 용접선 0개", vm.AreaMapSummary);
 
         vm.AreaMapScopeIndex = 0;                                                        // 다시 전체
         Assert.Equal(4, vm.Scene.Faces.Count);

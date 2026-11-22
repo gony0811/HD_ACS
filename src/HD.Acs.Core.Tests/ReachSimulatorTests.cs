@@ -163,6 +163,89 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 리프트를_쓰지_않으면_기둥은_간섭_판정에서_빠지고_스트로크는_무시된다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var noLift = Symmetric175 with { LiftEnabled = false };
+
+        // 리프트 기둥에 닿던 elbow-down 자세 — 리프트를 끄면 부품 목록에도, 간섭 대상에도 기둥이 없다
+        var r = ReachSimulator.Evaluate(noLift, planes, st, sm.To3D(12, v), sm.Normal, 300);
+        var parts = r.Stages[2].Chosen!.Parts;
+        Assert.DoesNotContain(parts, p => p.Name == "리프트 기둥");
+        Assert.DoesNotContain(parts, p => p.NearestPlane == "리프트 기둥");
+
+        // 스트로크를 줘도 BASE 는 리프트 0 높이(MountZMm) — 같은 판정
+        var r0 = ReachSimulator.Evaluate(noLift, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(floor + noLift.MountZMm / 1000.0, r.ColumnTop[2], 9);
+        Assert.Equal(r0.Stages[2].Chosen!.JointsDeg, r.Stages[2].Chosen!.JointsDeg);
+
+        // 자기 간섭 — 같은 관절각에서 기둥을 빼면 기둥 상대 값은 나오지 않는다
+        var j = r.Stages[2].Chosen!.JointsDeg;
+        Assert.NotEqual("리프트 기둥", ReachSimulator.SelfClearance(noLift, noLift.MountZMm, j).Obstacle);
+    }
+
+    [Fact]
+    public void 나무판_두께만큼_차체와_BASE가_올라가고_장착높이가_같으면_판정도_같다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var board = Symmetric175 with { LiftEnabled = false, MountZMm = 927, AmrFloorOffsetMm = 110 };
+        var direct = Symmetric175 with { LiftEnabled = false, MountZMm = 1037 };
+
+        var rb = ReachSimulator.Evaluate(board, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var rd = ReachSimulator.Evaluate(direct, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(floor + 1.037, rb.ColumnTop[2], 9);                       // BASE = 층 바닥 + 110 + 927
+        var (jb, jd) = (rb.Stages[2].Chosen!.JointsDeg, rd.Stages[2].Chosen!.JointsDeg);   // BASE 가 같으면 관절각도 같다
+        for (var i = 0; i < 6; i++) Assert.Equal(jd[i], jb[i], 6);
+    }
+
+    [Fact]
+    public void 층별_바닥_올림은_그_층에_선_정차에만_적용된다()
+    {
+        // 나무판은 0단(내부 L1)에만 — 2층 정차는 그대로
+        var (sm, v, floor) = MidWall();                                   // floor = 2층 발판 높이
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var levels = new[] { 0.0, floor, floor + 2.4, floor + 4.8 };
+        var l1Only = Symmetric175 with { LevelFloorZ = levels, AmrFloorOffsetByLevelMm = new Dictionary<int, double> { [1] = 110 } };
+        var l2Only = l1Only with { AmrFloorOffsetByLevelMm = new Dictionary<int, double> { [2] = 110 } };
+        Assert.Equal(110, l1Only.FloorOffsetMm(0));
+        Assert.Equal(0, l1Only.FloorOffsetMm(floor));
+        Assert.Equal(0, l1Only.FloorOffsetMm(99));                         // 층을 못 찾으면 0
+        Assert.Equal(110, (Symmetric175 with { AmrFloorOffsetMm = 110 }).FloorOffsetMm(floor));   // 공통 값 = 모든 층
+
+        var r0 = ReachSimulator.Evaluate(Symmetric175, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var r1 = ReachSimulator.Evaluate(l1Only, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var r2 = ReachSimulator.Evaluate(l2Only, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        Assert.Equal(r0.ColumnTop[2], r1.ColumnTop[2], 9);                 // 다른 층 올림은 영향 없음
+        Assert.Equal(r0.ColumnTop[2] + 0.110, r2.ColumnTop[2], 9);          // 이 층 올림만 BASE 를 올린다
+    }
+
+    [Fact]
+    public void 차체_윗면_바로_위에_달아도_BASE는_차체와_간섭으로_세지_않고_받침_기둥은_잰다()
+    {
+        // 2026-11-19 현장: 차체 765 + 160 mm 받침 기둥(리프트 단면) 위에 코봇 → BASE 927
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var low = Symmetric175 with { LiftEnabled = false, MountZMm = 927, AmrHeightMm = 887 };   // BASE 가 차체 윗면 40 mm 위
+        var r = ReachSimulator.Evaluate(low, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        foreach (var stage in r.Stages)
+            foreach (var s in stage.Solutions)
+                Assert.DoesNotContain(s.Parts, p => p.Name == "BASE·J1" && p.NearestPlane == "AMR 차체");
+
+        var support = low with { AmrHeightMm = 765, SupportColumn = true };
+        var rs = ReachSimulator.Evaluate(support, planes, st, sm.To3D(12, v), sm.Normal, 0);
+        var col = Assert.Single(rs.Stages[2].Chosen!.Parts, p => p.Name == "받침 기둥");
+        Assert.Equal(floor + 0.765, col.A[2], 9);
+        Assert.Equal(floor + 0.927, col.B[2], 9);
+        Assert.False((low with { AmrHeightMm = 765 }).HasColumn(927));    // 받침 기둥 설정이 없으면 종전대로 빠진다
+    }
+
+    [Fact]
     public void 관절_한계는_FR5_WML_사양_비대칭이다()
     {
         var m = ReachRobotModel.Default;
@@ -330,9 +413,58 @@ public class ReachSimulatorTests
     }
 
     [Fact]
+    public void 평면_경유를_쓰지_않는_면은_면_방향_거리_제한_없이_들어갈_점부터_본다()
+    {
+        // 위 테스트와 같은 배치(면 방향 600 mm)에서 SM 을 직접 진입 면으로 두면 들어갈 점 직접이 후보에 들어간다(6 → 7개).
+        var (sm, v, floor) = MidWall();
+        var h = ClearStroke(sm, v, floor);
+        var mount = ReachRobotModel.Default with { MountYawDeg = 180 };
+        var same = mount with
+        {
+            StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = ApproachJoints(mount, sm, 12, v, floor, h) },
+        };
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var start = ReachSimulator.Evaluate(same, planes, StationFor(sm, 12, v, 1.2, 2),
+            sm.To3D(12.6, v), sm.Normal, h, wallCode: "SM", checkEntry: false).Stages[0].Chosen!.JointsDeg;
+        var m = mount with
+        {
+            StartJointsByWall = new Dictionary<string, double[]> { ["SM"] = start },
+            PlanarEntryWalls = new HashSet<string> { "PU", "SU" },
+        };
+
+        Assert.False(ReachSimulator.UsesPlanarEntry(m, "SM"));
+        Assert.True(ReachSimulator.UsesPlanarEntry(m, "PU"));
+        Assert.True(ReachSimulator.UsesPlanarEntry(mount, "SM"));   // 설정이 없으면 모든 면이 평면 경유(종전)
+
+        var r = ReachSimulator.Evaluate(m, planes, StationFor(sm, 12, v, 1.2, 2), sm.To3D(12, v), sm.Normal, h, wallCode: "SM");
+        Assert.True(r.Entry is not null, r.Blocker ?? "진입 경로를 보지 않음");
+        Assert.Equal(7, r.Entry!.Candidates);   // 이 배치는 들어갈 점에서 전완이 기둥에 닿아 진입 자체는 거부된다 — 후보 구성만 본다
+    }
+
+    [Fact]
+    public void 직접_진입_경로가_양_끝보다_면에_가까워지면_막는다()
+    {
+        // 초점 자세(툴 끝이 면에서 약 0.1 m)를 J1 로 ±60° 돌린 두 자세 사이 MoveJ — 가운데에서 툴이 면 앞을 스친다.
+        var (sm, v, floor) = MidWall();
+        var h = ClearStroke(sm, v, floor);
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var station = StationFor(sm, 12, v, 1.2, 2);
+        var focus = ReachSimulator.Evaluate(NoTraverse, planes, station, sm.To3D(12, v), sm.Normal, h).Stages[^1].Chosen!.JointsDeg;
+        double[] Turn(double d) => focus.Select((x, i) => i == 0 ? x + d : x).ToArray();
+
+        var wide = NoTraverse with { EntryPathMarginMm = 300 };
+        var why = ReachSimulator.JointPathBlocker(wide, planes, station, h, Turn(-60), Turn(60));
+        Assert.True(why is not null && why.Contains("면 여유"), why ?? "막지 않음");
+        // 움직임이 없으면 볼 경로가 없다.
+        Assert.Null(ReachSimulator.JointPathBlocker(wide, planes, station, h, focus, focus));
+        // 지켜야 할 여유가 작으면(50 mm) 같은 이동이 통과한다 — 가운데에서도 툴은 면에서 약 0.1 m 떨어져 있다.
+        Assert.Null(ReachSimulator.JointPathBlocker(NoTraverse with { EntryPathMarginMm = 50 }, planes, station, h, Turn(-60), Turn(60)));
+    }
+
+    [Fact]
     public void 진입_경로가_없으면_자세가_닿아도_도달불가다()
     {
-        // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·140° 안의 진입점이 없다.
+        // 출발 자세를 벽 반대쪽으로 팔을 뻗은 자세로 두면 같은 가지·이동 한계 안의 진입점이 없다.
         var (sm, v, floor) = MidWall();
         var away = ApproachJoints(ReachRobotModel.Default, sm, 12, v, floor).ToArray();
         away[0] += away[0] > 0 ? -170 : 170;
@@ -360,8 +492,11 @@ public class ReachSimulatorTests
         Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 30.0, -80, 90, -70, 80, 170 }));   // J6 는 보지 않는다
         Assert.Contains("팔꿈치 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, -100, -90, 90, 0 }));
         Assert.Contains("손목 반전", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, -90, -90, 0 }));
-        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 40, 90, 0 }));          // 130° — 140° 한계 안
-        Assert.Contains("J4 150°", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 60, 90, 0 }));
+        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 40, 90, 0 }));          // 130° — 한계 안
+        Assert.Null(ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 60, 90, 0 }));          // 150° — 160° 한계 안
+        Assert.Contains("J4 170°", ReachSimulator.BranchChangeReason(m, start, new[] { 0.0, -90, 100, 80, 90, 0 }));
+        Assert.Contains("J4 150° 이동 > 140°",                                                                 // 설정으로 낮추면 그 값으로
+            ReachSimulator.BranchChangeReason(m with { MaxEntryJointTravelDeg = 140 }, start, new[] { 0.0, -90, 100, 60, 90, 0 }));
     }
 
     [Fact]
@@ -443,6 +578,8 @@ public class ReachSimulatorTests
         {
             MountYawDeg = 180, ToolZMm = 365, StageStandoffsMm = new[] { 400.0, 300, 10 }, CheckTraversal = false,
             StartJointsByWall = new Dictionary<string, double[]> { ["PU"] = home2 },
+            // 그날 AMR 의 J6 안전 범위(−310°~−160°)로 재현한다 — 2026-11-14 에 −320°~−145° 로 넓혔다(기본값).
+            SafeJ6MinDeg = -310, SafeJ6MaxDeg = -160,
         };
         var pu = new WallPose(new[] { -15.48, 8.64, 10.304 }, new[] { 1.0, 0, 0 }, new[] { 0, -Math.Sqrt(0.5), Math.Sqrt(0.5) });
         var n = new[] { 0, -Math.Sqrt(0.5), -Math.Sqrt(0.5) };
@@ -453,7 +590,7 @@ public class ReachSimulatorTests
             new ReachPlane("T", new[] { -15.48, -5.984, 12.96 }, new[] { 0.0, 0, -1 }),
         }, floor, 4);
 
-        var c24 = ReachSimulator.Evaluate(m, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
+        var c24 =ReachSimulator.Evaluate(m, planes, new ReachStation(10.76, 5.353, 1.5708, floor),
             pu.LocalToDrawing(25.74, 2.0054), n, 100, wallCode: "PU");
         Assert.NotNull(c24.Entry);
         Assert.False(c24.Entry!.Ok, c24.Entry.Summary);

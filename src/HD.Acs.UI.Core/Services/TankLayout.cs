@@ -10,7 +10,11 @@ public sealed record WallCode(string Code, string Name, double NormX, double Nor
 /// <summary>화물창 층(건조 슬라이스). AMR은 엘리베이터로 층간 이동(수동, Q9).</summary>
 /// <param name="Level">L1~L4</param>
 /// <param name="MapId">VDA 5050 mapId 접미 (예: CT1-L1)</param>
-public sealed record TankFloor(string Level, string MapId);
+public sealed record TankFloor(string Level, string MapId)
+{
+    /// <summary>화면 표기(<see cref="LevelLabel"/>). <see cref="Level"/> 은 맵 ID 를 만드는 내부 키(L1~L4)라 화면에 쓰지 않는다.</summary>
+    public string Label => LevelLabel.OfKey(Level);
+}
 
 /// <summary>
 /// TANK_WALL_LAYOUT 전개도의 정적 레이아웃 모델.
@@ -30,6 +34,27 @@ public static class TankLayout
         new TankFloor("L3", $"{DefaultTankId}-L3"),
         new TankFloor("L4", $"{DefaultTankId}-L4"),
     };
+
+    /// <summary>선창 ID 의 층 목록 — 층 맵 ID 는 `{선창}-L{층}`.</summary>
+    public static IReadOnlyList<TankFloor> FloorsFor(string tankId) =>
+        Floors.Select(f => new TankFloor(f.Level, $"{tankId}-{f.Level}")).ToArray();
+
+    /// <summary>
+    /// 층 목록을 다른 선창 ID 로 바꾼다(선창 ID 변경·다른 선창 프로젝트 열기). 항목을 제자리에서 갈아 끼우므로
+    /// 호출한 쪽이 선택 항목을 같은 층으로 다시 잡아야 한다. 바뀐 것이 있으면 true.
+    /// </summary>
+    public static bool Retarget(System.Collections.ObjectModel.ObservableCollection<TankFloor> floors, string tankId)
+    {
+        var changed = false;
+        for (var i = 0; i < floors.Count; i++)
+        {
+            var mapId = $"{tankId}-{floors[i].Level}";
+            if (floors[i].MapId == mapId) continue;
+            floors[i] = floors[i] with { MapId = mapId };
+            changed = true;
+        }
+        return changed;
+    }
 
     /// <summary>10개 벽면 코드 (중앙 A · 방사형 8 · 외곽 F).</summary>
     public static readonly IReadOnlyList<WallCode> Walls = new[]

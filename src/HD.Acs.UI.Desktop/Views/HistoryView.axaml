@@ -32,7 +32,7 @@
                 <DataGridTextColumn Header="발생 시각" Binding="{Binding OccurredAt}" Width="165" />
                 <DataGridTextColumn Header="AREA" Binding="{Binding AreaName}" Width="130" />
                 <DataGridTextColumn Header="면" Binding="{Binding WallCode}" Width="50" />
-                <DataGridTextColumn Header="층" Binding="{Binding Level}" Width="45" />
+                <DataGridTextColumn Header="층" Binding="{Binding LevelText}" Width="45" />
                 <DataGridTextColumn Header="결과" Binding="{Binding Status}" Width="80" />
                 <DataGridTextColumn Header="시도" Binding="{Binding Attempts}" Width="55" />
                 <DataGridTextColumn Header="성공/실패 상세" Binding="{Binding Description}" Width="*" />

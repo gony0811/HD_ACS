@@ -13,7 +13,7 @@ public sealed partial class ReachSimService
 {
     public async Task<IReadOnlyList<ReachAreaVerdict>?> AreaMapAsync(string tankId, int? level, string? wallCode, CancellationToken ct)
     {
-        _model = _baseModel;   // 운영 가지 규칙
+        _model = (await BaseAsync(tankId, ct));   // 운영 가지 규칙
         var ctx = await LoadTankAsync(tankId, ct);
         if (ctx is null) return null;
         var q = _db.InspectionAreas.AsNoTracking().Include(a => a.Tasks).Where(a => a.TankId == tankId);
@@ -28,7 +28,7 @@ public sealed partial class ReachSimService
             var corners = JsonSerializer.Deserialize<double[][]>(a.Corners) ?? Array.Empty<double[]>();
             var tasks = a.Tasks.Where(t => t.Enabled).OrderBy(t => t.Seq).ToList();
             var disabled = a.Tasks.Count - tasks.Count;
-            var lift = Math.Clamp(a.StationLiftMm ?? 0, 0, _model.StrokeMaxMm);
+            var lift = _model.LiftStrokeMm(a.StationLiftMm);
             // 임시 제외 용접선은 판정 없이(Ok = null) 위치만 싣는다
             var off = a.Tasks.Where(t => !t.Enabled).OrderBy(t => t.Seq)
                 .Select(t => new ReachWeldVerdict(t.TaskId, t.Seq, t.StartU, t.StartV, t.EndU, t.EndV, null)).ToList();

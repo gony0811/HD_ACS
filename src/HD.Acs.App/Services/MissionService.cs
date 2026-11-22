@@ -33,9 +33,14 @@ public sealed class MissionService
     /// <summary>
     /// 시나리오 → Run 생성. 선창 영역을 작업 큐로 전개(층별 미션 포함)한 뒤 첫 정차를 greedy 최근접 배차.
     /// 검사 순서는 고정 시퀀스가 아니라 "현재 층 미검사 중 로봇 최근접"으로 동적 결정된다.
+    /// <para><paramref name="restart"/> — 그 로봇의 가장 최근 run이 중단(ABORTED) 상태로 남은 작업을 갖고 있으면
+    /// 새 run을 만들지 않고 <see cref="ResumableRunExistsException"/>(409)로 묻는다. 새 run은 시나리오 전 영역을 처음부터
+    /// 다시 싣고, 만들어지는 순간 옛 run은 더 이상 이어할 수 없기 때문이다(2026-11-11 현장: 중단 run 대신 새 run이 시작되어
+    /// 끝낸 영역부터 다시 검사). 운영자가 확인하면 restart=true 로 다시 요청한다.</para>
     /// </summary>
-    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default)
-        => (await StartRunCoreAsync(scenarioId, robotId, null, false, ct)).RunId;
+    public async Task<Guid> StartRunAsync(Guid scenarioId, string robotId, CancellationToken ct = default, int? round = null,
+        bool restart = false)
+        => (await StartRunCoreAsync(scenarioId, robotId, null, false, ct, round, restart)).RunId;
 
     /// <summary>
     /// 리페어 run — 지정한 용접선(TASK)만 검사한다(1개 이상). 영역 검사에서 실패한 용접선을 골라 다시 돌릴 때 쓴다.
@@ -46,7 +51,7 @@ public sealed class MissionService
     /// (이 run의 정차에만 적용 — 영역에 저장된 정차는 바꾸지 않는다).
     /// </summary>
     public async Task<RepairRunStarted> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId = null,
-        CancellationToken ct = default, bool optimize = true)
+        CancellationToken ct = default, bool optimize = true, int? round = null)
     {
         var ids = taskIds.Distinct().ToList();
         if (ids.Count == 0) throw new RepairRequestException("검사할 용접선을 1개 이상 지정하세요.");
@@ -83,7 +88,7 @@ public sealed class MissionService
             if (sid is null) throw new RepairRequestException($"선창 {tankId}에 시나리오가 없습니다 — 계획 ▸ 시나리오에서 먼저 만드세요.");
         }
 
-        return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct);
+        return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct, round);
     }
 
     /// <summary>리페어 run의 정차 최적화 — 실패해도 재검사는 저장된 정차로 진행한다(빈 목록).</summary>
@@ -104,8 +109,10 @@ public sealed class MissionService
         stops.Where(s => s.Applied).ToDictionary(s => s.AreaId, s => new InspectionDispatcher.StopOverride(s.X, s.Y, s.Yaw, s.LiftMm));
 
     private async Task<RepairRunStarted> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, bool optimize,
-        CancellationToken ct)
+        CancellationToken ct, int? round = null, bool restart = false)
     {
+        if (round is not (null or 1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(round), round, "검사 회차(round)는 1 또는 2 입니다.");
         var what = repairTaskIds is null ? "미션 시작" : "용접선 재검사";
         // 활성 run 가드 — 같은 로봇에 RUNNING/WAITING_FLOOR_TRANSFER run이 있으면 새 시작 거부 (유령 run 누적 방지)
         var active = await _db.ScenarioRuns.AsNoTracking()
@@ -115,11 +122,29 @@ public sealed class MissionService
             throw new RunConflictException(
                 $"로봇 {robotId}에 진행 중인 run({active})이 있습니다 — 이어하기(resume) 또는 중단(abort) 후 시작하세요.");
 
+        // 이어할 수 있는 중단 run 가드 — 일반 미션 시작만(재검사는 지정한 용접선만 도는 별도 명령).
+        ResumableRun? resumable = repairTaskIds is null ? await FindResumableAsync(robotId, ct) : null;
+        if (resumable is { State: "ABORTED" } && !restart)
+            throw new ResumableRunExistsException(resumable);
+
         // AMR 미연결이면 run을 만들지 않고 알람 — 받을 로봇 없이 Order가 나가 "무반응"이 되는 것을 막는다
         await _dispatcher.EnsureRobotConnectedAsync(robotId, what, ct);
         _dispatcher.EnsureNoDeviceFault(robotId, what);   // 장치 HEAVY 알람 중 Order 금지 [장치통신 HEAVY알람 §5]
 
         var scenario = await _db.Scenarios.AsNoTracking().FirstAsync(s => s.ScenarioId == scenarioId, ct);
+
+        // 검사 종류 가드 — 지령 생성은 아직 용접검사만 구현돼 있다. 다른 장비를 단 로봇에 용접검사 지령을 보내지 않는다.
+        var kind = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == scenario.TankId)
+            .Select(g => g.InspectionKind).FirstOrDefaultAsync(ct);
+        if (!_dispatcher.SupportsInspectionKind(kind))
+            throw new RunConflictException(
+                $"선창 {scenario.TankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다 — 용접검사(WELD) 선창만 {what}할 수 있습니다.");
+
+        // 가스검사는 회차가 필수 — 세이지가 회차 없는 결과를 거부한다(재전송도 안 됨) [포밍가스 규격 §2 round 필수]
+        bool isGas = string.Equals(kind, HD.Acs.Core.Planning.InspectionKinds.Gas, StringComparison.OrdinalIgnoreCase);
+        if (isGas && round is null)
+            throw new RunRequestInvalidException(
+                $"선창 {scenario.TankId}는 가스검사입니다 — 검사 회차(1 또는 2)를 골라야 {what}할 수 있습니다.");
 
         var run = new ScenarioRunEntity
         {
@@ -130,6 +155,8 @@ public sealed class MissionService
             State = "RUNNING",
             StartedAt = DateTimeOffset.UtcNow,
             TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
+            // 회차는 가스검사 선창에서만 쓴다(지령 params.round) — 용접검사 run 에는 남기지 않는다
+            Round = isGas ? round : null,
         };
         // 재검사 — 지정한 용접선만 놓고 정차·리프트를 다시 고른다(가드를 모두 통과한 뒤 계산: 수 초 걸린다)
         IReadOnlyList<RepairStop> stops = repairTaskIds is not null && optimize
@@ -142,6 +169,18 @@ public sealed class MissionService
             _db.ChangeTracker.Clear();
             throw new RepairRequestException(
                 "지정한 용접선을 검사 큐에 넣을 수 없습니다 — 그 층의 맵 캘리브레이션(T_W_D)과 면 등록을 확인하세요.");
+        }
+        if (resumable is { State: "ABORTED" })
+        {
+            // 운영자가 확인하고 처음부터 다시 시작 — 옛 run은 이 시점부터 이어할 수 없다(기록으로 남긴다)
+            _db.AuditLogs.Add(new AuditLogEntity
+            {
+                UserId = "", Action = "RUN_RESTART_OVER_RESUMABLE",
+                Target = $"{robotId} 새 run {run.RunId} — 이어할 수 있던 run {resumable.RunId}"
+                         + $"(완료 {resumable.Done}·건너뜀 {resumable.Skipped}·남은 {resumable.Pending}) 대신 처음부터",
+            });
+            _log.LogWarning("로봇 {Robot}: 이어할 수 있는 run {Old}(완료 {Done}·남은 {Pending}) 대신 새 run {Run}을 처음부터 시작.",
+                robotId, resumable.RunId, resumable.Done, resumable.Pending, run.RunId);
         }
         if (repairTaskIds is not null)
             _db.AuditLogs.Add(new AuditLogEntity
@@ -188,6 +227,26 @@ public sealed class MissionService
     /// 리셋해 재검사, 남은 PENDING만 greedy 재배차. [INSPECTION_SCENARIO §3.1 재개 규정]
     /// </summary>
     public async Task<ResumeSummary> ResumeRunAsync(Guid runId, CancellationToken ct = default)
+    {
+        try { return await ResumeCoreAsync(runId, ct); }
+        catch (Exception ex) when (ex is RunStateException or RunConflictException or RobotNotConnectedException
+                                       or RobotDeviceFaultException or CalibrationInvalidException or WeldPayloadSchemaException)
+        {
+            // 이어하기 거부는 화면 상태줄에만 뜨고 사라졌다 — 그 뒤 '미션 시작'을 눌렀는지 경위를 알 수 없었다(2026-11-11).
+            // 거부 사유를 로그·감사로그에 남긴다. 중간에 바꾼 엔티티는 저장하지 않는다.
+            _log.LogWarning("Run {Run} 이어하기 거부 — {Reason}", runId, ex.Message);
+            try
+            {
+                _db.ChangeTracker.Clear();
+                _db.AuditLogs.Add(new AuditLogEntity { UserId = "", Action = "RUN_RESUME_REJECTED", Target = $"run {runId} — {ex.Message}" });
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (Exception logEx) { _log.LogWarning(logEx, "이어하기 거부 감사로그 기록 실패"); }
+            throw;
+        }
+    }
+
+    private async Task<ResumeSummary> ResumeCoreAsync(Guid runId, CancellationToken ct)
     {
         var run = await _db.ScenarioRuns.Include(r => r.Missions).FirstOrDefaultAsync(r => r.RunId == runId, ct)
                   ?? throw new KeyNotFoundException($"run '{runId}' 없음");
@@ -240,6 +299,11 @@ public sealed class MissionService
         run.EndedAt = null;
         foreach (var m in run.Missions.Where(m => m.State == nameof(MissionState.Aborted)))
             m.EndedAt = null;   // 상태는 재배차 시 디스패처가 Released/Running으로 갱신
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = "", Action = "RUN_RESUME",
+            Target = $"{run.RobotId} run {runId} — 남은 정차 {open.Count}(진행 중이던 정차 {stale} 처음부터) · 재계산 {refreshed} · 스킵 {skipped}",
+        });
         await _db.SaveChangesAsync(ct);
 
         _log.LogInformation("Run {Run} 재개 — DISPATCHED 리셋 {Stale}건, 현재 계획으로 재계산 {Refreshed}건, 재계산 불가 스킵 {Skipped}건.",
@@ -250,7 +314,10 @@ public sealed class MissionService
 
     /// <summary>로봇의 가장 최근 run이 재개 가능(미완료 + 미종결 작업 보유)하면 그 run, 아니면 null.
     /// 더 오래된 run은 후보로 삼지 않는다 — 재개는 직전 작업을 이어갈 때만 쓴다.</summary>
-    public async Task<object?> FindResumableRunAsync(string robotId, CancellationToken ct = default)
+    public async Task<ResumableRun?> FindResumableRunAsync(string robotId, CancellationToken ct = default)
+        => await FindResumableAsync(robotId, ct);
+
+    private async Task<ResumableRun?> FindResumableAsync(string robotId, CancellationToken ct)
     {
         var r = await _db.ScenarioRuns.AsNoTracking()
             .Where(x => x.RobotId == robotId)
@@ -263,8 +330,9 @@ public sealed class MissionService
         int Of(string s) => counts.FirstOrDefault(c => c.Key == s)?.N ?? 0;
         int open = Of("PENDING") + Of("DISPATCHED");
         if (open == 0) return null;
-        return new { r.RunId, r.ScenarioId, r.State, r.StartedAt,
-                     Pending = open, Done = Of("DONE"), Skipped = Of("SKIPPED") };
+        var name = await _db.Scenarios.AsNoTracking().Where(s => s.ScenarioId == r.ScenarioId)
+            .Select(s => s.Name).FirstOrDefaultAsync(ct);
+        return new ResumableRun(r.RunId, r.ScenarioId, name, r.State, r.StartedAt, open, Of("DONE"), Of("SKIPPED"));
     }
 
     /// <summary>
@@ -491,6 +559,21 @@ public sealed class MissionService
 
 /// <summary>run 시작/재개 충돌(동일 로봇 활성 run 존재) — 409로 매핑.</summary>
 public sealed class RunConflictException(string message) : Exception(message);
+
+/// <summary>로봇의 가장 최근 run — 이어하기 대상(미완료 + 남은 작업 보유). Pending = PENDING + DISPATCHED.</summary>
+public sealed record ResumableRun(Guid RunId, Guid ScenarioId, string? ScenarioName, string State,
+    DateTimeOffset? StartedAt, int Pending, int Done, int Skipped);
+
+/// <summary>미션 시작 요청인데 이어할 수 있는 중단 run이 있다 — 409. 운영자가 확인하면 restart=true 로 다시 요청.</summary>
+public sealed class ResumableRunExistsException(ResumableRun run) : Exception(
+    $"이어할 수 있는 중단 run이 있습니다(시나리오 {run.ScenarioName ?? run.ScenarioId.ToString()} · 완료 {run.Done} · 건너뜀 {run.Skipped} · 남은 {run.Pending}) "
+    + "— '이어하기'로 남은 영역만 진행하세요. 새로 시작하면 시나리오 전체를 처음부터 다시 검사하고, 그 run은 더 이상 이어할 수 없습니다.")
+{
+    public ResumableRun Run { get; } = run;
+}
+
+/// <summary>run 시작 요청이 잘못됨(가스검사 회차 누락 등) — 400.</summary>
+public sealed class RunRequestInvalidException(string message) : Exception(message);
 
 /// <summary>run 상태상 불가한 요청(완료 run 재개 등) — 400으로 매핑.</summary>
 public sealed class RunStateException(string message) : Exception(message);

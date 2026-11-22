@@ -183,6 +183,9 @@ public class RepairRunTests
 
         // 이어하기로 정차를 다시 계산해도 같은 방식(지정 용접선만 놓고 최적화)
         await f.Missions.AbortRunAsync(started.RunId);
+        // 정차 최적화가 몇 초 걸린다 — 그 사이 로봇 상태가 낡은 것으로 보이지 않게 방금 받은 것으로 둔다(실기는 2초마다 갱신된다)
+        (await f.Db.RobotContexts.SingleAsync(r => r.RobotId == "AMR-01")).ReportedAt = DateTimeOffset.UtcNow;
+        await f.Db.SaveChangesAsync();
         await WithReach(f).ResumeRunAsync(started.RunId);
         var again = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == started.RunId);
         Assert.Equal(wi.X, again.X, 3);

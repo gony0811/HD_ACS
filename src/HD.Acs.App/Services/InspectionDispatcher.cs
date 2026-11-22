@@ -29,6 +29,12 @@ public sealed class InspectionDispatcher
     private readonly RobotErrorTracker _tracker;
     private readonly double _standoffMm;
     private readonly double _workingDistanceMm;
+    /// <summary>리프트 운영 방식(<c>Acs:Lift:Mode</c>) — 미사용이면 모든 지령의 <c>liftStrokeMm</c> 은 0, 고정이면 고정 높이
+    /// (둘 다 영역 저장값·최적화 결과 무시), 자동이면 영역 저장값.</summary>
+    private readonly LiftSettings _lift;
+
+    /// <summary>지령에 실을 리프트 높이 — 미사용 0, 고정이면 고정 높이, 자동이면 주어진 값(없으면 0).</summary>
+    private double LiftForOrder(double? liftMm) => _lift.ForOrder(liftMm);
 
     public InspectionDispatcher(AcsDbContext db, Vda5050MasterClient vda,
         IInspectionOrderingPolicy policy, IHubContext<MonitoringHub> hub,
@@ -40,12 +46,18 @@ public sealed class InspectionDispatcher
         _nearestEnabled = config.GetValue("Acs:Dispatch:NearestStation:Enabled", false);
         _nearestTimeout = TimeSpan.FromSeconds(config.GetValue("Acs:Dispatch:NearestStation:TimeoutSec", 30.0));
         _nearestOptions = new HD.Acs.Core.Reach.NearestOptions(
-            config.GetValue("Acs:Dispatch:NearestStation:RobustM", config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08)),
+            config.GetValue("Acs:Dispatch:NearestStation:RobustM", 0.3),   // SLAM 오차 300 mm 이상 관측 — 도착 허용 오차(0.2)보다 크게 본다
             config.GetValue("Acs:Dispatch:NearestStation:MaxEvaluations", 600),
-            InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true));
+            InPlace: config.GetValue("Acs:Dispatch:NearestStation:InPlace", true),
+            RobustYawDeg: config.GetValue("Acs:Dispatch:NearestStation:RobustYawDeg", 3.0));
         _tracker = tracker ?? new RobotErrorTracker();   // DI는 싱글턴 주입 — 미지정(단위 테스트)은 빈 추적기
+        _lift = LiftSettings.From(config);
+        if (_lift.Warning is { } lw) _log.LogWarning("리프트 설정: {Warning}", lw);
         _standoffMm = config.GetValue("Acs:Area:StandoffMm", 400.0);
         _workingDistanceMm = config.GetValue("Acs:Area:WorkingDistanceMm", _standoffMm);
+        // 검사 종류별 지령 만들기 — 가스검사 등 새 종류는 여기에 구현을 더한다
+        var weld = new WeldInspectionCommandBuilder(_standoffMm, _workingDistanceMm, log);
+        _commands = new InspectionCommandBuilders(weld, new GasInspectionCommandBuilder(weld));
         _stationStandoffM = config.GetValue("Acs:Area:StationStandoffM", 0.8);
         _verticalStationStandoffM = config.GetValue("Acs:Area:VerticalStationStandoffM", 1.2);
         _allowedDevXy = config.GetValue("Acs:Dispatch:AllowedDevXy", 0.08);
@@ -58,6 +70,24 @@ public sealed class InspectionDispatcher
             config.GetValue("Acs:Dispatch:StationAdjust:MaxLateralMm", 200.0),
             config.GetValue("Acs:Dispatch:StationAdjust:MaxThetaDeg", 5.0));
     }
+
+    private readonly InspectionCommandBuilders _commands;
+
+    /// <summary>이 검사 종류의 지령을 만들 수 있는지 — 아니면 run 을 시작하지 않는다(값 없음 = 용접검사).</summary>
+    public bool SupportsInspectionKind(string? kind) => _commands.Supports(kind);
+
+    /// <summary>선창의 검사 종류에 맞는 지령 만들기 구현. 구현이 없는 종류면 거부(409).</summary>
+    private async Task<IInspectionCommandBuilder> CommandBuilderAsync(string tankId, CancellationToken ct)
+    {
+        var kind = await _db.TankGeometries.AsNoTracking().Where(g => g.TankId == tankId)
+            .Select(g => g.InspectionKind).FirstOrDefaultAsync(ct);
+        return _commands.Find(kind) ?? throw new RunConflictException(
+            $"선창 {tankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다.");
+    }
+
+    private async Task<string?> ParamSchemaAsync(string actionType, CancellationToken ct) =>
+        (await _db.ActionCatalog.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.ActionType == actionType, ct))?.ParamSchema;
 
     // 배차 직전 정차 선택(Acs:Dispatch:NearestStation) — ReachSimService 가 이 클래스를 참조하므로 순환을 피해 늦게 꺼낸다.
     private readonly IServiceProvider? _services;
@@ -102,7 +132,9 @@ public sealed class InspectionDispatcher
                 return null;
             }
 
-            var stop = BuildStop(run.RunId, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct), await WeldSchemaAsync(ct),
+            var builder = await CommandBuilderAsync(area.TankId, ct);
+            var stop = BuildStop(run, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct),
+                builder, await ParamSchemaAsync(builder.ActionType, ct),
                 new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm));
             wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
             _log.LogInformation(
@@ -331,8 +363,9 @@ public sealed class InspectionDispatcher
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
 
-        // 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
-        var weldSchema = await WeldSchemaAsync(ct);
+        // 검사 종류별 지령 만들기 + 발행 전 자체 검증용 param_schema [VDA5050_INTERFACE_SPEC §8.2]
+        var builder = await CommandBuilderAsync(tankId, ct);
+        var paramSchema = await ParamSchemaAsync(builder.ActionType, ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
@@ -351,7 +384,7 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run.RunId, tankId, area, wall, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(area.AreaId));
+            var stop = BuildStop(run, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId));
             _db.WorkItems.Add(new WorkItemEntity
             {
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
@@ -378,12 +411,13 @@ public sealed class InspectionDispatcher
     }
 
     /// <summary>
-    /// 영역 1개 → 정차 1곳(맵 프레임 x/y/θ) + 그 영역 작업들의 startWeldInspection 액션 payload(json 배열).
+    /// 영역 1개 → 정차 1곳(맵 프레임 x/y/θ) + 그 영역 작업들의 검사 액션 payload(json 배열).
+    /// 액션 종류·파라미터는 검사 종류별 구현(<see cref="IInspectionCommandBuilder"/>)이 만든다 — 용접검사 = startWeldInspection.
     /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
     /// </summary>
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
-        Guid runId, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
-        IReadOnlyList<double>? levelZ, string? weldSchema, StopOverride? ov = null)
+        ScenarioRunEntity run, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
+        IReadOnlyList<double>? levelZ, IInspectionCommandBuilder builder, string? paramSchema, StopOverride? ov = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
@@ -392,7 +426,7 @@ public sealed class InspectionDispatcher
         var (stationDx, stationDy, stationYaw) = StationDrawingOf(area, wall, DefaultStandoffM(wall));
         // 리페어 정차 최적화 결과 — 이 run의 이 정차에만 쓴다(영역에 저장된 정차는 그대로)
         if (ov is not null) (stationDx, stationDy, stationYaw) = (ov.X, ov.Y, ov.Yaw);
-        var liftMm = ov?.LiftMm ?? area.StationLiftMm ?? 0.0;
+        var liftMm = LiftForOrder(ov?.LiftMm ?? area.StationLiftMm);
         var (mx, my) = tWd.DrawingToMap(stationDx, stationDy);
         double? mTheta = stationYaw is double sy ? tWd.DrawingYawToMap(sy) : null;
 
@@ -400,62 +434,10 @@ public sealed class InspectionDispatcher
         // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
         var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
         var actionsJson = new JsonArray();
+        var ctx = new InspectionCommandContext(run.RunId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm, run.Round);
         foreach (var t in area.Tasks.OrderBy(x => x.Seq))
         {
-            if (string.IsNullOrWhiteSpace(t.SectionDxfId) || string.IsNullOrWhiteSpace(t.ProfileId))
-                throw new InvalidOperationException(
-                    $"TASK {t.TaskId} 검사 참조 누락: sectionDxfId/profileId를 등록한 뒤 RUN을 시작하세요.");
-            var startD = pose.LocalToDrawing(t.StartU, t.StartV);
-            var endD = pose.LocalToDrawing(t.EndU, t.EndV);
-            var d = new WeldDrawingData(tankId, area.Level, area.WallCode, startD, endD, t.StartU, t.StartV, t.EndU, t.EndV);
-            var worldPos = WeldInspectionPayload.BuildPosition(tWd, d, floorZ);
-            var jobRef = $"JOB-{anchorGroupId}-{t.Seq}";
-            var taskParams = new JsonObject
-            {
-                ["seamType"] = t.SeamType,
-                ["sectionDxfId"] = t.SectionDxfId,
-                ["inspectionProfileId"] = t.ProfileId,
-                ["standoffMm"] = _standoffMm,
-                ["workingDistanceMm"] = _workingDistanceMm,
-                ["anchorGroupId"] = anchorGroupId,
-                ["seqInGroup"] = t.Seq,
-                ["liftStrokeMm"] = liftMm,
-                // 용접선 1구간의 영구 식별자 — AMR이 모든 CAPTURE_REQ에 실어 SAIGE productId가 된다
-                // [VDA §8.1 / SAIGE §2.5]. attempt는 발행 시점에 발급(PublishStopAsync).
-                ["taskId"] = t.TaskId.ToString(),
-            };
-
-            // CROSS3/4 교차 가지 끝점 → AMR 면-로컬 mm·규약 순서 [VDA §8.5.1, N13]. ACS 저장은 전개도 프레임이라
-            // 반드시 면 법선에서 AMR 프레임을 재구성해 변환한다(좌현·마구리 거울 흡수 — CrossGeometry).
-            if (!string.IsNullOrWhiteSpace(t.Points))
-            {
-                var amrPts = CrossGeometry.BuildAmrPoints(t.SeamType, t.StartU, t.StartV,
-                    Json<double[][]>(t.Points), pose.U, pose.V, Json<double[]>(wall.Normal));
-                if (amrPts is not null)
-                {
-                    var arr = new JsonArray();
-                    foreach (var p in amrPts) arr.Add(new JsonArray((JsonNode)p[0], p[1]));
-                    taskParams["points"] = arr;
-                }
-            }
-
-            var actionParams = WeldInspectionPayload.BuildActionParameters(jobRef, worldPos, taskParams);
-            var violations = WeldInspectionPayload.ValidateSchema(weldSchema, actionParams);
-            if (violations.Count > 0)
-            {
-                _log.LogWarning("Run {Run}: {Job} payload 스키마 위반 — run 시작 중단: {V}",
-                    runId, jobRef, string.Join("; ", violations));
-                throw new WeldPayloadSchemaException(violations);
-            }
-
-            actionsJson.Add(new JsonObject
-            {
-                ["actionType"] = "startWeldInspection",
-                ["taskId"] = t.TaskId.ToString(),
-                ["jobRef"] = jobRef,
-                ["position"] = worldPos,
-                ["params"] = taskParams.DeepClone(),
-            });
+            actionsJson.Add(builder.BuildAction(ctx, t, paramSchema));
             if (ov is not null) actionsJson[^1]!["liftFixed"] = true;   // 발행 때 영역 리프트로 덮지 않음
         }
 
@@ -484,7 +466,8 @@ public sealed class InspectionDispatcher
         var walls = await _db.Walls.AsNoTracking().Where(w => w.TankId == tankId)
             .ToDictionaryAsync(w => w.WallCode, ct);
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Values.Select(a => a.Level).Distinct(), run.RunId, ct);
-        var weldSchema = await WeldSchemaAsync(ct);
+        var builder = await CommandBuilderAsync(tankId, ct);
+        var paramSchema = await ParamSchemaAsync(builder.ActionType, ct);
         var levelZ = await LevelZAsync(tankId, ct);
 
         // 임시 제외(enabled = false) 용접선은 재계산에서도 싣지 않는다
@@ -517,7 +500,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run.RunId, tankId, area!, wall!, lv.T, levelZ, weldSchema, overrides?.GetValueOrDefault(wi.AreaId));
+            var stop = BuildStop(run, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId));
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;
@@ -561,10 +544,6 @@ public sealed class InspectionDispatcher
         }
         return tWdByLevel;
     }
-
-    private async Task<string?> WeldSchemaAsync(CancellationToken ct) =>
-        (await _db.ActionCatalog.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
 
     /// <summary>선창 층 바닥 높이 목록 level_z (m) — seam z를 층 바닥 기준으로 보내는 데 쓴다 [VDA §10 N17]. 지오메트리 없으면 null.</summary>
     private async Task<double[]?> LevelZAsync(string tankId, CancellationToken ct)
@@ -701,14 +680,15 @@ public sealed class InspectionDispatcher
         var stationAdjust = _stationAdjust is null ? null : _stationAdjust.ForArea(areaMeta?.StationMaxBackwardMm);
 
         // attempt 발급 [VDA §8.1 / SAIGE §2.5] — taskId별 **누적** 시도 번호(1부터). run과 무관하게 증가하므로
-        // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수.
+        // 재검사 run에서도 (taskId, attempt, captureSeq)가 유일하다. 근거 = 이 TASK에 지금까지 발행된 액션 수 + 코봇 이동 시험 수.
         var stopTaskIds = actionsJson
             .Select(a => Guid.TryParse(a!["taskId"]?.GetValue<string>(), out var g) ? g : (Guid?)null)
             .Where(g => g is not null).Select(g => g!.Value).Distinct().ToList();
-        var issuedByTask = await _db.OrderActions.AsNoTracking()
-            .Where(a => a.TaskId != null && stopTaskIds.Contains(a.TaskId.Value))
-            .GroupBy(a => a.TaskId!.Value).Select(g => new { TaskId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
+        var issuedByTask = await IssuedAttemptsAsync(_db, stopTaskIds, ct);
+
+        // 이 미션에서 앞서 발행한 Order 의 미종결 액션 정리 — 새 Order 를 보내면 AMR 은 이전 Order 액션을 더 보고하지 않는다.
+        // 남겨 두면 "전 액션 종결" 판정이 영원히 끝나지 않는다(2026-11-21 현장: 중단 직후 이어하기 → 다음 영역으로 넘어가지 않음).
+        await CloseSupersededActionsAsync(mission.MissionId, ct);
 
         foreach (var an in actionsJson)
         {
@@ -723,6 +703,8 @@ public sealed class InspectionDispatcher
             prm["attempt"] = attempt;
             if (o["liftFixed"]?.GetValue<bool>() != true)   // 리페어 정차 최적화가 고른 리프트는 영역 저장값으로 덮지 않는다
                 prm["liftStrokeMm"] = areaMeta?.StationLiftMm ?? (prm["liftStrokeMm"]?.GetValue<double>() ?? 0.0);
+            // 미사용(0)·고정(고정 높이)은 큐 전개 이후 설정이 바뀐 run 까지 포함해 발행 직전에 다시 맞춘다
+            if (_lift.Mode != LiftMode.Auto) prm["liftStrokeMm"] = _lift.ForOrder(null);
             if (StationAdjustLimits.ToParam(stationAdjust, wi.Theta) is { } adjust)
                 prm["stationAdjust"] = adjust;   // 정차의 모든 액션에 같은 값 [VDA §4.4.2 / N23]
             var vda = new VdaAction
@@ -738,7 +720,7 @@ public sealed class InspectionDispatcher
             {
                 ActionId = actionId, MissionId = mission.MissionId, WorkItemId = wi.WorkItemId,
                 TaskId = taskId, NodeSequenceId = 0, ActionType = vda.ActionType, BlockingType = "HARD",
-                Params = o["position"]?.ToJsonString(), Status = "WAITING", Attempts = attempt,
+                Params = o["position"]?.ToJsonString(), Status = "WAITING", Attempts = attempt, OrderId = orderId,
             });
         }
 
@@ -768,7 +750,53 @@ public sealed class InspectionDispatcher
         _log.LogInformation("Run {Run}: 정차 배차 wi={Wi} @({X:F2},{Y:F2}) map={Map}", run.RunId, wi.WorkItemId, wi.X, wi.Y, wi.MapId);
     }
 
-    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW, double LiftStrokeMm = 0.0);
+    /// <summary>앞선 Order 의 미종결 액션(WAITING·INITIALIZING·RUNNING·PAUSED)을 FAILED(미실행·대체)로 닫는다.</summary>
+    internal const string SupersededDescription = "superseded — 새 Order 로 대체(이 Order 로는 실행 안 됨)";
+    private async Task CloseSupersededActionsAsync(Guid missionId, CancellationToken ct)
+    {
+        var stale = await _db.OrderActions
+            .Where(a => a.MissionId == missionId && a.Status != "FINISHED" && a.Status != "FAILED").ToListAsync(ct);
+        foreach (var a in stale)
+        {
+            a.Status = "FAILED";
+            a.Result = JsonSerializer.Serialize(new { ActionStatus = "FAILED", ResultDescription = SupersededDescription });
+        }
+        if (stale.Count > 0)
+            _log.LogInformation("Mission {Mission}: 이전 Order 미종결 액션 {N}건을 대체 처리(FAILED·미실행).", missionId, stale.Count);
+    }
+
+    /// <summary>
+    /// 정차 결과 판정에 쓸 액션 — 이번 Order(orderId) 액션만. order_id 가 없는 옛 기록(이 열 추가 전)은 그대로 전부.
+    /// 같은 정차를 중단·이어하기로 다시 배차하면 이전 Order 의 실패(취소)가 이번 결과를 실패로 만들지 않게 한다.
+    /// </summary>
+    internal static List<OrderActionEntity> CurrentOrderActions(IReadOnlyCollection<OrderActionEntity> acts, string? orderId)
+    {
+        var cur = orderId is null ? new List<OrderActionEntity>() : acts.Where(a => a.OrderId == orderId).ToList();
+        return cur.Count > 0 ? cur : acts.ToList();
+    }
+
+    public sealed record SeamStartTestResult(string OrderId, string MapId, double MapX, double MapY, double? MapTheta, double[] SeamStartW,
+        double LiftStrokeMm = 0.0, int? Attempt = null);
+
+    /// <summary>
+    /// taskId 별로 지금까지 발급한 attempt 수 — 본검사 액션(<c>run.order_action</c>)과 코봇 이동 시험(<c>run.seam_test</c>)을 합친다.
+    /// 다음 attempt = <see cref="TaskAttempt.Next"/>(이 값). 시험도 번호를 받으므로 시험 뒤 본검사는 더 큰 번호로 나간다
+    /// (세이지는 같은 taskId 의 가장 큰 attempt 를 최신으로 본다 — 본검사 결과가 시험 촬영을 대신한다).
+    /// </summary>
+    public static async Task<Dictionary<Guid, int>> IssuedAttemptsAsync(AcsDbContext db, IReadOnlyCollection<Guid> taskIds, CancellationToken ct = default)
+    {
+        var actions = await db.OrderActions.AsNoTracking()
+            .Where(a => a.TaskId != null && taskIds.Contains(a.TaskId.Value))
+            .GroupBy(a => a.TaskId!.Value).Select(g => new { TaskId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var tests = await db.SeamTests.AsNoTracking()
+            .Where(t => taskIds.Contains(t.TaskId))
+            .GroupBy(t => t.TaskId).Select(g => new { TaskId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var map = actions.ToDictionary(x => x.TaskId, x => x.Count);
+        foreach (var t in tests) map[t.TaskId] = (map.TryGetValue(t.TaskId, out var n) ? n : 0) + t.Count;
+        return map;
+    }
 
     /// <summary>
     /// 코봇툴 seam 시작점 이동 시험 [VDA §8 moveToSeamStart, N협의] — 지정 용접선(area-task)의 정차점(standoff)으로
@@ -820,29 +848,42 @@ public sealed class InspectionDispatcher
         var seamStartW = position["seamStartW"]!.AsArray().Select(n => n!.GetValue<double>()).ToArray();
 
         // 영역 리프트 높이 — 본검사 배차(params.liftStrokeMm)와 같은 값·같은 기본 0을 실어, 시험 자세가 운영 자세와 같게 한다.
-        var liftStrokeMm = area.StationLiftMm ?? 0.0;
-        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm);
+        var liftStrokeMm = LiftForOrder(area.StationLiftMm);   // 리프트를 쓰지 않으면 0
+        // attempt — 본검사와 같은 taskId 별 누적 번호. 작업자가 시험 자세에서 수동 촬영하면 AMR 이 이 taskId·attempt 로 비전에 보낸다.
+        // 발급 기록(run.seam_test)을 남겨 다음 본검사·시험이 더 큰 번호를 받게 한다(발행에 실패해도 번호는 건너뛸 뿐 겹치지 않는다).
+        var issued = await IssuedAttemptsAsync(_db, new[] { taskId }, ct);
+        var attempt = TaskAttempt.Next(issued.TryGetValue(taskId, out var nIssued) ? nIssued : 0);
+        var order = BuildSeamStartTestOrder(mapId, mx, my, mTheta, position, $"TEST-SEAM-{taskId}", _allowedDevXy, _allowedDevTheta, liftStrokeMm, taskId, attempt);
+        _db.SeamTests.Add(new SeamTestEntity { TestId = Guid.NewGuid(), TaskId = taskId, RobotId = robotId, OrderId = order.OrderId, Attempt = attempt });
 
         _db.AuditLogs.Add(new AuditLogEntity
         {
             UserId = userId ?? "", Action = "TEST_SEAM_START",
-            Target = $"{robotId} → task {taskId} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
+            Target = $"{robotId} → task {taskId} attempt {attempt} @{mapId} station=({mx:F2},{my:F2}) seamStart=({seamStartW[0]:F2},{seamStartW[1]:F2},{seamStartW[2]:F2}) lift={liftStrokeMm:0}mm",
         });
         await _db.SaveChangesAsync(ct);
         await _vda.PublishOrderAsync(new RobotRef(robot.RobotId, robot.Manufacturer, robot.SerialNumber), order, ct);
-        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm", robotId, taskId, mapId, mx, my, liftStrokeMm);
-        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm);
+        _log.LogInformation("코봇 seam 시작점 이동 시험: {Robot} task={Task} attempt={Attempt} map={Map} station=({X:F2},{Y:F2}) lift={Lift:0}mm",
+            robotId, taskId, attempt, mapId, mx, my, liftStrokeMm);
+        return new SeamStartTestResult(order.OrderId, mapId, mx, my, mTheta, seamStartW, liftStrokeMm, attempt);
     }
 
-    /// <summary>seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm 포함). 순수 — 테스트 대상.</summary>
+    /// <summary>
+    /// seam 시작점 이동 시험 Order(단일 노드 + moveToSeamStart 액션, params.liftStrokeMm·taskId·attempt 포함). 순수 — 테스트 대상.
+    /// taskId 는 본검사(startWeldInspection)의 params.taskId 와 같은 ACS 내부 표기(Guid.ToString) — jobRef 문자열을 잘라 읽지 않게.
+    /// attempt 는 본검사와 같은 taskId 별 누적 번호(<see cref="IssuedAttemptsAsync"/>) — 시험 자세 수동 촬영 때 AMR 이 비전에 싣는다.
+    /// </summary>
     public static Vda5050Order BuildSeamStartTestOrder(string mapId, double mx, double my, double? mTheta,
-        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0)
+        JsonObject position, string jobRef, double allowedXy, double allowedTheta, double liftStrokeMm = 0.0, Guid? taskId = null, int? attempt = null)
     {
         var orderId = Guid.NewGuid().ToString();
         var action = new VdaAction { ActionType = "moveToSeamStart", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
         action.ActionParameters.Add(new ActionParameter { Key = "jobRef", Value = jobRef });
         action.ActionParameters.Add(new ActionParameter { Key = "position", Value = position.DeepClone() });
-        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = new JsonObject { ["liftStrokeMm"] = liftStrokeMm } });
+        var prm = new JsonObject { ["liftStrokeMm"] = liftStrokeMm };
+        if (taskId is Guid tid) prm["taskId"] = tid.ToString();
+        if (attempt is int at) prm["attempt"] = at;
+        action.ActionParameters.Add(new ActionParameter { Key = "params", Value = prm });
         var order = new Vda5050Order { OrderId = orderId, OrderUpdateId = 0 };
         order.Nodes.Add(new OrderNode
         {
@@ -889,7 +930,8 @@ public sealed class InspectionDispatcher
             .FirstOrDefaultAsync(w => w.OrderId == mission.OrderId && w.Status == "DISPATCHED", ct);
         if (wi is not null)
         {
-            var acts = await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct);
+            var acts = CurrentOrderActions(
+                await _db.OrderActions.Where(a => a.WorkItemId == wi.WorkItemId).ToListAsync(ct), wi.OrderId);
             string? failureSummary = null;
             (AlarmEntity Entity, string Severity, string Title)? alarm = null;
             bool anyFailed = acts.Any(a => a.Status == "FAILED");

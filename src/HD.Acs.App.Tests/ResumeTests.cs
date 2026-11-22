@@ -275,4 +275,66 @@ public class ResumeTests
         Assert.Equal("WAITING_FLOOR_TRANSFER", (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == run.RunId)).State);
         Assert.Empty(await f.Db.Alarms.AsNoTracking().ToListAsync());
     }
+
+    // ── 이어할 수 있는 중단 run이 있으면 '미션 시작'을 확인 없이 받지 않는다 ──
+    // 2026-11-11 현장: 중단 run(완료 2·남은 2) 대신 새 run이 생겨 끝낸 영역부터 다시 검사했고,
+    // 그 뒤 이어하기는 가장 최근 run(새 run)만 골라 옛 run의 진행이 이어지지 않았다.
+
+    [Fact]
+    public async Task StartRun_IsRejected_WhenLatestRunIsAbortedWithOpenWork_AndNothingChanges()
+    {
+        var f = await Seed();
+        var old = await AbortedRun(f, DateTimeOffset.UtcNow.AddHours(-1));
+
+        var ex = await Assert.ThrowsAsync<ResumableRunExistsException>(() => f.Missions.StartRunAsync(f.ScenarioId, "AMR-01"));
+        Assert.Equal(old.RunId, ex.Run.RunId);
+        Assert.Equal(1, ex.Run.Pending);
+        Assert.Equal("T", ex.Run.ScenarioName);
+        Assert.Contains("이어하기", ex.Message);
+
+        Assert.Single(await f.Db.ScenarioRuns.AsNoTracking().ToListAsync());                     // 새 run 없음
+        Assert.Equal(old.RunId, ((ResumableRun)(await f.Missions.FindResumableRunAsync("AMR-01"))!).RunId);   // 여전히 이어할 수 있다
+    }
+
+    [Fact]
+    public async Task StartRun_WithRestart_StartsOver_AndRecordsWhatWasGivenUp()
+    {
+        var f = await Seed();
+        var old = await AbortedRun(f, DateTimeOffset.UtcNow.AddHours(-1));
+
+        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", restart: true);
+        Assert.NotEqual(old.RunId, runId);
+        var audit = await f.Db.AuditLogs.AsNoTracking().SingleAsync(a => a.Action == "RUN_RESTART_OVER_RESUMABLE");
+        Assert.Contains(old.RunId.ToString(), audit.Target);
+        Assert.Contains(runId.ToString(), audit.Target);
+    }
+
+    [Fact]
+    public async Task StartRun_IsNotBlocked_ByCompletedRun_OrByAbortedRunWithoutOpenWork()
+    {
+        var f = await Seed();
+        var old = await AbortedRun(f, DateTimeOffset.UtcNow.AddHours(-1));
+        (await f.Db.WorkItems.SingleAsync(w => w.RunId == old.RunId)).Status = "DONE";
+        await f.Db.SaveChangesAsync();
+
+        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        Assert.Equal("RUNNING", (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).State);
+        Assert.DoesNotContain(await f.Db.AuditLogs.AsNoTracking().ToListAsync(), a => a.Action == "RUN_RESTART_OVER_RESUMABLE");
+    }
+
+    [Fact]
+    public async Task Resume_WritesAudit_OnSuccessAndOnRejection()
+    {
+        var f = await Seed();
+        var run = await AbortedRun(f, DateTimeOffset.UtcNow.AddHours(-1));
+        await f.Missions.ResumeRunAsync(run.RunId);
+        var ok = await f.Db.AuditLogs.AsNoTracking().SingleAsync(a => a.Action == "RUN_RESUME");
+        Assert.Contains(run.RunId.ToString(), ok.Target);
+
+        // 가장 최근 run이 아닌 옛 run을 이어하기 — 거부되고 그 사유가 감사로그에 남아야 한다
+        var older = await AbortedRun(f, DateTimeOffset.UtcNow.AddDays(-2));
+        await Assert.ThrowsAsync<RunStateException>(() => f.Missions.ResumeRunAsync(older.RunId));
+        var rejected = await f.Db.AuditLogs.AsNoTracking().SingleAsync(a => a.Action == "RUN_RESUME_REJECTED");
+        Assert.Contains("가장 최근 run만", rejected.Target);
+    }
 }

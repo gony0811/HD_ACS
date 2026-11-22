@@ -75,7 +75,7 @@ public sealed record AreaSplitResultAreaDto(Guid AreaId, string Name, int Level,
 /// <summary>정차점 최적화 — 영역 하나의 지금 정차와 찾은 정차. Overridden = 이미 정차 덮어쓰기가 있음.</summary>
 public sealed record ReachStationOptimumDto(Guid AreaId, string Name, string WallCode, int Level, bool Overridden,
     ReachStationCandidateDto Current, ReachStationCandidateDto Best, int Evaluated, long ElapsedMs,
-    List<ReachOptimumSeamDto>? Seams = null);
+    List<ReachOptimumSeamDto>? Seams = null, bool? Improved = null);
 
 /// <summary>용접선 하나의 지금·찾은 정차 판정(Clear | Collision | Unreachable)과 찾은 정차에서 고른 리프트·도면 순회 관절 여유[도]·막힘 사유.</summary>
 public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, string Best, double? BestStrokeMm,
@@ -84,7 +84,9 @@ public sealed record ReachOptimumSeamDto(Guid TaskId, int Seq, string Current, s
 /// <summary>후보 정차 — 도면 x·y·방향, 영역 중심에서 안쪽 거리·좌측·방향 보정(°), 차체 여유, 판정 개수, 공통 리프트.</summary>
 public sealed record ReachStationCandidateDto(double X, double Y, double Theta, double DistM, double LateralM, double YawDeg,
     double BodyClearanceM, bool Feasible, int Clear, int Collision, int Unreachable, double Robustness,
-    double? StrokeMm = null, int? SafeClear = null, double? TraverseMarginDeg = null, double? MarginTargetDeg = null);
+    double? StrokeMm = null, int? SafeClear = null, double? TraverseMarginDeg = null, double? MarginTargetDeg = null,
+    int? ErrorMiss = null, int? ErrorCollision = null, double? ErrorMarginDeg = null, int? ErrorSamples = null,
+    double? ErrorRadiusM = null, double? ErrorYawDeg = null, double? GuaranteedMarginDeg = null);
 
 /// <summary>
 /// GET /api/reach-sim/tanks/{id}/report — 정차·리치 보고서 백데이터. Header = CSV 머리줄(줄바꿈 없음), Rows = CRLF 로 끝나는 CSV 본문
@@ -92,3 +94,34 @@ public sealed record ReachStationCandidateDto(double X, double Y, double Theta, 
 /// </summary>
 public sealed record ReachReportDto(string TaskHeader, string TaskRows, string IkHeader, string IkRows,
     int Areas, int Tasks, int Possible, int Caution, int Impossible);
+
+/// <summary>정차 묶음 최적화(set cover) 작업 — State = RUNNING | DONE | FAILED | CANCELLED, Done/Total = 판정한 후보 수.</summary>
+public sealed record SetCoverJobDto(Guid JobId, string TankId, int Level, string WallCode, string State, int Done, int Total,
+    string? Error, SetCoverPlanDto? Result);
+
+/// <summary>
+/// 정차 묶음 최적화 결과 — 면·층 하나. SafeCovered = 순회 여유 목표 이상으로 덮은 용접선, ClearCovered = 간섭 없이(여유 부족) 덮은 수,
+/// CurrentStations·CurrentClear = 지금 배치의 정차 수·간섭 없이 닿는 수, Uncovered = 어느 후보로도 닿지 못한 작업.
+/// </summary>
+public sealed record SetCoverPlanDto(string TankId, int Level, string WallCode, int Welds, int SafeCovered, int ClearCovered,
+    int CurrentStations, int CurrentClear, List<SetCoverStationDto> Stations, List<Guid> Uncovered,
+    int Cells, long Evaluations, long ElapsedMs, List<ReachWeldVerdictDto>? UncoveredSeams = null);
+
+/// <summary>제안 정차 하나 — 순번·도면 정차(x, y, θ rad)·리프트·Tier(Safe|Clear)·순회 최소 여유·맡은 용접선.</summary>
+public sealed record SetCoverStationDto(int No, double X, double Y, double Theta, double StrokeMm, string Tier, double? MinMarginDeg,
+    double[] Window, List<Guid> TaskIds, List<ReachWeldVerdictDto> Seams);
+
+/// <summary>정차 묶음 최적화 적용 결과 — 새 영역(물려받음·X 영역 여부), 지운 기존 영역 수, 시나리오 새 연결 수, 옮긴 작업 수.</summary>
+public sealed record SetCoverApplyResultDto(string TankId, int Level, string WallCode, List<SetCoverAppliedAreaDto> Areas,
+    int DeletedAreas, int ScenarioLinksAdded, int TasksMoved);
+
+/// <summary>균등 격자 재분할 응답 — Applied=false 면 미리보기만(Result 없음).</summary>
+public sealed record GridAreasResponseDto(bool Applied, GridAreasPreviewDto Preview, SetCoverApplyResultDto? Result = null);
+
+public sealed record GridAreasPreviewDto(string TankId, int Level, string WallCode, double CellUM, double CellVM,
+    int AreasBefore, int AreasAfter, int Tasks, int LeftoverAreas, bool Busy, List<GridAreaCellDto> Cells);
+
+public sealed record GridAreaCellDto(string Name, int Row, int Col, int TaskCount, double UMin, double VMin, double UMax, double VMax, bool Leftover);
+
+public sealed record SetCoverAppliedAreaDto(Guid AreaId, string Name, int TaskCount, bool Inherited, bool Unreachable,
+    double? StationX, double? StationY, double? StationTheta, double? LiftMm);

@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.17** |
-| 작성일 | 2026-08-27 (최종 개정 2026-11-12) |
+| 문서 버전 | **1.25** |
+| 작성일 | 2026-08-27 (최종 개정 2026-11-20) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
 | 상태 | **확정** — N10(정차 이격)만 잠정값 유지. N12(ACS 생존 신호) 승인(2026-09-03). N13(검사 타입 카탈로그): `seamType` 5값은 **양측 구현 완료**(ACS 발행·UI / HD_AMR 파서·resolver·17종 시드), 실행 게이트는 `LINE-*`만 활성. **N14(검사 작업 식별자 `taskId`·`attempt`)는 양측 구현 완료**(ACS 발행 + HD_AMR 파서·주입, 2026-09-21) — 실기 관통 확인만 남음. N15(촬영 좌표 면-로컬 원점 정합)·N16(taskId 바이트 순서)은 연동 시험 확인 대상. **N17(seam z 기준면)은 확정·ACS 반영(2026-10-23)** — seam z = 층 바닥 기준 |
@@ -22,6 +22,14 @@
 | 개정 1.12 (초안) | 2026-10-31 — **정차 온보드 보정 허용 범위 `params.stationAdjust` 제안 `[N23]`**(§4.4.2 신설·§8.1·§10). AMR이 도착 후 리치를 위해 `nodePosition`에서 옮겨 설 수 있는 한계(전진·후진·횡·각)를 ACS가 정차마다 준다. `allowedDeviation*`(도착 판정)은 의미 무변경. **선택 필드·기본 꺼짐 → 계약 하위 호환**. ACS 발행 구현 완료, AMR 회신·사인오프 대기 |
 | 개정 1.13 | 2026-11-03 — **run 중단 시 진행 중 Order 취소**(§4.5.3·§5.4): `cancelOrder` 발행 조건을 "통신 단절 PAUSE 중"에서 "**중단 시 그 run의 정차가 실행 중이거나 PAUSE 중**"으로 확장. 취소·비상정지로 FAILED 보고된 정차는 실패 집계 없이 PENDING(이어하기 대상). AMR 요구 동작은 무변경(HD_AMR `CancelOrderAsync`는 PAUSE 여부와 무관하게 주행 정지·검사 중단·잔여 액션 FAILED) |
 | 개정 1.14 | 2026-11-09 — **정차 리프트 높이 `params.liftStrokeMm` 명문화**(§8.1·§8.7). 정차점 최적화로 찾은 영역 공통 리프트 높이(0~1000 mm, 미지정 0)를 `startWeldInspection` 의 모든 액션에 싣는 것(ACS 구현 2026-11-04)을 표에 반영하고, **시험 액션 `moveToSeamStart` 에도 같은 값을 `params.liftStrokeMm` 으로 싣는다**(종전엔 `params` 없음 → 시험이 리프트 없이 수행돼 운영 자세와 달랐다). 선택 필드라 하위 호환(부재 = 0). HD_AMR 쪽 리프트 구동 반영 여부는 확인 필요 |
+| 개정 1.18 | 2026-11-14 — **선창 이름은 ACS 가 정하고 AMR 은 층만 정의** `[N24]`: §4.3 에 규칙 추가 — AMR 은 `nodePosition.mapId` 의 층 번호만 자기 층과 비교(선창 이름 부분 비교 안 함), 층이 맞는 Order 의 선창 이름을 받아 저장하고 state 로 되돌려 보고, ACS 는 등록되지 않은 보고값을 층 번호로 맞춘다. ACS 에 선창 ID 변경(`POST /api/tanks/{tankId}/rename`) 신설. 메시지 형식은 무변경(`mapId = "{tankId}-L{n}"` 그대로) — 다만 **구버전 AMR 은 mapId 를 글자 그대로 비교하므로 선창 ID 를 바꾸기 전에 AMR 을 먼저 올려야 한다**. 구현: ACS·HD_AMR 양측 완료(단위 테스트·시뮬레이터 E2E), 실기 미확인. |
+| 개정 1.19 | 2026-11-15 — **가스검사(포밍가스 기밀 검사) 지령** `[N25]`: 가스검사 AMR 은 용접선을 따라가는 같은 시퀀스에서 검사 센서만 가스 감지기로 바꾼다. 그래서 액션은 `startWeldInspection` 그대로이고, §8.1 에 선택 필드 `params.round`(검사 회차 1\|2) 추가. ACS 는 선창의 검사 종류가 가스(GAS)일 때만, 운영자가 미션 시작 때 고른 회차를 싣는다(고르지 않으면 생략). 결과(`resultDescription` 의 SAIGE 결과 본문 JSON)·임계값(`setGasThreshold`)·센서 상태(`state.information`)는 HD_AMR `docs/GAS_DETECTOR_XL3000FLEX.md` §5.2~§5.4 제안 단계 — ACS 미구현. |
+| 개정 1.21 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.attempt` 추가**(§8.7). 1.20 의 "시험은 attempt 를 싣지 않는다" 를 바꾼다: ACS 가 시험에도 본검사와 **같은 taskId 별 누적 attempt**(본검사 액션 수 + 시험 수 + 1, 1~255)를 발급해 싣고, 발급 기록을 남겨 이후 본검사가 더 큰 번호를 받는다. AMR 은 도달 후 작업자가 수동 촬영(검사 프로필·시퀀스 화면)하면 그 `CAPTURE_REQ` 에 시험의 taskId·attempt 를 싣는다 — 시험 촬영도 세이지에 그 용접선 결과로 들어가고, 이후 본검사 결과가 최신으로 대신한다. 선택 필드라 하위 호환 |
+| 개정 1.22 | 2026-11-17 — **`seamType` 에 `CROSS4_L`·`CROSS4_R` 추가**(§8.1·§8.2, canonical 10값). 기준은 **면을 정면으로 마주 봤을 때(로봇·카메라 시점)** 十자의 수직 용접선이 작업(가로 top–top 한 칸)의 왼쪽에 있으면 `CROSS4_L`, 오른쪽에 있으면 `CROSS4_R` — **작업 시작점/끝점 기준이 아니다.** ACS 는 정면 기준 값만 보내고, 용접선 시작→끝 방향이 교시 때와 반대인 경우의 보정(L/R 바꿔 고르기)은 HD_AMR 이 한다(2026-11-17 협의 — 프로필 경유점은 작업물 X = 시작→끝 으로 실행되므로). 참고: ACS 생성 작업은 u 오름차순이라 정면에서 본 시작→끝이 좌현·마구리(PL/PM/PU/F/A)는 왼쪽→오른쪽, 우현(SL/SM/SU)은 오른쪽→왼쪽이다. 접미 없는 `CROSS4` 는 그대로 유효(AMR 면별 기본값). 바닥·천장은 정면 좌우가 없어 ACS 가 정하지 않는다. ACS 는 가로지르는 수직 용접선이 작업 가운데에서 치우친 쪽으로 좌우를 판정·적용하는 수단을 둔다(`POST /api/tanks/{tankId}/cross4-sides`, 1 cm 미만이면 판정 불가). **단 CT1 도면 데이터는 가로 CROSS4 536개 모두 수직선이 정가운데라 자동으로는 정해지지 않는다** — 실물의 수 mm 치우침은 도면에 없으므로 면·층 단위 규칙으로 운영자가 지정한다(계획 화면 유형 선택 또는 어시스턴트 `setSeamType`) |
+| 개정 1.20 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.taskId` 추가**(§8.7). 대상 용접선의 taskId 를 본검사 `startWeldInspection` 의 `params.taskId` 와 **같은 표기**(ACS 내부 uuid 문자열)로 싣는다. 종전엔 `jobRef`(`TEST-SEAM-{taskId}`) 문자열 안에만 있어 AMR 이 잘라 읽어야 했다. 선택 필드라 하위 호환(부재 = 종전과 같음, `jobRef` 는 그대로). `attempt` 는 싣지 않는다(시험은 검사가 아니라 attempt 누적에 넣지 않는다). HD_AMR 쪽 사용 여부는 확인 필요 |
+| 개정 1.25 | 2026-11-20 — **배터리 보호 임시 해제 errorType `batteryGuardBypassed` 추가**(§6.4). BMS 고장으로 잔량(SoC)을 믿을 수 없을 때 HD_AMR appsettings `PowerMode:BypassBatteryGuard = true`(기본 false, 앱 재시작 후 적용)로 저전력 판정을 끄면 — 잔량과 무관하게 정상 모드(Order 거부·CRITICAL 안전정지·잔여 액션 중단 없음), `batteryLow`·`batteryCritical` 대신 이 항목을 WARNING 으로 상주 발행한다. ACS 는 알람(`BATTERY_GUARD_BYPASSED`)만 — 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 임시 조치이며 실제 잔량을 모른 채 운용하므로 팩 전압을 따로 확인할 것. **양측 구현 — 실기 미확인** |
+| 개정 1.24 | 2026-11-20 — **factsheet `teaching.safeJ6` 추가** `[N26]`(§7.3). AMR 이 티칭과 함께 적용 중인 J6 안전 범위·대기(홈) 각도(`minDeg`·`maxDeg`·`standbyDeg` — HD_AMR 파라미터 `inspection.safeJ6MinDeg/MaxDeg/StandbyDeg`)를 보고한다. 출발 자세 J6 와 짝이라 teaching 묶음에 들어가며, 값이 바뀌면 teaching 지문이 바뀌어 다시 보고된다. ACS 는 범위가 대기 자세를 포함할 때만 반영(J6 안전 범위·대기 자세·판정 J6 = 대기 자세·툴 장착 보정 = −180° − 대기 자세). 선택 필드 — 구버전 AMR 은 싣지 않으며 ACS 는 종전 설정을 쓴다. **양측 구현 — 실기 미확인** |
+| 개정 1.23 | 2026-11-20 — **factsheet 채널 사용 — AMR 설정 보고(연결 시 초기 정보 + 변경 보고)** `[N26]`(§2.1 표·§5 표·신설 §7.3·부록 C). AMR 은 `factsheet`(QoS 1, **retain**)를 ① 브로커 접속 직후 ② ACS 의 표준 instantAction `factsheetRequest`(ACS 는 AMR `connection` ONLINE 을 받을 때마다 보냄) ③ 보고 값이 바뀔 때(티칭 저장·리프트 설정·장착 보정 T_A_B·코봇 값 — 주기 확인 5 s) 발행한다. HD 값은 확장 객체 `hdAmr`(면별 ② 출발 관절각·리프트 운영·T_A_B·링크 치수·진입 관절 한계 + 설정 버전·묶음 지문·바뀐 묶음). ACS 는 리치 시뮬레이션·배차 설정 층으로 반영(우선순위 appsettings.json < AMR 보고 < 리치·간섭 화면), 진행 중 run 이 있으면 끝난 뒤 반영, 버전이 오르면 `AMR_CONFIG_CHANGED` 알람. **양측 구현(2026-11-20) — 실기·실브로커 미확인** |
 | 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
 | 개정 1.16 | 2026-11-12 — **`position.drawingPos`에 용접선 끝점 면 좌표 `uEnd`·`vEnd` 추가(선택 필드, §8.1) [N15]**. AMR은 `u,v`(시작점)를 원점으로, `uEnd,vEnd − u,v`의 큰 축을 면 위 용접선 방향으로 삼아 촬영 위치(CAPTURE_REQ `PosX/PosY`)를 면 좌표로 환산한다(작업물 좌표계 X+ = 시작→끝, 면의 손잡이는 `wall_code`로 판정 — T·SM·SL·SU는 왼손). 종전에는 용접선 시작점 기준 좌표가 그대로 나가 CROSS4 교차 팔의 음수 좌표를 비전이 `ERR_POSITION`으로 거부했다(실기 11-12 03:53, 56점 중 17점). 끝점이 없거나(구버전 ACS) 면 축에서 10° 넘게 비스듬하면 AMR은 종전 방식으로 보낸다. 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기. 높이 `h`가 음수인 경유점(교차 중심, 프로필 Z −12)은 그대로 음수로 나가므로 비전 측 수용 여부 협의 필요 |
 | 개정 1.15 | 2026-11-12 — **작업자 입력 요청 errorType `manualBeadInputRequired` 추가**(§6.4). AMR이 비드 자동 검출 대신 작업자 입력 팝업을 띄운 동안 `errors[]`에 WARNING으로 싣고, 팝업이 닫히면 뺀다. **고장·실패가 아니다** — 진행 액션은 `RUNNING` 그대로이며 ACS는 알람(`MANUAL_BEAD_INPUT_REQUIRED`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. AMR은 같은 동안 타워램프 녹색을 1초 주기로 점멸한다(AMR 로컬). 추가 필드라 하위 호환(구버전 ACS는 일반 경고로 표시). 양측 구현 완료, 실기 확인 대기 |
@@ -90,7 +98,7 @@ ACS는 AMR 플랫폼·협동로봇·검사장비를 개별 제어하지 않으�
 | `state` | AMR → ACS | 1 | false | **2초 주기** + 이벤트 시 즉시 (§6) |
 | `connection` | AMR → ACS | 1 | **true** | 생존 신호 + MQTT Last Will (§7) |
 | `connection` (ACS identity) | ACS → AMR | 1 | **true** | ACS 전용 identity의 생존 신호 + MQTT Last Will (§7.2) `[N12]` |
-| `factsheet` | AMR → ACS | — | — | **예약 채널 (현행 미사용)** — 향후 로봇 능력 조회용. 현행 ACS는 발행/구독하지 않음 |
+| `factsheet` | AMR → ACS | 1 | **true** | **(1.23)** AMR 설정 보고 — 접속 직후·`factsheetRequest` 수신·보고 값 변경 때 발행. HD 확장 `hdAmr` (§7.3) `[N26]` |
 | `visualization` | — | — | — | **미사용** — 위치는 state.agvPosition으로 충분 (2초 주기) |
 
 ### 2.4 Last Will (필수)
@@ -204,6 +212,18 @@ ACS는 **greedy 최근접 동적 배차**를 사용한다. 층(맵) 안의 미�
 
 - 화물창은 4층 슬라이스 구조이며 **층 1개 = 맵 1개**: `mapId = "{tankId}-L{n}"` (예: `CT1-L1` … `CT1-L4`).
 - ACS는 **로봇이 보고한 층(state.agvPosition.mapId)과 일치하는 Order만 발행**한다 (층 검증 게이트, §9.2).
+- **선창 이름(`{tankId}`)은 ACS 가 정한다 — AMR 은 층 번호만 정의한다** `(1.18, [N24])`:
+  - AMR 설정에는 층 번호(1~4)만 둔다. 수동 층 전환도 층 번호만 바꾼다.
+  - AMR 의 Order 검증은 `nodePosition.mapId` 끝의 `-L{n}` **층 번호만** 자기 층과 비교한다. 선창 이름 부분은 비교하지 않는다.
+    층 번호가 다르면 종전대로 거부(`orderValidationError`, "현재 층 불일치"), 층 번호를 읽을 수 없는 mapId 도 거부한다.
+    **지령의 층을 그대로 자기 층으로 받아들이지 않는다** — 층은 AMR 이 아는 값이 정본이다.
+  - AMR 은 층이 맞는 Order 의 `mapId` 에서 선창 이름을 받아 저장하고(재시작 뒤에도 사용), `state.agvPosition.mapId` 를
+    "마지막으로 받은 선창 이름 + 자기 층"으로 보고한다. 받은 적이 없으면 층만(`L{n}`) 보고해도 된다.
+  - ACS 는 등록된 맵이 아닌 보고값(선창 ID 를 바꾼 직후의 옛 이름, `L{n}`)을 **층 번호로** 자기 층 맵에 맞춘다
+    (그 층 번호의 활성 맵이 하나일 때 — 전제: 로봇이 있는 선창이 하나). 맞추지 못하면 보고값 그대로 두어 층 불일치로 드러난다.
+  - 일시정지 재개 전 확인(§5.3)의 mapId 일치도 층 번호 비교다.
+  - 선창 ID 는 ACS 에서 바꾼다(`POST /api/tanks/{tankId}/rename`). `jobRef`·`anchorGroupId` 문자열은 새 Order 부터 새 선창 ID 로 나가고
+    지난 기록은 옛 값 그대로다. `taskId` 는 바뀌지 않는다.
 - 층간 이동(엘리베이터)은 수동 운영 — ACS는 Order로 층 이동을 명령하지 않는다 [Q9].
 
 ### 4.4 정차점(nodePosition)의 의미와 산출 (참고)
@@ -365,6 +385,16 @@ Order가 "어디서 오는지": run 시작 시 ACS는 계획(검사 영역·용�
 > Modbus 주행 정지(Holding 12) 경유가 **필수가 아니다** — 통신 경로를 REST 하나로 유지할 수 있다.
 > 다만 정지가 큐까지 비우는지는 미확인이므로, 비상정지 후 재배차는 §4.5.1 각주의 순서(정지 → go)를 그대로 따른다.
 
+### 5.1a `factsheetRequest` `(1.23)` `[N26]`
+
+| 항목 | 값 |
+|---|---|
+| actionType | `factsheetRequest` (VDA 5050 2.0 표준) |
+| blockingType | NONE |
+| actionParameters | 없음 |
+| 발행 시점 | ACS 가 AMR `connection` ONLINE 을 받을 때마다 |
+| AMR 요구 동작 | 지금 값으로 `factsheet` 를 다시 발행(§7.3). 주행·검사에는 영향 없음 |
+
 ### 5.2 `initPosition` — 수동 층 전환 후 재측위
 
 | 항목 | 값 |
@@ -487,6 +517,7 @@ AMR이 표준 준수 구현(전체 필드 발행)을 하는 것을 **권장**하
 | `visionLinkLost` · `depthCameraLinkLost` · `laserSensorLinkLost` · `ioModuleLinkLost` · `cobotLinkLost` · `amrLinkLost` | **장치 통신 HEAVY 알람**(검사 비전·Depth 카메라·3점 레이저·I/O 모듈·코봇·AMR 플랫폼) — 3 s 이상 지속된 통신 두절. 장치마다 1건, `errorReferences` `device`=`vision`/`depthCamera`/`laserSensor`/`ioModule`/`cobot`/`amr`. description `"{장치} 통신 두절 t0=HH:mm:ss — {사유}"`, 복구 후 `"… — 복구됨, RESET 대기"`. **현장 RESET 전까지 유지**(래치) (1.10, §9.6) | **FATAL** |
 | `orderRejectedDeviceFault` | 장치 알람 중 Order 거부 — 기존 orderId 유지, `errorReferences` orderId·actionId·device (1.10, §4.5.2) | WARNING |
 | `resumeRejected` | `stopPause` 재개 거부 — description에 사유(비상정지·배터리·측위/mapId·모드) (1.9, §5.3) | WARNING |
+| `batteryGuardBypassed` | **배터리 보호 임시 해제 중** — BMS 고장 임시 조치로 AMR 이 저전력 판정을 끈 동안 상주(고장·실패 아님). description `"배터리 보호 임시 해제 중 — BMS SoC {n}% (판정 {모드}) 무시, 정상 모드로 운용"`. 이 동안 `batteryLow`·`batteryCritical` 은 싣지 않는다. AMR 설정 `PowerMode:BypassBatteryGuard` (1.25) | WARNING |
 | `cobotZoneObstacle` | **코봇 반경 장애물로 주행 정지** — ACS 지령 주행 중 라이다 점이 코봇 외곽(바닥 투영) + 여유 안에 들어와 AMR이 선 동안만 싣는다(고장·실패 아님). description `"코봇 반경 장애물 감지 — 주행 정지: {방향} {거리}m (방향 n°, 점 n개), 감시 영역 …"`, `errorReferences` `distanceMm`·`bearingDeg`(0 = 정면, + = 왼쪽). 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목이 사라진다. 주행 제한 시간까지 남아 있으면 주행 실패로 종결 (1.17) | WARNING |
 | `manualBeadInputRequired` | **수동 비드 입력 대기** — 비드 자동 검출 대신 작업자 입력 팝업이 떠 있는 동안만 싣는다(고장·실패 아님). description `"{단계}: 수동 비드 입력 대기 — {사유} (… HH:mm:ss 까지)"`, `errorReferences` `stage`·`deadline`(UTC). 진행 액션은 `RUNNING` 그대로이고, 입력 확정·자동 결과 사용·실패 처리·시간 초과·중단으로 팝업이 닫히면 사라진다 (1.15) | WARNING |
 
@@ -575,6 +606,52 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 > 운전 중 브로커/네트워크 연결이 끊기면 5초 간격으로 재접속하고, CleanSession에 맞춰 등록된 로봇의
 > `state`·`connection` 토픽을 모두 재구독한다. HD_AMR의 ACS 생존 토픽 구독·상태 처리는 로봇측 구현 항목이다.
 
+### 7.3 factsheet — AMR 설정 보고 `[N26]` `(1.23)`
+
+ACS 의 리치 시뮬레이션(정차·리프트 선택)과 배차 지령의 리프트 높이가 **이 AMR 의 실제 값**을 쓰게 한다. 표준 factsheet 에는
+관절 자세·리프트 운영을 담을 칸이 없으므로 HD 값은 확장 객체 `hdAmr` 에 담는다(우리 두 시스템끼리의 계약 — 표준 필드는 `typeSpecification` 최소만).
+
+**발행 시점 (AMR, QoS 1, retain = true)**
+
+| 시점 | 내용 |
+|---|---|
+| 브로커 접속 직후 | `connection` ONLINE 다음에 지금 값으로 발행 |
+| `factsheetRequest` 수신 | VDA 5050 2.0 표준 instantAction(파라미터 없음). ACS 는 AMR `connection` ONLINE 을 받을 때마다 보낸다 |
+| 보고 값 변경 | 주기(기본 5 s, `Vda5050:FactsheetCheckSec`)로 다시 읽어 묶음 지문이 바뀌었으면 발행 — 티칭 저장·삭제, 운영 티칭 세트(리프트 모드) 전환, 리프트 설정, 장착 보정 저장, 코봇 파라미터 저장 등 경로와 무관하게 잡는다 |
+
+retain 이므로 ACS 가 재기동·재구독하면 마지막 값을 바로 받는다. 연결이 끊긴 동안 바뀐 값도 재접속 때 `configVersion` 으로 드러난다.
+
+**`hdAmr` 필드**
+
+| 필드 | 형 | 내용 |
+|---|---|---|
+| `schemaVersion` | int | 확장 구조 버전 — 현재 `1` |
+| `configVersion` | int | 보고 값의 버전. 묶음 지문이 하나라도 바뀌면 AMR 이 +1(재시작해도 이어 셈). 처음은 1 |
+| `changedAt` | string | 이 버전이 된 시각(ISO 8601 UTC 밀리초 Z) |
+| `changed` | string[] | 이 버전에서 바뀐 묶음 — `teaching`·`lift`·`mount`·`cobot`. 처음(버전 1)은 빈 배열 |
+| `fingerprints` | object | 묶음별 지문(내용 SHA-256 앞 16자) — ACS 는 비교만 한다 |
+| `teaching.liftMode` | string | 운영 중인 티칭 세트(`SHORT`·`LONG`) |
+| `teaching.startJointsByWall` | object | 면 코드 → **운영 ② 출발 관절각** [J1..J6, 도]. 규칙(HD_AMR `SequenceEntry` 와 같음): 상부 면(T·PU·SU) = 그 면 검사 준비 슬롯, 없으면 홈 위치_2 / 하부 면(B·PL·SL) = 홈 위치_3 이 티칭돼 있으면 그 면 검사 준비 슬롯, 없으면 홈 위치_3 / 그 외 = 작업 준비 위치. 티칭이 없는 면은 싣지 않는다 |
+| `teaching.poses` | object | 기준 자세 관절각 — `home`·`home15`·`home16`·`home2`·`home3`·`ready` 중 티칭된 것 |
+| `teaching.safeJ6` `(1.24)` | object, 선택 | 적용 중인 J6 안전 범위·대기(홈) 각도 `{minDeg, maxDeg, standbyDeg}` [도, 실제 관절값] — HD_AMR `WObjAttitude` 적용값(파라미터 `inspection.safeJ6MinDeg/MaxDeg/StandbyDeg`, 잘못된 값이면 기본값으로 되돌린 뒤의 값). 출발 자세 J6 와 같은 기준이다 |
+| `lift.enabled` | bool | 리프트 사용(`Telescopic:Enabled`) |
+| `lift.mode` | string | ACS 리프트 운영 방식으로 옮긴 값 — 사용 = `Auto`, 미사용·서 있는 높이 0 = `Off`, 미사용·높이 &gt; 0 = `Fixed` |
+| `lift.fixedStrokeMm` | number \| null | `Fixed` 일 때 그 높이(= `disabledStrokeMm`) |
+| `lift.disabledStrokeMm`·`minHeightMm`·`maxHeightMm`·`mmPerUnit`·`heightOffsetMm` | number | 리프트 보정·범위 값(참고 — ACS 는 표시·기록만) |
+| `mount.tAB` | number[6] \| null | 장착 보정 T_A_B [x,y,z,rx,ry,rz] (mm·도, AMR 차체 → 코봇 BASE, 리프트 완전 하강 기준). 미보정(모두 0)이면 null |
+| `cobot.linksMm` | number[6] | 적용 중인 링크 치수 [d1,a2,a3,d4,d5,d6] |
+| `cobot.maxEntryJointTravelDeg` | number | 진입 관절 이동 한계(가지 전환 판정) |
+
+**ACS 반영 규칙**
+
+- 설정 키로 옮겨 설정 층 `appsettings.amr-reported.json` 에 쓰고 바로 다시 읽는다: `teaching.startJointsByWall` → `Acs:Reach:StartJoints:{면}`, `teaching.safeJ6` → `Acs:Reach:SafeJ6MinDeg`·`SafeJ6MaxDeg`·`SafeJ6StandbyDeg` + `OperationJ6Deg`(= 대기 자세 — HD_AMR 수직 검사 J6) + `ToolMountRollDeg`(= −180° − 대기 자세, (−180, 180] — 대기 자세에서 센서 헤드 방향이 용접검사 기준과 같다고 봄; 범위가 대기 자세를 포함하지 않으면 다섯 키 모두 싣지 않음), `lift.mode`·`fixedStrokeMm` → `Acs:Lift:Mode`·`FixedStrokeMm`, `mount.tAB` z·rz → `Acs:Reach:MountZMm`(300~3000 mm 만)·`MountYawDeg`, `cobot` → `Acs:Reach:LinksMm`·`MaxEntryJointTravelDeg`(30~360° 만). 그 AMR 이 가스검사 종류의 `ProfileSource` 로 지정돼 있으면 리치 키는 `Acs:Reach:Kinds:GAS:` 아래로.
+- 우선순위: **appsettings.json < AMR 보고 < 리치·간섭 화면 설정**. 화면에서 바꾼 키는 AMR 값을 가린다(감사로그에 기록).
+- 진행 중 run(RUNNING·WAITING_FLOOR_TRANSFER)이 있으면 반영을 미루고 끝난 뒤 반영(run 도중 지령 리프트 높이가 바뀌지 않게).
+- AMR 이 둘 이상이고 같은 키의 값이 다르면 그 키는 반영하지 않는다(로그·감사로그).
+- `configVersion` 이 직전에 반영한 값보다 크면 `AMR_CONFIG_CHANGED`(WARNING) 알람 — 옛 값으로 고른 영역 정차·리프트는 정차점 최적화로 다시 확인. 처음 받은 값은 알람 없음.
+- 반영할 묶음은 ACS 설정 `Acs:AmrFactsheet:Sections`(기본 4묶음 전부), 끄기는 `Acs:AmrFactsheet:Enabled=false`.
+- 조회: `GET /api/integrations/amr-factsheets`, `GET /api/robots/{robotId}/factsheet`.
+
 ---
 
 ## 8. 커스텀 액션 카탈로그
@@ -598,7 +675,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `jobRef` | 작업 역추적 키 (사람이 읽는 ID — AMR은 로깅 외 해석 불요) |
 | `position.seamStartW/seamEndW` | 용접선 시작/끝 **맵(월드) 좌표** [x,y,z] m — x,y 는 도면 좌표에 릴리즈 시점 유효 T_W_D(도면→맵 강체변환) 적용, **z 는 해당 `level` 바닥 = 0 기준**(도면 전역 z − `level_z[level−1]`, L1 은 동일) `[N17]`. AMR 은 수신 z 를 그대로 자기 바닥 기준 높이로 쓴다 |
 | `position.drawingPos` | 도면 좌표 echo — tank/level/wall_code + **u,v(벽면-로컬)** + x,y,z(도면) + 선택 **`uEnd`,`vEnd`(끝점의 벽면-로컬 좌표, m — 1.16, AMR이 촬영 위치를 면 좌표로 환산할 때 용접선 방향으로 사용)**. `wall_code`가 **티칭 자세 선택 키** — 값은 **`TankGeometry`가 자동 생성한 10개 면 코드 중 하나**(`B`·`SL`·`PL`·`SM`·`PM`·`SU`·`PU`·`T`·`F`·`A`, §8.5.1(2) 표). 자유 문자열이 아니라 검사 영역의 소속 면 코드(`ref.inspection_area.wall_code`, FK→`ref.wall`)를 그대로 echo하며, DB FK로 이 집합에 강제된다. `WALL 01`·`W03` 같은 임의 표기는 발행되지 않는다 |
-| `params.seamType` | 용접라인 형태 — **`LINE`·`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`·`CROSS4`·`CORNER2`·`CORNER3`** (canonical 8값, 카탈로그 1:1, §8.5.1; CROSS3 회전 4종은 2026-10-07 개정). `LINE`=직선 구간, `CROSS3_R{0/90/180/270}`=T자 3갈래 교차의 **회전 4종(면 자세 무관)**, `CROSS4`=4갈래 十자 교차, `CORNER2`=2면 코너, `CORNER3`=3면 코너. ACS는 canonical 값으로 발행하며, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 등록/수정 시점에 `AreaTaskRules.Normalize`가 canonical 로 정규화한다(AMR 파서도 전환 유예로 수용). HD_AMR 실행 게이트는 `LINE-*`만 활성 — 나머지는 캡처 교시·실기 검증 후 온보드에서 활성화(§8.5.1 (5)). **CROSS3 회전 기준 확정(2026-10-07, N13 ACS 사인오프)**: `R0`=줄기(stem)가 **면-로컬 +u**(통과선 아님), 회전은 면 외향 법선 둘레 **CCW(+)**·AMR 작업물 좌표 기준. 좌표 프레임은 **면-로컬** `u=(−sinθ,cosθ)`·`v=n×u`(전개도 아님 — 전개도는 일부 면 거울 반전). ACS는 각 면 법선에서 이 프레임을 재구성해 회전을 유도한다(§8.5.1 (2)). `POLYLINE`은 여전히 거부(2026-08-29 AMR 회신 §5.1 — 2점 계약으로 세그먼트 방향 불명이라 AMR이 FAILED). 꺾인 직선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `wall_code` 조합 레시피 매핑은 §8.5.1 |
+| `params.seamType` | 용접라인 형태 — **`LINE`·`CROSS3_R0`·`CROSS3_R90`·`CROSS3_R180`·`CROSS3_R270`·`CROSS4`·`CROSS4_L`·`CROSS4_R`·`CORNER2`·`CORNER3`** (canonical 10값, 카탈로그 1:1, §8.5.1; CROSS3 회전 4종은 2026-10-07 개정, CROSS4 좌우는 1.22). `LINE`=직선 구간, `CROSS3_R{0/90/180/270}`=T자 3갈래 교차의 **회전 4종(면 자세 무관)**, `CROSS4`=4갈래 十자 교차, `CROSS4_L`/`CROSS4_R`=면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업의 왼쪽/오른쪽에 있는 CROSS4(작업 시작/끝 기준 아님 — 시작→끝 방향이 교시와 반대일 때의 보정은 AMR), `CORNER2`=2면 코너, `CORNER3`=3면 코너. ACS는 canonical 값으로 발행하며, legacy 입력(`CROSS`→`CROSS4`·`CORNER`→`CORNER3`·bare `CROSS3`→`CROSS3_R0`)은 등록/수정 시점에 `AreaTaskRules.Normalize`가 canonical 로 정규화한다(AMR 파서도 전환 유예로 수용). HD_AMR 실행 게이트는 `LINE-*`만 활성 — 나머지는 캡처 교시·실기 검증 후 온보드에서 활성화(§8.5.1 (5)). **CROSS3 회전 기준 확정(2026-10-07, N13 ACS 사인오프)**: `R0`=줄기(stem)가 **면-로컬 +u**(통과선 아님), 회전은 면 외향 법선 둘레 **CCW(+)**·AMR 작업물 좌표 기준. 좌표 프레임은 **면-로컬** `u=(−sinθ,cosθ)`·`v=n×u`(전개도 아님 — 전개도는 일부 면 거울 반전). ACS는 각 면 법선에서 이 프레임을 재구성해 회전을 유도한다(§8.5.1 (2)). `POLYLINE`은 여전히 거부(2026-08-29 AMR 회신 §5.1 — 2점 계약으로 세그먼트 방향 불명이라 AMR이 FAILED). 꺾인 직선은 ACS가 **세그먼트별 LINE 액션 N개로 분할**(같은 정차·같은 anchorGroupId → 정렬 공유). `wall_code` 조합 레시피 매핑은 §8.5.1 |
 | `params.sectionDxfId` | 단면 프로파일 참조 ID |
 | `params.inspectionProfileId` | 검사(촬영/측정) 프로파일 ID (검사 타입 분류·레시피 계약은 §8.5 참고 — 제안, 현행 자유 문자열 무변경) |
 | `params.standoffMm` | 표면 이격 거리 [mm] |
@@ -608,6 +685,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
 | `params.taskId` | **(1.6 신설, 선택)** 검사 작업(용접선 1구간)의 **영구 식별자** — GUID 문자열(하이픈 포함 36자, 소문자). ACS가 작업 등록 시 발급하며 **실행(run)이 바뀌어도 같은 용접선이면 같은 값**. AMR은 이 액션 수행 중 발생하는 **모든 CAPTURE_REQ에 같은 값**을 싣는다(비전 v3.2 [15-30], 바이너리 16B). 비전 S/W→SAIGE 메타데이터의 `taskId`·`productId`가 되어 도면·진행률·촬영 이미지를 잇는 유일한 키다(§8.6) |
 | `params.attempt` | **(1.6 신설, 선택)** 그 `taskId`의 **몇 번째 시도인지** — 정수 1~255, **ACS 발급**. AMR은 값을 해석·증감하지 않고 CAPTURE_REQ [31]에 그대로 싣는다. 발급 규칙은 §8.6.2 |
 | `params.liftStrokeMm` | **(1.14, 선택)** 정차 리프트(텔레스코픽) 높이 [mm, 0~1000] — 정차점 최적화로 찾은 **영역 공통** 높이(`ref.inspection_area.station_lift_mm`). **같은 정차의 모든 액션에 같은 값**, 저장값이 없으면 `0`. 발행 시점에 읽으므로 run 도중 고쳐도 다음 정차부터 반영. 시험 액션 `moveToSeamStart`(§8.7)에도 같은 값이 실린다 |
+| `params.round` | **(1.19, 선택, 가스검사 전용)** 선창 전체 검사 회차 — 정수 `1` 또는 `2`. ACS 는 선창의 검사 종류가 가스(GAS)이고 운영자가 미션 시작 때 회차를 골랐을 때만 싣는다(run 단위 값 — 그 run 의 모든 액션에 같은 값, 재검사 run 도 같다). 없으면 AMR 은 결과 본문에서 `round` 를 생략한다. 1·2 가 아니면 AMR 이 `orderValidationError` 로 거부. 용접검사 선창의 지령에는 싣지 않는다 `[N25]` |
 | `params.stationAdjust` | **(1.12 초안, 선택) `[N23]`** 정차 온보드 보정 허용 범위 객체 `{maxForwardMm, maxBackwardMm, maxLateralMm, maxThetaDeg}`(전부 필수·0 이상). 의미·프레임·보고는 §4.4.2. **같은 정차의 모든 액션에 같은 값**이 실린다(VDA 노드에 커스텀 필드 자리가 없음). ACS 설정에서 꺼져 있거나 정차각(`theta`)이 없는 정차(바닥·천장)에는 **싣지 않는다** — 없으면 AMR은 `nodePosition`에 그대로 선다(종전 동작) |
 
 `wallNormalW`(벽 법선)는 **전송하지 않는다** — 툴 자세는 AMR이 `wall_code` 티칭으로 결정한다.
@@ -642,7 +720,7 @@ ACS 생존신호는 VDA 5050 표준 로봇 `connection` 메시지의 상태 모�
       "type": "object",
       "required": ["seamType", "sectionDxfId", "inspectionProfileId", "standoffMm", "anchorGroupId", "seqInGroup"],
       "properties": {
-        "seamType": { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3"] },
+        "seamType": { "enum": ["LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3"] },
         "points": { "type": "array" },
         "sectionDxfId": { "type": "string" },
         "inspectionProfileId": { "type": "string" },
@@ -879,7 +957,7 @@ TASK가 특정되고, 그 TASK가 어느 실행에 속하는지는 ACS가 보유
 정지**한다 — **촬영·측정·자세 시퀀스 없음**. `wall_code`(§8.1)로 툴 자세를 정한다.
 
 - **scope/blocking**: NODE / HARD. Order 1건 = 노드 1개(nodePosition=검사 정차점 standoff) + 액션 1건.
-- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm` 하나만: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0`). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
+- **actionParameters**: `jobRef`(string, `TEST-SEAM-{taskId}`) + `position`(§8.1과 동일 — `seamStartW`·`seamEndW`·`drawingPos`) + `params`(1.14 — `liftStrokeMm`: 본검사와 같은 영역 리프트 높이[mm, 0~1000], 저장값 없으면 `0` / **1.20 — `taskId`**: 대상 용접선 taskId, 본검사 `params.taskId` 와 같은 uuid 문자열, 선택 — 부재 시 `jobRef` 에서 읽던 종전 방식 / **1.21 — `attempt`**: 본검사와 같은 taskId 별 누적 시도 번호 1~255, 선택 — 도달 후 수동 촬영 `CAPTURE_REQ` 에 taskId 와 함께 싣는다). 촬영 파라미터는 없다. AMR은 코봇 이동 전에 리프트를 이 높이로 맞춰 **운영 자세와 같은 조건**에서 reach를 확인한다. `params` 부재(1.13 이전 발행분)는 리프트 0으로 본다. `stationAdjust`는 싣지 않는다(§4.4.2 ※구현).
 - **완료 판정**: `state.actionStates`로 `FINISHED`(도달 성공) / `FAILED`(reach 불가·특이자세 등 — `errors`에 사유). 이 시험의 FAILED가 곧 **N10(정차 이격) 실측 근거**가 된다.
 - **발행**: `POST /api/robots/{id}/test/seam-start { taskId }` — ACS가 area→정차점·task→seamStartW·wall_code 산출.
   진행 중 run 없음·로봇이 해당 층에 있어야 함(아니면 409).
@@ -1023,6 +1101,9 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 | N21 | **통신 단절 Fail-Safe** (§9.3.1·§5.3·§5.4) | AMR 로컬 GRACE 30 s→PAUSE→HOLD 60 s, 자동 재개 금지. `communicationLostPause`/`resumeRejected` errors, 액션 `PAUSED`·`state.paused`, `stopPause`(재개 전 확인 후)·`cancelOrder`(PAUSE 중 취소) 수용, keep-alive 5 s. ACS 구현 완료(2026-10-12) — 알람·실패 집계 제외·재개 버튼·PAUSE 중 abort 시 cancelOrder | ⏳ **HD_AMR 구현 대기** — 단절 감시 서비스·Order 실행기 PAUSE/RESUME 훅·`startPause`/`stopPause`/`cancelOrder` 핸들러·START 버튼·램프/부저. 미결: 주행 중 T1 단축, 브로커 배치 위치(통신단절 사양 §10) |
 | N22 | **장치 통신 HEAVY 알람** (§9.6·§6.4·§4.5.2) | 장치 6종 `*LinkLost`(FATAL, 래치, `errorReferences` device) 보고, 알람 중 임무 즉시 중단(남은 액션 FAILED)·신규 Order `orderRejectedDeviceFault`(기존 orderId 유지), **모든 errors에 `errorReferences` 발행**, 알람 발생·복구·해제 시 state 즉시 발행. ACS 구현 완료(2026-10-13) — 알람·해제 기록·배차 보류/재개·명령 409·거부 정차 PENDING 복귀 | ⏳ HD_AMR 측 구현은 장치통신 HEAVY알람 사양 §10(2026-10-12 배포) — **실기 연동 확인 대기**. 미결: 알람 코드·등급 표기(ACS는 HEAVY→CRITICAL 매핑), 비전 HEARTBEAT 실주기, LIGHT 알람 |
 | N23 | **정차 온보드 보정 허용 범위** `params.stationAdjust` (§4.4.2·§8.1) — **초안(1.12)** | ACS가 정차마다 AMR이 리치(용접선 도달)를 위해 `nodePosition`에서 옮겨 서도 되는 한계(전진·후진·횡·각)를 각 검사 액션 `params.stationAdjust`로 준다. `allowedDeviationXY/Theta`(도착 판정)와 별개. 필드 없음 = 종전 동작(옮기지 않음). 회신 요청: (a) 범위 기준(원래 `nodePosition`)·프레임(노드 theta 전진/좌측 횡) 수용 여부, (b) 보정 결과 보고 형식(§4.4.2 `stationAdjusted` 토큰) 수용 여부, (c) 범위 안에서도 리치 불가일 때의 신호 — **확정(2026-10-31, A안)**: 전용 errorType `stationReachShortfall`(§6.4) + ACS 액션별 알람, 자동 재정차 없음(N18 (c) 해소), (d) 기본값(전진 0·후진 400 mm·횡 200 mm·5°)의 차체 여유 검증 — **AMR 치수 확정(2026-10-31)**: 운용 외곽 앞 395·뒤 365·반폭 350 mm(§4.4). 원래 정차점 벽 여유 ≈ 205 mm(이격 0.8·dev 0.2), 후진 400 시 뒤 공간 765 mm 필요 → **확정(2026-10-31)**: 전역 설정 + **영역별 덮어쓰기** `ref.inspection_area.station_max_backward_mm`(null=전역, 0=후진 금지) — 뒤 공간이 좁은 영역만 운영자가 줄인다. 형상 기반 자동 산출은 2단계 | ⏳ **ACS 제기(2026-10-31)** — ACS 발행 구현 완료(설정 `Acs:Dispatch:StationAdjust`, **기본 꺼짐**). AMR 미구현 상태에서도 필드는 무시되므로 켜도 무해하나, 사인오프 전에는 켜지 않는다 |
+| N24 | **선창 이름의 주인** (§4.3) | AMR 은 층 번호만 정의·검증, 선창 이름은 ACS 지령의 값을 저장해 되돌려 보고. ACS 는 보고 층을 층 번호로 해석(선창 하나 전제) | ✅ 양측 구현(2026-11-14) — 실기 확인 전. 선창이 둘 이상이면 로봇의 소속 선창을 ACS 가 따로 관리해야 한다(미구현) |
+| N26 | **factsheet AMR 설정 보고** (§7.3) | AMR 이 접속·`factsheetRequest`·보고 값 변경 때 `factsheet`(retain)를 발행, HD 확장 `hdAmr`(면별 ② 출발 관절각·리프트 운영·T_A_B·코봇 값·설정 버전). ACS 는 리치 시뮬레이션·배차 설정 층으로 반영 | ✅ 양측 구현(2026-11-20, HD_AMR `gas/dev` 작업 트리) — 실기·실브로커 미확인. 확인 필요: 외부 VDA 스키마 검증 도구가 확장 객체를 거부하지 않는지(우리 두 시스템끼리는 무관) |
+| N25 | **가스검사 지령·결과·임계값·센서 상태** (§8.1) | AMR 구간 계약은 HD_AMR `docs/GAS_DETECTOR_XL3000FLEX.md` §5: 지령 `startWeldInspection` + `params.round`(ACS 는 가스검사 선창에서 **필수**로 싣는다) · 결과 = `resultDescription` 의 SAIGE 결과 본문 JSON · 임계값 = instantAction `setGasThreshold`(tankId·value·unit·requestedBy·requestedAt), 적용 확인은 `state.information` `gasThreshold`(lastActionId·lastAccepted·lastError) · 센서 상태 = `state.information` `gasSensor`(state·errorCode·calibrated). **ACS 구현 완료(2026-11-15)** — SAIGE 구간 대조는 `docs/SAIGE_GAS_INTERFACE.md`. 협의 남음: 측정 실패 `"ERROR"` 표기(SAIGE 규격은 OK·NG 만 — ACS 는 그런 결과를 SAIGE 로 보내지 않는다) |
 
 **AMR 구현 방식 고지 요약** (상세는 `VDA5050_AMR_REPLY.md` §3): allowedDeviation은 **도착 판정 허용 오차로만** 사용(미지정 시 0.1 m/0.1 rad) · 층별 맵은 AMR 내부 통합 맵으로 운용하되 계약(층별 mapId·좌표)은 그대로 준수 · **새 mapId는 재측위 검증 통과 시에만 보고**(실패 시 `localizationLost`) · 주행 실패 시 미도달 상태로 전 액션 FAILED+`drivingFailed` · 비상정지 시 진행 액션 FAILED+`emergencyStopActive`.
 
@@ -1129,6 +1210,7 @@ ACS는 비상정지와 동시에 **해당 로봇의 활성 run을 자동 중단(
 - [ ] 장치 HEAVY 알람: `*LinkLost`(FATAL) 6종·임무 즉시 중단·`orderRejectedDeviceFault`(기존 orderId 유지)·RESET 전 래치 (§9.6, N22)
 - [ ] 모든 errors에 `errorReferences` 발행 (§6.4, N22)
 - [ ] `stopPause`: 재개 전 확인 후 재개, 불충족 시 `resumeRejected` / `cancelOrder`: PAUSE 중 Order 종료·에러 클리어 (§5.3·§5.4, N21)
+- [x] `factsheet` 발행(retain) — 접속 직후·`factsheetRequest`·보고 값 변경, HD 확장 `hdAmr` (§7.3, N26 — 2026-11-20 구현)
 - [ ] §10 협의 항목 N1~N11 회신 (+ 1.6 신규 N14~N16)
 
 ---

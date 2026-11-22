@@ -189,7 +189,7 @@ public sealed partial class TankViewModel : ObservableObject
 
     /// <summary>3D 뷰 모드: "전체" + 층 목록(L1~L4). 전체=개관, L{n}=그 층 슬라이스 격리.</summary>
     public ObservableCollection<string> ViewModes { get; } =
-        new(new[] { AllMode }.Concat(TankLayout.Floors.Select(f => f.Level)));
+        new(new[] { AllMode }.Concat(TankLayout.Floors.Select(f => f.Label)));
 
     private const string AllMode = "전체";
 
@@ -202,10 +202,10 @@ public sealed partial class TankViewModel : ObservableObject
     [ObservableProperty] private TankFloor? _selectedFloor;
 
     /// <summary>선택 뷰 모드의 층 번호(1-based). "전체"면 null.</summary>
-    public int? SelectedLevel =>
-        SelectedViewMode is { } m && m != AllMode &&
-        int.TryParse(m.TrimStart('L', 'l'), NumberStyles.Integer, CultureInfo.InvariantCulture, out int lv)
-            ? lv : null;
+    public int? SelectedLevel => ViewModes.IndexOf(SelectedViewMode) is > 0 and var i ? i : null;   // 목록 순서 = 층 순서(표기와 무관)
+
+    /// <summary>층 번호(1부터)의 뷰 모드 이름 — 화면 표기는 설정에 따라 달라지므로 코드에서는 이것으로 고른다.</summary>
+    public static string ViewModeOf(int level) => LevelLabel.Of(level);
 
     /// <summary>층 슬라이스 격리 모드인지(전체가 아니면 true) — 뷰가 채움 면을 생략하고 슬라이스를 강조.</summary>
     public bool IsolateLevel => SelectedLevel is not null;

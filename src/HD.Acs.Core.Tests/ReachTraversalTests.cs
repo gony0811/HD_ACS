@@ -102,7 +102,7 @@ public class ReachTraversalTests
         var flat = Field with { ScanTiltProfile = new[] { new[] { 0.0, 0 }, new[] { 360.0, 0 } } };
         var t = ReachSimulator.Traverse(flat, Station, 0, pts[0], pts[2], Normal, seed);
         Assert.True(t.Ok, t.Blocker);
-        Assert.Equal(7, t.Points.Count);   // 0 → 360 mm 를 60 mm 간격으로
+        Assert.Equal(16, t.Points.Count);   // 0 → 360 mm 를 25 mm 이하 간격으로(15칸)
     }
 
     [Fact]
@@ -155,13 +155,14 @@ public class ReachTraversalTests
         var a = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 2), S(ReachVerdict.Clear, 3), S(ReachVerdict.Clear, 12) }, 10);
         var b = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Unreachable, null) }, 10);
         Assert.Equal((1, 3, 3, 2.0, 0), a);
-        Assert.Equal((2, 2, 2, 10.0, 1), b);
+        Assert.Equal((2, 2, 2, 11.0, 1), b);   // 최소 여유는 자르지 않는다(종전엔 목표 10 에서 잘랐다)
         Assert.True(StationOptimizer.CompareScore(a, b) > 0);
         // 둘 다 전부 도달이면 여유 확보 수가 먼저다.
         var c = StationOptimizer.Score(new[] { S(ReachVerdict.Clear, 15), S(ReachVerdict.Clear, 11), S(ReachVerdict.Collision, 12) }, 10);
         Assert.True(StationOptimizer.CompareScore(c, a) > 0);
-        // 최소 여유는 목표에서 자르고 0.5° 단위 — 순회 판정이 없으면(null) 목표로 본다.
-        Assert.Equal(10, StationOptimizer.MarginKey(23.4, 10));
+        // 최소 여유는 0.5° 단위(상한을 주면 그 이상은 같게) — 순회 판정이 없으면(null) 목표로 본다.
+        Assert.Equal(23.5, StationOptimizer.MarginKey(23.4, 10));
+        Assert.Equal(10, StationOptimizer.MarginKey(23.4, 10, 10));
         Assert.Equal(4.5, StationOptimizer.MarginKey(4.6, 10));
         Assert.Equal(10, StationOptimizer.MarginKey(null, 10));
     }
@@ -179,12 +180,13 @@ public class ReachTraversalTests
 
         var r = StationOptimizer.Optimize(m, Planes, space, seams, Normal, strokes, wallCode: "F");
 
-        // 지금 정차: 간섭 없음 2(여유 확보 1) — H03·H04 순회 막힘. 찾은 정차(거리 2.1 m·리프트 100): 4개 모두 순회, 여유 확보 3.
-        // 영역 오른쪽 끝 H04 는 여유 1.5° 에 그친다 — 한 정차로는 네 용접선 모두 10° 를 확보하지 못한다(영역 재분할 대상).
+        // 지금 정차: 간섭 없음 2(여유 확보 1) — H03·H04 순회 막힘. 찾은 정차(거리 2.0 m·리프트 100): 4개 모두 순회, 여유 확보 2.
+        // 양 끝 H01·H04 는 여유 1~3° 에 그친다 — 한 정차로는 네 용접선 모두 10° 를 확보하지 못한다(영역 재분할 대상).
+        // (손목 여유 5° 때는 여유 확보 3 이었다 — 10° 로 맞춘 뒤 끝 용접선 여유가 5° 줄었다.)
         Assert.Equal(2, r.Baseline.Clear);
         Assert.Equal(1, r.Baseline.SafeClear);
         Assert.Equal(4, r.Best.Clear);
-        Assert.Equal(3, r.Best.SafeClear);
+        Assert.Equal(2, r.Best.SafeClear);
         Assert.True(r.Best.TraverseMarginDeg > 0);
     }
 

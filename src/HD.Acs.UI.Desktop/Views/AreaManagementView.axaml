@@ -19,8 +19,21 @@
                 <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,10">
                     <StackPanel TextBlock.Foreground="{DynamicResource AppInfoFgBrush}">
                         <TextBlock Text="{Binding TankId, StringFormat='현재 선창: {0}'}" FontWeight="Bold" Margin="0,0,0,2" />
+                        <TextBlock Text="{Binding InspectionKindLabel, StringFormat='검사 종류: {0}'}" FontSize="12" Margin="0,0,0,2" />
                         <TextBlock Text="{Binding DerivedText}" TextWrapping="Wrap" FontSize="12" />
                         <TextBlock Text="선창 3D 정의는 [파일 ▸ 새 프로젝트] 또는 [열기]에서 수행합니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <!-- 선창 ID 변경 — 형상·면·영역·시나리오·층 맵을 서버가 한 번에 옮긴다(영역 ID·taskId 유지) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="선창 ID 변경" VerticalAlignment="Center" FontSize="12" Margin="0,0,8,0" />
+                            <TextBox x:Name="NewTankIdBox" Width="150" Text="{Binding NewTankId, Mode=TwoWay}" Watermark="새 선창 ID"
+                                     ToolTip.Tip="영문·숫자로 시작, 영문·숫자·_·- 만, 1~32자. '-L숫자' 로 끝날 수 없습니다." />
+                            <Button x:Name="RenameTankButton" Content="변경" Margin="6,0,0,0" Command="{Binding RenameTankCommand}"
+                                    ToolTip.Tip="진행 중인 run 이 있으면 바꿀 수 없습니다. 변경 뒤 [파일 ▸ 저장]을 하세요." />
+                        </StackPanel>
+                        <Button x:Name="ClassifyCross4Button" Content="CROSS4 좌우 자동 판정 (CROSS4_L / R)" Margin="0,8,0,0"
+                                Command="{Binding ClassifyCross4SidesCommand}"
+                                ToolTip.Tip="면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 CROSS4_L, 오른쪽에 있으면 CROSS4_R. 미리보기 후 확인하면 적용합니다." />
+                        <TextBlock Text="세이지 조회 주소의 tankId 가 바뀝니다. 변경 뒤 [파일 ▸ 저장] — 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록됩니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>
 
@@ -83,6 +96,13 @@
                             <TextBlock Text="후진 상한[mm]" Classes="lbl" />
                             <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Increment="50" Value="{Binding StationMaxBackwardMm}" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4" IsEnabled="{Binding LiftEnabled}"
+                                    ToolTip.Tip="이 영역을 검사할 때 AMR 리프트를 맞출 높이(0~1000 mm, 완전 하강 = 0). 모든 검사 지령에 실려 갑니다. 빈값 = 새 영역은 0, 기존 영역은 저장된 값 유지. 리치·간섭의 정차점 최적화를 적용하면 이 값도 함께 바뀝니다.">
+                            <TextBlock Text="리프트 높이[mm]" Classes="lbl" />
+                            <NumericUpDown Classes="field" MinWidth="150" Minimum="0" Maximum="1000" Increment="50" Value="{Binding StationLiftMm}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding LiftHint}" IsVisible="{Binding !LiftEnabled}" Foreground="{DynamicResource AppMutedTextBrush}"
+                                   FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding AutoStationText}" FontSize="12" Margin="0,0,0,4" TextWrapping="Wrap" />
                         <CheckBox Content="정차 위치 조정 (자동 정차점 기준 오프셋)" IsChecked="{Binding StationOverride}" Margin="0,0,0,4"
                                   ToolTip.Tip="자동 정차점에서 도면 축으로 얼마나 옮길지 입력합니다. +x=선수 방향, +y=좌현 방향(m). 영역 코너를 고치면 정차점도 같은 오프셋으로 따라 움직입니다." />
@@ -203,7 +223,7 @@
                           AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="영역 이름" Binding="{Binding Name}" Width="Auto" MinWidth="100" />
-                        <DataGridTextColumn Header="층" Binding="{Binding Level, StringFormat='L{0}'}" Width="Auto" MinWidth="44" />
+                        <DataGridTextColumn Header="층" Binding="{Binding LevelText}" Width="Auto" MinWidth="44" />
                         <DataGridTextColumn Header="u 시작(m)" Binding="{Binding UMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="u 끝(m)" Binding="{Binding UMax, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />
                         <DataGridTextColumn Header="v 시작(m)" Binding="{Binding VMin, StringFormat='{}{0:N2}'}" Width="Auto" MinWidth="76" />

@@ -143,6 +143,45 @@ public class WeldSeamEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+// HD_AMR 검사 프로필(순회 경유점) 사본 — AMR 이 저장할 때 올려 보낸다. 리치 시뮬레이터의 순회 판정용 참조 데이터.
+public class InspectionProfileEntity
+{
+    public string Source { get; set; } = "";        // 보낸 AMR(serialNumber)
+    public int AmrProfileId { get; set; }           // AMR 쪽 프로필 번호(이름을 바꿔도 그대로)
+    public string Name { get; set; } = "";
+    public string SeamType { get; set; } = "LINE";
+    public bool PoseAbsolute { get; set; }
+    public string Waypoints { get; set; } = "[]";   // jsonb [{x,y,z,theta,rzDeg,rxDeg,surface}, …] 작업물 좌표계 mm·도
+    public int PointCount { get; set; }
+    public int Version { get; set; } = 1;           // 내용(유형·자세 방식·경유점)이 바뀔 때마다 +1
+    public string ContentHash { get; set; } = "";
+    public DateTimeOffset? AmrUpdatedAt { get; set; }
+    public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.UtcNow;   // 마지막으로 받은 시각
+    public DateTimeOffset ChangedAt { get; set; } = DateTimeOffset.UtcNow;    // 내용·삭제 표시가 마지막으로 바뀐 시각
+    public bool Deleted { get; set; }               // AMR 에서 지워짐(전체 동기화 목록에 없음)
+}
+
+// HD_AMR 프로필 지정표 — 이 유형·면·진행 방향(H 가로 / V 세로)의 용접선은 이 프로필로 순회한다. AMR 이 통째로 올려 보낸다.
+public class InspectionProfileAssignmentEntity
+{
+    public string Source { get; set; } = "";
+    public string SeamType { get; set; } = "";     // LINE · CROSS4 · CROSS3_R0 …
+    public string WallCode { get; set; } = "";
+    public string Direction { get; set; } = "H";   // H | V
+    public int AmrProfileId { get; set; }
+}
+
+// HD_AMR 교시 위치 사본 — 프로필 전송 때 함께 온다(AMR 하나 = 행 하나). 리치 시뮬레이터 출발 자세(②)의 정본.
+public class AmrTeachingEntity
+{
+    public string Source { get; set; } = "";                 // 보낸 AMR(serialNumber)
+    public string TeachingPositions { get; set; } = "[]";    // jsonb [{key, joints[6]}, …] 도
+    public string StartJoints { get; set; } = "{}";          // jsonb {면 코드: [J1..J6]} 도 — 면별 운영 ② 출발 자세
+    public string ContentHash { get; set; } = "";
+    public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.UtcNow;   // 마지막으로 받은 시각
+    public DateTimeOffset ChangedAt { get; set; } = DateTimeOffset.UtcNow;    // 값이 마지막으로 바뀐 시각
+}
+
 // 선창 파라메트릭 정의 [SPEC v3 §2] — 팔각 단면 파라미터. 등록 시 §3 면 자동 생성.
 public class TankGeometryEntity
 {
@@ -159,6 +198,7 @@ public class TankGeometryEntity
     public double? ReachZMax { get; set; }        // (선택, v3.1) 코봇 도달 밴드 상한 상대높이
     public double OriginOx { get; set; }
     public double OriginOy { get; set; }
+    public string InspectionKind { get; set; } = "WELD";   // 검사 종류(WELD 용접 / GAS 가스) — Core InspectionKinds
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

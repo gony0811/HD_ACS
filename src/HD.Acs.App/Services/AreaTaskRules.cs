@@ -17,7 +17,7 @@ public static class AreaTaskRules
     /// 동일해야 한다(VDA §8.2). 사양서 개정 시 세 곳 + UI <c>AreaPlanningViewModel.SeamTypes</c> 를 함께 갱신할 것.
     /// </summary>
     public static readonly string[] SeamTypes =
-        { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CORNER2", "CORNER3" };
+        { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3" };
 
     /// <summary>
     /// 입력 seamType 을 저장용 canonical 값으로 정규화한다(저장은 항상 canonical — 발행 시 param_schema enum 통과용).
@@ -62,7 +62,7 @@ public static class AreaTaskRules
         if (points is null || points.Length == 0) return null;
         var st = Normalize(seamType);
         bool isCross3 = st.StartsWith("CROSS3", StringComparison.Ordinal);
-        bool isCross4 = st == "CROSS4";
+        bool isCross4 = Cross4Side.IsCross4(st);
         if (!isCross3 && !isCross4)
             return $"points(교차 가지 끝점)는 CROSS3/CROSS4 에만 쓸 수 있습니다 (현재 '{seamType}').";
         int need = isCross4 ? 4 : 3;

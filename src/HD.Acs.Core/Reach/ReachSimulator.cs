@@ -47,14 +47,84 @@ public sealed record ReachRobotModel
     /// 위치가 달라 회전 대칭으로 감싸면 실기 홈 자세부터 차체와 간섭으로 잘못 나온다(HD_AMR CobotEnvelope 와 같은 규칙).
     /// </summary>
     public ReachToolSegment SelfToolSegment { get; init; } = new("검사 툴(몸체)", 0, 293, 169);
-    /// <summary>차체 바닥 → 코봇 BASE 면 높이(리프트 0) [mm].</summary>
+    /// <summary>
+    /// 차체 바닥(바퀴 닿는 면) → 코봇 BASE 면 높이(리프트 0) [mm]. 설정 <c>Acs:Reach:MountZMm</c>.
+    /// 리프트를 떼어 코봇을 차체에 바로 달면 그 실측값으로 바꾼다.
+    /// </summary>
     public double MountZMm { get; init; } = 1635;
+    /// <summary>
+    /// 차체 바닥이 층 바닥(멤브레인)보다 올라간 높이 [mm] — 주행 바닥 보호용 나무판 등. 차체·코봇 전체가 이만큼 위로 간다
+    /// (용접선 좌표는 그대로 층 바닥 기준). 모든 층 공통 값 — 층별 값(<see cref="AmrFloorOffsetByLevelMm"/>)이 있으면 쓰지 않는다.
+    /// 설정 <c>Acs:Reach:AmrFloorOffsetMm</c> 에 숫자 하나, 기본 0.
+    /// </summary>
+    public double AmrFloorOffsetMm { get; init; }
+    /// <summary>
+    /// 층별 차체 바닥 올림 [mm] — 키 = 내부 층 번호(1부터, 맵 ID <c>{선창}-L{n}</c> 의 n · 화면 표기 L0 = 1). 적힌 층만 올리고 나머지 층은 0.
+    /// 층은 정차의 바닥 높이(<see cref="ReachStation.FloorZ"/>)를 <see cref="LevelFloorZ"/> 와 맞춰 찾는다.
+    /// 설정 <c>Acs:Reach:AmrFloorOffsetMm</c> 에 {"1": 25} 처럼 층 → mm.
+    /// </summary>
+    public IReadOnlyDictionary<int, double>? AmrFloorOffsetByLevelMm { get; init; }
+    /// <summary>선창 층 발판 높이 [m](<c>level_z</c>) — 층별 바닥 올림을 찾을 때 쓴다(선창마다 호출부가 넣는다).</summary>
+    public IReadOnlyList<double>? LevelFloorZ { get; init; }
+
+    /// <summary>
+    /// 이 바닥 높이 [m]에 선 차체의 바닥 올림 [mm] — 층별 값이 있으면 그 층 값(없는 층·층을 못 찾으면 0), 없으면 공통 값.
+    /// </summary>
+    public double FloorOffsetMm(double floorZ)
+    {
+        if (AmrFloorOffsetByLevelMm is not { } byLevel) return AmrFloorOffsetMm;
+        if (LevelFloorZ is not { } levels) return 0;
+        for (var i = 0; i < levels.Count; i++)
+            if (Math.Abs(levels[i] - floorZ) < 0.005)
+                return byLevel.TryGetValue(i + 1, out var v) ? v : 0;
+        return 0;
+    }
     /// <summary>
     /// 장착 yaw [도] — BASE +X 가 차체 +X 에서 반시계로 돈 각(HD_AMR T_A_B rz). 링크 기하·간섭은 바뀌지 않고 관절각 이름표(J1)만
     /// 달라지지만, 출발 자세(<see cref="StartJointsByWall"/>)·J1 한계를 실기와 맞추려면 실제 값이어야 한다. 설정 <c>Acs:Reach:MountYawDeg</c>.
     /// </summary>
     public double MountYawDeg { get; init; }
     public double StrokeMaxMm { get; init; } = 1000;
+
+    /// <summary>
+    /// 리프트 사용 여부 — false 면 리프트가 없는 것으로 본다: BASE 는 항상 <see cref="MountZMm"/>(스트로크 무시),
+    /// 리프트 기둥은 자기 간섭(차체 충돌 방지)·탱크 면 간섭 판정에서 빠진다. 설정 <c>Acs:Lift:Enabled</c>.
+    /// 리프트 후보 높이를 0 하나로 줄이는 것은 호출부(<see cref="StrokeMaxMm"/> = 0)의 몫이다.
+    /// </summary>
+    public bool LiftEnabled { get; init; } = true;
+
+    /// <summary>
+    /// 리프트 고정 높이 [mm] — 값이 있으면 리프트를 그 높이에 세워 두고 쓰는 운영(<c>Acs:Lift:Mode = Fixed</c>)이다:
+    /// 후보 높이는 이 값 하나이고, 호출부가 넘긴 높이·영역 저장값과 무관하게 BASE 는 <see cref="MountZMm"/> + 이 값이다.
+    /// null 이면 자동(0~<see cref="StrokeMaxMm"/> 탐색). <see cref="LiftEnabled"/> = false 면 무시한다.
+    /// </summary>
+    public double? FixedStrokeMm { get; init; }
+
+    /// <summary>판정에 쓸 리프트 높이 — 리프트를 쓰지 않으면 0, 고정이면 고정 높이.</summary>
+    public double EffectiveStrokeMm(double strokeMm) => !LiftEnabled ? 0 : FixedStrokeMm ?? strokeMm;
+
+    /// <summary>저장값·요청값을 운영 리프트 높이로 — 미사용 0, 고정이면 고정 높이, 자동이면 0~<see cref="StrokeMaxMm"/> 로 자른 값.</summary>
+    public double LiftStrokeMm(double? requestedMm) =>
+        !LiftEnabled ? 0 : FixedStrokeMm ?? Math.Clamp(requestedMm ?? 0, 0, StrokeMaxMm);
+
+    /// <summary>조사·최적화가 훑을 리프트 후보 — 미사용 [0], 고정 [고정 높이], 자동 0~<see cref="StrokeMaxMm"/>(간격 stepMm).</summary>
+    public IReadOnlyList<double> StrokeCandidates(double stepMm) =>
+        !LiftEnabled ? new[] { 0.0 }
+        : FixedStrokeMm is { } h ? new[] { h }
+        : Enumerable.Range(0, (int)(StrokeMaxMm / stepMm) + 1).Select(i => i * stepMm).ToArray();
+
+    /// <summary>
+    /// 리프트를 쓰지 않을 때 코봇을 받치는 고정 기둥이 있는가 — 있으면 리프트 기둥과 같은 단면(<see cref="ColumnHalfMm"/>)으로
+    /// 차체 윗면 → BASE 사이를 "받침 기둥"으로 두고 간섭(자기 간섭·탱크 면)을 잰다. 설정 <c>Acs:Reach:SupportColumn</c>, 기본 false.
+    /// (2026-11-19 현장: 차체 약 765 mm 위에 리프트와 같은 가로세로의 130 mm 기둥을 두고 코봇 장착)
+    /// </summary>
+    public bool SupportColumn { get; init; }
+
+    /// <summary>차체 윗면 → BASE 사이 기둥(리프트 또는 받침)을 간섭 판정에 넣는가.</summary>
+    public bool HasColumn(double baseZMm) => (LiftEnabled || SupportColumn) && baseZMm > AmrHeightMm + 1;
+
+    /// <summary>기둥 부품 이름 — 리프트를 쓰면 "리프트 기둥", 아니면 "받침 기둥".</summary>
+    public string ColumnName => LiftEnabled ? "리프트 기둥" : "받침 기둥";
 
     public double AmrFrontMm { get; init; } = 395;
     public double AmrRearMm { get; init; } = 365;
@@ -86,6 +156,10 @@ public sealed record ReachRobotModel
     /// </summary>
     public double[] JointMinDeg { get; init; } = { -175, -265, -170, -265, -175 };
     public double[] JointMaxDeg { get; init; } = { 175, 85, 170, 85, 175 };
+    /// <summary>
+    /// 판정 자세(② · 정렬 준비 · 초점)의 손목 여유 |J5| [도] — 경로 기준(<see cref="PlanarWristMarginDeg"/> 10°)보다 넉넉히 둔다
+    /// (세 자세 사이·검사 중 추가 이동의 몫). HD_AMR 자세 허용 범위 기본값은 10° 다. 설정 <c>Acs:Reach:PostureWristMarginDeg</c>.
+    /// </summary>
     public double WristMarginDeg { get; init; } = 15;
     public double ElbowMarginDeg { get; init; } = 8;
 
@@ -122,8 +196,13 @@ public sealed record ReachRobotModel
     public IReadOnlyDictionary<string, double[]> StartJointsByWall { get; init; } = new Dictionary<string, double[]>();
 
     // ── 운영 ② 진입 규칙 — HD_AMR CobotInspectionMoveStep(2026-11-02 c490bb1·6791a6d)과 같은 값. 바뀌면 함께 맞출 것. ──
-    /// <summary>출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — MaxEntryJointTravelDeg.</summary>
-    public double MaxEntryJointTravelDeg { get; init; } = 140;
+    /// <summary>
+    /// 출발 자세 → ② 해·진입점 관절별(J1~J5) 최대 이동 [도] — 넘으면 가지 전환으로 본다. 2026-11-19 140 → 160(사용자 지시,
+    /// HD_AMR 파라미터 <c>inspection.maxEntryJointTravelDeg</c> 와 같은 값). 설정 <c>Acs:Reach:MaxEntryJointTravelDeg</c>.
+    /// </summary>
+    public double MaxEntryJointTravelDeg { get; init; } = DefaultMaxEntryJointTravelDeg;
+    /// <summary><see cref="MaxEntryJointTravelDeg"/> 기본값 [도].</summary>
+    public const double DefaultMaxEntryJointTravelDeg = 160;
     /// <summary>
     /// 자세 사이(② → 정렬 준비 → 초점, 시작점 ② → 중간·끝점 ②) 관절별(J1~J5) 최대 변화 [도]. 운영은 이 사이를 광축 방향 직선 이동이나
     /// 같은 자세의 짧은 이동으로 잇는다(관절 변화 수십 도 이내). 넘으면 다른 IK 가지로 갈아탄 해라 운영이 갈 수 없다 — 도달 불가.
@@ -138,14 +217,35 @@ public sealed record ReachRobotModel
     public double PlanarRetreatMm { get; init; } = 100;
     /// <summary>진입 MoveJ 가 출발 TCP 투영점에서 면을 따라 갈 수 있는 최대 거리 [mm] — MaxEntryInPlaneMm.</summary>
     public double MaxEntryInPlaneMm { get; init; } = 500;
+    /// <summary>
+    /// 평면 경유 진입(후퇴 평면·<see cref="MaxEntryInPlaneMm"/> 제한)을 쓰는 면 코드. null 이면 모든 면(종전).
+    /// 여기에 없는 면은 <b>직접 진입</b>이다 — 들어갈 점까지 면 방향 거리 제한 없이 MoveJ 한 번에 가되, 그 관절 이동 경로를
+    /// <see cref="EntryPathStepDeg"/> 간격으로 따라가며 면·자기 간섭을 본다(<see cref="ReachSimulator.JointPathBlocker"/>).
+    /// HD_AMR <c>inspection.planarEntryWalls</c>(기본 PU,SU)와 같은 값이어야 한다. 설정 <c>Acs:Reach:PlanarEntryWalls</c>.
+    /// </summary>
+    public IReadOnlySet<string>? PlanarEntryWalls { get; init; }
+    /// <summary>직접 진입 MoveJ 경로 점검 간격 — 관절별 최대 변화 [도]. HD_AMR <c>EntryPathStepDeg</c>.</summary>
+    public double EntryPathStepDeg { get; init; } = 5;
+    /// <summary>
+    /// 직접 진입 MoveJ 경로가 지켜야 할 탱크 면 여유 [mm](자기 간섭은 닿는지만 본다). 출발·도착 자세의 여유가 이보다 작으면 그 작은 쪽을 기준으로 삼는다
+    /// (경로가 양 끝보다 더 가까워지지 않을 것). HD_AMR <c>EntryPathMarginMm</c>.
+    /// </summary>
+    public double EntryPathMarginMm { get; init; } = 100;
     /// <summary>직선 경로 검증 간격 [mm] — PlanarSampleMm.</summary>
     public double PlanarSampleMm { get; init; } = 100;
     /// <summary>면 방향 거리가 이보다 짧으면 들어갈 점으로 바로 진입 [mm] — PlanarSkipMm.</summary>
     public double PlanarSkipMm { get; init; } = 50;
     /// <summary>경로 검증 점 사이 관절 최대 변화 [도] — MaxPathJointStepDeg.</summary>
     public double MaxPathJointStepDeg { get; init; } = 30;
-    /// <summary>경로 손목 특이점 여유 |J5| [도] — PlanarWristMarginDeg.</summary>
-    public double PlanarWristMarginDeg { get; init; } = 5;
+    /// <summary>
+    /// 경로 손목 특이점 여유 |J5| [도] — 진입 경로·도면 순회에서 |J5| 가 이보다 작으면 막는다. HD_AMR
+    /// <c>PostureLimits.DefaultWristMarginDeg</c>(= CobotInspectionMoveStep.PlanarWristMarginDeg, 2026-11-07 10° 로 통일)와 같은 값이어야 한다.
+    /// ACS 는 2026-11-16 까지 5° 였다(AMR 이 막는 5~10° 자세를 통과시켰다). 설정 <c>Acs:Reach:WristMarginDeg</c>.
+    /// AMR 이 프로필 전송 때 자기 값을 알려 주므로 다르면 ACS 가 경고한다.
+    /// </summary>
+    public double PlanarWristMarginDeg { get; init; } = DefaultWristMarginDeg;
+    /// <summary>손목 여유 |J5| 의 기준값 [도] — HD_AMR <c>PostureLimits.DefaultWristMarginDeg</c> 와 같다. 바꾸면 함께 맞출 것.</summary>
+    public const double DefaultWristMarginDeg = 10;
 
     // ── 도면 순회(⑱ inspectionRun) 판정 — HD_AMR InspectionRunStep.CheckWaypointChainAsync 와 같은 규칙. 바뀌면 함께 맞출 것. ──
     /// <summary>
@@ -171,25 +271,71 @@ public sealed record ReachRobotModel
     /// Z 는 작업물 프레임 원점(Top − <see cref="ScanTopZMm"/>, 면 쪽) 기준이라 TCP 면 이격 = <see cref="ScanStandoffMm"/> + (Z − 33.8). 설정 <c>Acs:Reach:ScanTiltProfile</c>.
     /// </summary>
     public IReadOnlyList<double[]>? ScanTiltProfile { get; init; }
+    /// <summary>
+    /// 용접선별 순회 프로필(6축 경유점) — 용접선 점 목록(<see cref="ReachSimulator.TraverseSeam"/> 에 넘긴 그 객체)을 주면 그 용접선이 쓸
+    /// 경유점을 돌려준다. null 을 돌려주면 <see cref="ScanTiltProfile"/>(없으면 포괄 근사)로 판정한다.
+    /// HD_AMR 이 올려 보낸 프로필과 유형·면별 지정표로 App 이 채운다.
+    /// </summary>
+    public Func<IReadOnlyList<double[]>, IReadOnlyList<ScanWaypoint>?>? SeamProfile { get; init; }
     /// <summary>작업물 프레임 Top 높이 [mm] — HD_AMR InternalWorkpieceFrame.DefaultCorrugationTopHeightMm. 점1(Top)이 이 Z 다.</summary>
     public const double ScanTopZMm = 33.8;
-    /// <summary>기울기 판정 간격 [도] — HD_AMR 경로 검증 자세 간격(ChainSampleDeg 10°)과 같다.</summary>
-    public double ScanTiltStepDeg { get; init; } = 10;
-    /// <summary>용접선 따라 판정 간격 [mm] — 경로 검증 간격(100mm)보다 촘촘히(360mm 용접선 = 7점).</summary>
-    public double ScanSampleMm { get; init; } = 60;
+    /// <summary>
+    /// 순회 판정 자세 간격 [도] — 경유점 사이에서 툴 자세가 이만큼 돌 때마다 판정한다. HD_AMR 경로 검증(ChainSampleDeg 10°)보다 촘촘히 봐서
+    /// 표본 사이에서 |J5| 가 잠깐 작아지는 것을 놓치지 않는다(2026-11-16 까지 10°). 설정 <c>Acs:Reach:ScanTiltStepDeg</c>.
+    /// </summary>
+    public double ScanTiltStepDeg { get; init; } = 5;
+    /// <summary>
+    /// 순회 판정 위치 간격 [mm] — 경유점 사이 TCP 이동 거리(면 쪽으로 넣었다 빼는 Z 이동 포함, 3D)가 이만큼일 때마다 판정한다.
+    /// HD_AMR 경로 검증 간격(100 mm)보다 촘촘히(2026-11-16 까지 60 mm, 그리고 X·Y 거리만 셌다). 설정 <c>Acs:Reach:ScanSampleMm</c>.
+    /// </summary>
+    public double ScanSampleMm { get; init; } = 25;
+    /// <summary>
+    /// 관절 튐 판정 창의 자세 폭 [도] — HD_AMR ChainSampleDeg. 관절 튐(<see cref="MaxPathJointStepDeg"/>)은 AMR 의 경로 검증 간격
+    /// (위치 <see cref="PlanarSampleMm"/> · 자세 이 값) 안에서의 관절 변화로 본다 — 판정 간격을 촘촘히 해도 같은 기준이 되게.
+    /// </summary>
+    public double ChainSampleDeg { get; init; } = 10;
     /// <summary>경로 관절 한계 여유 [도] — PathJointLimitMarginDeg(하드 한계에서 이만큼 안쪽이어야 통과).</summary>
     public double PathJointLimitMarginDeg { get; init; } = 2;
     /// <summary>
-    /// J6 안전 범위(실제 관절값, 대기 자세 −180° 쪽 감김 기준) [도] — HD_AMR WObjAttitude.SafeJ6Min/MaxDeg. 밖이면 센서 헤드–링크암 간섭·케이블 감김.
+    /// J6 안전 범위(실제 관절값, 대기 자세 <see cref="SafeJ6StandbyDeg"/> 쪽 감김 기준) [도] — HD_AMR WObjAttitude.SafeJ6Min/MaxDeg. 밖이면 센서 헤드–링크암 간섭·케이블 감김.
     /// </summary>
     /// <summary>
     /// 도면 순회 관절 여유 목표 [도] — 정차 최적화가 이 여유 이상으로 순회하는 용접선 수('여유 확보')를 먼저 늘리고, 같으면 최소 여유를 이 값까지 키운다
     /// (넘는 여유는 같게 본다). 실기 백테스트에서 모델 오차가 약 ±5° 라(경계 −4° 사례가 실기 통과) 그 두 배. 설정 <c>Acs:Reach:TraverseMarginTargetDeg</c>.
     /// </summary>
     public double TraverseMarginTargetDeg { get; init; } = DefaultTraverseMarginTargetDeg;
+    /// <summary>
+    /// 정차 순위에서 순회 최소 여유를 비교할 때의 상한 [도] — 이보다 큰 여유는 같게 본다. 기본은 상한 없음(무한대): 여유 확보 수가 같은
+    /// 후보끼리는 실제 최소 여유각이 큰 쪽을 고른다("최소 여유각 최대화"). 2026-11-16 까지는 목표(10°)에서 잘라, 10° 이상 후보끼리는
+    /// 여유를 비교하지 않았다 — 그 동작으로 되돌리려면 10 을 넣는다. 설정 <c>Acs:Reach:MarginRankCapDeg</c>.
+    /// </summary>
+    public double MarginRankCapDeg { get; init; } = double.PositiveInfinity;
     public const double DefaultTraverseMarginTargetDeg = 10;
-    public double SafeJ6MinDeg { get; init; } = -310;
-    public double SafeJ6MaxDeg { get; init; } = -160;
+    public const double DefaultSafeJ6MinDeg = -320, DefaultSafeJ6MaxDeg = -140;
+    /// <summary>대기(홈) 자세 J6 실제 관절값 기본값 [도] — 용접검사 AMR −180°(HD_AMR <c>WObjAttitude.DefaultSafeJ6StandbyDeg</c>).</summary>
+    public const double DefaultSafeJ6StandbyDeg = -180;
+    /// <summary>J6 안전 범위 [도] — 2026-11-14 실제 기구 확인으로 −320°~−140°. 설정 <c>Acs:Reach:SafeJ6MinDeg</c>·<c>SafeJ6MaxDeg</c>.
+    /// HD_AMR 파라미터 <c>inspection.safeJ6MinDeg</c>·<c>safeJ6MaxDeg</c> 와 같게 둘 것.</summary>
+    public double SafeJ6MinDeg { get; init; } = DefaultSafeJ6MinDeg;
+    public double SafeJ6MaxDeg { get; init; } = DefaultSafeJ6MaxDeg;
+    /// <summary>
+    /// 대기(홈) 자세 J6 [도, 실제 관절값] — 안전 범위가 반드시 포함해야 하는 각이며, 운영 J6(<see cref="OperationJ6Deg"/>)를 따로 주지
+    /// 않으면 그 기준이다. 툴을 플랜지에 180° 돌려 단 가스검사 AMR 은 0(범위 −140~40). 설정 <c>Acs:Reach:SafeJ6StandbyDeg</c>,
+    /// HD_AMR 파라미터 <c>inspection.safeJ6StandbyDeg</c> 와 같게 둘 것.
+    /// </summary>
+    public double SafeJ6StandbyDeg { get; init; } = DefaultSafeJ6StandbyDeg;
+
+    /// <summary>설정 값 → 적용할 J6 안전 범위. 하한 ≥ 상한·대기 자세(<paramref name="standby"/>, 기본 −180°) 미포함·폭 360° 이상·
+    /// 무한대면 기본값으로 되돌린다(HD_AMR <c>WObjAttitude.ResolveSafeJ6Range</c> 와 같은 규칙).</summary>
+    public static (double Min, double Max, bool Ok) ResolveSafeJ6Range(double? min, double? max, double? standby = null)
+    {
+        var lo = min ?? DefaultSafeJ6MinDeg;
+        var hi = max ?? DefaultSafeJ6MaxDeg;
+        var home = standby ?? DefaultSafeJ6StandbyDeg;
+        var ok = double.IsFinite(lo) && double.IsFinite(hi) && double.IsFinite(home)
+                 && lo < hi && hi - lo < 360.0 && lo <= home && hi >= home;
+        return ok ? (lo, hi, true) : (DefaultSafeJ6MinDeg, DefaultSafeJ6MaxDeg, false);
+    }
 
     /// <summary>
     /// 진입 경로 판정에 J6 를 넣는다(기본 켬) — HD_AMR 은 진입점·경로의 자세를 ② 접근점 자세(J6 = 운영 값)로 고정해 풀고,
@@ -234,6 +380,12 @@ public sealed record ReachPlane(string Code, double[] Origin, double[] Normal)
 
 /// <summary>정차 — 도면 프레임 차체 중심 (x,y)[m], 차체 전방 yaw[rad], 층 바닥 z[m].</summary>
 public sealed record ReachStation(double X, double Y, double Yaw, double FloorZ);
+
+/// <summary>
+/// 순회 경유점 하나 — HD_AMR 절대 자세 프로필과 같은 값. 작업물 좌표계(X = 용접선 시작 → 끝, Z = 면에서 멀어지는 쪽,
+/// Y = Z × X) 기준 위치 [mm]와 자세 [도](R = Rz · Ry · Rx, Ry = 프로필의 θ).
+/// </summary>
+public sealed record ScanWaypoint(double X, double Y, double Z, double RxDeg, double RyDeg, double RzDeg);
 
 public enum ReachStage { Approach, Align, Focus }
 
@@ -345,7 +497,7 @@ public static partial class ReachSimulator
     {
         var frame = new BaseFrame(model, station, strokeMm, offsetForwardMm, offsetLeftMm);
         var body = Body(model, planes, frame);
-        var columnTop = frame.AmrToDrawing(0, 0, model.MountZMm + strokeMm);
+        var columnTop = frame.AmrToDrawing(0, 0, frame.BaseZMm);
         var start = seedJoints is null ? StartJoints(model, wallCode) : null;
         string? branchChange = null;
         ReachEntry? entry = null;
@@ -421,7 +573,8 @@ public static partial class ReachSimulator
         // 진입 경로는 세 자세가 닿고 가지 전환이 없을 때만 본다 — 앞에서 막히면 운영도 진입하지 않는다(IK 가 가장 많이 드는 단계).
         if (start is not null && checkEntry && branchChange is null && stages.Count > 0
             && stages.All(s => s.Chosen is { PostureOk: true }))
-            entry = PlanEntry(model, frame, start, stages[0].TcpTarget, wallNormal, stages[0].Chosen?.JointsDeg);
+            entry = PlanEntry(model, planes, frame, start, stages[0].TcpTarget, wallNormal, stages[0].Chosen?.JointsDeg,
+                UsesPlanarEntry(model, wallCode));
         return new ReachPointResult(body, columnTop, stages, branchChange, entry, ScanOnly: seedJoints is not null,
             FlangeShort: FlangeShortReason(model, station, strokeMm, seamPoint, wallNormal, offsetForwardMm, offsetLeftMm));
     }
@@ -439,11 +592,22 @@ public static partial class ReachSimulator
         return normalM * 1000 - model.StageStandoffsMm[0] - model.ToolZMm;
     }
 
-    /// <summary>플랜지 뻗음이 <see cref="ReachRobotModel.MinFlangeReachMm"/> 미만이면 사유(아니거나 규칙이 꺼져 있으면 null).</summary>
+    /// <summary>
+    /// 이 면에 최소 플랜지 뻗음 규칙을 적용하는가 — 천장(안쪽 법선이 아래)만 뺀다(2026-11-13). HD_AMR
+    /// <c>ApproachReach.AppliesTo</c>(wall_code ≠ T)와 같은 규칙이다 — 바꾸면 함께 맞출 것.
+    /// 근거 실측(뻗음 230mm 손목 특이점 3회)은 수직벽이었다. 천장은 툴이 위를 향해 ② 자세 J5 가 90° 근처에 머물러
+    /// 접힌 팔에서도 손목 특이점이 생기지 않고(리프트를 올려 뻗음 143mm 까지 자세 여유 유지 — 더 가까우면 상완–리프트
+    /// 기둥 간섭·가지 전환이 따로 막는다), 이 규칙은 리프트를 올린 정차만 막아 먼 용접선의 팔 뻗음 실패를 풀 수단을 없앴다.
+    /// 경사면은 단독으로 막는 경우가 없고 바닥은 걸리지 않아 그대로 둔다.
+    /// </summary>
+    public static bool FlangeRuleApplies(double[] wallNormal)
+        => !(Vec3.Normalize(wallNormal) is { } n && n[2] < -0.99);
+
+    /// <summary>플랜지 뻗음이 <see cref="ReachRobotModel.MinFlangeReachMm"/> 미만이면 사유(아니거나 규칙이 꺼져 있거나 천장이면 null).</summary>
     public static string? FlangeShortReason(ReachRobotModel model, ReachStation station, double strokeMm, double[] facePoint,
         double[] wallNormal, double offsetForwardMm = 0, double offsetLeftMm = 0)
     {
-        if (model.MinFlangeReachMm <= 0 || model.StageStandoffsMm.Length == 0) return null;
+        if (model.MinFlangeReachMm <= 0 || model.StageStandoffsMm.Length == 0 || !FlangeRuleApplies(wallNormal)) return null;
         var reach = FlangeReachMm(model, station, strokeMm, facePoint, wallNormal, offsetForwardMm, offsetLeftMm);
         return reach < model.MinFlangeReachMm
             ? $"플랜지 뻗음 부족 — {reach:0}mm < 최소 {model.MinFlangeReachMm:0}mm (면에 너무 가깝거나 리프트가 높음 — AMR 사전 점검이 거부)"
@@ -565,7 +729,8 @@ public static partial class ReachSimulator
         IReadOnlyList<double[]> seamPoints, double[] wallNormal, double[]? startSeed,
         double offsetForwardMm = 0, double offsetLeftMm = 0) =>
         model.CheckTraversal && seamPoints.Count > 0 && startSeed is { Length: >= 6 }
-            ? Traverse(model, station, strokeMm, seamPoints[0], seamPoints[^1], wallNormal, startSeed, offsetForwardMm, offsetLeftMm)
+            ? Traverse(model, station, strokeMm, seamPoints[0], seamPoints[^1], wallNormal, startSeed, offsetForwardMm, offsetLeftMm,
+                model.SeamProfile?.Invoke(seamPoints))
             : null;
 
     /// <summary>층의 장애물 평면 — 탱크 면 + (2층 이상) 그 층 데크면.</summary>
@@ -580,7 +745,7 @@ public static partial class ReachSimulator
     // ② 해를 고를 때는 J6 을 보지 않는다(광축 둘레 회전은 J6 만 바꾼다). 진입 경로는 J6 을 본다 — HD_AMR 은 진입점·경로를
     // ② 접근점 자세(J6 = 운영 값) 그대로 풀기 때문에 위치가 달라지면 J6 이 달라지고, 그 값이 관절 이동량·J6 안전 범위에 걸린다
     // (실기 2026-11-12 PU: 면 방향 536~828 mm 떨어진 용접선 7건이 "진입 관절 이동 221°"·"J6 안전 범위 밖"으로 거부).
-    // 손목 반전 해는 J5 부호 반전으로 따로 거른다(HD_AMR IsWristFlip — 140° 완화로 이동 한계만으로는 통과할 수 있다).
+    // 손목 반전 해는 J5 부호 반전으로 따로 거른다(HD_AMR IsWristFlip — 이동 한계 완화로 이동 한계만으로는 통과할 수 있다).
 
     /// <summary>TCP(도면)에서 광축이 면을 바라보는 자세의 IK 해(범위 밖 관절은 ±360 감음).</summary>
     private static List<double[]> SolveIk(ReachRobotModel m, BaseFrame f, double[] tcpDrawing, double[] wallNormal) =>
@@ -648,14 +813,77 @@ public static partial class ReachSimulator
     /// <summary>
     /// 평면 경유 진입 — 출발 TCP 를 ② 접근점 이격 평면에서 <see cref="ReachRobotModel.PlanarRetreatMm"/> 더 물러난 후퇴 평면에
     /// 투영하고, 진입점 후보(① 들어갈 점 직접: 면 방향 500mm 이내일 때만 ② 투영점부터 100mm 간격, 500mm 까지)마다
-    /// 진입 해(같은 가지·관절 이동 ≤140°·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
+    /// 진입 해(같은 가지·관절 이동 ≤ MaxEntryJointTravelDeg·손목 반전 없음·자기 간섭 없음)와 그 뒤 경로(후퇴 평면 → 들어갈 점 → 접근점, 100mm 간격)의
     /// 관절 튐·팔꿈치 반전·손목 특이점·자기 간섭을 본다. 자세는 전 구간 ② 자세로 고정.
     /// </summary>
-    private static ReachEntry PlanEntry(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
-        double[]? approachJoints = null)
+    /// <summary>이 면이 평면 경유 진입을 쓰는가 — <see cref="ReachRobotModel.PlanarEntryWalls"/> 가 없으면 모든 면.</summary>
+    public static bool UsesPlanarEntry(ReachRobotModel m, string? wallCode) =>
+        m.PlanarEntryWalls is null || (wallCode is not null && m.PlanarEntryWalls.Contains(wallCode));
+
+    /// <summary>
+    /// 진입점 후보 — 평면 경유면 ① 들어갈 점 직접(면 방향 <see cref="ReachRobotModel.MaxEntryInPlaneMm"/> 이내일 때만) ② 투영점부터
+    /// 100 mm 간격(같은 제한까지). 직접 진입이면 제한 없이 ① 들어갈 점 직접 ② 투영점부터 들어갈 점 앞까지 전부.
+    /// </summary>
+    private static List<(double[] P, bool Direct)> EntryCandidates(ReachRobotModel m, double[] projected, double[] plunge,
+        double inPlaneMm, bool planar)
+    {
+        var candidates = new List<(double[] P, bool Direct)>();
+        if (inPlaneMm < m.PlanarSkipMm) { candidates.Add((plunge, true)); return candidates; }
+        var cap = planar ? m.MaxEntryInPlaneMm : double.PositiveInfinity;
+        if (inPlaneMm <= cap) candidates.Add((plunge, true));
+        candidates.Add((projected, false));
+        var pts = Sample(projected, plunge, m.PlanarSampleMm);
+        var step = inPlaneMm / pts.Count;
+        for (var k = 0; k < pts.Count - 1; k++)
+            if ((k + 1) * step <= cap + 1e-6) candidates.Add((pts[k], false));
+        return candidates;
+    }
+
+    /// <summary>
+    /// 직접 진입 MoveJ(관절 보간) 경로가 막히는 사유, 지나갈 수 있으면 null. <paramref name="from"/> → <paramref name="to"/> 를
+    /// 관절별 최대 <see cref="ReachRobotModel.EntryPathStepDeg"/> 간격으로 나눠, 중간 자세마다 자기 간섭이 없고 탱크 면 여유가
+    /// min(<see cref="ReachRobotModel.EntryPathMarginMm"/>, 출발 여유, 도착 여유) 아래로 내려가지 않는지 본다.
+    /// 평면 경유가 하던 "팔이 면 쪽으로 휘둘리지 않는가"를 경로 자체로 확인한다.
+    /// </summary>
+    public static string? JointPathBlocker(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, ReachStation station, double strokeMm,
+        double[] from, double[] to) => JointPathBlocker(m, planes, new BaseFrame(m, station, strokeMm, 0, 0), from, to);
+
+    private static string? JointPathBlocker(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] from, double[] to)
+    {
+        var n = Math.Min(from.Length, to.Length);
+        var travel = Enumerable.Range(0, n).Max(i => Math.Abs(to[i] - from[i]));
+        var steps = (int)Math.Ceiling(travel / Math.Max(0.5, m.EntryPathStepDeg));
+        if (steps <= 1) return null;
+        // 면 여유는 팔 캡슐·툴 상자를 탱크 면과만 잰다. 자기 간섭(차체·기둥·신호탑)은 닿는지만 본다 — 홈 자세는 원래
+        // 기둥·차체에 가까워 "양 끝보다 가까워지지 않을 것"을 자기 간섭에 쓰면 실기에서 늘 하던 진입까지 막는다.
+        (double Mm, string Part, string Near) Wall(double[] j)
+        {
+            var fr = m.Kinematics.Frames(j);
+            var segs = ArmSegments(m, fr);
+            var worst = segs[..^1].Select(q => Part(q.Name, f.BaseToDrawing(q.A), f.BaseToDrawing(q.B), q.RadiusMm, planes))
+                .Concat(m.ToolBoxes.Select(t => ToolBoxPart(m, t, fr[6], f, planes)))
+                .MinBy(q => q.ClearanceM)!;
+            return (worst.ClearanceM * 1000, worst.Name, worst.NearestPlane);
+        }
+        double[] At(double t) => to.Select((v, i) => i < n ? from[i] + (v - from[i]) * t : v).ToArray();
+        var floor = Math.Min(m.EntryPathMarginMm, Math.Min(Wall(At(0)).Mm, Wall(to).Mm)) - 1.0;
+        for (var k = 1; k < steps; k++)
+        {
+            var j = At((double)k / steps);
+            if (SelfClearance(m, f.BaseZMm, j) is { ClearanceMm: < 0 } self)
+                return $"관절 이동 경로 {100.0 * k / steps:0}% 지점 자기 간섭 ({self.Part}–{self.Obstacle})";
+            var w = Wall(j);
+            if (w.Mm < floor)
+                return $"관절 이동 경로 {100.0 * k / steps:0}% 지점 면 여유 {w.Mm:0}mm < {floor + 1:0}mm ({w.Part}–{w.Near})";
+        }
+        return null;
+    }
+
+    private static ReachEntry PlanEntry(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] start,
+        double[] approach, double[] normal, double[]? approachJoints = null, bool planar = true)
     {
         if (m.CheckEntryJ6 && m.OperationJ6Deg is not null && approachJoints is { Length: >= 6 } && start.Length >= 6)
-            return PlanEntryFixedPose(m, f, start, approach, normal, approachJoints);
+            return PlanEntryFixedPose(m, planes, f, start, approach, normal, approachJoints, planar);
         var fr = m.Kinematics.Frames(start);
         var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
         var r = m.PlanarRetreatMm / 1000.0;
@@ -664,17 +892,7 @@ public static partial class ReachSimulator
         var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
         var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
 
-        var candidates = new List<(double[] P, bool Direct)>();
-        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
-        else
-        {
-            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
-            candidates.Add((projected, false));
-            var pts = Sample(projected, plunge, m.PlanarSampleMm);
-            var step = inPlaneMm / pts.Count;
-            for (var k = 0; k < pts.Count - 1; k++)
-                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
-        }
+        var candidates = EntryCandidates(m, projected, plunge, inPlaneMm, planar);
 
         string Fmt(double[] p) => string.Join(", ", f.DrawingToBase(p).Select(v => v.ToString("0")));
         var rejects = new List<string>();
@@ -689,6 +907,7 @@ public static partial class ReachSimulator
             if (ElbowFlip(start, jc)) { rejects.Add($"{label}: 팔꿈치 가지 전환"); continue; }
             if (WristFlip(start, jc)) { rejects.Add($"{label}: 손목 가지 전환(J5 {start[4]:0}° → {jc[4]:0}°)"); continue; }
             if (SelfClearance(m, f.BaseZMm, jc) is { ClearanceMm: < 0 } sc) { rejects.Add($"{label}: 자기 간섭 ({sc.Part}–{sc.Obstacle})"); continue; }
+            if (!planar && JointPathBlocker(m, planes, f, start, jc) is { } jp) { rejects.Add($"{label}: {jp}"); continue; }
 
             var path = new List<double[]>();
             if (!direct) path.AddRange(Sample(cand, plunge, m.PlanarSampleMm));
@@ -717,8 +936,8 @@ public static partial class ReachSimulator
     /// 팔꿈치·손목 반전 없음, |J5| 여유, J6 안전 범위, 자기 간섭). 그 뒤 경로는 100 mm 간격으로 이어 풀어 관절 한계 근접·관절 튐[6축]·
     /// 팔꿈치·손목·J6 안전 범위·자기 간섭을 본다.
     /// </summary>
-    private static ReachEntry PlanEntryFixedPose(ReachRobotModel m, BaseFrame f, double[] start, double[] approach, double[] normal,
-        double[] approachJoints)
+    private static ReachEntry PlanEntryFixedPose(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f, double[] start,
+        double[] approach, double[] normal, double[] approachJoints, bool planar)
     {
         var fr = m.Kinematics.Frames(start);
         var cur = f.BaseToDrawing(Vec3.Add(Mat4.Origin(fr[6]), Vec3.Scale(Mat4.AxisZ(fr[6]), m.ToolZMm)));
@@ -728,17 +947,7 @@ public static partial class ReachSimulator
         var plunge = Vec3.Add(approach, Vec3.Scale(normal, r));
         var inPlaneMm = Vec3.Length(Vec3.Sub(plunge, projected)) * 1000;
 
-        var candidates = new List<(double[] P, bool Direct)>();
-        if (inPlaneMm < m.PlanarSkipMm) candidates.Add((plunge, true));
-        else
-        {
-            if (inPlaneMm <= m.MaxEntryInPlaneMm) candidates.Add((plunge, true));
-            candidates.Add((projected, false));
-            var pts = Sample(projected, plunge, m.PlanarSampleMm);
-            var step = inPlaneMm / pts.Count;
-            for (var k = 0; k < pts.Count - 1; k++)
-                if ((k + 1) * step <= m.MaxEntryInPlaneMm + 1e-6) candidates.Add((pts[k], false));
-        }
+        var candidates = EntryCandidates(m, projected, plunge, inPlaneMm, planar);
 
         // ② 접근 해의 플랜지 자세(BASE) — 진입점·경로 전 구간에서 이 자세를 유지한다.
         var pose = m.Kinematics.Frames(approachJoints)[6];
@@ -792,7 +1001,8 @@ public static partial class ReachSimulator
             string? firstWhy = null;
             foreach (var sol in sols)
             {
-                var whySol = EntryBlocker(sol);
+                // 직접 진입(평면 경유를 쓰지 않는 면)은 진입 MoveJ 가 길 수 있다 — 그 관절 이동 경로의 면·자기 간섭을 본다.
+                var whySol = EntryBlocker(sol) ?? (planar ? null : JointPathBlocker(m, planes, f, start, sol));
                 if (whySol is null) { jc = sol; break; }
                 firstWhy ??= whySol;
             }
@@ -933,9 +1143,9 @@ public static partial class ReachSimulator
             _cos = Math.Cos(st.Yaw); _sin = Math.Sin(st.Yaw);
             _ox = st.X + (_cos * dF - _sin * dL) / 1000.0;
             _oy = st.Y + (_sin * dF + _cos * dL) / 1000.0;
-            _floor = st.FloorZ;
+            _floor = st.FloorZ + m.FloorOffsetMm(st.FloorZ) / 1000.0;   // 차체가 서 있는 면(나무판 위 — 층별)
             _mc = Math.Cos(m.MountYawDeg * Math.PI / 180); _ms = Math.Sin(m.MountYawDeg * Math.PI / 180);
-            BaseZMm = m.MountZMm + strokeMm;
+            BaseZMm = m.MountZMm + m.EffectiveStrokeMm(strokeMm);
         }
 
         public double[] AmrToDrawing(double x, double y, double z) =>
@@ -1043,9 +1253,13 @@ public static partial class ReachSimulator
         var self = SelfBoxes(m, f.BaseZMm);
         var segs = ArmSegments(m, fr);
         var core = segs[^1];
-        var parts = new[] { Column(m, planes, f) }
+        // BASE·J1 은 받침(리프트 기둥 또는 차체 윗면)에 붙어 있는 부품이라 자기 간섭을 재지 않는다(SelfClearance·HD_AMR
+        // CobotEnvelope 와 같은 규칙). 리프트를 떼고 차체 윗면 바로 위(예: 927 mm)에 달면 BASE 캡슐 반경이 차체 윗면을 파고들어
+        // 자세와 무관하게 모든 해가 간섭으로 나왔다. 탱크 면과는 그대로 잰다.
+        var parts = (m.HasColumn(f.BaseZMm) ? new[] { Column(m, planes, f) } : Array.Empty<ReachPart>())
             .Concat(segs[..^1].Select(s =>
-                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f, s.NearColumn ? self[..2] : self)))
+                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f,
+                    s.Name == "BASE·J1" ? Array.Empty<SelfBox>() : s.NearColumn ? self[..2] : self)))
             .Concat(m.ToolBoxes.Select(t =>
                 WithSelf(ToolBoxPart(m, t, fr[6], f, planes), core.A, core.B, core.RadiusMm, f, self)))
             .ToArray();
@@ -1068,15 +1282,24 @@ public static partial class ReachSimulator
     /// <summary>차체 기준 상자(mm, x 전방·y 좌측·z 바닥 위).</summary>
     private readonly record struct SelfBox(string Name, double[] Min, double[] Max);
 
-    /// <summary>자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).</summary>
-    private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm) => new[]
+    /// <summary>
+    /// 자기 간섭 상자 — 신호탑·차체·리프트 기둥(차체 윗면 → BASE). 앞 둘은 BASE·어깨도 잰다(기둥에 붙은 부품).
+    /// 리프트를 쓰지 않으면(<see cref="ReachRobotModel.LiftEnabled"/> = false) 기둥은 빠진다 — 단 받침 기둥
+    /// (<see cref="ReachRobotModel.SupportColumn"/>)이 있으면 같은 단면의 고정 기둥으로 둔다.
+    /// </summary>
+    private static SelfBox[] SelfBoxes(ReachRobotModel m, double baseZMm)
     {
-        new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm }),
-        new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
-            new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm }),
-        new SelfBox("리프트 기둥", new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
-            new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
-    };
+        var body = new SelfBox("AMR 차체", new[] { -m.AmrRearMm, -m.AmrHalfWidthMm, 0 }, new[] { m.AmrFrontMm, m.AmrHalfWidthMm, m.AmrHeightMm });
+        var tower = new SelfBox("신호탑", new[] { -m.TowerRearToMm, -m.TowerHalfWidthMm, m.AmrHeightMm },
+            new[] { -m.TowerRearFromMm, m.TowerHalfWidthMm, m.TowerTopMm });
+        if (!m.HasColumn(baseZMm)) return new[] { body, tower };
+        return new[]
+        {
+            body, tower,
+            new SelfBox(m.ColumnName, new[] { -m.ColumnHalfMm, -m.ColumnHalfMm, m.AmrHeightMm },
+                new[] { m.ColumnHalfMm, m.ColumnHalfMm, baseZMm }),
+        };
+    }
 
     /// <summary>리프트 기둥 — 사각 기둥 꼭짓점으로 탱크 면 여유를 잰다(그림은 반폭 반경 캡슐).</summary>
     private static ReachPart Column(ReachRobotModel m, IReadOnlyList<ReachPlane> planes, BaseFrame f)
@@ -1086,7 +1309,7 @@ public static partial class ReachSimulator
             .SelectMany(z => new[] { (h, h), (h, -h), (-h, h), (-h, -h) }.Select(c => f.AmrToDrawing(c.Item1, c.Item2, z)))
             .ToList();
         var (cl, code) = Clearance(corners, 0, planes, skipFloor: true);
-        return new ReachPart("리프트 기둥", f.AmrToDrawing(0, 0, m.AmrHeightMm), f.AmrToDrawing(0, 0, f.BaseZMm), h / 1000.0, cl, code);
+        return new ReachPart(m.ColumnName, f.AmrToDrawing(0, 0, m.AmrHeightMm), f.AmrToDrawing(0, 0, f.BaseZMm), h / 1000.0, cl, code);
     }
 
     /// <summary>팔 부품의 탱크 면 여유와 차체·신호탑·기둥 여유 중 작은 쪽. a·b 는 BASE 기준 mm.</summary>

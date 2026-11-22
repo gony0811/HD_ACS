@@ -25,6 +25,15 @@ public sealed partial class BatterySwapNodesViewModel : ObservableObject
     public ObservableCollection<BatterySwapNodeDto> Nodes { get; } = new();
 
     [ObservableProperty] private TankFloor? _selectedFloor;
+
+    /// <summary>선창 ID 가 바뀌면 층 목록의 맵 ID 를 새 선창 것으로 바꾸고 같은 층을 다시 고른다.</summary>
+    public void SetTank(string tankId)
+    {
+        
+        var level = SelectedFloor?.Level;
+        if (!TankLayout.Retarget(Floors, tankId)) return;
+        SelectedFloor = Floors.FirstOrDefault(f => f.Level == level) ?? Floors.FirstOrDefault();
+    }
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private double _x;
     [ObservableProperty] private double _y;

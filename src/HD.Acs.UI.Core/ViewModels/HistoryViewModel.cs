@@ -101,6 +101,7 @@ public sealed class HistoryTaskRow
     public string AreaName { get; }
     public string WallCode { get; }
     public int? Level { get; }
+    public string LevelText => Level is int n ? HD.Acs.UI.Services.LevelLabel.Of(n) : "";
     public string Status { get; }
     public int Attempts { get; }
     public DateTimeOffset OccurredAt { get; }

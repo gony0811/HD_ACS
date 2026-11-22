@@ -27,6 +27,9 @@ public class AcsDbContext : DbContext
     public DbSet<RobotEntity> Robots => Set<RobotEntity>();
     public DbSet<WeldSeamEntity> WeldSeams => Set<WeldSeamEntity>();
     public DbSet<TankGeometryEntity> TankGeometries => Set<TankGeometryEntity>();
+    public DbSet<InspectionProfileEntity> InspectionProfiles => Set<InspectionProfileEntity>();
+    public DbSet<InspectionProfileAssignmentEntity> InspectionProfileAssignments => Set<InspectionProfileAssignmentEntity>();
+    public DbSet<AmrTeachingEntity> AmrTeachings => Set<AmrTeachingEntity>();
     public DbSet<WallEntity> Walls => Set<WallEntity>();
     public DbSet<InspectionAreaEntity> InspectionAreas => Set<InspectionAreaEntity>();
     public DbSet<AreaTaskEntity> AreaTasks => Set<AreaTaskEntity>();
@@ -38,9 +41,11 @@ public class AcsDbContext : DbContext
     public DbSet<OrderActionEntity> OrderActions => Set<OrderActionEntity>();
     public DbSet<RobotContextEntity> RobotContexts => Set<RobotContextEntity>();
     public DbSet<WorkItemEntity> WorkItems => Set<WorkItemEntity>();
+    public DbSet<SeamTestEntity> SeamTests => Set<SeamTestEntity>();
     // hist / alarm / sys
     public DbSet<TransitionLogEntity> TransitionLogs => Set<TransitionLogEntity>();
     public DbSet<InspectionResultEntity> InspectionResults => Set<InspectionResultEntity>();
+    public DbSet<GasResultEntity> GasResults => Set<GasResultEntity>();
     public DbSet<AlarmSpecEntity> AlarmSpecs => Set<AlarmSpecEntity>();
     public DbSet<AlarmEntity> Alarms => Set<AlarmEntity>();
     public DbSet<AppUserEntity> Users => Set<AppUserEntity>();
@@ -105,6 +110,18 @@ public class AcsDbContext : DbContext
             e.Property(x => x.PathDrawing).HasColumnType("jsonb");
             e.Property(x => x.NormalDrawing).HasColumnType("jsonb"); });
 
+        mb.Entity<InspectionProfileEntity>(e => { e.ToTable("inspection_profile", "ref");
+            e.HasKey(x => new { x.Source, x.AmrProfileId });
+            e.HasIndex(x => x.Name);
+            e.Property(x => x.Waypoints).HasColumnType("jsonb"); });
+
+        mb.Entity<InspectionProfileAssignmentEntity>(e => { e.ToTable("inspection_profile_assignment", "ref");
+            e.HasKey(x => new { x.Source, x.SeamType, x.WallCode, x.Direction }); });
+
+        mb.Entity<AmrTeachingEntity>(e => { e.ToTable("amr_teaching", "ref"); e.HasKey(x => x.Source);
+            e.Property(x => x.TeachingPositions).HasColumnType("jsonb");
+            e.Property(x => x.StartJoints).HasColumnType("jsonb"); });
+
         mb.Entity<TankGeometryEntity>(e => { e.ToTable("tank_geometry", "ref"); e.HasKey(x => x.TankId);
             e.Property(x => x.LevelZ).HasColumnType("jsonb"); });
 
@@ -151,6 +168,9 @@ public class AcsDbContext : DbContext
             e.Property(x => x.Params).HasColumnType("jsonb");
             e.Property(x => x.Result).HasColumnType("jsonb"); });
 
+        mb.Entity<SeamTestEntity>(e => { e.ToTable("seam_test", "run"); e.HasKey(x => x.TestId);
+            e.HasIndex(x => x.TaskId); });
+
         mb.Entity<RobotContextEntity>(e => { e.ToTable("robot_context", "run");
             e.HasKey(x => x.RobotId); });
 
@@ -163,6 +183,13 @@ public class AcsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.MissionId, x.OccurredAt });
             e.Property(x => x.Payload).HasColumnType("jsonb"); });
+
+        mb.Entity<GasResultEntity>(e => { e.ToTable("gas_result", "hist");
+            e.HasKey(x => x.ResultId);
+            e.HasIndex(x => x.ActionId).IsUnique();
+            e.HasIndex(x => new { x.SendState, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.Property(x => x.Body).HasColumnType("jsonb"); });
 
         mb.Entity<InspectionResultEntity>(e => { e.ToTable("inspection_result", "hist");
             e.HasKey(x => x.ResultId);

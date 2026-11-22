@@ -58,6 +58,20 @@ public class AreaUpdateTests
         Assert.Equal(JsonValueKind.Null, body.GetProperty("stationMaxBackwardMm").ValueKind);
     }
 
+    /// <summary>리프트 높이 — 입력값을 그대로 보내고, 빈값이면 null(서버가 기존 값 유지).</summary>
+    [Fact]
+    public async Task UpdateArea_SendsLiftHeight_AndNullWhenBlank()
+    {
+        var (vm, server) = await BuildAsync();
+        vm.StationLiftMm = 300;
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Equal(300, server.Writes[^1].Item3.GetProperty("stationLiftMm").GetDouble());
+
+        vm.StationLiftMm = null;
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Equal(JsonValueKind.Null, server.Writes[^1].Item3.GetProperty("stationLiftMm").ValueKind);
+    }
+
     [Fact]
     public async Task NoSelection_UpdateDisabled()
     {
@@ -111,6 +125,34 @@ public class AreaUpdateTests
 
         Assert.Empty(server.Writes);
         Assert.Contains("1.44m", vm.StatusMessage);
+    }
+
+    /// <summary>
+    /// 현장(11-20 PL L2-R01C19): 경계에 붙은 코너가 0.1 mm 반올림 저장으로 층 구간 밖 −0.03 mm 가 되어
+    /// 사전 검사가 수정을 막았다. 서버 층 판정 ε(5 mm) 안이면 통과, 넘으면 여전히 막는다(위·아래 공통).
+    /// </summary>
+    [Fact]
+    public async Task UpdateArea_CornerJustOutsideLevelBand_WithinTolerance_IsSent()
+    {
+        var (vm, server) = await BuildAsync();
+        vm.C1V = -0.000032; vm.C2V = -0.000032;            // 아래 경계 0.03 mm 밖(현장 값)
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        var (_, _, body) = Assert.Single(server.Writes);
+        Assert.Equal(VOff - 0.000032, body.GetProperty("corners")[0][1].GetDouble(), 9);   // 값은 고치지 않고 그대로 보낸다
+
+        vm.C1V = 0.6; vm.C2V = 0.6; vm.C3V = 2.404; vm.C4V = 2.404;   // 위 경계(2.4) 4 mm 밖
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Equal(2, server.Writes.Count);
+    }
+
+    [Fact]
+    public async Task UpdateArea_CornerBeyondTolerance_RejectedBeforeRoundTrip()
+    {
+        var (vm, server) = await BuildAsync();
+        vm.C1V = -0.006; vm.C2V = -0.006;                  // 6 mm 밖 — 다른 층
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        Assert.Empty(server.Writes);
+        Assert.Contains("선택 층 구간", vm.StatusMessage);
     }
 
     [Fact]
