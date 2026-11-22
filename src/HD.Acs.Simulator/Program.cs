@@ -63,6 +63,7 @@ var commLossMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_COMM_LOSS
 var commLossCount = 0;
 var resumeRejectPending = Environment.GetEnvironmentVariable("SIM_RESUME_REJECT") == "1";
 TaskCompletionSource<string>? pauseWait = null;   // "resume" | "cancel"
+bool cancelPending = false;   // 일시정지 밖에서 받은 cancelOrder — 진행 중 액션을 마친 뒤 남은 액션을 버린다 [§5.4]
 
 // 장치 HEAVY 알람 주입 [장치통신 HEAVY알람] — 처음 N개 Order를 코봇 통신 두절로 중단, S초 후 복구·S초 후 RESET
 var deviceFaultMax = int.TryParse(Environment.GetEnvironmentVariable("SIM_DEVICE_FAULT_ORDERS"), out var dfo) ? dfo : 0;
@@ -189,7 +190,13 @@ client.ApplicationMessageReceivedAsync += async e =>
             }
             if (a.ActionType == "cancelOrder")
             {
-                if (pauseWait is null) Console.WriteLine("[SIM] cancelOrder — 일시정지 중 Order 없음(무시)");
+                // 일시정지 밖: 시뮬레이터는 액션 도중에 끊지 못하므로 mode 와 무관하게 진행 중 액션을 마친 뒤 남은 액션을 버린다.
+                var mode = a.ActionParameters.FirstOrDefault(p => p.Key == "mode")?.Value?.ToString() ?? "immediate";
+                if (pauseWait is null)
+                {
+                    cancelPending = true;
+                    Console.WriteLine($"[SIM] cancelOrder(mode={mode}) — 진행 중 액션 완료 후 남은 액션 폐기");
+                }
                 else pauseWait.TrySetResult("cancel");
             }
         }
@@ -237,6 +244,7 @@ async Task ExecuteOrderAsync(Vda5050Order order)
         state.OrderId = order.OrderId;
         state.OrderUpdateId = order.OrderUpdateId;
         state.Errors.Clear();
+        cancelPending = false;   // 취소는 그 Order 에만 유효
         state.ActionStates = order.Nodes.SelectMany(n => n.Actions)
             .Select(a => new ActionState { ActionId = a.ActionId, ActionType = a.ActionType, ActionStatus = "WAITING" })
             .ToList();
@@ -273,7 +281,17 @@ async Task ExecuteOrderAsync(Vda5050Order order)
 
             bool cancelled = false;
             foreach (var action in node.Actions)
+            {
+                if (cancelPending)
+                {
+                    cancelPending = false;
+                    foreach (var rest in state.ActionStates.Where(s => s.ActionStatus is not ("FINISHED" or "FAILED")))
+                    { rest.ActionStatus = "FAILED"; rest.ResultDescription = "cancelled by cancelOrder (진행 중 검사 완료 후 중단)"; }
+                    Console.WriteLine("[SIM]   cancelOrder 이행 — 남은 액션 FAILED, 코봇 홈 복귀(가정)");
+                    cancelled = true; break;
+                }
                 if (!await ExecuteActionAsync(action)) { cancelled = true; break; }
+            }
             await PublishStateAsync();
             if (cancelled) { Console.WriteLine($"[SIM] Order 중단됨: {order.OrderId}"); return; }
         }

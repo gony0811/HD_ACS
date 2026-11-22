@@ -21,17 +21,33 @@ public sealed class CommLossService
     private readonly MissionService _missions;
     private readonly RobotErrorTracker _tracker;
     private readonly ILogger<CommLossService> _log;
+    private readonly bool _finishCurrentTask;
 
     public CommLossService(AcsDbContext db, Vda5050MasterClient vda, InspectionDispatcher dispatcher,
-        MissionService missions, RobotErrorTracker tracker, ILogger<CommLossService> log)
+        MissionService missions, RobotErrorTracker tracker, ILogger<CommLossService> log,
+        IConfiguration? config = null)
     {
         _db = db; _vda = vda; _dispatcher = dispatcher; _missions = missions; _tracker = tracker; _log = log;
+        _finishCurrentTask = AbortFinishesCurrentTask(config);
     }
+
+    /// <summary>설정 <c>Acs:Dispatch:AbortFinishCurrentTask</c>(기본 true) — 미션 중단 시 진행 중 용접선 검사를 마친 뒤 멈출지.</summary>
+    public static bool AbortFinishesCurrentTask(IConfiguration? config)
+        => config?.GetValue("Acs:Dispatch:AbortFinishCurrentTask", true) ?? true;
+
+    /// <summary>
+    /// 중단 시 취소 방식. 통신 단절 일시정지 중이면 항상 즉시 취소(멈춰 있는 검사를 재개 전 확인 없이 이어 가게 하지 않는다),
+    /// 그 밖에는 설정에 따라 "진행 중 검사 완료 후"(<see cref="Vda5050MasterClient.CancelAfterCurrentAction"/>) 또는 즉시.
+    /// </summary>
+    public static string CancelModeFor(bool paused, bool finishCurrentTask)
+        => !paused && finishCurrentTask ? Vda5050MasterClient.CancelAfterCurrentAction : "immediate";
 
     public sealed record ResumePauseRequest(string? UserId);
     public sealed record ResumePauseResult(string RobotId, string ActionType);
     /// <summary>CancelOrderRequired = 진행 중 정차·일시정지가 있어 취소가 필요했는지, CancelOrderSent = 실제 발행 성공.</summary>
-    public sealed record AbortResult(Guid RunId, string State, bool CancelOrderSent, bool CancelOrderRequired = false);
+    /// <summary>CancelMode = 보낸(보내려던) 취소 방식 — "afterCurrentAction"(진행 중 검사 완료 후 홈 복귀) / "immediate" / null(취소 불필요).</summary>
+    public sealed record AbortResult(Guid RunId, string State, bool CancelOrderSent, bool CancelOrderRequired = false,
+        string? CancelMode = null);
 
     /// <summary>
     /// 운영자 재개 → <c>stopPause</c>. 로봇이 통신 단절 일시정지를 보고 중일 때만 보낸다(그 외 409 — 오조작 방지).
@@ -58,7 +74,9 @@ public sealed class CommLossService
 
     /// <summary>
     /// run 중단. 그 run의 정차가 AMR에서 실행 중(work_item DISPATCHED)이거나 로봇이 통신 단절 일시정지 중이면
-    /// <c>cancelOrder</c>도 발행한다 [VDA 사양서 §4.5.3]. 중단만 하고 Order를 두면 AMR이 그 정차의 남은 용접선을
+    /// <c>cancelOrder</c>도 발행한다 [VDA 사양서 §4.5.3]. 기본은 <c>mode=afterCurrentAction</c> — AMR 이 진행 중 용접선 검사를
+    /// 마친 뒤 남은 용접선을 버리고 코봇을 홈으로 되돌린다(§5.4). 통신 단절 일시정지 중이면 즉시 취소.
+    /// 중단만 하고 Order를 두면 AMR이 그 정차의 남은 용접선을
     /// 끝까지 수행한다(2026-11-03 현장: 용접선 8개 정차에서 중단 후에도 검사가 이어짐).
     /// 발행 실패는 중단 자체를 되돌리지 않는다 — run은 이미 ABORTED, 응답의 cancelOrderSent로 알린다.
     /// 취소로 FAILED 보고되는 그 정차는 <see cref="InspectionDispatcher.HandleStopOutcomeAsync"/>가 PENDING으로 되돌려 이어하기 대상으로 남긴다.
@@ -74,6 +92,7 @@ public sealed class CommLossService
         bool sent = false;
         bool paused = robotId is not null && _tracker.HasActiveError(robotId, PauseErrorType);
         bool required = robotId is not null && (inFlight || paused);
+        string? mode = required ? CancelModeFor(paused, _finishCurrentTask) : null;
         if (required)
         {
             var robot = await _db.Robots.AsNoTracking().FirstOrDefaultAsync(r => r.RobotId == robotId, ct);
@@ -81,12 +100,13 @@ public sealed class CommLossService
             {
                 try
                 {
-                    await _vda.CancelOrderAsync(new RobotRef(robotId!, robot.Manufacturer, robot.SerialNumber), ct);
+                    await _vda.CancelOrderAsync(new RobotRef(robotId!, robot.Manufacturer, robot.SerialNumber), ct,
+                        afterCurrentAction: mode == Vda5050MasterClient.CancelAfterCurrentAction);
                     sent = true;
                     _db.AuditLogs.Add(new AuditLogEntity
                         { UserId = "operator", Action = paused ? "COMM_LOSS_CANCEL_ORDER" : "RUN_ABORT_CANCEL_ORDER", Target = robotId! });
                     await _db.SaveChangesAsync(ct);
-                    _log.LogInformation("run {Run} 중단 — 진행 중 Order 취소(cancelOrder) 발행(robot={Robot}, 일시정지={Paused})", runId, robotId, paused);
+                    _log.LogInformation("run {Run} 중단 — 진행 중 Order 취소(cancelOrder, mode={Mode}) 발행(robot={Robot}, 일시정지={Paused})", runId, mode, robotId, paused);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -95,7 +115,7 @@ public sealed class CommLossService
                 }
             }
         }
-        return new AbortResult(runId, "ABORTED", sent, required);
+        return new AbortResult(runId, "ABORTED", sent, required, mode);
     }
 }
 

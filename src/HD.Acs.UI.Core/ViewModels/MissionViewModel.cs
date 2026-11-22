@@ -381,6 +381,18 @@ public sealed partial class MissionViewModel : ObservableObject
         }
     }
 
+    /// <summary>중단 결과 안내 — AMR 에 무엇을 시켰는지(진행 중 검사 완료 후 홈 복귀 / 즉시 취소 / 전달 실패)까지 적는다.</summary>
+    public static string DescribeAbort(RunAbortResultDto? r)
+    {
+        const string tail = " 완료 이력은 보존되며 '이어하기'로 재개할 수 있습니다.";
+        if (r is null || !r.CancelOrderRequired) return "run 중단됨 —" + tail;
+        if (!r.CancelOrderSent)
+            return "run 중단됨 — 그러나 AMR 에 취소 지령을 보내지 못했습니다(연결 확인). AMR 이 진행 중 정차를 끝까지 수행할 수 있습니다." + tail;
+        return r.CancelMode == "afterCurrentAction"
+            ? "run 중단됨 — AMR 은 진행 중인 용접선 검사를 마친 뒤 코봇을 홈으로 복귀합니다(즉시 정지는 비상정지)." + tail
+            : "run 중단됨 — AMR 에 즉시 취소를 보냈습니다." + tail;
+    }
+
     private bool CanAbortRun() => CurrentRun is not null && CurrentRun.State is "RUNNING" or "WAITING_FLOOR_TRANSFER";
 
     /// <summary>중단 — 후속 배차 중지(진행 중 정차는 완주). 즉시 정지는 비상정지 사용.</summary>
@@ -390,9 +402,9 @@ public sealed partial class MissionViewModel : ObservableObject
         if (CurrentRun is null) return;
         try
         {
-            await _api.AbortRunAsync(CurrentRun.RunId);
+            var aborted = await _api.AbortRunWithResultAsync(CurrentRun.RunId);
             await RefreshRunAsync(CurrentRun.RunId);
-            StatusMessage = "run 중단됨 — 완료 이력은 보존, '이어하기'로 재개할 수 있습니다.";
+            StatusMessage = DescribeAbort(aborted);
         }
         catch (Exception ex)
         {

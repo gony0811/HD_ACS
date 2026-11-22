@@ -374,7 +374,7 @@ run 시작 시 그 시나리오에 담긴 영역만 큐로 전개된다(예: "L2
 | `GET /api/runs?status=&tankId=&limit=` | Run 목록(최근 시작 순) — SAIGE가 진행 중 Run을 발견하는 진입점 [SAIGE §5.3]. status 허용값 외 400, 없으면 `[]` |
 | `GET /api/runs/{runId}` | Run 상세 — 상태·`tankId`·층별 미션(`missions[].level` 1-based) [SAIGE §5.5]. 시각은 UTC `Z` |
 | `GET /api/runs/{runId}/results?status=&limit=&offset=` | 종결 TASK별 최종 결과 — taskId당 1건(재시도 중복 없음), `wallId`+`wallCode`, 용접선 구간 mm [SAIGE §5.6]. status = SUCCESS·FAILED·SKIPPED |
-| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지 + 진행 중 정차가 있거나 로봇이 통신 단절 일시정지 중이면 `cancelOrder` 발행(AMR이 남은 용접선을 멈춤, 응답 `cancelOrderRequired`·`cancelOrderSent`). 끊긴 정차는 PENDING으로 돌아가 이어하기 때 다시 배차. 즉시 정지는 비상정지 |
+| `POST /api/runs/{runId}/abort` | Run 중단 — 후속 배차 중지 + 진행 중 정차가 있거나 로봇이 통신 단절 일시정지 중이면 `cancelOrder` 발행(AMR이 남은 용접선을 멈춤, 응답 `cancelOrderRequired`·`cancelOrderSent`). 끊긴 정차는 PENDING으로 돌아가 이어하기 때 다시 배차. 즉시 정지는 비상정지 기본은 `mode=afterCurrentAction` — AMR 이 진행 중 용접선 검사를 마친 뒤 남은 용접선을 버리고 코봇을 홈으로 되돌린다(통신 단절 일시정지 중이면 즉시 취소, 설정 `Acs:Dispatch:AbortFinishCurrentTask`). 응답 `cancelMode` |
 | `POST /api/runs/{runId}/resume` | Run 재개 — DONE/SKIPPED 보존, DISPATCHED→PENDING 리셋 후 잔여만 재배차. COMPLETED는 400 |
 | `POST /api/runs/repair` | 용접선 재검사(리페어 run) — `{robotId, taskIds[], scenarioId?, optimize?}` 지정한 용접선만 검사. `optimize`(기본 true) = 시작 전에 그 용접선만 놓고 정차점 최적화를 돌려 이 run의 정차·리프트에 반영(응답 `stops[]`에 영역별 결과). scenarioId 생략 = 그 선창의 최근 run 시나리오. 400(용접선 없음·선창 혼재·캘리브레이션 없음)·409(진행 중 run·미연결·장치 알람). Run 상세(`GET /api/runs/{id}`)의 `repairTaskIds`로 구분 |
 | `GET /api/runs/resumable?robotId=` | 로봇의 가장 최근 재개 가능 run(미종결 작업 보유) — 없으면 404 |

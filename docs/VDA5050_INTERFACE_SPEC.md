@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | **1.25** |
+| 문서 버전 | **1.26** |
 | 작성일 | 2026-08-27 (최종 개정 2026-11-20) |
 | 대상 | HD_AMR 통합 운영 S/W 개발팀 (로봇 온보드) |
 | 기준 표준 | **VDA 5050 v2.0** (Interface for the communication between AGV and master control) |
@@ -28,6 +28,7 @@
 | 개정 1.22 | 2026-11-17 — **`seamType` 에 `CROSS4_L`·`CROSS4_R` 추가**(§8.1·§8.2, canonical 10값). 기준은 **면을 정면으로 마주 봤을 때(로봇·카메라 시점)** 十자의 수직 용접선이 작업(가로 top–top 한 칸)의 왼쪽에 있으면 `CROSS4_L`, 오른쪽에 있으면 `CROSS4_R` — **작업 시작점/끝점 기준이 아니다.** ACS 는 정면 기준 값만 보내고, 용접선 시작→끝 방향이 교시 때와 반대인 경우의 보정(L/R 바꿔 고르기)은 HD_AMR 이 한다(2026-11-17 협의 — 프로필 경유점은 작업물 X = 시작→끝 으로 실행되므로). 참고: ACS 생성 작업은 u 오름차순이라 정면에서 본 시작→끝이 좌현·마구리(PL/PM/PU/F/A)는 왼쪽→오른쪽, 우현(SL/SM/SU)은 오른쪽→왼쪽이다. 접미 없는 `CROSS4` 는 그대로 유효(AMR 면별 기본값). 바닥·천장은 정면 좌우가 없어 ACS 가 정하지 않는다. ACS 는 가로지르는 수직 용접선이 작업 가운데에서 치우친 쪽으로 좌우를 판정·적용하는 수단을 둔다(`POST /api/tanks/{tankId}/cross4-sides`, 1 cm 미만이면 판정 불가). **단 CT1 도면 데이터는 가로 CROSS4 536개 모두 수직선이 정가운데라 자동으로는 정해지지 않는다** — 실물의 수 mm 치우침은 도면에 없으므로 면·층 단위 규칙으로 운영자가 지정한다(계획 화면 유형 선택 또는 어시스턴트 `setSeamType`) |
 | 개정 1.20 | 2026-11-17 — **시험 액션 `moveToSeamStart` 에 `params.taskId` 추가**(§8.7). 대상 용접선의 taskId 를 본검사 `startWeldInspection` 의 `params.taskId` 와 **같은 표기**(ACS 내부 uuid 문자열)로 싣는다. 종전엔 `jobRef`(`TEST-SEAM-{taskId}`) 문자열 안에만 있어 AMR 이 잘라 읽어야 했다. 선택 필드라 하위 호환(부재 = 종전과 같음, `jobRef` 는 그대로). `attempt` 는 싣지 않는다(시험은 검사가 아니라 attempt 누적에 넣지 않는다). HD_AMR 쪽 사용 여부는 확인 필요 |
 | 개정 1.25 | 2026-11-20 — **배터리 보호 임시 해제 errorType `batteryGuardBypassed` 추가**(§6.4). BMS 고장으로 잔량(SoC)을 믿을 수 없을 때 HD_AMR appsettings `PowerMode:BypassBatteryGuard = true`(기본 false, 앱 재시작 후 적용)로 저전력 판정을 끄면 — 잔량과 무관하게 정상 모드(Order 거부·CRITICAL 안전정지·잔여 액션 중단 없음), `batteryLow`·`batteryCritical` 대신 이 항목을 WARNING 으로 상주 발행한다. ACS 는 알람(`BATTERY_GUARD_BYPASSED`)만 — 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 임시 조치이며 실제 잔량을 모른 채 운용하므로 팩 전압을 따로 확인할 것. **양측 구현 — 실기 미확인** |
+| 개정 1.26 | 2026-11-22 — **미션 중단 시 진행 중 용접선 검사를 마친 뒤 홈 복귀**(§5.4): `cancelOrder` 에 선택 actionParameter `mode=afterCurrentAction` 추가. AMR 은 `RUNNING` 액션을 끝까지 수행하고, 코봇을 홈으로 되돌린 뒤 남은 액션을 `FAILED` 로 종결한다. 파라미터 없음 = 종전 즉시 취소(통신 단절 일시정지 중 중단은 항상 즉시). ACS 설정 `Acs:Dispatch:AbortFinishCurrentTask`(기본 true), 중단 응답에 `cancelMode`. |
 | 개정 1.24 | 2026-11-20 — **factsheet `teaching.safeJ6` 추가** `[N26]`(§7.3). AMR 이 티칭과 함께 적용 중인 J6 안전 범위·대기(홈) 각도(`minDeg`·`maxDeg`·`standbyDeg` — HD_AMR 파라미터 `inspection.safeJ6MinDeg/MaxDeg/StandbyDeg`)를 보고한다. 출발 자세 J6 와 짝이라 teaching 묶음에 들어가며, 값이 바뀌면 teaching 지문이 바뀌어 다시 보고된다. ACS 는 범위가 대기 자세를 포함할 때만 반영(J6 안전 범위·대기 자세·판정 J6 = 대기 자세·툴 장착 보정 = −180° − 대기 자세). 선택 필드 — 구버전 AMR 은 싣지 않으며 ACS 는 종전 설정을 쓴다. **양측 구현 — 실기 미확인** |
 | 개정 1.23 | 2026-11-20 — **factsheet 채널 사용 — AMR 설정 보고(연결 시 초기 정보 + 변경 보고)** `[N26]`(§2.1 표·§5 표·신설 §7.3·부록 C). AMR 은 `factsheet`(QoS 1, **retain**)를 ① 브로커 접속 직후 ② ACS 의 표준 instantAction `factsheetRequest`(ACS 는 AMR `connection` ONLINE 을 받을 때마다 보냄) ③ 보고 값이 바뀔 때(티칭 저장·리프트 설정·장착 보정 T_A_B·코봇 값 — 주기 확인 5 s) 발행한다. HD 값은 확장 객체 `hdAmr`(면별 ② 출발 관절각·리프트 운영·T_A_B·링크 치수·진입 관절 한계 + 설정 버전·묶음 지문·바뀐 묶음). ACS 는 리치 시뮬레이션·배차 설정 층으로 반영(우선순위 appsettings.json < AMR 보고 < 리치·간섭 화면), 진행 중 run 이 있으면 끝난 뒤 반영, 버전이 오르면 `AMR_CONFIG_CHANGED` 알람. **양측 구현(2026-11-20) — 실기·실브로커 미확인** |
 | 개정 1.17 | 2026-11-12 — **코봇 반경 장애물 errorType `cobotZoneObstacle` 추가**(§6.4). AMR 자체 장애물 감지는 차체만 보므로, HD_AMR이 ACS 지령 주행 중 라이다 점을 읽어 코봇(주행 자세)의 바닥 투영 외곽 + 여유 안에 장애물이 들어오면 **주행을 세우고** `errors[]`에 WARNING으로 싣는다. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 항목을 뺀다. **고장·실패가 아니다** — ACS는 알람(`COBOT_ZONE_OBSTACLE`)·로그·화면 표시만 하고 실패 집계·배차·로봇 오류 상태 판정에는 쓰지 않는다. 주행 제한 시간까지 안 사라지면 AMR이 주행 실패로 종결한다(전 액션 FAILED — 기존 실패 정책). AMR 파라미터 `cobotGuard.enabled`(기본 끔)로 끄고 켠다. 라이다가 2D 한 대라 후방·코봇 높이 장애물은 못 보는 운영 보조 기능이다(안전 기능 아님). 추가 필드라 하위 호환. 양측 구현 완료, 실기 확인 대기 |
@@ -429,15 +430,17 @@ Order가 "어디서 오는지": run 시작 시 ACS는 계획(검사 영역·용�
 | ACS 발행 조건 | 해당 로봇이 `errors[]`에 `communicationLostPause`를 보고 중이고 연결 ONLINE이며, 운영자가 현장 안전을 확인하고 '작업 재개'를 누른 경우만 (`POST /api/robots/{id}/resume-pause`). **자동 재개 없음** |
 | AMR 요구 동작 | 재개 전 확인(비상정지 해제·배터리 PowerMode NORMAL·측위 정상+mapId 일치·operatingMode AUTOMATIC) 통과 시 재개 — 주행 중이었으면 같은 목표 노드 재지령, 검사 중이었으면 **정지 직전 웨이포인트부터 재촬영**. 액션 `PAUSED`→`RUNNING`, `state.paused=false`, `communicationLostPause` 클리어. 불충족 시 거부 + `errors[]` `resumeRejected`(사유) |
 
-### 5.4 `cancelOrder` — run 중단 시 진행 중 Order 취소 `(1.9 신규, 1.13 확장)` `[N21]`
+### 5.4 `cancelOrder` — run 중단 시 진행 중 Order 취소 `(1.9 신규, 1.13 확장, 1.26 mode)` `[N21]`
 
 | 항목 | 값 |
 |---|---|
 | actionType | `cancelOrder` |
 | blockingType | HARD |
-| actionParameters | 없음 |
+| actionParameters | 선택 `mode` (문자열, 개정 1.26): `afterCurrentAction` = 진행 중 액션을 마친 뒤 취소. 없음·그 밖의 값 = 즉시 취소(종전) |
 | ACS 발행 조건 | 운영자 run 중단(`POST /api/runs/{id}/abort`) 시점에 그 run의 정차가 실행 중(work_item DISPATCHED)이거나 그 로봇이 `communicationLostPause`를 보고 중일 때 (§4.5.3, 개정 1.13). 응답 `cancelOrderRequired`·`cancelOrderSent` |
 | AMR 요구 동작 | 현재 Order 종료(미완료 액션 종결), `paused=false`, `communicationLostPause` 클리어, 이후 신규 Order 수락 |
+| `mode=afterCurrentAction` 동작 | 액션(용접선 검사)이 `RUNNING` 이면 **그 액션은 끝까지 수행**해 `FINISHED`/`FAILED` 로 보고하고, 다음 액션을 시작하지 않는다. 코봇을 홈(기준 자세)으로 되돌린 **뒤** 남은 액션을 `FAILED`(`cancelled by cancelOrder (진행 중 검사 완료 후 중단)`)로 종결한다. 주행 중·일시정지 중·진행 액션 없음이면 즉시 취소와 같다. 대기 중 즉시 취소·비상정지를 받으면 그쪽이 우선한다 |
+| ACS 선택 규칙 | 로봇이 `communicationLostPause` 보고 중이면 항상 즉시(파라미터 없음). 그 밖에는 설정 `Acs:Dispatch:AbortFinishCurrentTask`(기본 true)면 `afterCurrentAction`. 응답 `cancelMode` 로 알린다. 이 파라미터를 모르는 구버전 AMR 은 즉시 취소한다 |
 
 instantAction에 대한 actionState 보고는 선택 사항이다 — ACS는 instantAction의 actionStates를 추적하지 않으며, `initPosition`의 성공 판정은 **state.agvPosition.mapId 변경**으로만 한다.
 
