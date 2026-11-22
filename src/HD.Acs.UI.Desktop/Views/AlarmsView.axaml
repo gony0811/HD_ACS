@@ -18,8 +18,11 @@
                 <TextBlock x:Name="StatusHeadline" Text="{Binding StatusHeadline}" FontSize="16" FontWeight="SemiBold"
                            TextWrapping="Wrap"
                            Foreground="{Binding StatusKind, Converter={StaticResource KindBrush}, ConverterParameter=text}" />
-                <TextBlock Text="{Binding StatusDetail}" FontSize="12" TextWrapping="Wrap"
-                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <!-- 긴 오류 설명(용접선 여러 건 사유)이 카드를 키워 아래 이벤트 기록을 밀어내지 않게 높이 제한 + 스크롤 -->
+                <ScrollViewer MaxHeight="110" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock Text="{Binding StatusDetail}" FontSize="12" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                </ScrollViewer>
                 <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="1"
                              Value="{Binding Mission.TaskProgressFraction}"
                              Foreground="{Binding StatusKind, Converter={StaticResource KindBrush}, ConverterParameter=bar}" />
@@ -27,9 +30,11 @@
                 <TextBlock Text="{Binding Mission.WorkSummary}" FontSize="12"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
                 <TextBlock Text="{Binding RobotSummary}" FontSize="12" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding LastFailure, StringFormat='최근 실패: {0}'}" FontSize="12" TextWrapping="Wrap"
-                           Foreground="{DynamicResource AppErrorBrush}"
-                           IsVisible="{Binding LastFailure, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <ScrollViewer MaxHeight="70" HorizontalScrollBarVisibility="Disabled"
+                              IsVisible="{Binding LastFailure, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Text="{Binding LastFailure, StringFormat='최근 실패: {0}'}" FontSize="12" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppErrorBrush}" />
+                </ScrollViewer>
             </StackPanel>
         </Border>
 
