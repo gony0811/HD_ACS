@@ -158,6 +158,58 @@ public class CommLossFailSafeTests
         Assert.True(r.CancelOrderRequired);
         Assert.False(r.CancelOrderSent);   // MQTT 미연결 — 발행 실패해도 중단은 확정
         Assert.Equal("ABORTED", (await env.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);
+        // 기본 취소 방식 = 진행 중 용접선 검사를 마친 뒤 중단·홈 복귀 [§5.4]
+        Assert.Equal("afterCurrentAction", r.CancelMode);
+    }
+
+    [Fact]
+    public async Task Abort_NoStopInFlight_HasNoCancelMode()
+    {
+        var env = Build();
+        var wi = await SeedDispatchedRunAsync(env.Db);
+        (await env.Db.WorkItems.SingleAsync()).Status = "DONE";
+        await env.Db.SaveChangesAsync();
+        Assert.Null((await env.CommLoss.AbortRunAsync(wi.RunId, default)).CancelMode);
+    }
+
+    [Fact]
+    public async Task Abort_WhilePaused_CancelsImmediately()
+    {
+        var env = Build();
+        var wi = await SeedDispatchedRunAsync(env.Db);
+        await env.States.HandleStateAsync(Robot, PausedState("PAUSE"));
+        Assert.Equal("immediate", (await env.CommLoss.AbortRunAsync(wi.RunId, default)).CancelMode);
+    }
+
+    [Theory]
+    [InlineData(false, true, "afterCurrentAction")]   // 기본 — 진행 중 검사 완료 후
+    [InlineData(false, false, "immediate")]           // 설정으로 끔
+    [InlineData(true, true, "immediate")]             // 통신 단절 일시정지 중 — 멈춰 있는 검사를 이어 가게 하지 않는다
+    [InlineData(true, false, "immediate")]
+    public void CancelMode_Rule(bool paused, bool finishCurrentTask, string expected)
+        => Assert.Equal(expected, CommLossService.CancelModeFor(paused, finishCurrentTask));
+
+    [Fact]
+    public void AbortFinishCurrentTask_DefaultsToTrue_AndReadsSetting()
+    {
+        Assert.True(CommLossService.AbortFinishesCurrentTask(null));
+        Assert.True(CommLossService.AbortFinishesCurrentTask(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()));
+        var off = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Acs:Dispatch:AbortFinishCurrentTask"] = "false" }).Build();
+        Assert.False(CommLossService.AbortFinishesCurrentTask(off));
+    }
+
+    [Fact]
+    public void CancelOrder_CarriesModeParameter_OnlyWhenFinishingCurrentAction()
+    {
+        var graceful = HD.Acs.Vda5050.Vda5050MasterClient.BuildCancelOrder(afterCurrentAction: true).Actions.Single();
+        Assert.Equal("cancelOrder", graceful.ActionType);
+        var p = Assert.Single(graceful.ActionParameters);
+        Assert.Equal("mode", p.Key);
+        Assert.Equal("afterCurrentAction", p.Value?.ToString());
+
+        // 즉시 취소는 종전 본문 그대로(파라미터 없음) — 구버전 AMR 과 같은 메시지
+        Assert.Empty(HD.Acs.Vda5050.Vda5050MasterClient.BuildCancelOrder(afterCurrentAction: false).Actions.Single().ActionParameters);
     }
 
     [Fact]

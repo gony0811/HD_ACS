@@ -147,15 +147,25 @@ public sealed class Vda5050MasterClient : IAsyncDisposable
             Actions = { new VdaAction { ActionType = "stopPause", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
         }, ct);
 
+    /// <summary>cancelOrder 의 <c>mode</c> 값 — 진행 중 액션(용접선 검사)을 마친 뒤 남은 액션을 버리고 코봇을 홈으로 [§5.4].</summary>
+    public const string CancelAfterCurrentAction = "afterCurrentAction";
+
     /// <summary>
-    /// Order 취소 — **통신 단절 PAUSE 중 run 중단 시에만** 사용 [VDA 사양서 §4.5.3 개정 1.9].
-    /// PAUSE 상태 AMR은 Order를 폐기하지 않고 쥐고 있으므로 명시적으로 놓게 한다.
+    /// Order 취소 [VDA 사양서 §4.5.3·§5.4]. <paramref name="afterCurrentAction"/> = true 면 actionParameters 에
+    /// <c>mode=afterCurrentAction</c> 을 실어, AMR 이 진행 중 용접선 검사를 끝낸 뒤 남은 액션만 버리고 코봇을 홈으로 되돌리게 한다.
+    /// false(파라미터 없음) = 즉시 취소(주행 정지·검사 중단). 이 파라미터를 모르는 구버전 AMR 은 즉시 취소한다.
     /// </summary>
-    public Task CancelOrderAsync(RobotRef robot, CancellationToken ct = default)
-        => PublishInstantActionsAsync(robot, new Vda5050InstantActions
-        {
-            Actions = { new VdaAction { ActionType = "cancelOrder", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" } }
-        }, ct);
+    public Task CancelOrderAsync(RobotRef robot, CancellationToken ct = default, bool afterCurrentAction = false)
+        => PublishInstantActionsAsync(robot, BuildCancelOrder(afterCurrentAction), ct);
+
+    /// <summary>cancelOrder instantActions 본문(순수 — 테스트용).</summary>
+    public static Vda5050InstantActions BuildCancelOrder(bool afterCurrentAction)
+    {
+        var action = new VdaAction { ActionType = "cancelOrder", ActionId = Guid.NewGuid().ToString(), BlockingType = "HARD" };
+        if (afterCurrentAction)
+            action.ActionParameters.Add(new ActionParameter { Key = "mode", Value = CancelAfterCurrentAction });
+        return new Vda5050InstantActions { Actions = { action } };
+    }
 
     /// <summary>factsheet 다시 보내기 요청 — VDA 5050 2.0 표준 instantAction [§7.3]. AMR 이 ONLINE 이 될 때 보낸다.</summary>
     public Task FactsheetRequestAsync(RobotRef robot, CancellationToken ct = default)

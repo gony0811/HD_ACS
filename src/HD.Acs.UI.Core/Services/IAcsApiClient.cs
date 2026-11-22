@@ -36,6 +36,9 @@ public interface IAcsApiClient
     Task<RepairRunStartedDto?> StartRepairRunAsync(string robotId, IReadOnlyCollection<Guid> taskIds, Guid? scenarioId,
         bool optimize, int? round, CancellationToken ct) => StartRepairRunAsync(robotId, taskIds, scenarioId, optimize, ct);
     Task AbortRunAsync(Guid runId, CancellationToken ct = default);
+    /// <summary>중단 + 서버 응답(취소 방식 등). 기본 구현은 응답 없이 중단만 한다(기존 대역·구서버).</summary>
+    async Task<RunAbortResultDto?> AbortRunWithResultAsync(Guid runId, CancellationToken ct = default)
+    { await AbortRunAsync(runId, ct); return null; }
     Task ResumeRunAsync(Guid runId, CancellationToken ct = default);
     Task<ResumableRunDto?> GetResumableRunAsync(string robotId, CancellationToken ct = default);
     Task<bool> ReleaseNextMissionAsync(Guid runId, CancellationToken ct = default);

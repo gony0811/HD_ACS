@@ -94,9 +94,14 @@ public sealed class AcsApiClient : IAcsApiClient
     }
 
     public async Task AbortRunAsync(Guid runId, CancellationToken ct = default)
+        => await AbortRunWithResultAsync(runId, ct);
+
+    public async Task<RunAbortResultDto?> AbortRunWithResultAsync(Guid runId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsync($"/api/runs/{runId}/abort", null, ct);
         await EnsureSuccessOrThrowAsync(resp, ct);
+        try { return await resp.Content.ReadFromJsonAsync<RunAbortResultDto>(ct); }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     public async Task ResumeRunAsync(Guid runId, CancellationToken ct = default)

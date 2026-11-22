@@ -477,3 +477,7 @@ public sealed record ReachSettingsDto(
 /// <summary>리치 설정 저장 요청 — null 항목은 덮어쓰지 않는다(appsettings.json 값). 보낸 값으로 덮어쓰기 파일을 통째로 바꾼다.</summary>
 public sealed record ReachSettingsUpdateDto(
     string? LiftMode, double? FixedStrokeMm, double? MountZMm, double? AmrHeightMm, bool? SupportColumn, double? MaxEntryJointTravelDeg);
+
+/// <summary>POST /api/runs/{id}/abort 응답. CancelMode = "afterCurrentAction"(진행 중 검사 완료 후 홈 복귀) / "immediate" / null(취소 불필요·구서버).</summary>
+public sealed record RunAbortResultDto(Guid RunId, string? State, bool CancelOrderSent = false,
+    bool CancelOrderRequired = false, string? CancelMode = null);
