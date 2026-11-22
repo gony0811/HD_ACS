@@ -106,7 +106,11 @@
                     <StackPanel Orientation="Horizontal">
                         <Button Content="다시 계산" Command="{Binding SolveCommand}" Margin="0,0,6,0" />
                         <Button Content="새로고침" Command="{Binding RefreshCommand}" />
+                        <CheckBox Content="맵 왜곡 보정 (affine)" IsChecked="{Binding UseAffine}" Margin="12,0,0,0"
+                                  VerticalAlignment="Center" ToolTip.Tip="{Binding AffineHint}" />
                     </StackPanel>
+                    <TextBlock Text="{Binding AffineHint}" IsVisible="{Binding UseAffine}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11.5" />
                     <Border Background="{DynamicResource AppInfoBgBrush}" BorderBrush="{DynamicResource AppInfoBorderBrush}" BorderThickness="1" CornerRadius="3" Padding="7">
                         <TextBlock Text="{Binding CalibrationSummary}" TextWrapping="Wrap" Foreground="{DynamicResource AppInfoFgBrush}" />
                     </Border>

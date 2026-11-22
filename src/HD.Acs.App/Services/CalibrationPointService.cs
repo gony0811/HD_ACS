@@ -84,4 +84,65 @@ public sealed class CalibrationPointService
         await _db.SaveChangesAsync(ct);
         return points.Count;
     }
+
+    /// <summary>계산 결과. Model = "rigid" | "affine". RigidRmsM 은 같은 점을 강체로 풀었을 때의 잔차(비교용).</summary>
+    public sealed record SolveResult(string Model, DrawingTransform T, double RmsM, double MaxResidualM,
+        int PointCount, double RigidRmsM, double? LooRmsM, double ScaleMin, double ScaleMax, string? Warning);
+
+    /// <summary>
+    /// 현재 맵버전 기준점으로 T_W_D 를 풀어 저장한다.
+    /// model: "rigid"(회전·이동) / "affine"(축별 축척·전단 포함 — 맵이 실제보다 늘거나 줄어든 층) /
+    /// null(이 맵에 저장된 모델 유지, 없으면 rigid). RMS 가 임계값을 넘어도 저장하고 경고를 돌려준다.
+    /// </summary>
+    public async Task<SolveResult> SolveAsync(string mapId, string? model, double rmsWarnM, string? userId = null,
+        CancellationToken ct = default)
+    {
+        var map = await _db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.MapId == mapId, ct)
+            ?? throw new NotFoundException($"map '{mapId}' 없음");
+        var points = await _db.MapCalibrationPoints.AsNoTracking()
+            .Where(p => p.MapId == mapId && p.MapVersion == map.Version).ToListAsync(ct);
+        if (points.Count < 2)
+            throw new ValidationException("대응쌍이 2개 미만입니다. 최소 2점(권장 3점) 캡처 후 계산하세요.");
+
+        var cal = await _db.MapCalibrations.FindAsync(new object[] { mapId, map.Version }, ct);
+        string requested = (model ?? (cal?.A11 is not null ? "affine" : "rigid")).Trim().ToLowerInvariant();
+        if (requested is not ("rigid" or "affine"))
+            throw new ValidationException($"model 은 rigid 또는 affine 이어야 합니다(받은 값: '{model}').");
+
+        var pairs = points
+            .Select(p => (((double X, double Y))(p.DrawingXM, p.DrawingYM), ((double X, double Y))(p.MapX, p.MapY)))
+            .ToList();
+        var rigid = DrawingTransform.Solve(pairs);
+        var fit = rigid;
+        if (requested == "affine")
+        {
+            try { fit = DrawingTransform.SolveAffine(pairs); }
+            catch (ArgumentException ex) { throw new ValidationException(ex.Message.Split(" (Parameter")[0]); }
+        }
+        var t = fit.T;
+        double? loo = DrawingTransform.LeaveOneOutRms(pairs, t.IsAffine);
+        var (sMin, sMax) = t.Scales();
+
+        cal ??= _db.MapCalibrations.Add(new MapCalibrationEntity { MapId = mapId, MapVersion = map.Version }).Entity;
+        cal.Tx = t.Tx; cal.Ty = t.Ty; cal.YawRad = t.YawRad;
+        cal.A11 = t.Affine?.A11; cal.A12 = t.Affine?.A12; cal.A21 = t.Affine?.A21; cal.A22 = t.Affine?.A22;
+        cal.RmsM = fit.RmsM; cal.PointCount = points.Count; cal.RegisteredAt = DateTimeOffset.UtcNow;
+        if (userId is not null) cal.RegisteredBy = userId;
+        await _db.SaveChangesAsync(ct);
+
+        var warns = new List<string>();
+        if (fit.RmsM > rmsWarnM)
+            warns.Add($"등록 잔차 RMS {fit.RmsM:F4}m 가 임계값 {rmsWarnM:F3}m 를 초과합니다. 기준점 재캡처를 권장합니다.");
+        if (t.IsAffine)
+        {
+            if (points.Count < DrawingTransform.AffineMinPairs + 2)
+                warns.Add($"affine 은 기준점이 적으면 실제보다 잘 맞아 보입니다(현재 {points.Count}점) — 6점 이상을 길이·폭 양쪽으로 넓게 두세요.");
+            if (loo is double l && l > Math.Max(rmsWarnM, 2 * fit.RmsM))
+                warns.Add($"한 점씩 빼고 예측한 오차가 {l:F3}m 입니다 — 기준점이 없는 구역에서는 이 정도 어긋날 수 있습니다.");
+            if (sMin < 0.97 || sMax > 1.03)
+                warns.Add($"축척이 {sMin:F4}~{sMax:F4} 로 3% 넘게 벗어납니다 — 기준점 입력 오류나 맵 해상도를 확인하세요.");
+        }
+        return new SolveResult(t.IsAffine ? "affine" : "rigid", t, fit.RmsM, fit.MaxResidualM, points.Count,
+            rigid.RmsM, loo, sMin, sMax, warns.Count == 0 ? null : string.Join(" ", warns));
+    }
 }

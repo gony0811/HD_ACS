@@ -60,6 +60,9 @@ public interface IAcsApiClient
     Task<int> RotateCalibrationDrawingAsync(string mapId, double deg, string userId,
         CancellationToken ct = default) => throw new NotSupportedException();
     Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, CancellationToken ct = default);
+    /// <summary>모델 지정 계산 — "rigid" / "affine" / null(서버에 저장된 모델 유지). 기본 구현은 모델을 무시한다(기존 대역).</summary>
+    Task<CalibrationSolveResultDto> SolveCalibrationAsync(string mapId, string? model, CancellationToken ct = default)
+        => SolveCalibrationAsync(mapId, ct);
     Task<MapCalibrationDto?> GetCalibrationAsync(string mapId, CancellationToken ct = default);
 
     // ── 슬라이싱/TASK (전개도) [PHASE2 WP-5b] ──────────

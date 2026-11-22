@@ -77,7 +77,11 @@ CREATE TABLE ref.map_calibration (
   map_version   int  NOT NULL,               -- ref.map.version 과 일치할 때만 유효 [§2.5]
   tx            double precision NOT NULL,    -- 평행이동 X [m]
   ty            double precision NOT NULL,    -- 평행이동 Y [m]
-  yaw_rad       double precision NOT NULL,    -- 회전 [rad], 맵 X축 기준 CCW
+  yaw_rad       double precision NOT NULL,    -- 회전 [rad], 맵 X축 기준 CCW (affine 이면 가장 가까운 회전각)
+  a11           double precision,             -- affine 선형부(맵 = A·도면 + t). 네 값 NULL = 강체 R(yaw)
+  a12           double precision,
+  a21           double precision,
+  a22           double precision,
   rms_m         double precision NOT NULL,    -- 등록 잔차 RMS [m]
   point_count   int NOT NULL,                 -- 사용된 대응쌍 수
   registered_by text,

@@ -53,7 +53,8 @@ public sealed partial class ReachSimService
             try
             {
                 transforms[map.Level] = WeldInspectionPayload.ResolveTransform(map.Version, cal?.MapVersion,
-                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+                    cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                    cal?.A11, cal?.A12, cal?.A21, cal?.A22);
             }
             catch (Exception) { transforms[map.Level] = null; }
         }

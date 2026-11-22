@@ -19,7 +19,12 @@ public class MapCalibrationEntity
     public int MapVersion { get; set; }
     public double Tx { get; set; }                    // 평행이동 X [m]
     public double Ty { get; set; }                    // 평행이동 Y [m]
-    public double YawRad { get; set; }                // 회전 [rad], 맵 X축 기준 CCW
+    public double YawRad { get; set; }                // 회전 [rad], 맵 X축 기준 CCW (affine 이면 가장 가까운 회전각)
+    // affine 선형부(맵 = A·도면 + t). 네 값 모두 NULL = 강체(R(yaw)).
+    public double? A11 { get; set; }
+    public double? A12 { get; set; }
+    public double? A21 { get; set; }
+    public double? A22 { get; set; }
     public double RmsM { get; set; }                  // 등록 잔차 RMS [m]
     public int PointCount { get; set; }
     public string? RegisteredBy { get; set; }

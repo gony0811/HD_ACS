@@ -410,7 +410,8 @@ public sealed class MissionService
                 .Where(c => c.MapId == mission.MapId)
                 .OrderByDescending(c => c.MapVersion).FirstOrDefaultAsync(ct);
             weldTransform = WeldInspectionPayload.ResolveTransform(
-                map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0);
+                map.Version, cal?.MapVersion, cal?.Tx ?? 0, cal?.Ty ?? 0, cal?.YawRad ?? 0,
+                cal?.A11, cal?.A12, cal?.A21, cal?.A22);
             weldSchema = (await _db.ActionCatalog.AsNoTracking()
                 .FirstOrDefaultAsync(a => a.ActionType == "startWeldInspection", ct))?.ParamSchema;
             // seam z를 층 바닥 기준으로 보내기 위한 level_z [VDA §10 N17]

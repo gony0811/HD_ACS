@@ -216,7 +216,14 @@ public sealed record CalibrationSolveResultDto(
     double RmsM,
     double MaxResidualM,
     int PointCount,
-    string? Warning);
+    string? Warning,
+    // 아래는 affine 확장 이후 서버만 준다(구서버 = null → 강체)
+    string? Model = null,
+    double? A11 = null, double? A12 = null, double? A21 = null, double? A22 = null,
+    double? RigidRmsM = null, double? LooRmsM = null, double? ScaleMin = null, double? ScaleMax = null)
+{
+    public bool IsAffine => A11 is not null && A12 is not null && A21 is not null && A22 is not null;
+}
 
 /// <summary>GET /api/maps/{mapId}/calibration — 현재 유효 T_W_D (ref.map_calibration).</summary>
 public sealed record MapCalibrationDto(
@@ -228,7 +235,56 @@ public sealed record MapCalibrationDto(
     double RmsM,
     int PointCount,
     string? RegisteredBy,
-    DateTimeOffset RegisteredAt);
+    DateTimeOffset RegisteredAt,
+    // affine 선형부(맵 = A·도면 + t). 네 값 null = 강체 R(yaw) — 구서버 응답도 null
+    double? A11 = null, double? A12 = null, double? A21 = null, double? A22 = null)
+{
+    public bool IsAffine => A11 is not null && A12 is not null && A21 is not null && A22 is not null;
+    public CalTransform Transform => new(Tx, Ty, YawRad, A11, A12, A21, A22);
+}
+
+/// <summary>
+/// 도면↔맵 변환(T_W_D)의 화면 쪽 계산 — 서버 <c>DrawingTransform</c> 과 같은 식(UI.Core 는 도메인 Core 를 참조하지 않는다).
+/// 맵 = A·도면 + t. 선형부 네 값이 없으면 A = R(yaw)(강체).
+/// </summary>
+public readonly record struct CalTransform(double Tx, double Ty, double YawRad,
+    double? A11 = null, double? A12 = null, double? A21 = null, double? A22 = null)
+{
+    public bool IsAffine => A11 is not null && A12 is not null && A21 is not null && A22 is not null;
+
+    private (double, double, double, double) Linear()
+    {
+        if (IsAffine) return (A11!.Value, A12!.Value, A21!.Value, A22!.Value);
+        double cos = Math.Cos(YawRad), sin = Math.Sin(YawRad);
+        return (cos, -sin, sin, cos);
+    }
+
+    public (double X, double Y) DrawingToMap(double dx, double dy)
+    {
+        var (a11, a12, a21, a22) = Linear();
+        return (a11 * dx + a12 * dy + Tx, a21 * dx + a22 * dy + Ty);
+    }
+
+    public (double X, double Y) MapToDrawing(double mx, double my)
+    {
+        var (a11, a12, a21, a22) = Linear();
+        double det = a11 * a22 - a12 * a21, ux = mx - Tx, uy = my - Ty;
+        return ((a22 * ux - a12 * uy) / det, (-a21 * ux + a11 * uy) / det);
+    }
+
+    /// <summary>맵 heading → 도면 heading, (−π, π]. 강체는 theta − yaw, affine 은 방향 벡터에 A⁻¹ 적용.</summary>
+    public double MapThetaToDrawing(double thetaMap)
+    {
+        if (!IsAffine)
+        {
+            double t = Math.IEEERemainder(thetaMap - YawRad, 2 * Math.PI);
+            if (t <= -Math.PI) t += 2 * Math.PI;
+            return t;
+        }
+        double c = Math.Cos(thetaMap), s = Math.Sin(thetaMap);
+        return Math.Atan2(-A21!.Value * c + A11!.Value * s, A22!.Value * c - A12!.Value * s);
+    }
+}
 
 /// <summary>GET /api/seams 항목 — ref.weld_seam (도면 좌표 원본은 제외한 관리용 투영) [PHASE2 WP-5b].</summary>
 public sealed record SeamDto(

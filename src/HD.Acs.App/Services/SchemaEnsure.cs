@@ -111,6 +111,11 @@ public static class SchemaEnsure
           changed_at         timestamptz NOT NULL DEFAULT now()
         )
         """,
+        // db/migrations/2026-11-22_map_calibration_affine.sql — T_W_D affine 선형부(네 값 NULL = 강체)
+        "ALTER TABLE ref.map_calibration ADD COLUMN IF NOT EXISTS a11 double precision",
+        "ALTER TABLE ref.map_calibration ADD COLUMN IF NOT EXISTS a12 double precision",
+        "ALTER TABLE ref.map_calibration ADD COLUMN IF NOT EXISTS a21 double precision",
+        "ALTER TABLE ref.map_calibration ADD COLUMN IF NOT EXISTS a22 double precision",
     };
 
     public static async Task EnsureAsync(AcsDbContext db, ILogger log, CancellationToken ct = default)

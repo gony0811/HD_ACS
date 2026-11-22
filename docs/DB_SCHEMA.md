@@ -12,7 +12,7 @@
 | | ref.node | 정차/경유 노드 (좌표, 허용편차, ELEVATOR 포함) | VDA 5050 |
 | | ref.edge | 주행 간선 (TRAVEL / MANUAL_TRANSFER) | Q9 수동 이송 |
 | | ref.zone / ref.zone_member | 층·구역 계층 (FLOOR/AREA/RESTRICTED…) | 4층 슬라이스 |
-| **ref 캘리브레이션** | ref.map_calibration | 층별 도면→맵 강체변환 T_W_D (맵버전 바인딩) | PHASE2 WP-1 |
+| **ref 캘리브레이션** | ref.map_calibration | 층별 도면→맵 변환 T_W_D (맵버전 바인딩). 기본 강체(tx·ty·yaw_rad), `a11~a22` 가 있으면 affine(맵 = A·도면 + t, 네 값 NULL = 강체) | PHASE2 WP-1 |
 | | ref.map_calibration_point | 기준점 대응쌍 (감사·재계산 보존) | PHASE2 WP-1 |
 | **ref 액션** | ref.action_catalog | HD_AMR과 협의된 액션 계약 | Q1 |
 | **ref 시나리오** | ref.scenario | 검사 시나리오 (정책 jsonb 외부화) | ADR-010 |
