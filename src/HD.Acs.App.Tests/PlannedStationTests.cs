@@ -85,14 +85,19 @@ public class PlannedStationTests
     {
         var db = NewDb();
         var (scId, f, pm) = await Seed(db, link: false);
+        var d = Dispatcher(db);
+        // 자동 정차(이격 1.8, 법선 −x)에서 벽 x 를 얻는다
+        var auto = (await d.GetPlannedStationsAsync(scId, default))!.Stations.Single(s => s.AreaId == f.AreaId);
+        var wallX = auto.X + 1.8;
         f.StationX = 1.0; f.StationY = -2.0; f.StationTheta = 0.5;
         await db.SaveChangesAsync();
-        var d = Dispatcher(db);
 
         var plan = await d.GetPlannedStationsAsync(scId, default);
         Assert.Equal(2, plan!.Stations.Count);   // 연결 0건 = 선창 전체
         var fs = plan.Stations.Single(s => s.AreaId == f.AreaId);
         Assert.Equal((1.0, -2.0, 0.5, true), (fs.X, fs.Y, fs.Yaw!.Value, fs.Manual));
+        // 수동 정차의 이격 = 설정값(1.8)이 아니라 실제 정차점의 벽 거리 — 화면 "벽까지 (계획 n)"의 기준
+        Assert.Equal(wallX - 1.0, fs.StandoffM, 6);
         Assert.Equal(1.2, plan.Stations.Single(s => s.AreaId == pm.AreaId).StandoffM);   // 수직벽 기본 이격
 
         Assert.Null(await d.GetPlannedStationsAsync(Guid.NewGuid(), default));

@@ -284,10 +284,20 @@ public sealed class InspectionDispatcher
             var (x, y, yaw) = StationDrawingOf(a, wall, DefaultStandoffM(wall));
             var u = Json<double[]>(wall.UAxis);
             var n = Json<double[]>(wall.Normal);
+            var manual = a.StationX is not null || a.StationY is not null;
+            var nh = Horizontal(n);
+            // 수동(최적화 저장 포함) 정차는 이격 설정값이 아니라 실제 정차점의 벽 거리를 돌려준다 —
+            // 화면이 "벽까지 (계획 n)"을 이 값으로 계산하므로, 설정값을 주면 실제 정차와 다른 거리가 보인다.
+            var standoff = a.StationStandoffM ?? DefaultStandoffM(wall);
+            if (manual && nh is not null)
+            {
+                var pose = new WallPose(Json<double[]>(wall.Origin), u, Json<double[]>(wall.VAxis));
+                var (uc, vc) = AreaGeometry.Centroid(Json<double[][]>(a.Corners));
+                var c = pose.LocalToDrawing(uc, vc);
+                standoff = (x - c[0]) * nh[0] + (y - c[1]) * nh[1];
+            }
             list.Add(new PlannedStation(a.AreaId, a.Name, a.WallCode, a.Level, $"{sc.TankId}-L{a.Level}",
-                x, y, yaw, a.StationStandoffM ?? DefaultStandoffM(wall),
-                a.StationX is not null || a.StationY is not null,
-                Horizontal(u), Horizontal(n)));
+                x, y, yaw, standoff, manual, Horizontal(u), nh));
         }
         return new PlannedStations(scenarioId, sc.TankId, _allowedDevXy, _allowedDevTheta, list);
 
