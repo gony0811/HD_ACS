@@ -493,7 +493,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     }
 
     /// <summary>선택 용접선 1개만 검사 실행(리페어 run) — 주행·촬영을 포함한 실제 검사이며 결과가 기록에 남는다.
-    /// 진행은 운영 화면이 run 시작 알림을 받아 이어서 보여준다. 로봇은 활성 로봇(단일) 사용.</summary>
+    /// 진행은 운영 화면이 run 시작 알림을 받아 이어서 보여준다. 로봇은 활성 로봇(단일) 사용.
+    /// 정차는 그 용접선이 속한 **영역의 정차점(저장된 정차·리프트)** 그대로 — 이 용접선만 보고 정차를 다시 고르지 않는다
+    /// (계획 화면에서 정한 정차를 실기로 확인하는 용도. 작업 현황의 재검사는 종전대로 정차 최적화를 선택할 수 있다).</summary>
     [RelayCommand(CanExecute = nameof(CanUpdateTask))]
     private async Task InspectTaskOnlyAsync()
     {
@@ -502,11 +504,11 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         {
             var robots = await _api.GetRobotsAsync();
             if (robots.FirstOrDefault() is not { } robot) { StatusMessage = "등록된 로봇이 없습니다."; return; }
-            StatusMessage = $"용접선 seq {task.Seq} 검사 준비 — 이 용접선에 맞춰 정차 최적화 중…";
-            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId }, null, true, RoundProvider?.Invoke(), default);
+            StatusMessage = $"용접선 seq {task.Seq} 검사 준비 — 영역 정차점으로 검사합니다…";
+            var r = await _api.StartRepairRunAsync(robot.RobotId, new[] { task.TaskId }, null, false, RoundProvider?.Invoke(), default);
             StatusMessage = r is null
                 ? "검사 실행 실패: 관제 서버가 구빌드입니다 — 서버를 재빌드·재시작하세요."
-                : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} · {MissionViewModel.DescribeStops(r.Stops, true)} — 진행은 운영 화면에서 확인";
+                : $"용접선 seq {task.Seq} 검사 시작: {robot.RobotId} · 영역 정차점({SelectedArea?.Name ?? "소속 영역"})으로 정차 — 진행은 운영 화면에서 확인";
         }
         catch (Exception ex) { StatusMessage = $"검사 실행 실패: {ex.Message}"; }   // 409 진행 중 run·미연결, 400 사유
     }
