@@ -3,6 +3,8 @@
 #   tools\deploy_server.ps1 -Only app            # App만 / -Only ui
 #   tools\deploy_server.ps1 -Force               # 진행 중 run이 있어도 배포
 #   tools\deploy_server.ps1 -Sql db\migrations\2026-10-20_x.sql   # 배포 전 DB 마이그레이션 적용
+#   tools\deploy_server.ps1 -Server user@192.168.0.19 -Jump eggplant@100.116.213.68
+#                                                # 경유 PC(HD_AMR 원격 PC)를 거쳐 배포 — 서버 API 확인도 서버 안에서
 #
 # 전제: 서버에 SSH 키 접속(administrators_authorized_keys), 서비스 HDACS-App·postgresql-x64-16 설치,
 #       배치 C:\HDACS\{app,ui}. 서버의 appsettings.json은 덮어쓰지 않는다(현장 설정 보존).
@@ -11,17 +13,33 @@ param(
     [string]$Server = "user@10.10.100.4",
     [ValidateSet("all", "app", "ui")] [string]$Only = "all",
     [switch]$Force,
-    [string[]]$Sql = @()
+    [string[]]$Sql = @(),
+    # 경유 PC(user@host) — 서버에 직접 닿지 않을 때. ssh·scp 에 -J 로 넘기고, 서버 API 확인은 ssh 로 서버 안에서 한다.
+    [string]$Jump = ""
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $stage = Join-Path (Split-Path -Parent $root) "deploy_pkg\staging"
 $ssh = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
+if ($Jump) { $ssh += @("-J", $Jump) }
 $host_ = $Server.Split("@")[-1]
+# Windows OpenSSH 우선 — Git 의 ssh 는 한글 사용자 폴더 경로를 깨뜨려 known_hosts·키를 못 찾는다
+$sshDir = "$env:SystemRoot\System32\OpenSSH"
+$sshExe = if (Test-Path "$sshDir\ssh.exe") { "$sshDir\ssh.exe" } else { "ssh" }
+$scpExe = if (Test-Path "$sshDir\scp.exe") { "$sshDir\scp.exe" } else { "scp" }
 
 function Remote([string]$cmd) {
-    & ssh @ssh $Server $cmd
+    & $sshExe @ssh $Server $cmd
     if ($LASTEXITCODE -ne 0) { throw "원격 명령 실패 (exit $LASTEXITCODE)" }
+}
+
+# 서버 API GET — 경유 접속이면 서버 안에서 127.0.0.1 로 묻는다(이 PC 에서 서버 5199 에 닿지 않으므로)
+function ServerApi([string]$path) {
+    if (-not $Jump) { return Invoke-RestMethod "http://${host_}:5199$path" -TimeoutSec 5 }
+    $json = & $sshExe @ssh $Server "Invoke-RestMethod 'http://127.0.0.1:5199$path' -TimeoutSec 5 | ConvertTo-Json -Compress -Depth 4"
+    if ($LASTEXITCODE -ne 0) { throw (New-Object System.Net.WebException "서버 API 응답 없음") }
+    if (-not $json) { return @() }
+    return ($json -join "`n") | ConvertFrom-Json
 }
 
 $parts = if ($Only -eq "all") { @("app", "ui") } else { @($Only) }
@@ -31,7 +49,7 @@ Write-Host "==> 배포: $($parts -join '+') / $commit$dirty → $Server"
 
 # 1) 진행 중 run 확인 — 배포는 App 재시작이라 run 진행 중이면 중단(-Force로 무시)
 try {
-    $running = Invoke-RestMethod "http://${host_}:5199/api/runs?status=RUNNING" -TimeoutSec 5
+    $running = ServerApi "/api/runs?status=RUNNING"
     if (@($running).Count -gt 0 -and -not $Force) { throw "진행 중인 run $(@($running).Count)건 — 끝난 뒤 배포하거나 -Force" }
 } catch [System.Net.WebException] { Write-Host "   (서버 API 응답 없음 — 확인 생략)" }
 
@@ -48,10 +66,10 @@ foreach ($p in $parts) {
 # 3) 전송
 Write-Host "==> 전송"
 Remote "if (Test-Path C:\HDACS\staging) { Remove-Item -Recurse -Force C:\HDACS\staging }; New-Item -ItemType Directory C:\HDACS\staging | Out-Null"
-& scp -q @ssh -r ($parts | ForEach-Object { Join-Path $stage $_ }) "${Server}:C:/HDACS/staging/"
+& $scpExe -q @ssh -r ($parts | ForEach-Object { Join-Path $stage $_ }) "${Server}:C:/HDACS/staging/"
 if ($LASTEXITCODE -ne 0) { throw "scp 실패" }
 foreach ($f in $Sql) {
-    & scp -q @ssh (Join-Path $root $f) "${Server}:C:/HDACS/staging/"
+    & $scpExe -q @ssh (Join-Path $root $f) "${Server}:C:/HDACS/staging/"
     if ($LASTEXITCODE -ne 0) { throw "scp 실패: $f" }
 }
 
@@ -83,7 +101,7 @@ Get-ChildItem C:\HDACS\backup -Directory | Sort-Object Name -Descending | Select
 # 따옴표·줄바꿈이 ssh 명령줄에서 깨지지 않도록 스크립트 파일로 보내 실행 (BOM 포함 UTF-8 — PS 5.1 한글)
 $swapFile = Join-Path $stage "swap.ps1"
 [IO.File]::WriteAllText($swapFile, $swap, (New-Object Text.UTF8Encoding $true))
-& scp -q @ssh $swapFile "${Server}:C:/HDACS/staging/"
+& $scpExe -q @ssh $swapFile "${Server}:C:/HDACS/staging/"
 if ($LASTEXITCODE -ne 0) { throw "scp 실패: swap.ps1" }
 Write-Host "==> 교체"
 Remote "powershell -NoProfile -ExecutionPolicy Bypass -File C:\HDACS\staging\swap.ps1"
@@ -94,7 +112,7 @@ if ($parts -contains "app") {
     $ok = $false
     for ($i = 0; $i -lt 12 -and -not $ok; $i++) {
         Start-Sleep 5
-        try { Invoke-RestMethod "http://${host_}:5199/api/robots" -TimeoutSec 5 | Out-Null; $ok = $true } catch { }
+        try { ServerApi "/api/robots" | Out-Null; $ok = $true } catch { }
     }
     if (-not $ok) { throw "App 응답 없음 — 서버 C:\HDACS\logs\app-*.log 확인, 되돌리기는 C:\HDACS\backup 최신 폴더" }
 }
