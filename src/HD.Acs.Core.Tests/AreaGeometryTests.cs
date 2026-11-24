@@ -157,4 +157,21 @@ public class AreaGeometryTests
         Assert.False(AreaGeometry.PointInPolygon(4.0, 4.0, q));   // bbox 안이지만 다각형 밖
         Assert.False(AreaGeometry.PointInPolygon(10.0, 10.0, q)); // 완전 밖
     }
+
+    /// <summary>정차점의 실제 이격 = StationDrawing 의 역(영역 중심 → 정차점을 수평 내향 법선에 투영). 바닥·천장은 null.</summary>
+    [Fact]
+    public void StandoffOfStation_InvertsStationDrawing_AndIgnoresLateral()
+    {
+        double r = Math.Sqrt(0.5);
+        var pose = new WallPose(new[] { -15.48, -6.0, 9.0 }, new[] { 1.0, 0, 0 }, new[] { 0.0, r, r });   // 경사면 SU 꼴
+        var n = new[] { 0.0, r, -r };
+        var corners = new[] { new[] { 3.0, 0.5 }, new[] { 4.0, 0.5 }, new[] { 4.0, 1.5 }, new[] { 3.0, 1.5 } };
+        var st = AreaGeometry.StationDrawing(pose, 3.5, 1.0, n, 1.10);
+
+        Assert.Equal(1.10, AreaGeometry.StandoffOfStation(pose, corners, n, st[0], st[1])!.Value, 9);
+        Assert.Equal(1.10, AreaGeometry.StandoffOfStation(pose, corners, n, st[0] + 0.7, st[1])!.Value, 9);   // 좌우 이동 무관
+
+        var floor = new WallPose(new[] { 0.0, 0, 0 }, new[] { 1.0, 0, 0 }, new[] { 0.0, 1, 0 });
+        Assert.Null(AreaGeometry.StandoffOfStation(floor, corners, new[] { 0.0, 0, 1 }, 1, 1));
+    }
 }

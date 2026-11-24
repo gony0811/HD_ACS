@@ -47,6 +47,21 @@ public static class AreaGeometry
     }
 
     /// <summary>
+    /// 정차점 (x,y)의 실제 정차 이격 [m] — 영역 중심(코너 평균)의 도면 투영에서 정차점까지를 내부향 법선의
+    /// **수평 성분**에 투영한 거리(<see cref="StationDrawing"/>의 역). 덮어쓰기 정차가 저장될 때 이격 값을 이 거리로 맞춘다.
+    /// 수평 성분이 없는 면(바닥 B·천장 T)은 null(이격 미적용 면).
+    /// </summary>
+    public static double? StandoffOfStation(WallPose pose, IReadOnlyList<double[]> corners, double[]? wallNormal, double x, double y)
+    {
+        if (wallNormal is not { Length: >= 2 }) return null;
+        var h = Vec3.Normalize(new[] { wallNormal[0], wallNormal[1], 0.0 });
+        if (h is null) return null;
+        var (uc, vc) = Centroid(corners);
+        var c = pose.LocalToDrawing(uc, vc);
+        return (x - c[0]) * h[0] + (y - c[1]) * h[1];
+    }
+
+    /// <summary>
     /// 면 종류별 기본 정차 이격 [m] — 수직벽(법선의 수직 성분 ≈ 0: A·F·SM·PM)은 <paramref name="verticalM"/>,
     /// 경사면(SL·PL·SU·PU)은 <paramref name="inclinedM"/>. 바닥·천장은 이격이 적용되지 않으므로 무엇을 돌려도 같다.
     /// 수직벽을 따로 두는 이유: FR5-WML 오프라인 리치 분석(2026-10-31)에서 0.8m 는 수직벽 용접선이 하나도 닿지 않았고

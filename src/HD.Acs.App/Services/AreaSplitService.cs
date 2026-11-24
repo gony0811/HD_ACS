@@ -110,6 +110,7 @@ public sealed class AreaSplitService(AcsDbContext db)
             (target.UMin, target.VMin, target.UMax, target.VMax) = (bb.MinU, bb.MinV, bb.MaxU, bb.MaxV);
             target.StationX = g.StationX; target.StationY = g.StationY; target.StationTheta = g.StationTheta;
             target.StationLiftMm = g.StationLiftMm;
+            AreaRules.SyncStandoffToStation(target, wall);   // 이격 = 고른 정차의 실제 거리
             var ordered = AreaRules.OrderByLine(tasks);
             for (var i = 0; i < ordered.Count; i++)
             {
