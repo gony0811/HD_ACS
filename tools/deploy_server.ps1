@@ -36,7 +36,8 @@ function Remote([string]$cmd) {
 # 서버 API GET — 경유 접속이면 서버 안에서 127.0.0.1 로 묻는다(이 PC 에서 서버 5199 에 닿지 않으므로)
 function ServerApi([string]$path) {
     if (-not $Jump) { return Invoke-RestMethod "http://${host_}:5199$path" -TimeoutSec 5 }
-    $json = & $sshExe @ssh $Server "Invoke-RestMethod 'http://127.0.0.1:5199$path' -TimeoutSec 5 | ConvertTo-Json -Compress -Depth 4"
+    # 서버 PS 5.1 은 배열을 파이프로 넘기면 {"value":[...],"Count":n} 로 감싸므로 -InputObject @(...) 로 항상 JSON 배열을 받는다
+    $json = & $sshExe @ssh $Server "`$r = Invoke-RestMethod 'http://127.0.0.1:5199$path' -TimeoutSec 5; ConvertTo-Json -InputObject @(`$r) -Compress -Depth 4"
     if ($LASTEXITCODE -ne 0) { throw (New-Object System.Net.WebException "서버 API 응답 없음") }
     # 빈 결과는 아무것도 내보내지 않는다 — return @() 는 $null 이 되어 @($null).Count = 1 로 세어진다.
     # 배열은 항목별로 풀어 내보내 호출부의 @(...).Count 가 실제 건수가 되게 한다(PS 5.1 ConvertFrom-Json 은 배열을 한 덩어리로 낸다)
