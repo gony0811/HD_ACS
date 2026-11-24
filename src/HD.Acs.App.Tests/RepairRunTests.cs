@@ -206,6 +206,28 @@ public class RepairRunTests
         Assert.Null(JsonNode.Parse(wi.Actions!)![0]!["liftFixed"]);
     }
 
+    /// <summary>계획 ▸ [선택 작업만 검사 실행] — 영역 정차점으로 시작한 run은 이어하기에서도 정차를 다시 고르지 않는다.</summary>
+    [Fact]
+    public async Task Repair_OptimizeOff_ResumeKeepsSavedStation()
+    {
+        var f = await Seed();
+        var weld = f.A.Tasks.Single(t => t.Seq == 2);
+        f.A.StationStandoffM = 3.5;                                 // 최적화하면 옮겨질 자리
+        await f.Db.SaveChangesAsync();
+        var planned = (await f.Dispatcher.GetPlannedStationsAsync(f.ScenarioId, default))!.Stations.Single(s => s.AreaId == f.A.AreaId);
+
+        var started = await WithReach(f).StartRepairRunAsync("AMR-01", new[] { weld.TaskId }, optimize: false);
+        await f.Missions.AbortRunAsync(started.RunId);
+        (await f.Db.RobotContexts.SingleAsync(r => r.RobotId == "AMR-01")).ReportedAt = DateTimeOffset.UtcNow;
+        await f.Db.SaveChangesAsync();
+        await WithReach(f).ResumeRunAsync(started.RunId);
+
+        var wi = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == started.RunId);
+        Assert.Equal(planned.X + 9.35, wi.X, 3);
+        Assert.Equal(planned.Y + 12.3, wi.Y, 3);
+        Assert.Null(JsonNode.Parse(wi.Actions!)![0]!["liftFixed"]);
+    }
+
     [Fact]
     public async Task Resume_OfRepairRun_KeepsOnlyTheChosenWeld()
     {

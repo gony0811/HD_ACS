@@ -91,6 +91,26 @@ public sealed class MissionService
         return await StartRunCoreAsync(sid.Value, robotId, ids, optimize, ct, round);
     }
 
+    /// <summary>리페어 run이 시작할 때 정차 최적화 결과를 썼는지 — 그 정차의 액션에는 liftFixed 표시가 남는다.</summary>
+    private async Task<bool> UsedRepairOptimizeAsync(Guid runId, CancellationToken ct)
+    {
+        var actions = await _db.WorkItems.AsNoTracking().Where(w => w.RunId == runId)
+            .Select(w => w.Actions).ToListAsync(ct);
+        // jsonb 는 공백·키 순서를 바꿔 돌려주므로 문자열 비교가 아니라 파싱해서 본다
+        return actions.Any(a =>
+        {
+            if (string.IsNullOrEmpty(a)) return false;
+            try
+            {
+                return System.Text.Json.Nodes.JsonNode.Parse(a) is System.Text.Json.Nodes.JsonArray arr
+                       && arr.Any(x => x is System.Text.Json.Nodes.JsonObject o
+                                       && o["liftFixed"] is System.Text.Json.Nodes.JsonValue v
+                                       && v.TryGetValue<bool>(out var b) && b);
+            }
+            catch (System.Text.Json.JsonException) { return false; }
+        });
+    }
+
     /// <summary>리페어 run의 정차 최적화 — 실패해도 재검사는 저장된 정차로 진행한다(빈 목록).</summary>
     private async Task<IReadOnlyList<RepairStop>> RepairStopsAsync(string tankId, HashSet<Guid> taskIds, CancellationToken ct,
         IReadOnlySet<Guid>? onlyAreas = null)
@@ -275,9 +295,10 @@ public sealed class MissionService
         }
 
         // 남은 정차의 좌표·액션을 현재 계획/캘리브레이션으로 다시 계산 — 시작 시점 스냅샷으로 움직이지 않는다
-        // 리페어 run은 남은 정차를 다시 계산할 때도 그 용접선만 놓고 정차를 고른다
+        // 리페어 run은 남은 정차를 다시 계산할 때도 그 용접선만 놓고 정차를 고른다 —
+        // 단 시작할 때 정차 최적화를 쓴 run만(정차 최적화를 끄고 시작한 run은 영역 정차점 그대로 이어한다)
         Dictionary<Guid, InspectionDispatcher.StopOverride>? overrides = null;
-        if (InspectionDispatcher.RepairFilter(run) is { } only)
+        if (InspectionDispatcher.RepairFilter(run) is { } only && await UsedRepairOptimizeAsync(runId, ct))
         {
             var tank = await _db.Scenarios.AsNoTracking().Where(s => s.ScenarioId == run.ScenarioId)
                 .Select(s => s.TankId).FirstOrDefaultAsync(ct);

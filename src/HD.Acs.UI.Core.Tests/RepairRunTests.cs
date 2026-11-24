@@ -37,6 +37,9 @@ public class RepairRunTests
                 case nameof(IAcsApiClient.GetWorkItemsAsync):
                     v = new[] { new WorkItemDto(Wi, Area, "A", 1, "CT1-L1", 0, "PENDING", 0) };
                     break;
+                case nameof(IAcsApiClient.GetRobotsAsync):
+                    v = new[] { new RobotDto("AMR-01", "AMR-01", "HD", "AMR-01", "2.0.0", true) };
+                    break;
                 case nameof(IAcsApiClient.GetTankAreaTasksAsync):
                     v = new[] { T(A1, 1), T(A2, 2), T(A3, 3) };
                     break;
@@ -156,5 +159,23 @@ public class RepairRunTests
         await vm.RepairFailedCommand.ExecuteAsync(null);
         Assert.Contains("구빌드", vm.StatusMessage);
         Assert.False(vm.CurrentRun!.IsRepair);                      // 화면은 그대로
+    }
+
+    /// <summary>계획 ▸ [선택 작업만 검사 실행] — 정차 최적화 없이 그 용접선이 속한 영역의 정차점으로 검사한다.</summary>
+    [Fact]
+    public async Task PlanningInspectTaskOnly_UsesAreaStation_NoOptimize()
+    {
+        RepairApi.Started = new(); RepairApi.OldServer = false; RepairApi.Reject = null;
+        RepairApi.Optimize = new(); RepairApi.Stops = null;
+        var vm = new AreaPlanningViewModel(DispatchProxy.Create<IAcsApiClient, RepairApi>(),
+            Microsoft.Extensions.Options.Options.Create(new AcsOptions { OperatorId = "tester" }));
+        vm.SelectedTask = new AreaTaskDto(RepairApi.A2, 2, "H02", "LINE", 0, 0, 1, 0, "D", "P");
+
+        await vm.InspectTaskOnlyCommand.ExecuteAsync(null);
+
+        var started = Assert.Single(RepairApi.Started);
+        Assert.Equal(new[] { RepairApi.A2 }, started.Tasks);
+        Assert.False(Assert.Single(RepairApi.Optimize));            // 정차 최적화 끔 = 영역 저장 정차·리프트
+        Assert.Contains("영역 정차점", vm.StatusMessage);
     }
 }

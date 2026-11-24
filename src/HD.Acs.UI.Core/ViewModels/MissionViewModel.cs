@@ -439,19 +439,27 @@ public sealed partial class MissionViewModel : ObservableObject
         if (CurrentRun is not null) await RefreshRunAsync(CurrentRun.RunId);
     }
 
+    /// <summary>RefreshRunAsync 호출 세대 — 마지막에 시작한 호출만 화면에 반영한다.</summary>
+    private int _refreshGeneration;
+
+    /// <summary>
+    /// run·실행 큐를 서버에서 다시 읽어 화면에 반영한다.
+    /// 미션 시작 직후에는 시작 경로의 새로고침과 RunState 푸시의 AdoptRunAsync 가 동시에 돈다.
+    /// 예전에는 두 호출이 각자 WorkItems 를 비운 뒤 각자 행을 넣어 행이 중복됐고, 다음 WorkItemProgress 푸시의
+    /// ToDictionary(AreaId) 에서 UI 가 종료됐다(2026-11-24 현장). 그래서 결과는 지역 목록에 모으고,
+    /// 모든 조회가 끝났을 때 자기가 마지막 호출일 때만 한 번에 교체한다.
+    /// </summary>
     private async Task RefreshRunAsync(Guid runId)
     {
+        var generation = Interlocked.Increment(ref _refreshGeneration);
+        bool Superseded() => Volatile.Read(ref _refreshGeneration) != generation;
+
         var run = await _api.GetRunAsync(runId);
-        CurrentRun = run;
-        Missions.Clear();
-        if (run is not null)
-            foreach (var m in run.Missions.OrderBy(m => m.Seq))
-                Missions.Add(m);
 
         // 실행 큐 초기 로드(pull) — 이후 실시간 갱신은 WorkItemProgress/TaskActionProgress 푸시가 담당.
+        var rows = new List<WorkItemRow>();
         try
         {
-            WorkItems.Clear();
             if (run is not null)
             {
                 var items = await _api.GetWorkItemsAsync(runId);
@@ -482,27 +490,43 @@ public sealed partial class MissionViewModel : ObservableObject
                             row.Tasks.Add(new TaskRow(t.TaskId, t.Seq, t.Name ?? $"라인 {t.Seq}"));
                     }
                     catch { /* 영역 삭제 등 — 라인 없이 표시 */ }
-                    WorkItems.Add(row);
+                    rows.Add(row);
                 }
 
                 // 액션 상태 병합 — CreatedAt 오름차순 응답이라 나중(최신 시도) 것이 덮어씀
                 foreach (var a in await _api.GetTaskActionsAsync(runId))
                 {
-                    var task = FindTask(a.WorkItemId, a.TaskId);
+                    var task = FindTask(rows, a.WorkItemId, a.TaskId);
                     if (task is null) continue;
                     task.Apply(a.Status, ExtractResultDescription(a.Result));
                 }
-                foreach (var w in WorkItems) w.RefreshOutcome();
+                foreach (var w in rows) w.RefreshOutcome();
             }
         }
         catch { /* 작업 큐 조회 실패는 화면 흐름을 막지 않음 */ }
+
+        // 더 나중에 시작한 새로고침이 있으면 그쪽이 화면을 채운다 — 여기서 손대면 행이 섞인다
+        if (Superseded()) return;
+
+        CurrentRun = run;
+        Missions.Clear();
+        if (run is not null)
+            foreach (var m in run.Missions.OrderBy(m => m.Seq))
+                Missions.Add(m);
+        WorkItems.Clear();
+        foreach (var row in rows) WorkItems.Add(row);
+
         RebuildWorkSummary();
         WorkItemsChanged?.Invoke(this, EventArgs.Empty);
 
         RebuildFloorProgress();
 
         // TASK 단위 진행률 초기 로드(pull) — 이후 실시간 갱신은 RunProgress 푸시가 담당.
-        try { ApplyTaskProgress(run is null ? null : await _api.GetRunProgressAsync(runId)); }
+        try
+        {
+            var progress = run is null ? null : await _api.GetRunProgressAsync(runId);
+            if (!Superseded()) ApplyTaskProgress(progress);
+        }
         catch { /* 진행률 조회 실패는 화면 흐름을 막지 않음 */ }
 
         ReleaseNextCommand.NotifyCanExecuteChanged();
@@ -575,10 +599,12 @@ public sealed partial class MissionViewModel : ObservableObject
         WorkItemsChanged?.Invoke(this, EventArgs.Empty);   // TankView 용접선 색 갱신
     }
 
-    private TaskRow? FindTask(Guid? workItemId, Guid? taskId)
+    private TaskRow? FindTask(Guid? workItemId, Guid? taskId) => FindTask(WorkItems, workItemId, taskId);
+
+    private static TaskRow? FindTask(IEnumerable<WorkItemRow> rows, Guid? workItemId, Guid? taskId)
     {
         if (workItemId is null || taskId is null) return null;
-        return WorkItems.FirstOrDefault(w => w.WorkItemId == workItemId)
+        return rows.FirstOrDefault(w => w.WorkItemId == workItemId)
             ?.Tasks.FirstOrDefault(t => t.TaskId == taskId);
     }
 
