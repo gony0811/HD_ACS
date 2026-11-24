@@ -38,8 +38,10 @@ function ServerApi([string]$path) {
     if (-not $Jump) { return Invoke-RestMethod "http://${host_}:5199$path" -TimeoutSec 5 }
     $json = & $sshExe @ssh $Server "Invoke-RestMethod 'http://127.0.0.1:5199$path' -TimeoutSec 5 | ConvertTo-Json -Compress -Depth 4"
     if ($LASTEXITCODE -ne 0) { throw (New-Object System.Net.WebException "서버 API 응답 없음") }
-    if (-not $json) { return @() }
-    return ($json -join "`n") | ConvertFrom-Json
+    # 빈 결과는 아무것도 내보내지 않는다 — return @() 는 $null 이 되어 @($null).Count = 1 로 세어진다.
+    # 배열은 항목별로 풀어 내보내 호출부의 @(...).Count 가 실제 건수가 되게 한다(PS 5.1 ConvertFrom-Json 은 배열을 한 덩어리로 낸다)
+    if (-not $json) { return }
+    ($json -join "`n") | ConvertFrom-Json | ForEach-Object { $_ }
 }
 
 $parts = if ($Only -eq "all") { @("app", "ui") } else { @($Only) }
