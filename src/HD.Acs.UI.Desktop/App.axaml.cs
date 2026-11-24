@@ -32,6 +32,7 @@ public partial class App : Application
 
         if (AutoStart && ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            UiErrorLog.Install();
             _host = AppHost.Build();
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
             var window = _host.Services.GetRequiredService<MainWindow>();

@@ -116,10 +116,11 @@ public sealed partial class ShellViewModel : ObservableObject
         AreaPlanning.PlanningChanged += (_, _) => RobotStatus.InvalidatePlannedStations();
 
         // 실행 큐(work_item)·용접라인(액션) 상태 변화 → TankView 영역/용접선 상태색 갱신 (운영 진행 지도)
+        // 키가 겹쳐도 예외 없이 나중 값으로 덮는다 — 이 핸들러는 푸시를 받은 UI 스레드에서 바로 돌아, 예외가 나면 앱이 종료된다
         Mission.WorkItemsChanged += (_, _) =>
             Tank.ApplyWorkItemStatuses(
-                Mission.WorkItems.ToDictionary(w => w.AreaId, w => w.DisplayStatus),   // 영역 성공 = 소속 용접선 전부 성공
-                Mission.WorkItems.SelectMany(w => w.Tasks).ToDictionary(t => t.TaskId, t => t.Status),
+                ToLastWins(Mission.WorkItems.Select(w => (w.AreaId, w.DisplayStatus))),   // 영역 성공 = 소속 용접선 전부 성공
+                ToLastWins(Mission.WorkItems.SelectMany(w => w.Tasks).Select(t => (t.TaskId, t.Status))),
                 partialAreas: Mission.CurrentRun?.IsRepair == true);   // 리페어 run은 영역의 용접선 일부만 검사
 
         // run 시작·종료·전환 → 선창 누적 검사 기록(용접선별 최근 결과)을 다시 읽어 지난 run의 결과를 도면에 남긴다
@@ -448,6 +449,14 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     public void NotifyEmergencyStopCanExecute() => EmergencyStopCommand.NotifyCanExecuteChanged();
+
+    /// <summary>(키, 값) 목록 → 사전. 같은 키가 또 나오면 나중 값으로 덮는다(ToDictionary 와 달리 예외 없음).</summary>
+    public static Dictionary<Guid, string> ToLastWins(IEnumerable<(Guid Key, string Value)> pairs)
+    {
+        var map = new Dictionary<Guid, string>();
+        foreach (var (key, value) in pairs) map[key] = value;
+        return map;
+    }
 
     private static string ToText(HubStatus s) => s switch
     {
