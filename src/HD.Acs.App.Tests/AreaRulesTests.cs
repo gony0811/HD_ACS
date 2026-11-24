@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using HD.Acs.App.Services;
 using HD.Acs.Data.Entities;
 using Xunit;
@@ -163,5 +164,19 @@ public class AreaRulesTests
         var b = new InspectionAreaEntity { Corners = "[[1,1],[2,1],[2,2],[1,2]]", StationX = 0.4, StationY = 0.4, StationStandoffM = null };
         AreaRules.SyncStandoffToStation(b, floor);                      // 바닥·천장은 이격 미적용 → 손대지 않음
         Assert.Null(b.StationStandoffM);
+    }
+
+    /// <summary>팔 링크–벽 최소 여유 설정 — 없으면 0(종전), 0~300 mm 로 자른다.</summary>
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("100", 100)]
+    [InlineData("-5", 0)]
+    [InlineData("900", 300)]
+    public void ArmWallMargin_ReadFromConfig(string? value, double expected)
+    {
+        var data = new Dictionary<string, string?>();
+        if (value is not null) data["Acs:Reach:ArmWallMarginMm"] = value;
+        var cfg = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(data).Build();
+        Assert.Equal(expected, ReachSimService.ModelFrom(cfg).ArmWallMarginMm);
     }
 }

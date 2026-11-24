@@ -220,6 +220,7 @@ public sealed partial class ReachSimService
             EntrySelfMarginMm = config.GetValue("Acs:Reach:EntrySelfMarginMm", d.EntrySelfMarginMm),
             PlanarEntryWalls = PlanarEntryWallsFrom(config.GetSection("Acs:Reach:PlanarEntryWalls")),
             EntryPathMarginMm = config.GetValue("Acs:Reach:EntryPathMarginMm", d.EntryPathMarginMm),
+            ArmWallMarginMm = Math.Clamp(config.GetValue("Acs:Reach:ArmWallMarginMm", d.ArmWallMarginMm), 0, 300),
             SafeJ6MinDeg = j6.Min,
             SafeJ6MaxDeg = j6.Max,
             SafeJ6StandbyDeg = j6.Standby,
