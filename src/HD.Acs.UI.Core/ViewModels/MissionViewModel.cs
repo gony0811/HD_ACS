@@ -241,7 +241,8 @@ public sealed partial class MissionViewModel : ObservableObject
     /// <summary>회차 선택(0 = 1회차, 1 = 2회차). 가스검사는 회차가 필수라 "없음"은 두지 않는다(세이지가 회차 없는 결과를 거부).</summary>
     [ObservableProperty] private int _roundIndex;
     /// <summary>미션·재검사 시작에 실을 회차 — 가스검사 선창이면 1 또는 2, 아니면 null.</summary>
-    public int? Round => IsGasTank ? (RoundIndex == 1 ? 2 : 1) : null;
+    /// <remarks>2026-11-24: 회차는 보내지 않는다 — 서버가 구역(영역)별 검사 횟수를 세어 지령 params.round 에 싣는다.</remarks>
+    public int? Round => null;
 
     [RelayCommand(CanExecute = nameof(CanStartRun))]
     private async Task StartRunAsync()

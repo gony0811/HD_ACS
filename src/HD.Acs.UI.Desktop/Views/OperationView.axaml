@@ -167,10 +167,7 @@
                         <ComboBox Width="120" MinHeight="30" Margin="0,0,10,0"
                                   ItemsSource="{Binding Mission.RobotIds}"
                                   SelectedItem="{Binding Mission.SelectedRobotId}" />
-                        <!-- 가스검사 선창에서만 — 선창 전체 검사 회차(지령 params.round) -->
-                        <ComboBox Width="100" MinHeight="30" Margin="0,0,10,0" IsVisible="{Binding Mission.IsGasTank}"
-                                  ToolTip.Tip="가스검사 회차(필수) — 미션 시작·재검사에 함께 쓰이고 가스 측정 결과에 기록됩니다"
-                                  ItemsSource="{Binding Mission.RoundOptions}" SelectedIndex="{Binding Mission.RoundIndex}" />
+                        <!-- 가스검사 회차 선택은 없다 — 서버가 구역(영역)별 검사 횟수를 세어 지령 params.round 에 싣는다 -->
                     </StackPanel>
                     <Button Grid.Column="2" Content="미션 시작" MinHeight="30" Margin="0,0,6,0"
                             Command="{Binding Mission.StartRunCommand}" />

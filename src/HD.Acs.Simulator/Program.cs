@@ -607,7 +607,7 @@ static class WeldInspectionParams
                 violations.Add("params.attempt");
             // round — 가스검사 회차(선택). 실려 왔다면 1 또는 2 [HD_AMR 가스 디텍터 사양 §5.1 — 그 밖의 값은 AMR 이 거부]
             if (prms.Value.TryGetProperty("round", out var rd) &&
-                !(rd.ValueKind == JsonValueKind.Number && rd.TryGetInt32(out var rdv) && rdv is 1 or 2))
+                !(rd.ValueKind == JsonValueKind.Number && rd.TryGetInt32(out var rdv) && rdv >= 1))
                 violations.Add("params.round");
         }
         return (violations.Count == 0, violations, jobRef ?? "", anchorGroupId, seqInGroup);

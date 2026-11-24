@@ -14,7 +14,7 @@ namespace HD.Acs.App.Tests;
 
 /// <summary>
 /// 가스검사 지령 — HD_AMR 은 같은 용접선 시퀀스에서 검사 센서만 가스 감지기로 바꾸므로 액션은 startWeldInspection 그대로이고,
-/// run 의 검사 회차만 params.round(1|2)로 얹는다 [HD_AMR docs/GAS_DETECTOR_XL3000FLEX.md §5.1].
+/// 그 구역의 검사 횟수만 params.round 로 얹는다 [HD_AMR docs/GAS_DETECTOR_XL3000FLEX.md §5.1].
 /// </summary>
 public class GasCommandTests
 {
@@ -66,62 +66,79 @@ public class GasCommandTests
     private static async Task<JsonObject> FirstAction(AcsDbContext db, Guid runId) =>
         JsonNode.Parse((await db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId)).Actions!)![0]!.AsObject();
 
-    [Theory]
-    [InlineData(1)] [InlineData(2)]
-    public async Task GasTank_SendsWeldActionWithRound(int round)
+    /// <summary>지난 run 을 끝낸 것으로 만든다 — 그 구역의 정차를 주어진 상태로.</summary>
+    private static async Task Finish(AcsDbContext db, Guid runId, string itemStatus)
+    {
+        var run = await db.ScenarioRuns.SingleAsync(r => r.RunId == runId);
+        run.State = "COMPLETED";
+        foreach (var w in await db.WorkItems.Where(w => w.RunId == runId).ToListAsync()) w.Status = itemStatus;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>가스검사 지령의 round = 그 구역(영역)을 검사하는 횟수 — 운영자가 고르지 않고 서버가 센다. 1·2 로 묶지 않는다.</summary>
+    [Fact]
+    public async Task GasTank_SendsAreaInspectionCountAsRound()
     {
         var f = await Seed("GAS");
 
-        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", round: round);
-
-        var action = await FirstAction(f.Db, runId);
+        var run1 = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        var action = await FirstAction(f.Db, run1);
         Assert.Equal("startWeldInspection", action["actionType"]!.GetValue<string>());   // AMR 계약 — 액션은 용접검사와 같다
-        Assert.Equal(round, action["params"]!["round"]!.GetValue<int>());
+        Assert.Equal(1, action["params"]!["round"]!.GetValue<int>());
         Assert.Equal("LINE", action["params"]!["seamType"]!.GetValue<string>());          // 나머지 파라미터는 용접검사 그대로
-        Assert.Equal(round, (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).Round);
-        Assert.Equal(round, (await new RunQueryService(f.Db).GetRunAsync(runId))!.Round);
+        Assert.Equal(1, (await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == run1)).Round);
+        Assert.Null((await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == run1)).Round);   // run 단위 회차는 쓰지 않는다
+        await Finish(f.Db, run1, "DONE");
+
+        // 구 UI 가 보내는 round 인자는 무시한다
+        var run2 = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", round: 1);
+        Assert.Equal(2, (await FirstAction(f.Db, run2))["params"]!["round"]!.GetValue<int>());
+        await Finish(f.Db, run2, "SKIPPED");   // 실패로 건너뛴 것도 검사한 횟수다
+
+        var run3 = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        Assert.Equal(3, (await FirstAction(f.Db, run3))["params"]!["round"]!.GetValue<int>());
+        await Finish(f.Db, run3, "PENDING");   // 그 구역에 가지 못하고 끝난 run 은 세지 않는다
+
+        var run4 = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        Assert.Equal(3, (await FirstAction(f.Db, run4))["params"]!["round"]!.GetValue<int>());
     }
 
-    /// <summary>가스검사는 회차가 필수 — 세이지가 회차 없는 결과를 거부하고 재전송도 받지 않으므로 시작 자체를 막는다.</summary>
+    /// <summary>이어하기로 남은 정차를 다시 계산해도 그 정차의 횟수는 그대로다.</summary>
     [Fact]
-    public async Task GasTank_WithoutRound_IsRefused_BeforeAnyRun()
+    public async Task Refresh_KeepsRoundOfTheStop()
     {
         var f = await Seed("GAS");
+        var run1 = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        await Finish(f.Db, run1, "DONE");
+        var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01");
+        var run = await f.Db.ScenarioRuns.Include(r => r.Missions).SingleAsync(r => r.RunId == runId);
+        var items = await f.Db.WorkItems.Where(w => w.RunId == runId).ToListAsync();
+        foreach (var w in items) w.Status = "PENDING";
+        var dispatcher = new InspectionDispatcher(f.Db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
+            hub: null!, new ConfigurationBuilder().Build(), NullLogger<InspectionDispatcher>.Instance);
 
-        var ex = await Assert.ThrowsAsync<RunRequestInvalidException>(() => f.Missions.StartRunAsync(f.ScenarioId, "AMR-01"));
+        await dispatcher.RefreshOpenItemsAsync(run, items, default);
 
-        Assert.Contains("회차", ex.Message);
-        Assert.Empty(await f.Db.ScenarioRuns.ToListAsync());
+        Assert.Equal(2, JsonNode.Parse(items[0].Actions!)![0]!["params"]!["round"]!.GetValue<int>());
     }
 
     [Fact]
-    public async Task WeldTank_IgnoresRound()
+    public async Task WeldTank_HasNoRound()
     {
         var f = await Seed("WELD");
 
         var runId = await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", round: 2);
 
         Assert.False((await FirstAction(f.Db, runId))["params"]!.AsObject().ContainsKey("round"));
-        Assert.Null((await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).Round);
+        Assert.Null((await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId)).Round);
     }
 
-    [Theory]
-    [InlineData(0)] [InlineData(3)]
-    public async Task RoundOutsideOneOrTwo_IsRejected_BeforeAnyRun(int round)
-    {
-        var f = await Seed("GAS");
-
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", round: round));
-
-        Assert.Empty(await f.Db.ScenarioRuns.ToListAsync());
-    }
-
-    /// <summary>액션 카탈로그 스키마도 round 를 1·2 로 묶는다 — 다른 경로로 잘못된 값이 실려도 발행 전 검증에서 걸린다.</summary>
+    /// <summary>액션 카탈로그 스키마 — round 는 1 이상의 정수(검사 횟수라 상한이 없다).</summary>
     [Fact]
-    public async Task ParamSchema_AllowsOnlyRoundOneOrTwo()
+    public async Task ParamSchema_AllowsAnyPositiveRound()
     {
         var f = await Seed("GAS");
-        var action = await FirstAction(f.Db, await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01", round: 1));
+        var action = await FirstAction(f.Db, await f.Missions.StartRunAsync(f.ScenarioId, "AMR-01"));
         JsonObject Payload(int round)
         {
             var prm = action["params"]!.DeepClone().AsObject();
@@ -129,7 +146,7 @@ public class GasCommandTests
             return WeldInspectionPayload.BuildActionParameters(action["jobRef"]!.GetValue<string>(), action["position"]!.DeepClone().AsObject(), prm);
         }
 
-        Assert.Empty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.StartWeldInspectionParamSchema, Payload(2)));
-        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.StartWeldInspectionParamSchema, Payload(3)));
+        Assert.Empty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.StartWeldInspectionParamSchema, Payload(7)));
+        Assert.NotEmpty(WeldInspectionPayload.ValidateSchema(ActionCatalogSeed.StartWeldInspectionParamSchema, Payload(0)));
     }
 }

@@ -48,11 +48,16 @@ public class GasSpecTests
     public void Violations_CatchWhatSaigeWouldReject()
     {
         Assert.Contains(SaigeGasResult.Violations(Example(o => o.Remove("round"))), v => v.Contains("round"));       // 필수
-        Assert.Contains(SaigeGasResult.Violations(Example(o => o["round"] = 3)), v => v.Contains("round"));
+        Assert.Contains(SaigeGasResult.Violations(Example(o => o["round"] = JsonNode.Parse("0"))), v => v.Contains("round"));
+        Assert.DoesNotContain(SaigeGasResult.Violations(Example(o => o["round"] = JsonNode.Parse("3"))), v => v.Contains("round"));   // 구역 검사 횟수 — 상한 없음
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["result"] = "ERROR")), v => v.Contains("ERROR"));   // OK·NG 만
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["points"]![0]!["scans"] = new JsonArray())), v => v.Contains("scans"));   // 최초 측정 1건 필수
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["points"]![1]!["scans"]![2]!["retry"] = 3)), v => v.Contains("retry"));
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["points"]![0]!["scans"]![0]!["u"] = 1200.5)), v => v.Contains("u·v"));
+        // h(면에서의 높이)는 선택 — 있으면 0 이상의 정수
+        Assert.Empty(SaigeGasResult.Violations(Example(o => o["points"]![0]!["scans"]![0]!["h"] = JsonNode.Parse("34"))));
+        Assert.Contains(SaigeGasResult.Violations(Example(o => o["points"]![0]!["scans"]![0]!["h"] = JsonNode.Parse("-1"))), v => v.Contains("h 는"));
+        Assert.Contains(SaigeGasResult.Violations(Example(o => o["points"]![0]!["scans"]![0]!["h"] = 3.5)), v => v.Contains("h 는"));
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["threshold"]!.AsObject().Remove("unit"))), v => v.Contains("threshold"));
         Assert.Contains(SaigeGasResult.Violations(Example(o => o["tankId"] = "")), v => v.Contains("tankId"));
     }

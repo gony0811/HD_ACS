@@ -154,7 +154,7 @@ VALUES ('startWeldInspection', 'NODE', 'HARD',
         "liftStrokeMm":        { "type": "number", "minimum": 0, "maximum": 1000 },
         "taskId":              { "type": "string", "format": "uuid" },
         "attempt":             { "type": "integer", "minimum": 1, "maximum": 255 },
-        "round":               { "enum": [1, 2] },
+        "round":               { "type": "integer", "minimum": 1 },
         "stationAdjust": {
           "type": "object",
           "required": ["maxForwardMm", "maxBackwardMm", "maxLateralMm", "maxThetaDeg"],

@@ -43,16 +43,15 @@ public class GasRoundTests
     }
 
     [Theory]
-    [InlineData(true, 1, 2)]        // 가스검사 선창 + 2회차(둘째 항목)
-    [InlineData(true, 0, 1)]        // 가스검사 선창 기본 = 1회차(회차 없음은 고를 수 없다)
-    [InlineData(false, 1, null)]    // 용접검사 선창 — 고른 값이 남아 있어도 보내지 않는다
-    public async Task StartRun_SendsRoundOnlyForGasTank(bool gas, int roundIndex, int? sent)
+    [InlineData(true, 1, null)]     // 가스검사 선창 — 회차를 보내지 않는다(서버가 구역별 검사 횟수를 센다)
+    [InlineData(true, 0, null)]
+    [InlineData(false, 1, null)]    // 용접검사 선창
+    public async Task StartRun_NeverSendsRound(bool gas, int roundIndex, int? sent)
     {
         var server = new FakeAcs();
         var api = new AcsApiClient(new HttpClient(server) { BaseAddress = new Uri("http://acs.test") });
 
         var mission = new MissionViewModel(api, System.Reflection.DispatchProxy.Create<IMonitoringClient, QuietProxy>()) { IsGasTank = gas, RoundIndex = roundIndex };
-        Assert.Equal(new[] { "1회차", "2회차" }, mission.RoundOptions);
 
         await api.StartRunAsync(Guid.NewGuid(), "AMR-01", mission.Round, default);
 

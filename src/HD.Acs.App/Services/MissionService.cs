@@ -111,8 +111,7 @@ public sealed class MissionService
     private async Task<RepairRunStarted> StartRunCoreAsync(Guid scenarioId, string robotId, List<Guid>? repairTaskIds, bool optimize,
         CancellationToken ct, int? round = null, bool restart = false)
     {
-        if (round is not (null or 1 or 2))
-            throw new ArgumentOutOfRangeException(nameof(round), round, "검사 회차(round)는 1 또는 2 입니다.");
+        // round 인자는 쓰지 않는다(구 UI 호환) — 가스검사 지령의 params.round 는 구역별 검사 횟수로 배차가 정한다.
         var what = repairTaskIds is null ? "미션 시작" : "용접선 재검사";
         // 활성 run 가드 — 같은 로봇에 RUNNING/WAITING_FLOOR_TRANSFER run이 있으면 새 시작 거부 (유령 run 누적 방지)
         var active = await _db.ScenarioRuns.AsNoTracking()
@@ -140,12 +139,6 @@ public sealed class MissionService
             throw new RunConflictException(
                 $"선창 {scenario.TankId}의 검사 종류({kind})는 아직 지령을 만들 수 없습니다 — 용접검사(WELD) 선창만 {what}할 수 있습니다.");
 
-        // 가스검사는 회차가 필수 — 세이지가 회차 없는 결과를 거부한다(재전송도 안 됨) [포밍가스 규격 §2 round 필수]
-        bool isGas = string.Equals(kind, HD.Acs.Core.Planning.InspectionKinds.Gas, StringComparison.OrdinalIgnoreCase);
-        if (isGas && round is null)
-            throw new RunRequestInvalidException(
-                $"선창 {scenario.TankId}는 가스검사입니다 — 검사 회차(1 또는 2)를 골라야 {what}할 수 있습니다.");
-
         var run = new ScenarioRunEntity
         {
             RunId = Guid.NewGuid(),
@@ -155,8 +148,6 @@ public sealed class MissionService
             State = "RUNNING",
             StartedAt = DateTimeOffset.UtcNow,
             TaskIds = repairTaskIds is null ? null : JsonSerializer.Serialize(repairTaskIds),
-            // 회차는 가스검사 선창에서만 쓴다(지령 params.round) — 용접검사 run 에는 남기지 않는다
-            Round = isGas ? round : null,
         };
         // 재검사 — 지정한 용접선만 놓고 정차·리프트를 다시 고른다(가드를 모두 통과한 뒤 계산: 수 초 걸린다)
         IReadOnlyList<RepairStop> stops = repairTaskIds is not null && optimize

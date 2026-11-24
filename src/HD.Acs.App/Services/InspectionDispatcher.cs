@@ -135,7 +135,7 @@ public sealed class InspectionDispatcher
             var builder = await CommandBuilderAsync(area.TankId, ct);
             var stop = BuildStop(run, area.TankId, area, wall, lv.T, await LevelZAsync(area.TankId, ct),
                 builder, await ParamSchemaAsync(builder.ActionType, ct),
-                new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm));
+                new StopOverride(pick.X, pick.Y, pick.Yaw, pick.LiftMm), wi.Round);
             wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta; wi.Actions = stop.Actions; wi.UpdatedAt = DateTimeOffset.UtcNow;
             _log.LogInformation(
                 "Run {Run}: {Area} 정차 선택 — 도면 ({X:F2}, {Y:F2}) 리프트 {Lift:F0} mm, 주행 {Travel:F2} m (저장된 정차 {Saved:F2} m){Relaxed} · 후보 {N}곳 {Ms} ms",
@@ -380,6 +380,10 @@ public sealed class InspectionDispatcher
 
         var tWdByLevel = await LoadTransformsAsync(tankId, areas.Select(a => a.Level).Distinct(), run.RunId, ct);
 
+        // 가스검사 — 구역(영역)마다 이번이 몇 번째 검사인지 센다 → 지령 params.round
+        var rounds = builder.InspectionKind == InspectionKinds.Gas
+            ? await NextRoundsAsync(areas.Select(a => a.AreaId).ToList(), ct) : null;
+
         var seq = 0;
         var missionMaps = new HashSet<string>();
         // 진행률 분모/제외 수 — 이 시점에 고정 [SAIGE §6.1/§6.4]. 임시 제외 용접선도 제외 수에 넣는다(리페어 run 은 지정분만 보므로 제외).
@@ -394,9 +398,11 @@ public sealed class InspectionDispatcher
             }
             totalTasks += area.Tasks.Count;
 
-            var stop = BuildStop(run, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId));
+            int? round = rounds is null ? null : rounds.GetValueOrDefault(area.AreaId, 1);
+            var stop = BuildStop(run, tankId, area, wall, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(area.AreaId), round);
             _db.WorkItems.Add(new WorkItemEntity
             {
+                Round = round,
                 WorkItemId = Guid.NewGuid(), RunId = run.RunId, AreaId = area.AreaId,
                 MapId = lv.MapId, X = stop.X, Y = stop.Y, Theta = stop.Theta, Seq = area.SortOrder,
                 Status = "PENDING", Actions = stop.Actions,
@@ -425,9 +431,24 @@ public sealed class InspectionDispatcher
     /// 액션 종류·파라미터는 검사 종류별 구현(<see cref="IInspectionCommandBuilder"/>)이 만든다 — 용접검사 = startWeldInspection.
     /// 큐 전개와 재개(resume) 시 잔여 정차 재계산이 공유하는 단일 정본 — 현재 계획·면·T_W_D 기준.
     /// </summary>
+    /// <summary>
+    /// 가스검사 — 구역(영역)별 이번 검사 횟수(1부터). 지난 run 에서 그 구역이 실제로 배차된 정차(PENDING 이 아닌 것)의
+    /// 가장 큰 횟수 + 1. 검사한 적 없는 구역은 사전에 없다(= 1). 용접검사로 돌린 지난 run(횟수 없음)은 세지 않는다.
+    /// 같은 run 의 재시도·이어하기는 정차에 저장된 횟수를 그대로 쓴다.
+    /// </summary>
+    private async Task<Dictionary<Guid, int>> NextRoundsAsync(IReadOnlyCollection<Guid> areaIds, CancellationToken ct)
+    {
+        var done = await _db.WorkItems.AsNoTracking()
+            .Where(w => areaIds.Contains(w.AreaId) && w.Round != null && w.Status != "PENDING")
+            .GroupBy(w => w.AreaId)
+            .Select(g => new { AreaId = g.Key, Max = g.Max(w => w.Round) })
+            .ToListAsync(ct);
+        return done.ToDictionary(x => x.AreaId, x => (x.Max ?? 0) + 1);
+    }
+
     private (double X, double Y, double? Theta, string Actions, int TaskCount) BuildStop(
         ScenarioRunEntity run, string tankId, InspectionAreaEntity area, WallEntity wall, DrawingTransform tWd,
-        IReadOnlyList<double>? levelZ, IInspectionCommandBuilder builder, string? paramSchema, StopOverride? ov = null)
+        IReadOnlyList<double>? levelZ, IInspectionCommandBuilder builder, string? paramSchema, StopOverride? ov = null, int? round = null)
     {
         var floorZ = WeldInspectionPayload.FloorZ(levelZ, area.Level);   // seam z 층 바닥 기준 [N17]
         var pose = new WallPose(Json<double[]>(wall.Origin), Json<double[]>(wall.UAxis), Json<double[]>(wall.VAxis));
@@ -444,7 +465,7 @@ public sealed class InspectionDispatcher
         // 영역 1개 = anchorGroup 1개, seqInGroup = task.Seq [SPEC_AREA §7 / VDA5050_INTERFACE_SPEC §8.1]
         var anchorGroupId = $"{tankId}-L{area.Level}-{area.WallCode}-{area.Name}";
         var actionsJson = new JsonArray();
-        var ctx = new InspectionCommandContext(run.RunId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm, run.Round);
+        var ctx = new InspectionCommandContext(run.RunId, tankId, area, wall, pose, tWd, floorZ, anchorGroupId, liftMm, round);
         foreach (var t in area.Tasks.OrderBy(x => x.Seq))
         {
             actionsJson.Add(builder.BuildAction(ctx, t, paramSchema));
@@ -510,7 +531,7 @@ public sealed class InspectionDispatcher
                 continue;
             }
 
-            var stop = BuildStop(run, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId));
+            var stop = BuildStop(run, tankId, area!, wall!, lv.T, levelZ, builder, paramSchema, overrides?.GetValueOrDefault(wi.AreaId), wi.Round);
             _log.LogInformation("Run {Run}: 재개 — wi={Wi} 정차 재계산 ({OX:F2},{OY:F2}) → ({NX:F2},{NY:F2}) map={Map}",
                 run.RunId, wi.WorkItemId, wi.X, wi.Y, stop.X, stop.Y, lv.MapId);
             wi.MapId = lv.MapId; wi.X = stop.X; wi.Y = stop.Y; wi.Theta = stop.Theta;

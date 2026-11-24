@@ -106,6 +106,7 @@ public class WorkItemEntity
     public int Attempts { get; set; }
     public string? Actions { get; set; }               // jsonb — 이 정차의 액션 payload 배열(발행 시 사용)
     public string? OrderId { get; set; }               // 현재/최근 배차 orderId (state 대조)
+    public int? Round { get; set; }                    // 가스검사 — 이 구역(영역)의 검사 횟수(1부터) → 지령 params.round. NULL = 용접검사
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

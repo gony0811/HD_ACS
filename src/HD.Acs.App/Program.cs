@@ -1176,7 +1176,6 @@ app.MapGet("/api/scenarios/{scenarioId:guid}/stations", async (Guid scenarioId, 
 
 app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 {
-    if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
     try { return Results.Ok(new { runId = await missions.StartRunAsync(req.ScenarioId, req.RobotId, round: req.Round,
                                                                        restart: req.Restart ?? false) }); }
     catch (Exception ex) when (ex is CalibrationInvalidException or WeldPayloadSchemaException or RunRequestInvalidException)
@@ -1194,7 +1193,6 @@ app.MapPost("/api/runs", async (StartRunRequest req, MissionService missions) =>
 // scenarioId 생략 = 그 선창의 가장 최근 run 시나리오. 가드는 미션 시작과 같다(활성 run·미연결·장치 알람 409).
 app.MapPost("/api/runs/repair", async (StartRepairRunRequest req, MissionService missions) =>
 {
-    if (req.Round is not (null or 1 or 2)) return Results.BadRequest(new { error = "검사 회차(round)는 1 또는 2 입니다." });
     try
     {
         var r = await missions.StartRepairRunAsync(req.RobotId, req.TaskIds ?? new List<Guid>(), req.ScenarioId,

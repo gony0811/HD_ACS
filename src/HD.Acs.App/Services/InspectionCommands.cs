@@ -9,7 +9,7 @@ namespace HD.Acs.App.Services;
 /// <summary>정차 1곳의 지령을 만들 때 검사 작업마다 공통으로 쓰는 값 — 영역·면·좌표 변환·정렬 그룹·리프트.</summary>
 /// <param name="FloorZ">그 층 바닥 높이 [m] — 로봇에 보내는 z 는 층 바닥 기준 [VDA §10 N17]</param>
 /// <param name="AnchorGroupId">영역 1개 = 정렬 그룹 1개 (`{선창}-L{층}-{면}-{영역}`)</param>
-/// <param name="Round">run 의 검사 회차(가스검사 1|2, 없으면 null)</param>
+/// <param name="Round">가스검사 — 이 구역(영역)의 검사 횟수(1부터, 없으면 null)</param>
 /// <param name="LiftMm">정차의 리프트 높이 [mm] (큐 전개 시점 값 — 발행 때 영역 저장값으로 다시 덮는다)</param>
 public sealed record InspectionCommandContext(
     Guid RunId, string TankId, InspectionAreaEntity Area, WallEntity Wall, WallPose Pose,
@@ -131,7 +131,7 @@ public sealed class WeldInspectionCommandBuilder(double standoffMm, double worki
 /// <summary>
 /// 가스검사(포밍가스 기밀 검사) 지령 — HD_AMR 은 용접선을 따라가는 같은 시퀀스에서 검사 센서만 가스 감지기로 바꾼다
 /// (InspectionSensor:Mode = GasDetector). 그래서 액션은 용접검사와 같은 startWeldInspection 이고,
-/// run 의 검사 회차를 params.round(1|2)로 얹는다 — 없으면 싣지 않는다 [HD_AMR docs/GAS_DETECTOR_XL3000FLEX.md §5.1].
+/// 그 구역(영역)의 검사 횟수를 params.round(1 이상)로 얹는다 — 없으면 싣지 않는다 [HD_AMR docs/GAS_DETECTOR_XL3000FLEX.md §5.1].
 /// 결과는 액션이 끝날 때 resultDescription 에 SAIGE 결과 본문(JSON)으로 온다(§5.2 — ACS 의 SAIGE 전송은 별도 단계).
 /// </summary>
 public sealed class GasInspectionCommandBuilder(WeldInspectionCommandBuilder weld) : IInspectionCommandBuilder

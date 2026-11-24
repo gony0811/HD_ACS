@@ -72,13 +72,17 @@ public static class SaigeGasResult
         static bool Int(JsonNode? n, out long value)
         {
             value = 0;
-            return n is JsonValue x && x.GetValueKind() == JsonValueKind.Number && x.TryGetValue(out value);
+            if (n is not JsonValue x || x.GetValueKind() != JsonValueKind.Number) return false;
+            if (x.TryGetValue(out value)) return true;
+            // ACS 가 채운 값(ForSaige 의 round)은 int 로 들어 있어 long 으로는 꺼내지지 않는다
+            if (x.TryGetValue<int>(out var i)) { value = i; return true; }
+            return false;
         }
         static bool Verdict(JsonNode? n) => n is JsonValue x && x.TryGetValue<string>(out var s) && s is "OK" or "NG";
 
         if (!Str(body["tankId"])) v.Add("tankId 없음");
         if (!Str(body["taskId"])) v.Add("taskId 없음");
-        if (!Int(body["round"], out var round) || round is not (1 or 2)) v.Add("round 는 1 또는 2 (필수)");
+        if (!Int(body["round"], out var round) || round < 1) v.Add("round 는 1 이상의 정수 (필수 — 그 구역의 검사 횟수)");
         if (!Int(body["startedAt"], out _)) v.Add("startedAt 없음");
         if (!Int(body["finishedAt"], out _)) v.Add("finishedAt 없음");
         if (body["threshold"] is not JsonObject th || !Num(th["value"]) || !Str(th["unit"])) v.Add("threshold.value·unit 없음");
@@ -96,6 +100,8 @@ public static class SaigeGasResult
                 if (sc is not JsonObject scan) { v.Add($"{at}: scans 항목이 객체가 아님"); continue; }
                 if (!Int(scan["retry"], out var retry) || retry is < 0 or > 2) v.Add($"{at}: retry 는 0~2");
                 if (!Int(scan["u"], out _) || !Int(scan["v"], out _)) v.Add($"{at}: u·v 는 정수(mm)");
+                // h = 면에서의 높이 [mm] (선택 — AMR 이 실어 보내면 그대로 전달). 용접검사 촬영 요청 PosZ 와 같은 기준(0 = 벽 표면).
+                if (scan["h"] is not null && (!Int(scan["h"], out var h) || h < 0)) v.Add($"{at}: h 는 0 이상의 정수(mm)");
                 if (!Num(scan["value"])) v.Add($"{at}: value 없음");
                 if (!Verdict(scan["result"])) v.Add($"{at}: scan result 는 OK·NG 만");
                 if (!Int(scan["measuredAt"], out _)) v.Add($"{at}: measuredAt 없음");
