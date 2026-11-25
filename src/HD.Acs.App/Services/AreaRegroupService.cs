@@ -150,6 +150,7 @@ public sealed class AreaRegroupService(AcsDbContext db)
             target.Corners = g.Corners!;
             (target.UMin, target.VMin, target.UMax, target.VMax) = (g.Box.MinU, g.Box.MinV, g.Box.MaxU, g.Box.MaxV);
             (target.StationX, target.StationY, target.StationTheta, target.StationLiftMm) = (g.X, g.Y, g.Theta, g.Lift);
+            AreaRules.SyncStandoffToStation(target, s.Wall);   // 이격 = 제안 정차의 실제 거리(정차 없으면 그대로)
             var ordered = AreaRules.OrderByLine(g.Tasks);
             for (var i = 0; i < ordered.Count; i++)
             {

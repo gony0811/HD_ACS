@@ -231,6 +231,12 @@ public sealed record ReachRobotModel
     /// (경로가 양 끝보다 더 가까워지지 않을 것). HD_AMR <c>EntryPathMarginMm</c>.
     /// </summary>
     public double EntryPathMarginMm { get; init; } = 100;
+    /// <summary>
+    /// 판정 자세(② · 정렬 준비 · 초점)에서 코봇 팔 링크(BASE~손목 캡슐)가 탱크 면과 지켜야 할 여유 [mm] — 이보다 가까우면 간섭으로 본다.
+    /// 부품 여유(<see cref="ReachPart.ClearanceM"/>)는 이 값을 뺀 나머지로 보고된다. 검사 툴은 초점 자세에서 원래 면에 붙어
+    /// (설계상 약 100 mm) 가므로 적용하지 않는다. 0 = 끔(종전). 2026-11-24 SU L4-R02C12: 시뮬레이터 여유 84 mm 정차에서 팔꿈치가 벽에 닿았다.
+    /// </summary>
+    public double ArmWallMarginMm { get; init; }
     /// <summary>직선 경로 검증 간격 [mm] — PlanarSampleMm.</summary>
     public double PlanarSampleMm { get; init; } = 100;
     /// <summary>면 방향 거리가 이보다 짧으면 들어갈 점으로 바로 진입 [mm] — PlanarSkipMm.</summary>
@@ -1258,7 +1264,9 @@ public static partial class ReachSimulator
         // 자세와 무관하게 모든 해가 간섭으로 나왔다. 탱크 면과는 그대로 잰다.
         var parts = (m.HasColumn(f.BaseZMm) ? new[] { Column(m, planes, f) } : Array.Empty<ReachPart>())
             .Concat(segs[..^1].Select(s =>
-                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm, planes), s.A, s.B, s.RadiusMm, f,
+                // 벽 여유는 캡슐 반경을 그만큼 키워 재고, 그림 반경은 실제 값으로 되돌린다.
+                WithSelf(Part(s.Name, B(s.A), B(s.B), s.RadiusMm + Math.Max(0, m.ArmWallMarginMm), planes) with { RadiusM = s.RadiusMm / 1000.0 },
+                    s.A, s.B, s.RadiusMm, f,
                     s.Name == "BASE·J1" ? Array.Empty<SelfBox>() : s.NearColumn ? self[..2] : self)))
             .Concat(m.ToolBoxes.Select(t =>
                 WithSelf(ToolBoxPart(m, t, fr[6], f, planes), core.A, core.B, core.RadiusMm, f, self)))

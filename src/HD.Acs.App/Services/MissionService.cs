@@ -204,6 +204,9 @@ public sealed class MissionService
             });
         await _db.SaveChangesAsync(ct);
 
+        // 새 run 은 처음부터 RUNNING 이라 첫 배차가 상태 변화로 보지 않는다 — 운영 화면이 이 run 을 이어받도록 여기서 알린다
+        // (계획 ▸ 선택 작업만 검사 실행·다른 단말에서 시작한 run 도 운영 화면의 중단 버튼이 켜지게).
+        await _dispatcher.PushRunStateAsync(run.RunId, run.State, ct);
         await _dispatcher.DispatchNextAsync(run.RunId, ct, commanded: true);   // 첫 정차 배차(로봇 층 일치 시, 불일치면 FLOOR_MISMATCH 알람)
         return new RepairRunStarted(run.RunId, stops);
     }
@@ -320,6 +323,7 @@ public sealed class MissionService
 
         _log.LogInformation("Run {Run} 재개 — DISPATCHED 리셋 {Stale}건, 현재 계획으로 재계산 {Refreshed}건, 재계산 불가 스킵 {Skipped}건.",
             runId, stale, refreshed, skipped);
+        await _dispatcher.PushRunStateAsync(runId, run.State, ct);   // ABORTED → RUNNING — 운영 화면이 다시 이어받게
         await _dispatcher.DispatchNextAsync(runId, ct, commanded: true);
         return new ResumeSummary(refreshed, skipped);
     }

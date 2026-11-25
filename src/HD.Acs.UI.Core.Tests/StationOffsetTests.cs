@@ -107,14 +107,85 @@ public class StationOffsetTests
 
         Assert.True(vm.StandoffApplicable);
         var a = vm.AutoStation!.Value;
+        // 저장된 이격은 1.2 이지만 정차점(y 5.0)의 실제 벽 쪽 거리는 1.0 — 폼은 실제 거리를 보이고 오프셋은 좌우만
+        Assert.Equal(1.0, vm.StationStandoffM!.Value, 6);
         Assert.Equal(-19.0, a.X, 6);                                  // u 중심 3.5 − 22.5
-        Assert.Equal(4.8, a.Y, 6);                                    // 6 + (−1)·1.2 (이격)
+        Assert.Equal(5.0, vm.AutoStation!.Value.Y, 6);                // 6 + (−1)·1.0
         Assert.Equal(-1.0, vm.StationDx, 6);
-        Assert.Equal(0.2, vm.StationDy, 6);
+        Assert.Equal(0.0, vm.StationDy, 6);
+        Assert.Equal((-20.0, 5.0), (vm.StationX, vm.StationY));        // 저장값 그대로
 
-        vm.StationStandoffM = null;                                   // 빈값 = 서버 기본(PM 은 수직벽 1.2)
+        vm.StationStandoffM = null;                                   // 빈값 = 면 기본(PM 은 수직벽 1.2) 거리로, 좌우 유지
         Assert.Equal(AreaPlanningViewModel.DefaultVerticalStandoffM, vm.DefaultStandoffForWall);
-        Assert.Equal(6.0 - AreaPlanningViewModel.DefaultVerticalStandoffM, vm.AutoStation!.Value.Y, 6);
+        Assert.Equal(6.0 - AreaPlanningViewModel.DefaultVerticalStandoffM, vm.StationY, 6);
+        Assert.Equal(-20.0, vm.StationX, 6);
+    }
+
+    // 경사면 SU 꼴: 원점 (−15.48, −6, 9), u=+x, v=(0, √½, √½), 내부향 법선 (0, √½, −√½) → 수평 법선 +y
+    private static readonly double R = Math.Sqrt(0.5);
+    private static WallDto WallSu() => new("CT1", "SU", new[] { -15.48, -6.0, 9.0 }, new[] { 1.0, 0, 0 }, new[] { 0.0, R, R },
+        new[] { 0.0, R, -R }, 30, 3, Math.PI / 2, true, null);
+    private const double SuCx = -11.98;                                // u 중심 3.5
+    private static readonly double SuCy = -6.0 + R;                    // v 중심 1.0 → y
+
+    private static object SuArea(double? sx, double? sy, double? standoff) => new
+    {
+        areaId = Area, tankId = "CT1", wallCode = "SU", level = 4, name = "L4-R02C12",
+        corners = new[] { new[] { 3.0, 0.5 }, new[] { 4.0, 0.5 }, new[] { 4.0, 1.5 }, new[] { 3.0, 1.5 } },
+        uMin = 3.0, vMin = 0.5, uMax = 4.0, vMax = 1.5, stationX = sx, stationY = sy, stationTheta = sx is null ? (double?)null : 1.6,
+        stationStandoffM = standoff, sortOrder = 0, taskCount = 6,
+    };
+
+    /// <summary>
+    /// 2026-11-24 SU L4-R02C12 사례 — 최적화가 정차를 벽 쪽 거리 1.10 에 두었는데 이격 칸에 1.2 가 남았고,
+    /// 1.2 를 다시 넣어도 정차가 움직이지 않았다. 이제 칸은 1.10 으로 보이고, 1.4 를 넣으면 법선 거리가 1.4 가 된다(좌우·방향 유지).
+    /// </summary>
+    [Fact]
+    public async Task FieldCase_FormShowsActualStandoff_AndNewStandoffIsAbsolute()
+    {
+        var (vm, server) = await BuildAsync(WallSu(), SuArea(SuCx + 0.2, SuCy + 1.10, standoff: 1.2));
+
+        Assert.True(vm.StationOverride);
+        Assert.Equal(1.10, vm.StationStandoffM!.Value, 6);
+        Assert.Equal(0.2, vm.StationDx, 6);                            // 좌우 성분만 오프셋으로
+        Assert.Equal(0.0, vm.StationDy, 6);
+
+        vm.StationStandoffM = 1.4;
+        Assert.Equal(1.4, vm.StationY - SuCy, 6);                      // 법선(+y) 거리 = 입력값
+        Assert.Equal(SuCx + 0.2, vm.StationX, 6);                      // 좌우 유지
+        Assert.Equal(1.6, vm.StationTheta, 6);                         // 방향 유지
+
+        await vm.UpdateAreaCommand.ExecuteAsync(null);
+        var put = Assert.Single(server.Writes, w => w.Method == "PUT");
+        Assert.Equal(SuCy + 1.4, put.Body.GetProperty("stationY").GetDouble(), 6);
+        Assert.Equal(SuCx + 0.2, put.Body.GetProperty("stationX").GetDouble(), 6);
+        Assert.Equal(1.4, put.Body.GetProperty("stationStandoffM").GetDouble(), 6);
+    }
+
+    /// <summary>오프셋에 법선 성분을 직접 넣었어도, 이격을 바꾸면 법선 거리는 이격 값이 된다(차이가 아니라 절대).</summary>
+    [Fact]
+    public async Task StandoffEdit_RemovesNormalPartOfManualOffset()
+    {
+        var (vm, _) = await BuildAsync(WallSu(), SuArea(SuCx, SuCy + 1.2, standoff: 1.2));
+
+        vm.StationDy = 0.3;                                            // 운영자가 법선 방향으로 0.3 더 밀어 둠 → 1.5
+        Assert.Equal(1.5, vm.StationY - SuCy, 6);
+        vm.StationStandoffM = 1.3;
+        Assert.Equal(1.3, vm.StationY - SuCy, 6);                      // 1.3 + 0.3 이 아니라 1.3
+        Assert.Equal(0.0, vm.StationDy, 6);
+    }
+
+    /// <summary>다른 화면(정차점 최적화 적용)에서 같은 영역의 정차가 바뀌면, 새로고침 때 폼을 다시 채운다.</summary>
+    [Fact]
+    public async Task ExternalStationChange_RefillsForm()
+    {
+        var (vm, server) = await BuildAsync(WallSu(), SuArea(SuCx, SuCy + 1.2, standoff: 1.2));
+        Assert.Equal(1.2, vm.StationStandoffM!.Value, 6);
+
+        server.AreaJson = SuArea(SuCx, SuCy + 1.10, standoff: 1.10);       // 최적화 적용(서버가 이격을 실제 거리로 저장)
+        vm.SelectedWall = WallSu();                                    // 새로고침
+        await WaitAsync(() => vm.StationStandoffM is { } s && Math.Abs(s - 1.10) < 1e-6);
+        Assert.Equal(SuCy + 1.10, vm.StationY, 6);
     }
 
     private static object PmArea() => new
@@ -175,6 +246,7 @@ public class StationOffsetTests
     private sealed class FakeAcs(object area, object? pose = null) : HttpMessageHandler
     {
         public List<(string Method, string Path, JsonElement Body)> Writes { get; } = new();
+        public object AreaJson { get; set; } = area;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
         {
@@ -185,7 +257,7 @@ public class StationOffsetTests
                 Writes.Add((req.Method.Method, path, body));
                 return Json(new { areaId = Area, level = 4 });
             }
-            if (path == "/api/internal/areas") return Json(new[] { area });
+            if (path == "/api/internal/areas") return Json(new[] { AreaJson });
             if (path == $"/api/internal/areas/{Area}/tasks") return Json(Array.Empty<object>());
             if (path == "/api/robots") return Json(new[] { new { robotId = "AMR-01", name = "AMR", manufacturer = "HHI", serialNumber = "AMR-01", vdaVersion = "2.0", isActive = true } });
             if (path == "/api/robots/AMR-01/drawing-pose" && pose is not null) return Json(pose);

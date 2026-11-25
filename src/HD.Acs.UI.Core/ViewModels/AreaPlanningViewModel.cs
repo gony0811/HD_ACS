@@ -168,18 +168,56 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     {
         get
         {
-            if (SelectedWall is not { Origin: { Length: >= 2 } o, UAxis: { Length: >= 2 } u, VAxis: { Length: >= 2 } v } w) return null;
-            var c = InputCorners();
-            double uc = c.Average(p => p[0]), vc = c.Average(p => p[1]) + VOff;   // 층-로컬 → 면-전체 v
-            double x = o[0] + uc * u[0] + vc * v[0], y = o[1] + uc * u[1] + vc * v[1];
+            if (AreaCenterDrawing is not { } c) return null;
+            double x = c.X, y = c.Y;
             double standoff = StationStandoffM ?? DefaultStandoffForWall;
-            if (StandoffApplicable && standoff > 0 && w.Normal is { } n)
-            {
-                double h = Math.Sqrt(n[0] * n[0] + n[1] * n[1]);
-                x += n[0] / h * standoff; y += n[1] / h * standoff;
-            }
+            if (standoff > 0 && HorizontalNormal is { } h) { x += h.X * standoff; y += h.Y * standoff; }
             return (x, y);
         }
+    }
+
+    /// <summary>폼 코너 4점 평균(영역 중심)의 도면 x,y — 정차 이격의 기준점.</summary>
+    private (double X, double Y)? AreaCenterDrawing
+    {
+        get
+        {
+            if (SelectedWall is not { Origin: { Length: >= 2 } o, UAxis: { Length: >= 2 } u, VAxis: { Length: >= 2 } v }) return null;
+            var c = InputCorners();
+            double uc = c.Average(p => p[0]), vc = c.Average(p => p[1]) + VOff;   // 층-로컬 → 면-전체 v
+            return (o[0] + uc * u[0] + vc * v[0], o[1] + uc * u[1] + vc * v[1]);
+        }
+    }
+
+    /// <summary>내부향 법선의 수평 단위벡터 — 바닥·천장(수평 성분 없음)은 null.</summary>
+    private (double X, double Y)? HorizontalNormal
+    {
+        get
+        {
+            if (SelectedWall?.Normal is not { Length: >= 2 } n) return null;
+            double h = Math.Sqrt(n[0] * n[0] + n[1] * n[1]);
+            return h > 1e-9 ? (n[0] / h, n[1] / h) : null;
+        }
+    }
+
+    private bool _settingStation;   // 이격·오프셋을 함께 다시 쓰는 중 — 이격 변경 시의 오프셋 투영을 건너뛴다
+
+    /// <summary>
+    /// 덮어쓰기 정차를 절대 좌표 (x,y)로 둔다 — 이격 칸 = 그 점의 실제 법선 거리(영역 중심 → 정차점, 서버
+    /// <c>AreaRules.SyncStandoffToStation</c> 과 같은 식), 오프셋(dx,dy) = 좌우 성분만. 이후 이격을 고치면
+    /// 법선 거리가 정확히 그 값이 된다(좌우·방향 유지). 바닥·천장은 이격을 건드리지 않고 오프셋만.
+    /// </summary>
+    private void SetStationAbsolute(double x, double y)
+    {
+        _settingStation = true;
+        try
+        {
+            if (HorizontalNormal is { } h && AreaCenterDrawing is { } c)
+                StationStandoffM = Math.Round((x - c.X) * h.X + (y - c.Y) * h.Y, 4);
+            var auto = AutoStation ?? (0, 0);
+            StationDx = Math.Round(x - auto.X, 4);   // 0.1mm 반올림 — 부동소수 먼지 제거
+            StationDy = Math.Round(y - auto.Y, 4);
+        }
+        finally { _settingStation = false; }
     }
 
     /// <summary>정차 이격이 적용되는 면인지 — 법선에 수평 성분이 있어야 한다(B/T는 false).</summary>
@@ -198,7 +236,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         : $"적용 정차점 x {StationX:0.###}, y {StationY:0.###} m ({DescribeOffset(StationDx, StationDy)})";
 
     public string StandoffHint => StandoffApplicable
-        ? "벽 안쪽으로 이 거리만큼 떨어져 정차. 빈값=서버 기본(0.8m)."
+        ? $"영역 중심에서 벽 안쪽으로 이 거리만큼 떨어져 정차(정차 위치를 따로 정한 영역도 이 거리 — 좌우·방향은 유지). 빈값=면 기본({DefaultStandoffForWall:0.0#}m)."
         : "바닥·천장 면은 이격이 적용되지 않습니다 — 위치를 옮기려면 아래 '정차 위치 조정'의 오프셋을 쓰세요.";
 
     /// <summary>도면 축 오프셋을 선박 방향어로(+x=선수, +y=좌현).</summary>
@@ -221,7 +259,28 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     partial void OnStationDxChanged(double value) => NotifyStation();
     partial void OnStationDyChanged(double value) => NotifyStation();
     partial void OnStationOverrideChanged(bool value) => NotifyStation();
-    partial void OnStationStandoffMChanged(double? value) => NotifyStation();
+    /// <summary>
+    /// 이격은 "차이"가 아니라 "절대 거리" — 덮어쓰기 정차면 오프셋에서 법선 성분을 빼서, 정차점의 법선 거리가
+    /// 입력값(빈값이면 면 기본 이격)이 되게 한다. 좌우 성분·방향은 그대로. 같은 값을 다시 넣어도 그 거리로 맞춰진다.
+    /// </summary>
+    partial void OnStationStandoffMChanged(double? value)
+    {
+        if (!_settingStation && StationOverride && HorizontalNormal is { } h)
+        {
+            double dn = StationDx * h.X + StationDy * h.Y;
+            if (Math.Abs(dn) > 1e-9)
+            {
+                _settingStation = true;
+                try
+                {
+                    StationDx = Math.Round(StationDx - dn * h.X, 4);
+                    StationDy = Math.Round(StationDy - dn * h.Y, 4);
+                }
+                finally { _settingStation = false; }
+            }
+        }
+        NotifyStation();
+    }
 
     // ── 작업 등록 입력 (면 로컬 u,v) ──
     [ObservableProperty] private double _startU;
@@ -388,6 +447,8 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
                 StationStandoffM, _operatorId, StationMaxBackwardMm, StationLiftMm);
             StatusMessage = $"영역 수정: {area.WallCode}/{AreaName} → 층 {LevelLabel.Of(level)} — areaId·작업 유지"
                 + (SelectedLevel is { } l && l.Level != level ? $" (층이 {LevelLabel.Of(level)}로 바뀌어 현재 {l.Label} 목록에서 빠집니다)" : "");
+            // 서버가 덮어쓰기 정차의 이격을 실제 거리로 맞추므로, 폼도 같은 값으로(같은 영역은 새로고침으로 폼을 다시 채우지 않는다)
+            if (StationOverride) SetStationAbsolute(StationX, StationY);
             await RefreshAreasAsync(select: area.AreaId);
         }
         catch (Exception ex) { StatusMessage = $"영역 수정 실패: {ex.Message}"; }   // 면범위·층유도·작업 이탈 400·이름 중복 409·없음 404
@@ -535,8 +596,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             }
 
             StationOverride = true;
-            StationDx = Math.Round(p.X - auto.X, 4);   // 0.1mm 반올림 — 저장 시 절대 좌표 = 자동 정차점 + 오프셋 = 로봇 위치
-            StationDy = Math.Round(p.Y - auto.Y, 4);
+            SetStationAbsolute(p.X, p.Y);   // 저장 시 절대 좌표 = 로봇 위치, 이격 칸 = 그 자리의 실제 벽 쪽 거리
             if (p.Theta is double th) StationTheta = Math.Round(th, 4);
 
             string wallText = "";
@@ -986,10 +1046,20 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         UpdateAreaCommand.NotifyCanExecuteChanged();
         AddTaskToSplitCommand.NotifyCanExecuteChanged();
         // 분리할 작업을 담는 중에는 다른 영역을 눌러 작업을 추가해도 새 영역 폼(사각형·이름)을 유지한다
-        if (value is not null && value.AreaId != _formAreaId && SplitTasks.Count == 0) FillAreaForm(value);
+        // 같은 영역이라도 저장된 정차가 다른 곳(정차점 최적화 적용 등)에서 바뀌었으면 다시 채운다 —
+        // 옛 정차·이격이 폼에 남은 채 이격만 고쳐 저장하면 최적화 정차를 옛 값으로 덮어쓴다.
+        if (value is not null && SplitTasks.Count == 0 && (value.AreaId != _formAreaId || StationChanged(_formSource, value)))
+            FillAreaForm(value);
         _formAreaId = value?.AreaId;
+        if (value is not null) _formSource = value;
         _ = LoadTasksAndProjectAsync();
     }
+
+    private AreaDto? _formSource;   // 폼을 채운(또는 마지막으로 본) 저장값
+
+    private static bool StationChanged(AreaDto? a, AreaDto b) =>
+        a is not null && (a.StationX != b.StationX || a.StationY != b.StationY || a.StationTheta != b.StationTheta
+                          || a.StationStandoffM != b.StationStandoffM || a.StationLiftMm != b.StationLiftMm);
 
     /// <summary>선택 영역 값을 입력 폼에 채운다(Areas는 이미 층-로컬 v) → 전개도 점선 미리보기도 그 영역으로 이동.</summary>
     private void FillAreaForm(AreaDto a)
@@ -997,14 +1067,15 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         var c = a.Corners is { Length: 4 } ? a.Corners : RectCorners(a.UMin, a.VMin, a.UMax, a.VMax);   // 구데이터 폴백
         AreaName = a.Name;
         for (int i = 0; i < 4; i++) SetCorner(i, c[i][0], c[i][1]);
-        StationStandoffM = a.StationStandoffM;   // 이격이 자동 정차점을 바꾸므로 오프셋 환산보다 먼저
+        _settingStation = true;
+        try { StationStandoffM = a.StationStandoffM; }   // 이격이 자동 정차점을 바꾸므로 오프셋 환산보다 먼저
+        finally { _settingStation = false; }
         StationMaxBackwardMm = a.StationMaxBackwardMm;
         StationLiftMm = a.StationLiftMm;
         StationOverride = a.StationX is not null && a.StationY is not null;
-        // 저장된 절대 좌표 → 자동 정차점 기준 오프셋(0.1mm 반올림 — 부동소수 먼지 제거)
-        var auto = AutoStation ?? (0, 0);
-        StationDx = StationOverride ? Math.Round(a.StationX!.Value - auto.X, 4) : 0;
-        StationDy = StationOverride ? Math.Round(a.StationY!.Value - auto.Y, 4) : 0;
+        // 저장된 절대 좌표 → 이격(실제 법선 거리) + 자동 정차점 기준 오프셋(좌우만)
+        if (StationOverride) SetStationAbsolute(a.StationX!.Value, a.StationY!.Value);
+        else { StationDx = 0; StationDy = 0; }
         StationTheta = a.StationTheta ?? 0;
     }
 

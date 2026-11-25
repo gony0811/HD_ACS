@@ -473,16 +473,19 @@ app.MapPut("/api/reach-sim/areas/{areaId:guid}/station", async (Guid areaId, Set
         return Results.BadRequest(new { error = "정차 x·y 는 함께 지정하거나 함께 비워야 합니다." });
     if (req.StationLiftMm is < 0 or > 1000)
         return Results.BadRequest(new { error = "리프트 높이(stationLiftMm)는 0~1000 mm 범위여야 합니다." });
-    var old = new { area.StationX, area.StationY, area.StationTheta, area.StationLiftMm };
+    var old = new { area.StationX, area.StationY, area.StationTheta, area.StationLiftMm, area.StationStandoffM };
     area.StationX = req.StationX; area.StationY = req.StationY; area.StationTheta = req.StationTheta;
     area.StationLiftMm = req.StationLiftMm;
+    // 정차점 최적화·현장 정차 지정 등 — 이격 칸이 옛 값으로 남지 않게 새 정차점의 실제 거리로 맞춘다(해제면 이격 그대로).
+    var wallOfArea = await db.Walls.AsNoTracking().FirstOrDefaultAsync(w => w.TankId == area.TankId && w.WallCode == area.WallCode);
+    if (wallOfArea is not null) AreaRules.SyncStandoffToStation(area, wallOfArea);
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {
         UserId = req.UserId ?? "", Action = "AREA_STATION_SET", Target = areaId.ToString(),
-        Detail = System.Text.Json.JsonSerializer.Serialize(new { old, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm, req.Reason }),
+        Detail = System.Text.Json.JsonSerializer.Serialize(new { old, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm, area.StationStandoffM, req.Reason }),
     });
     await db.SaveChangesAsync();
-    return Results.Ok(new { areaId, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm });
+    return Results.Ok(new { areaId, area.StationX, area.StationY, area.StationTheta, area.StationLiftMm, area.StationStandoffM });
 });
 
 // 전체 교체(빈 배열 = 연결 해제 = 전체 검사). 미존재/타 선창 영역은 400.
@@ -653,6 +656,7 @@ app.MapPost("/api/areas", async (CreateAreaRequest req, AcsDbContext db) =>
         StationLiftMm = req.StationLiftMm,
         SortOrder = req.SortOrder ?? 0, CreatedBy = req.UserId
     };
+    AreaRules.SyncStandoffToStation(area, wall);   // 덮어쓰기 정차가 있으면 이격 = 실제 거리
     db.InspectionAreas.Add(area);
     await db.SaveChangesAsync();
     return Results.Ok(new { areaId = area.AreaId, level = derivedLevel.Value });
@@ -703,6 +707,7 @@ app.MapPut("/api/areas/{areaId:guid}", async (Guid areaId, UpdateAreaRequest req
     area.StationMaxBackwardMm = req.StationMaxBackwardMm;
     if (req.StationLiftMm is not null) area.StationLiftMm = req.StationLiftMm;
     if (req.SortOrder is int so) area.SortOrder = so;
+    AreaRules.SyncStandoffToStation(area, wall);   // 덮어쓰기 정차가 있으면 이격 = 실제 거리(요청 이격보다 우선)
     db.AuditLogs.Add(new HD.Acs.Data.Entities.AuditLogEntity
     {
         UserId = req.UserId ?? "", Action = "AREA_UPDATE", Target = areaId.ToString(),
@@ -807,6 +812,7 @@ app.MapPost("/api/areas/split-tasks", async (SplitTasksToAreaRequest req, AcsDbC
         StationStandoffM = req.StationStandoffM, StationMaxBackwardMm = req.StationMaxBackwardMm,
         SortOrder = req.SortOrder ?? (maxSort + 1), CreatedBy = req.UserId,
     };
+    AreaRules.SyncStandoffToStation(newArea, wall);
     db.InspectionAreas.Add(newArea);
     // 순번은 담은 순서가 아니라 "라인 순"(코봇이 라인을 번갈아 오가지 않게) — AreaRules.OrderByLine
     var lineOrdered = AreaRules.OrderByLine(orderedTasks);

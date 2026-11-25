@@ -40,7 +40,7 @@ public class AreaUpdateTests
         Assert.Equal((3.0, 4.0), (vm.C1U, vm.C3U));
         Assert.Equal(0.6, vm.C1V, 9);                        // 저장값 3.0(면-전체) − VOff 2.4
         Assert.Equal(1.8, vm.C3V, 9);                        // 4.2 − 2.4
-        Assert.Equal(1.2, vm.StationStandoffM);
+        Assert.Equal(1.0, vm.StationStandoffM!.Value, 9);       // 저장 이격 1.2 가 아니라 정차점(y 5.0)의 실제 벽 쪽 거리
         Assert.True(vm.StationOverride);
         Assert.Equal((-20.0, 5.0), (vm.StationX, vm.StationY));
         Assert.True(vm.UpdateAreaCommand.CanExecute(null));
@@ -97,7 +97,7 @@ public class AreaUpdateTests
         Assert.Equal(0.6 + VOff, c[0][1].GetDouble(), 9);                       // 층-로컬 → 면-전체 v
         Assert.Equal(4.2, c[2][0].GetDouble(), 9);
         Assert.Equal(JsonValueKind.Null, body.GetProperty("stationX").ValueKind); // 수동 정차 해제 = null 전송
-        Assert.Equal(1.2, body.GetProperty("stationStandoffM").GetDouble());
+        Assert.Equal(1.0, body.GetProperty("stationStandoffM").GetDouble(), 9);   // 폼은 실제 거리(1.0)로 채워졌다
         Assert.Equal(150, body.GetProperty("stationMaxBackwardMm").GetDouble());   // 영역 후진 상한(N23) 유지 — 전체 교체라 빠지면 해제된다
 
         Assert.Equal(Area, vm.SelectedArea?.AreaId);                            // 새로고침 후에도 선택 유지

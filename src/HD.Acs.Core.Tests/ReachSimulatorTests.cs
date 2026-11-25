@@ -162,6 +162,40 @@ public class ReachSimulatorTests
         Assert.True(Worst(ReachRobotModel.Default).ClearanceM >= 0);
     }
 
+    /// <summary>
+    /// 팔 링크–벽 최소 여유(ArmWallMarginMm) — 팔 부품의 탱크 면 여유가 정확히 그만큼 줄어 보고되고(그림 반경은 그대로),
+    /// 툴 상자 여유는 바뀌지 않는다. 2026-11-24 SU: 시뮬레이터 여유 84 mm 정차에서 팔꿈치가 벽에 닿았다.
+    /// </summary>
+    [Fact]
+    public void 팔_벽_여유를_두면_팔_부품_여유가_그만큼_줄고_툴은_그대로다()
+    {
+        var (sm, v, floor) = MidWall();
+        var planes = ReachSimulator.PlanesForLevel(WallPlanes, floor, 2);
+        var st = StationFor(sm, 12, v, 1.2, 2);
+        var m0 = NoTraverse with { LiftEnabled = false, StrokeMaxMm = 0 };
+        IReadOnlyList<ReachPart> Parts(ReachRobotModel m) =>
+            ReachSimulator.Evaluate(m, planes, st, sm.To3D(12, v), sm.Normal, 0).Stages[2].Chosen!.Parts;
+
+        var a = Parts(m0);
+        var b = Parts(m0 with { ArmWallMarginMm = 100 });
+        Assert.Equal(a.Count, b.Count);
+        var tools = m0.ToolBoxes.Select(t => t.Name).ToHashSet();
+        var armCompared = 0;
+        for (var i = 0; i < a.Count; i++)
+        {
+            Assert.Equal(a[i].RadiusM, b[i].RadiusM, 9);                     // 그림 반경은 실제 값
+            if (tools.Contains(a[i].Name)) { Assert.Equal(a[i].ClearanceM, b[i].ClearanceM, 9); continue; }
+            // 팔 부품: 탱크 면이 가장 가까운 부품이면 정확히 0.1 m 줄고, 자기 간섭(차체 등)이 더 가까우면 그쪽 값이 남는다
+            Assert.True(b[i].ClearanceM <= a[i].ClearanceM + 1e-9);
+            if (a[i].NearestPlane == b[i].NearestPlane && a[i].ClearanceM + 0.1 < 1e9 && b[i].ClearanceM < a[i].ClearanceM - 1e-9)
+            {
+                Assert.Equal(a[i].ClearanceM - 0.1, b[i].ClearanceM, 6);
+                armCompared++;
+            }
+        }
+        Assert.True(armCompared > 0);
+    }
+
     [Fact]
     public void 리프트를_쓰지_않으면_기둥은_간섭_판정에서_빠지고_스트로크는_무시된다()
     {

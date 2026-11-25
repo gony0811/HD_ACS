@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using HD.Acs.App.Services;
 using HD.Acs.Data.Entities;
 using Xunit;
@@ -124,5 +125,58 @@ public class AreaRulesTests
         Assert.Equal(3.85, bb.MaxU, 6);
         Assert.Equal(2.95, bb.MinV, 6);
         Assert.Equal(3.45, bb.MaxV, 6);
+    }
+
+    // 경사면 SU 꼴: 원점 (−15.48, −6, 9), u=+x, v=(0, √½, √½), 내부향 법선 (0, √½, −√½) → 수평 법선 +y
+    private static WallEntity WallSu()
+    {
+        double r = Math.Sqrt(0.5);
+        return new WallEntity
+        {
+            TankId = "CT1", WallCode = "SU", ULen = 30, VLen = 3,
+            Origin = "[-15.48,-6,9]", UAxis = "[1,0,0]", VAxis = $"[0,{r},{r}]", Normal = $"[0,{r},{-r}]",
+        };
+    }
+
+    private static InspectionAreaEntity SuArea(double? sx, double? sy, double? standoff) => new()
+    {
+        TankId = "CT1", WallCode = "SU", Name = "L4-R02C12",
+        Corners = "[[3,0.5],[4,0.5],[4,1.5],[3,1.5]]", StationX = sx, StationY = sy, StationStandoffM = standoff,
+    };
+
+    /// <summary>
+    /// 2026-11-24 SU L4-R02C12 — 이격 1.2 가 남은 채 최적화 정차(벽 쪽 거리 1.10)가 저장됐다.
+    /// 덮어쓰기 정차를 저장하는 모든 경로가 이 함수로 이격을 실제 거리로 맞춘다.
+    /// </summary>
+    [Fact]
+    public void SyncStandoff_SetsActualDistance_OfOverrideStation()
+    {
+        double cy = -6.0 + Math.Sqrt(0.5);   // 영역 중심 y (v 1.0)
+        var a = SuArea(-11.98 + 0.3, cy + 1.10, standoff: 1.2);
+        AreaRules.SyncStandoffToStation(a, WallSu());
+        Assert.Equal(1.10, a.StationStandoffM!.Value, 4);
+
+        var noOverride = SuArea(null, null, standoff: 1.2);           // 덮어쓰기 없음 → 이격이 곧 정차 거리라 그대로
+        AreaRules.SyncStandoffToStation(noOverride, WallSu());
+        Assert.Equal(1.2, noOverride.StationStandoffM);
+
+        var floor = new WallEntity { TankId = "CT1", WallCode = "B", Origin = "[0,0,0]", UAxis = "[1,0,0]", VAxis = "[0,1,0]", Normal = "[0,0,1]" };
+        var b = new InspectionAreaEntity { Corners = "[[1,1],[2,1],[2,2],[1,2]]", StationX = 0.4, StationY = 0.4, StationStandoffM = null };
+        AreaRules.SyncStandoffToStation(b, floor);                      // 바닥·천장은 이격 미적용 → 손대지 않음
+        Assert.Null(b.StationStandoffM);
+    }
+
+    /// <summary>팔 링크–벽 최소 여유 설정 — 없으면 0(종전), 0~300 mm 로 자른다.</summary>
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("100", 100)]
+    [InlineData("-5", 0)]
+    [InlineData("900", 300)]
+    public void ArmWallMargin_ReadFromConfig(string? value, double expected)
+    {
+        var data = new Dictionary<string, string?>();
+        if (value is not null) data["Acs:Reach:ArmWallMarginMm"] = value;
+        var cfg = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(data).Build();
+        Assert.Equal(expected, ReachSimService.ModelFrom(cfg).ArmWallMarginMm);
     }
 }

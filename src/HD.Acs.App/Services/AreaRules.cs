@@ -106,4 +106,27 @@ public static class AreaRules
         }
         return AreaGeometry.BoundingCornersFromPoints(pts, wall.WallCode, 0, vLo, wall.ULen, vHi);
     }
+
+    /// <summary>
+    /// 덮어쓰기 정차(x·y)가 있으면 정차 이격 값을 그 정차점의 실제 거리(영역 중심 → 정차점, 수평 내향 법선 방향)로 맞춘다.
+    /// 이격 칸이 실제 정차와 다른 값을 들고 있으면 운영자가 그 값을 보고 정차를 옮기려 할 때 엉뚱한 결과가 난다(2026-11-24 SU 사례).
+    /// 덮어쓰기가 없거나(배차 식이 이격을 그대로 쓴다) 바닥·천장(이격 미적용)이면 손대지 않는다. 0.1 mm 반올림.
+    /// </summary>
+    public static void SyncStandoffToStation(InspectionAreaEntity area, WallEntity wall)
+    {
+        if (area.StationX is not { } x || area.StationY is not { } y) return;
+        double[]? origin, u, v, n; double[][]? corners;
+        try
+        {
+            origin = JsonSerializer.Deserialize<double[]>(wall.Origin);
+            u = JsonSerializer.Deserialize<double[]>(wall.UAxis);
+            v = JsonSerializer.Deserialize<double[]>(wall.VAxis);
+            n = JsonSerializer.Deserialize<double[]>(wall.Normal);
+            corners = JsonSerializer.Deserialize<double[][]>(area.Corners);
+        }
+        catch (JsonException) { return; }
+        if (origin is not { Length: >= 3 } || u is not { Length: >= 3 } || v is not { Length: >= 3 } || corners is not { Length: > 0 }) return;
+        var s = AreaGeometry.StandoffOfStation(new HD.Acs.Core.Geometry.WallPose(origin, u, v), corners, n, x, y);
+        if (s is { } d && double.IsFinite(d)) area.StationStandoffM = Math.Round(d, 4);
+    }
 }

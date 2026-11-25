@@ -1,10 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HD.Acs.App.Hubs;
 using HD.Acs.App.Services;
 using HD.Acs.Core.Planning;
 using HD.Acs.Data;
 using HD.Acs.Data.Entities;
 using HD.Acs.Vda5050;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,7 +21,7 @@ public class RepairRunTests
         Guid ScenarioId, InspectionAreaEntity A, InspectionAreaEntity B);
 
     /// <summary>F면 L1에 영역 2개(A: 용접선 3개 — 시나리오 대상 / B: 용접선 1개 — 시나리오 대상 아님).</summary>
-    private static async Task<Fixture> Seed()
+    private static async Task<Fixture> Seed(IHubContext<MonitoringHub>? hub = null)
     {
         var db = new AcsDbContext(new DbContextOptionsBuilder<AcsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -62,7 +64,7 @@ public class RepairRunTests
 
         var cfg = new ConfigurationBuilder().Build();
         var dispatcher = new InspectionDispatcher(db, new Vda5050MasterClient("localhost"), new GreedyNearestPolicy(),
-            hub: null!, cfg, NullLogger<InspectionDispatcher>.Instance);
+            hub: hub!, cfg, NullLogger<InspectionDispatcher>.Instance);
         var missions = new MissionService(db, new Vda5050MasterClient("localhost"), dispatcher, NullLogger<MissionService>.Instance);
         return new Fixture(db, dispatcher, missions, sc.ScenarioId, a, b);
     }
@@ -241,5 +243,60 @@ public class RepairRunTests
         var wi = await f.Db.WorkItems.AsNoTracking().SingleAsync(w => w.RunId == runId);
         Assert.Equal(new[] { weld.TaskId }, TaskIdsOf(wi));
         Assert.Equal(1, (await f.Db.ScenarioRuns.AsNoTracking().SingleAsync(r => r.RunId == runId)).TotalTasks);
+    }
+
+    /// <summary>
+    /// 새 run 은 처음부터 RUNNING 이라 첫 배차가 상태 변화로 보지 않아 RunState 가 나가지 않았다 —
+    /// 계획 ▸ 선택 작업만 검사 실행·다른 단말에서 시작한 run 을 운영 화면이 이어받지 못해 중단 버튼이 꺼져 있었다(2026-11-24 현장).
+    /// 시작·재개 때 RunState(RUNNING)를 알려야 한다.
+    /// </summary>
+    [Fact]
+    public async Task StartAndResume_PushRunState()
+    {
+        var hub = new RecordingHub();
+        var f = await Seed(hub);
+        var weld = f.A.Tasks[0];
+
+        var runId = (await f.Missions.StartRepairRunAsync("AMR-01", new[] { weld.TaskId }, null, default, optimize: false)).RunId;
+        Assert.Contains(hub.Sent, m => m == ("RunState", runId, "RUNNING"));
+
+        var normal = f.ScenarioId;
+        await f.Missions.AbortRunAsync(runId);
+        hub.Sent.Clear();
+        await f.Missions.ResumeRunAsync(runId);
+        Assert.Contains(hub.Sent, m => m == ("RunState", runId, "RUNNING"));
+
+        await f.Missions.AbortRunAsync(runId);
+        hub.Sent.Clear();
+        var run2 = await f.Missions.StartRunAsync(normal, "AMR-01", default, restart: true);
+        Assert.Contains(hub.Sent, m => m == ("RunState", run2, "RUNNING"));
+    }
+
+    /// <summary>SignalR 푸시 기록 — (메서드, RunId, State). RunState 가 아닌 메시지는 RunId·State 없음.</summary>
+    private sealed class RecordingHub : IHubContext<MonitoringHub>
+    {
+        public List<(string Method, Guid? RunId, string? State)> Sent { get; } = new();
+        public IHubClients Clients => new C(this);
+        public IGroupManager Groups => null!;
+        private sealed class C : IHubClients
+        {
+            private readonly P _p; public C(RecordingHub h) => _p = new P(h);
+            public IClientProxy All => _p; public IClientProxy AllExcept(IReadOnlyList<string> _) => _p;
+            public IClientProxy Client(string _) => _p; public IClientProxy Clients(IReadOnlyList<string> _) => _p;
+            public IClientProxy Group(string _) => _p; public IClientProxy GroupExcept(string _, IReadOnlyList<string> __) => _p;
+            public IClientProxy Groups(IReadOnlyList<string> _) => _p; public IClientProxy User(string _) => _p;
+            public IClientProxy Users(IReadOnlyList<string> _) => _p;
+        }
+        private sealed class P : IClientProxy
+        {
+            private readonly RecordingHub _h; public P(RecordingHub h) => _h = h;
+            public Task SendCoreAsync(string method, object?[] args, CancellationToken ct = default)
+            {
+                var j = args.Length > 0 ? JsonSerializer.SerializeToNode(args[0]) as JsonObject : null;
+                var id = j?["RunId"]?.GetValue<Guid>();
+                _h.Sent.Add((method, id, j?["State"]?.GetValue<string>()));
+                return Task.CompletedTask;
+            }
+        }
     }
 }
