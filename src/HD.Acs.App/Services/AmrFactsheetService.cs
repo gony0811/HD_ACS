@@ -17,12 +17,13 @@ namespace HD.Acs.App.Services;
 /// AMR 이 factsheet(§7.3) 확장 <c>hdAmr</c> 로 보고한 값 — 해석 결과.
 /// StartJointsByWall = 면 코드 → 운영 ② 출발 관절각, MountPose = T_A_B [x,y,z,rx,ry,rz](미보정이면 null),
 /// SafeJ6 = 티칭과 함께 온 J6 안전 범위·대기(홈) 각도(구버전 AMR 이면 null).
+/// JointMinDeg·JointMaxDeg = AMR 도달 사전 점검이 쓰는 관절 사용 범위 J1~J6(구버전 AMR 이면 null).
 /// </summary>
 public sealed record AmrFactsheet(
     int ConfigVersion, string? ChangedAt, IReadOnlyList<string> Changed, IReadOnlyDictionary<string, string> Fingerprints,
     string? TeachingLiftMode, IReadOnlyDictionary<string, double[]> StartJointsByWall,
     string? LiftMode, double? FixedStrokeMm, double[]? MountPose, double[]? LinksMm, double? MaxEntryJointTravelDeg,
-    AmrSafeJ6? SafeJ6 = null)
+    AmrSafeJ6? SafeJ6 = null, double[]? JointMinDeg = null, double[]? JointMaxDeg = null)
 {
     /// <summary>factsheet 원문에서 hdAmr 확장을 읽는다. 확장이 없거나 형식이 틀리면 null(무시).</summary>
     public static AmrFactsheet? Parse(string json)
@@ -53,7 +54,8 @@ public sealed record AmrFactsheet(
             Arr(hd["mount"]?["tAB"], 6), Arr(hd["cobot"]?["linksMm"], 6), Num(hd["cobot"]?["maxEntryJointTravelDeg"]),
             hd["teaching"]?["safeJ6"] is JsonObject j6
             && Num(j6["minDeg"]) is { } lo && Num(j6["maxDeg"]) is { } hi && Num(j6["standbyDeg"]) is { } sb
-                ? new AmrSafeJ6(lo, hi, sb) : null);
+                ? new AmrSafeJ6(lo, hi, sb) : null,
+            Arr(hd["cobot"]?["jointMinDeg"], 6), Arr(hd["cobot"]?["jointMaxDeg"], 6));
     }
 }
 
@@ -164,6 +166,13 @@ public sealed class AmrFactsheetService : BackgroundService
             if (f.LinksMm is { } l)
                 for (var i = 0; i < 6; i++) d[$"{reachPrefix}LinksMm:{i}"] = N(l[i]);
             if (f.MaxEntryJointTravelDeg is { } e && e >= 30 && e <= 360) d[$"{reachPrefix}MaxEntryJointTravelDeg"] = N(e);
+            // 관절 사용 범위(J1~J5) — AMR 사전 점검과 같은 범위로 정차를 골라야 AMR 이 거부하지 않는다(J6 은 따로 판정).
+            if (ReachSimService.JointLimitsFrom(f.JointMinDeg, f.JointMaxDeg) is { } lim)
+                for (var i = 0; i < lim.Min.Length; i++)
+                {
+                    d[$"{reachPrefix}JointMinDeg:{i}"] = N(lim.Min[i]);
+                    d[$"{reachPrefix}JointMaxDeg:{i}"] = N(lim.Max[i]);
+                }
         }
         return d;
     }

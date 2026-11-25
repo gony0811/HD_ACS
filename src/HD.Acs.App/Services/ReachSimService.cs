@@ -214,6 +214,11 @@ public sealed partial class ReachSimService
             // 손목 여유 |J5| — 경로(진입·순회)는 HD_AMR 과 같은 10°, 판정 자세는 그보다 넉넉한 15°
             // 출발 자세 → ② 해 관절별 최대 이동(가지 전환 판정) — HD_AMR inspection.maxEntryJointTravelDeg 와 같게
             MaxEntryJointTravelDeg = EntryTravelFrom(config.GetValue<double?>("Acs:Reach:MaxEntryJointTravelDeg"), d.MaxEntryJointTravelDeg),
+            // 관절 사용 범위 J1~J5 — HD_AMR 이 factsheet 로 보고한 자세 허용 범위(appsettings.amr-reported.json). 없거나 틀리면 FR5-WML 사양.
+            JointMinDeg = JointLimitsFrom(config.GetSection("Acs:Reach:JointMinDeg").Get<double[]>(),
+                config.GetSection("Acs:Reach:JointMaxDeg").Get<double[]>())?.Min ?? d.JointMinDeg,
+            JointMaxDeg = JointLimitsFrom(config.GetSection("Acs:Reach:JointMinDeg").Get<double[]>(),
+                config.GetSection("Acs:Reach:JointMaxDeg").Get<double[]>())?.Max ?? d.JointMaxDeg,
             PlanarWristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:WristMarginDeg"), d.PlanarWristMarginDeg),
             WristMarginDeg = WristMarginFrom(config.GetValue<double?>("Acs:Reach:PostureWristMarginDeg"), d.WristMarginDeg),
             CheckEntryJ6 = config.GetValue("Acs:Reach:CheckEntryJ6", d.CheckEntryJ6),
@@ -317,6 +322,21 @@ public sealed partial class ReachSimService
         v is { } x && double.IsFinite(x) && x >= 300 && x <= 3000 ? x : fallback;
 
     /// <summary>진입 관절 이동 한계 설정 [도] — 30~360 만 받는다(밖이면 기본값).</summary>
+    /// <summary>
+    /// 관절 사용 범위 설정 → J1~J5 하한·상한 [도]. 둘 다 5요소 이상(J6 이 붙어 와도 앞 5개만)이고 유한·±360 안·하한 &lt; 상한이어야 받는다 — 아니면 null(기본 사양).
+    /// HD_AMR 자세 허용 범위가 J3 ±160 인데 ACS 가 사양 ±170 으로 판정하면 AMR 이 거부하는 정차를 고른다(2026-11-25 SU L4-R02C13-5: J3 160.9°).
+    /// </summary>
+    public static (double[] Min, double[] Max)? JointLimitsFrom(double[]? min, double[]? max)
+    {
+        if (min is not { Length: >= 5 } || max is not { Length: >= 5 }) return null;
+        var lo = min.Take(5).ToArray();
+        var hi = max.Take(5).ToArray();
+        for (var i = 0; i < 5; i++)
+            if (!double.IsFinite(lo[i]) || !double.IsFinite(hi[i]) || Math.Abs(lo[i]) > 360 || Math.Abs(hi[i]) > 360 || lo[i] >= hi[i])
+                return null;
+        return (lo, hi);
+    }
+
     public static double EntryTravelFrom(double? v, double fallback) =>
         v is { } x && double.IsFinite(x) && x >= 30 && x <= 360 ? x : fallback;
 
