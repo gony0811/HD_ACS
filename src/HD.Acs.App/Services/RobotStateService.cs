@@ -247,6 +247,10 @@ public sealed class RobotStateService
         if (disappeared.Any(RobotErrorTracker.IsBatteryGuardBypass))
             await ClearNoticeAlarmAsync(robot.RobotId, "BATTERY_GUARD_BYPASSED", "배터리 보호 다시 켜짐", ct);
 
+        // 주행 경고가 사라짐(도착·경고 해제·주행 종료) — 알람 해제 기록.
+        if (disappeared.Any(RobotErrorTracker.IsDriveWarning))
+            await ClearNoticeAlarmAsync(robot.RobotId, "AMR_DRIVE_WARNING", "AMR 주행 경고 해제", ct);
+
         if (state.Errors.Count == 0) return;
 
         // orderRejectedDeviceFault: 알람 직전 발행 Order가 경합으로 거부된 경우 — 실패 아님, 정차를 PENDING 복귀(멱등).
@@ -332,6 +336,12 @@ public sealed class RobotStateService
                     // 배터리 보호 임시 해제 — 실패 아님(운영 상태 경고). 알람·로그만, 배차·실패 집계는 건드리지 않는다.
                     AddErrorAlarm("BATTERY_GUARD_BYPASSED", robot.RobotId,
                         "배터리 보호 해제 중 — AMR이 BMS 잔량을 무시하고 운용(팩 전압 확인 필요)", err);
+                    break;
+                case var t when RobotErrorTracker.IsDriveWarning(t):
+                    // 주행 중 AMR 주행부 경고(W 코드) — 실패 아님(AMR 이 계속 주행). 알람·로그만, 배차·실패 집계는 건드리지 않는다.
+                    // 경고 뒤 30초 동안 움직임이 없으면 AMR 이 주행 실패로 종결한다(그때 실패 정책).
+                    AddErrorAlarm("AMR_DRIVE_WARNING", robot.RobotId,
+                        "AMR 주행 경고 — 주행은 계속(경고 뒤 움직임이 없으면 AMR 이 실패 처리)", err);
                     break;
                 case var t when DeviceFaults.IsLinkLost(t):
                     // 장치통신 HEAVY알람 §5.2: AMR이 이미 임무 중단(남은 액션 FAILED → 액션 종결 경로가 실패 집계).

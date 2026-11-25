@@ -42,6 +42,8 @@ public static class AlarmSpecSeed
             "AMR이 비드 자동 검출 대신 작업자 입력을 기다림(팝업 표시 중, 타워램프 녹색 점멸) — 실패 아님. AMR 화면에서 비드선을 지정하면 검사가 이어지고 알람이 해제된다 [VDA §6.4 manualBeadInputRequired]"),
         ("BATTERY_GUARD_BYPASSED", "WARNING", "배터리 보호 해제 중 — BMS 잔량 무시",
             "AMR이 BMS 고장 임시 조치로 배터리 보호를 끈 상태(HD_AMR appsettings PowerMode:BypassBatteryGuard=true) — 배터리 잔량과 무관하게 정상 모드로 Order를 받고 저전력 안전정지를 하지 않는다. 실제 잔량을 모르므로 팩 전압을 따로 확인할 것. AMR에서 설정을 끄고 재시작하면 해제된다 [VDA §6.4 batteryGuardBypassed]"),
+        ("AMR_DRIVE_WARNING", "WARNING", "AMR 주행 경고 — 주행 계속",
+            "AMR 주행부가 주행 중 경고(W 코드, 예 W07_001)를 보고 — 실패 아님. AMR 은 주행을 끝내지 않고 도착을 기다린다. 경고 뒤 30초 동안 위치·방향이 그대로면 AMR 이 주행 실패로 종결한다. 같은 경고가 반복되면 AMR 주행부 담당에 코드 의미를 문의할 것 [VDA §6.4 amrDriveWarning]"),
         ("COBOT_ZONE_OBSTACLE", "WARNING", "코봇 반경 장애물 — AMR 주행 정지",
             "AMR이 주행 중 라이다로 코봇 반경 안의 장애물을 감지해 그 자리에 정지(타워램프 황색·부저) — 실패 아님. 장애물이 사라지면 AMR이 같은 목표로 다시 출발하고 알람이 해제된다. 주행 제한 시간까지 안 사라지면 정차가 실패로 보고된다 [VDA §6.4 cobotZoneObstacle, HD_AMR 파라미터 cobotGuard.enabled]"),
         ("AMR_CONFIG_CHANGED", "WARNING", "AMR 설정 변경 — 티칭·리프트·장착 보정",
