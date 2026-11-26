@@ -201,6 +201,37 @@ public class ManualBeadInputTests
         Assert.True(RobotErrorTracker.IsBatteryGuardBypass("BATTERYGUARDBYPASSED"));
     }
 
+    /// <summary>주행 중 AMR 주행부 경고(W 코드) — 경고 알람 1건, 오류 상태 판정·정차·run 은 그대로(AMR 이 계속 주행), 사라지면 해제.</summary>
+    [Fact]
+    public async Task AMR_주행_경고는_경고_알람만_남기고_실패로_세지_않는다()
+    {
+        var env = Build();
+        await SeedDispatchedRunAsync(env.Db);
+        Vda5050State Warned() => new()
+        {
+            Errors = { new VdaError { ErrorType = "amrDriveWarning", ErrorLevel = "WARNING",
+                ErrorDescription = "AMR 주행 경고 — W07_001 드라이버 오버코스트 (주행 계속)" } },
+        };
+
+        await env.States.HandleStateAsync(Robot, Warned());
+        await env.States.HandleStateAsync(Robot, Warned());   // 반복 보고 — 중복 없음
+
+        var alarm = await env.Db.Alarms.AsNoTracking().SingleAsync();
+        Assert.Equal("AMR_DRIVE_WARNING", alarm.AlarmCode);
+        Assert.Null(alarm.ClearedAt);
+        Assert.Contains("W07_001", DescriptionOf(alarm));
+        Assert.False(env.Tracker.HasActiveErrors(RobotId));      // SAIGE 로봇 상태가 ERROR 로 가지 않는다
+        var wi = await env.Db.WorkItems.AsNoTracking().SingleAsync();
+        Assert.Equal(("DISPATCHED", 0), (wi.Status, wi.Attempts));
+        Assert.Equal("RUNNING", (await env.Db.ScenarioRuns.AsNoTracking().SingleAsync()).State);
+
+        await env.States.HandleStateAsync(Robot, new Vda5050State());   // 도착 — 경고 사라짐
+
+        Assert.NotNull((await env.Db.Alarms.AsNoTracking().SingleAsync()).ClearedAt);
+        Assert.True(RobotErrorTracker.IsDriveWarning("AMRDRIVEWARNING"));
+        Assert.False(RobotErrorTracker.IsDriveWarning("drivingFailed"));
+    }
+
     [Theory]
     [InlineData("manualBeadInputRequired", true)]
     [InlineData("MANUALBEADINPUTREQUIRED", true)]

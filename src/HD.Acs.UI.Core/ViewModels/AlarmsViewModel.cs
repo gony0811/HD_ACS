@@ -251,6 +251,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
         var t = head.Trim();
         if (t.Equals(ManualBeadInputType, StringComparison.OrdinalIgnoreCase)) return "warn";   // 작업자 입력 대기 — 실패 아님
         if (t.Equals("cobotZoneObstacle", StringComparison.OrdinalIgnoreCase)) return "warn";   // 장애물로 주행 정지 — 사라지면 재출발
+        if (t.Equals("amrDriveWarning", StringComparison.OrdinalIgnoreCase)) return "warn";   // 주행 중 AMR 주행부 경고 — 주행 계속
         if (t.Equals("batteryGuardBypassed", StringComparison.OrdinalIgnoreCase)) return "warn";   // 배터리 보호 해제 중 — 운영 상태 경고
         if (t.Equals("batteryCritical", StringComparison.OrdinalIgnoreCase)) return "fail";
         if (t.Equals("batteryLow", StringComparison.OrdinalIgnoreCase)) return "warn";

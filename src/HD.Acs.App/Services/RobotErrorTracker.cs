@@ -70,11 +70,20 @@ public sealed class RobotErrorTracker
     public static bool IsBatteryGuardBypass(string errorType) =>
         string.Equals(errorType, BatteryGuardBypassedType, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용. 작업자 입력 요청·장애물 대기·배터리 보호 해제는 세지 않는다.</summary>
+    /// <summary>
+    /// 주행 중 AMR 주행부 경고 errorType — AMR 이 W 코드(경고)를 받았지만 주행을 끝내지 않고 도착을 기다리는 동안 WARNING 으로 싣는다 [VDA §6.4].
+    /// 실패가 아니므로 오류 상태 판정(<see cref="HasActiveErrors"/>)에서 뺀다. 경고 뒤 30초 동안 움직임이 없으면 AMR 이 주행 실패로 종결한다(그때 실패 정책).
+    /// </summary>
+    public const string AmrDriveWarningType = "amrDriveWarning";
+
+    public static bool IsDriveWarning(string errorType) =>
+        string.Equals(errorType, AmrDriveWarningType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>로봇이 마지막 state에서 errors를 보고 중인가 — SAIGE 로봇 상태(ERROR) 판정용. 작업자 입력 요청·장애물 대기·배터리 보호 해제·주행 경고는 세지 않는다.</summary>
     public bool HasActiveErrors(string robotId)
     {
         if (!_activeByRobot.TryGetValue(robotId, out var active)) return false;
-        lock (active) return active.Any(t => !IsOperatorNotice(t) && !IsObstacleHold(t) && !IsBatteryGuardBypass(t));
+        lock (active) return active.Any(t => !IsOperatorNotice(t) && !IsObstacleHold(t) && !IsBatteryGuardBypass(t) && !IsDriveWarning(t));
     }
 
     /// <summary>로봇이 마지막 state에서 해당 errorType을 보고 중인가 (예: communicationLostPause — run 중단 시 cancelOrder 판정).</summary>
