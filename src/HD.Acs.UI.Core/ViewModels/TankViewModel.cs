@@ -52,6 +52,7 @@ public sealed partial class TankViewModel : ObservableObject
         if (statusByTask is not null)
             foreach (var (taskId, status) in statusByTask) _workStatusByTask[taskId] = status;
         OnPropertyChanged(nameof(HasRunStatuses));
+        OnPropertyChanged(nameof(ShowLegend));
         BuildFacePlots();
         SceneInvalidated?.Invoke(this, EventArgs.Empty);   // 색만 바뀜 — 카메라는 유지(ViewChanged는 맞춤을 다시 함)
     }
@@ -86,6 +87,7 @@ public sealed partial class TankViewModel : ObservableObject
     private void RefreshStatusColors()
     {
         OnPropertyChanged(nameof(HasRunStatuses));
+        OnPropertyChanged(nameof(ShowLegend));
         BuildFacePlots();
         SceneInvalidated?.Invoke(this, EventArgs.Empty);
     }
@@ -133,6 +135,88 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>진행·기록 색을 표시 중인지(범례 표시용) — run 진행 중이거나 누적 기록을 보여줄 때.</summary>
     public bool HasRunStatuses => _workStatusByArea.Count > 0 || (ShowHistory && _historyByTask.Count > 0);
 
+    // ── 보기: 미션 강조 / 전체 현황 ──
+    /// <summary>미션 강조 보기에서 아직 차례가 오지 않은 미션 대상 영역의 표시 상태(강조색).</summary>
+    public const string MissionTarget = "MISSION";
+
+    private MissionAreaScope? _missionScope;
+    private readonly Dictionary<Guid, Guid> _areaByTask = new();   // 용접선 → 소속 영역 (Overlays에서)
+
+    /// <summary>운영 화면 보기 — 기본은 미션 강조. 바꾸면 색만 다시 칠한다(카메라 유지).</summary>
+    [ObservableProperty] private TankDisplayMode _displayMode = TankDisplayMode.MissionFocus;
+
+    partial void OnDisplayModeChanged(TankDisplayMode value) => NotifyMissionView();
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void ShowMissionView() => DisplayMode = TankDisplayMode.MissionFocus;
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void ShowOverview() => DisplayMode = TankDisplayMode.Overview;
+
+    public bool IsMissionView => DisplayMode == TankDisplayMode.MissionFocus;
+    public bool IsOverviewView => DisplayMode == TankDisplayMode.Overview;
+
+    /// <summary>미션 강조가 실제로 걸려 있는지 — 미션 강조 보기이고 기준 미션(진행 중 run 또는 선택 시나리오)이 있을 때.</summary>
+    public bool MissionFocusActive => DisplayMode == TankDisplayMode.MissionFocus && _missionScope is not null;
+
+    /// <summary>범례 표시 — 진행·기록 색이 있거나 미션 강조 중일 때.</summary>
+    public bool ShowLegend => HasRunStatuses || MissionFocusActive;
+
+    /// <summary>보기 옆 안내 문구.</summary>
+    public string MissionViewSummary => DisplayMode == TankDisplayMode.Overview
+        ? "선창 전체 진행 현황"
+        : _missionScope is null ? "선택된 미션 없음 — 전체 현황으로 표시"
+        : _missionScope.All ? $"{_missionScope.Source} · 선창 전체가 대상"
+        : $"{_missionScope.Source} · 대상 {_missionScope.AreaIds.Count}개 영역 강조, 나머지 흑백";
+
+    /// <summary>기준 미션의 대상 영역을 바꾼다(Shell이 MissionViewModel.MissionScope 변경 때 호출). null = 기준 미션 없음.</summary>
+    public void SetMissionScope(MissionAreaScope? scope)
+    {
+        bool same = scope is null ? _missionScope is null : scope.SameAreas(_missionScope);
+        bool sourceChanged = scope?.Source != _missionScope?.Source;
+        _missionScope = scope;
+        if (same) { if (sourceChanged) OnPropertyChanged(nameof(MissionViewSummary)); return; }
+        NotifyMissionView();
+    }
+
+    private void NotifyMissionView()
+    {
+        OnPropertyChanged(nameof(IsMissionView));
+        OnPropertyChanged(nameof(IsOverviewView));
+        OnPropertyChanged(nameof(MissionFocusActive));
+        OnPropertyChanged(nameof(ShowLegend));
+        OnPropertyChanged(nameof(MissionViewSummary));
+        RefreshStatusColors();
+    }
+
+    /// <summary>영역이 기준 미션의 대상인지(기준 미션이 없으면 false).</summary>
+    public bool IsInMission(Guid areaId) => _missionScope?.Contains(areaId) == true;
+
+    /// <summary>흑백 음영으로 낮출 영역인지 — 미션 강조 중이고 대상이 아닌 영역.</summary>
+    public bool IsAreaMuted(Guid areaId) => MissionFocusActive && !IsInMission(areaId);
+
+    /// <summary>화면에 칠할 영역 상태. 전체 현황(또는 기준 미션 없음)은 <see cref="WorkItemStatusOf"/> 그대로.
+    /// 미션 강조: 대상 영역은 이번 run에서 진행됐으면(검사 중·완료·실패) 그 상태, 아니면 <see cref="MissionTarget"/>(강조색).
+    /// 대상이 아닌 영역은 누적 기록 또는 계획색(흐린 EXCLUDED 대신) — 뷰가 흑백으로 낮춘다.</summary>
+    public string? AreaDisplayStatusOf(Guid areaId)
+    {
+        var s = WorkItemStatusOf(areaId);
+        if (!MissionFocusActive) return s;
+        if (IsInMission(areaId))
+            return _workStatusByArea.TryGetValue(areaId, out var run) && run is not ("PENDING" or "PLANNED" or "WAITING")
+                ? s : MissionTarget;
+        return s == WorkOutcome.Excluded ? null : s;
+    }
+
+    /// <summary>화면에 칠할 용접선 상태. 미션 강조에서 대상 영역의 용접선은 이번 run 결과(검사 중·성공·실패)만 보이고,
+    /// 나머지는 미검사(주황) — 지난 기록은 대상 외 영역에서만 흑백으로 남는다.</summary>
+    public string? TaskDisplayStatusOf(Guid taskId)
+    {
+        if (!MissionFocusActive || !_areaByTask.TryGetValue(taskId, out var area) || !IsInMission(area))
+            return TaskStatusOf(taskId);
+        return _workStatusByTask.TryGetValue(taskId, out var run) && run is "RUNNING" or "FINISHED" or "FAILED" ? run : null;
+    }
+
     /// <summary>용접라인의 표시 상태. 현재 run에서 검사 중·성공·실패면 그 상태, 아니면 누적 기록의 가장 최근 결과,
     /// 그것도 없으면 run 대기(회색) 또는 null = 미검사(계획 주황).</summary>
     public string? TaskStatusOf(Guid taskId)
@@ -146,11 +230,14 @@ public sealed partial class TankViewModel : ObservableObject
     /// <summary>상태 → (채움, 외곽선) 색 — 전개도(브러시 컨버터)·3D(material)·상태 배지가 공유하는 단일 매핑.
     /// 영역(work_item): null=계획(녹) / PENDING=회 / DISPATCHED=파랑 / DONE=녹(진) / SKIPPED·FAILED=빨강.
     /// 용접라인(액션): PLANNED·WAITING=회 / RUNNING=파랑 / FINISHED=녹(진) / FAILED=빨강.
-    /// 영역 결과(WorkOutcome): SUCCESS=진한 녹 채움(소속 용접선 전부 성공) / EXCLUDED=흐린 회(실행 대상 아님).</summary>
+    /// 영역 결과(WorkOutcome): SUCCESS=진한 녹 채움(소속 용접선 전부 성공) / EXCLUDED=흐린 회(실행 대상 아님).
+    /// 미션 강조 보기: MISSION=노랑(미션 대상, 아직 차례 전).</summary>
     public static (Rgba Fill, Rgba Line) StatusColors(string? status) => status switch
     {
         "SUCCESS" =>
             (Rgba.FromArgb(0x80, 0x2E, 0xCC, 0x71), Rgba.FromRgb(0x2E, 0xCC, 0x71)),
+        MissionTarget =>
+            (Rgba.FromArgb(0x33, 0xF4, 0xD0, 0x3F), Rgba.FromRgb(0xF4, 0xD0, 0x3F)),
         WorkOutcome.Excluded =>
             (Rgba.FromArgb(0x0D, 0x80, 0x8A, 0x94), Rgba.FromArgb(0x66, 0x80, 0x8A, 0x94)),
         "PENDING" or "PLANNED" or "WAITING" =>
@@ -364,10 +451,12 @@ public sealed partial class TankViewModel : ObservableObject
             if (_overlayReloadPending) continue;   // 조회 중 다시 요청됨 — 낡은 결과는 그리지 않고 다시 조회
             Overlays.Clear();
             _tasksByArea.Clear();
+            _areaByTask.Clear();
             foreach (var o in loaded)
             {
                 Overlays.Add(o);
                 _tasksByArea[o.Area.AreaId] = o.Tasks.Select(t => t.TaskId).ToArray();
+                foreach (var t in o.Tasks) _areaByTask[t.TaskId] = o.Area.AreaId;
             }
             BuildFacePlots();   // 전개도(면별 2D 도면) 갱신
             ViewChanged?.Invoke(this, EventArgs.Empty);
@@ -417,18 +506,21 @@ public sealed partial class TankViewModel : ObservableObject
             {
                 bool wantAreas = layers.AreaFills || layers.AreaLabels;
                 bool wantTasks = layers.WeldLines || layers.WeldEndpoints || layers.TaskSeq;
-                foreach (var ov in Overlays.Where(o => o.Area.WallCode == w.WallCode))
+                // 흑백(미션 대상 외) 영역을 먼저 — 강조·진행 영역이 그 위에 그려진다
+                foreach (var ov in Overlays.Where(o => o.Area.WallCode == w.WallCode)
+                             .OrderByDescending(o => IsAreaMuted(o.Area.AreaId)))
                 {
+                    bool muted = IsAreaMuted(ov.Area.AreaId);
                     if (wantAreas)
                     {
                         var corners = ov.Area.Corners ?? RectUv(ov.Area.UMin, ov.Area.VMin, ov.Area.UMax, ov.Area.VMax);
                         var pc = PC(corners);
                         var (cx, cy) = Plot2D.Centroid(pc);
-                        areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, WorkItemStatusOf(ov.Area.AreaId)));
+                        areas.Add(new AreaPoly(pc, cx, cy, ov.Area.Name, AreaDisplayStatusOf(ov.Area.AreaId), muted));
                     }
                     if (!wantTasks) continue;
                     foreach (var t in ov.Tasks)   // 교차(CROSS3/4)는 저장된 가지로 T/十자 [SeamGlyph]
-                        tasks.Add(SeamGlyph.ToSeg(t, Proj, 0, TaskStatusOf(t.TaskId), BadgeStyle.Compact));
+                        tasks.Add(SeamGlyph.ToSeg(t, Proj, 0, TaskDisplayStatusOf(t.TaskId), BadgeStyle.Compact) with { Muted = muted });
                 }
             }
 

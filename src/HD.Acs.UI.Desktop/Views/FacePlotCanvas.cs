@@ -48,7 +48,8 @@ public sealed class FacePlotCanvas : Control
             foreach (var a in plot.Areas)
             {
                 var (fill, line) = TankViewModel.StatusColors(a.Status);
-                if (a.Points.Count >= 3) DrawPolygon(ctx, a.Points, Brush(fill), Pen(line, 1));
+                double w = a.Status == TankViewModel.MissionTarget ? 1.6 : 1;   // 미션 대상(대기)은 외곽선을 조금 굵게
+                if (a.Points.Count >= 3) DrawPolygon(ctx, a.Points, Brush(fill.MutedIf(a.Muted)), Pen(line.MutedIf(a.Muted), w));
             }
 
         // 용접선 — 선 색=진행 상태색, 유형은 모양으로 구분(CROSS3=T자·▲, CROSS4=十자·■, 가지 없음=점선) [SeamGlyph]
@@ -58,24 +59,25 @@ public sealed class FacePlotCanvas : Control
             var t = plot.Tasks[i];
             var g = glyphs[i] = SeamGlyph.Build(t, markerR: 3.5, arrowLen: 6);
             if (layers.WeldLines)
-                SeamGlyphPainter.Draw(ctx, g, TankViewModel.WeldLineColor(t.Status), 2, 3.5);
+                SeamGlyphPainter.Draw(ctx, g, TankViewModel.WeldLineColor(t.Status).MutedIf(t.Muted), 2, 3.5);
             if (layers.WeldEndpoints && t.Kind == SeamKind.Line)
             {
-                ctx.DrawEllipse(Brush(WeldStart), null, new Point(t.X1, t.Y1), 2.5, 2.5);
-                ctx.DrawEllipse(Brush(WeldEnd), null, new Point(t.X2, t.Y2), 2.5, 2.5);
+                ctx.DrawEllipse(Brush(WeldStart.MutedIf(t.Muted)), null, new Point(t.X1, t.Y1), 2.5, 2.5);
+                ctx.DrawEllipse(Brush(WeldEnd.MutedIf(t.Muted)), null, new Point(t.X2, t.Y2), 2.5, 2.5);
             }
         }
 
         // 글자는 도형 위에
         if (layers.AreaLabels)
             foreach (var a in plot.Areas)
-                DrawText(ctx, a.Label, TankViewModel.StatusColors(a.Status).Line, 9, a.LabelX, a.LabelY, center: false);
+                DrawText(ctx, a.Label, TankViewModel.StatusColors(a.Status).Line.MutedIf(a.Muted), 9, a.LabelX, a.LabelY, center: false);
         if (layers.TaskSeq)
             for (int i = 0; i < plot.Tasks.Count; i++)
             {
                 var t = plot.Tasks[i];
-                if (t.Kind == SeamKind.Line) DrawText(ctx, t.Badge, SeqColor, 8, t.MidX, t.MidY, center: true);
-                else DrawText(ctx, t.Badge, SeqColor, 8, glyphs[i].LabelAnchor.X, glyphs[i].LabelAnchor.Y, center: false);
+                var seq = SeqColor.MutedIf(t.Muted);
+                if (t.Kind == SeamKind.Line) DrawText(ctx, t.Badge, seq, 8, t.MidX, t.MidY, center: true);
+                else DrawText(ctx, t.Badge, seq, 8, glyphs[i].LabelAnchor.X, glyphs[i].LabelAnchor.Y, center: false);
             }
     }
 

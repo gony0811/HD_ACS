@@ -177,6 +177,36 @@ public sealed partial class MissionViewModel : ObservableObject
     partial void OnWallFilterChanged(AreaFilterOption? value) { if (!_rebuildingFilters) ApplyAreaFilter(); }
     partial void OnAreaNameFilterChanged(string value) => ApplyAreaFilter();
 
+    // ── 운영 화면 미션 강조의 기준 영역 ──
+    private HashSet<Guid>? _linkedAreaIds;   // 선택 시나리오의 저장된 대상(null=시나리오 없음·아직 안 읽음, 빈 집합=선창 전체)
+    private string? _linkedScenarioName;
+
+    /// <summary>운영 화면 3D·전개도가 강조할 미션 대상 영역. 진행 중 run이 있으면 그 run의 정차 영역(재검사 run 포함),
+    /// 없으면 선택한 시나리오의 저장된 대상(대상 미지정 = 선창 전체). 둘 다 없으면 null.</summary>
+    public MissionAreaScope? MissionScope { get; private set; }
+
+    /// <summary><see cref="MissionScope"/>의 대상 영역이 바뀜(출처 문구만 바뀌어도 알림).</summary>
+    public event EventHandler? MissionScopeChanged;
+
+    private void RebuildMissionScope()
+    {
+        MissionAreaScope? next;
+        if (RunActive && WorkItems.Count > 0)
+            next = new MissionAreaScope(false, WorkItems.Select(w => w.AreaId).ToHashSet(),
+                CurrentRun?.IsRepair == true ? "진행 중 재검사" : "진행 중 미션");
+        else if (SelectedScenario is null || _linkedAreaIds is null)
+            next = null;
+        else if (_linkedAreaIds.Count == 0)
+            next = MissionAreaScope.Whole($"'{_linkedScenarioName}'");
+        else
+            next = new MissionAreaScope(false, new HashSet<Guid>(_linkedAreaIds), $"'{_linkedScenarioName}'");
+
+        bool same = next is null ? MissionScope is null : next.SameAreas(MissionScope) && next.Source == MissionScope?.Source;
+        if (same) return;
+        MissionScope = next;
+        MissionScopeChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private async Task LoadScenarioAreasAsync()
     {
         var seq = ++_areasLoadSeq;
@@ -184,7 +214,9 @@ public sealed partial class MissionViewModel : ObservableObject
         if (sc is null)
         {
             _poolAll.Clear(); _chosenAll.Clear();
+            _linkedAreaIds = null;
             RebuildLevelFilterOptions(); ApplyAreaFilter();
+            RebuildMissionScope();
             return;
         }
         try
@@ -201,6 +233,9 @@ public sealed partial class MissionViewModel : ObservableObject
 
             RebuildLevelFilterOptions();   // 필터 선택은 값으로 유지(다른 시나리오로 바꿔도 같은 층·면)
             ApplyAreaFilter();
+            _linkedAreaIds = linked;       // 서버에 저장된 대상 — 편집 중(저장 전) 목록은 강조에 쓰지 않는다
+            _linkedScenarioName = sc.Name;
+            RebuildMissionScope();
         }
         catch (Exception ex)
         {
@@ -663,6 +698,7 @@ public sealed partial class MissionViewModel : ObservableObject
 
         RebuildWorkSummary();
         WorkItemsChanged?.Invoke(this, EventArgs.Empty);
+        RebuildMissionScope();
 
         RebuildFloorProgress();
 
@@ -844,6 +880,7 @@ public sealed partial class MissionViewModel : ObservableObject
     partial void OnNewScenarioNameChanged(string value) => CreateScenarioCommand.NotifyCanExecuteChanged();
     partial void OnCurrentRunChanged(ScenarioRunDto? value)
     {
+        RebuildMissionScope();
         ReleaseNextCommand.NotifyCanExecuteChanged();
         RefreshCurrentRunCommand.NotifyCanExecuteChanged();
         AbortRunCommand.NotifyCanExecuteChanged();

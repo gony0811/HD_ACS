@@ -133,9 +133,10 @@ public sealed class Tank3DControl : Control
         return new TankSceneInput(
             vm.ShellWalls.ToArray(), vm.LevelWalls.ToArray(), vm.Geometry,
             vm.Overlays.ToArray(), vm.ShowOverlays, vm.SelectedLevel,
-            vm.WorkItemStatusOf, vm.TaskStatusOf,
+            vm.AreaDisplayStatusOf, vm.TaskDisplayStatusOf,
             vm.RobotMarkerVisible, new Pt3(vm.RobotDrawingX, vm.RobotDrawingY, vm.RobotDrawingZ),
-            moveMarker, vm.RobotDrawingTheta, moveHeading, vm.View3DLayers.Snapshot());
+            moveMarker, vm.RobotDrawingTheta, moveHeading, vm.View3DLayers.Snapshot(),
+            vm.MissionFocusActive ? vm.IsAreaMuted : null);
     }
 
     /// <summary>현재 카메라·크기로 그리기 목록 생성(테스트·진단용).</summary>

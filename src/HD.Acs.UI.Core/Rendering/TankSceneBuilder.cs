@@ -27,7 +27,8 @@ public sealed record TankSceneInput(
     Pt3? MoveMarker = null,
     double? RobotHeading = null,   // 도면 프레임 heading(rad). null=화살표 생략
     double? MoveHeading = null,
-    SceneLayers? Layers = null)    // null=전부 표시
+    SceneLayers? Layers = null,    // null=전부 표시
+    Func<Guid, bool>? AreaMuted = null)   // 흑백 음영으로 낮출 영역(미션 강조 보기의 대상 외). null=없음
 {
     public bool IsolateLevel => SelectedLevel is not null;
     public SceneLayers EffectiveLayers => Layers ?? SceneLayers.All;
@@ -215,6 +216,7 @@ public static class TankSceneBuilder
         {
             var a = ov.Area;
             if (lvl is int L && a.Level != L) continue;
+            bool muted = input.AreaMuted?.Invoke(a.AreaId) == true;   // 대상 외 — 영역·용접선·글자 모두 흑백
             if (!wallByCode.TryGetValue(a.WallCode, out var wall)) continue;
 
             var off = -TankShape.NormalOffset(wall, HighlightOffsetM * 1.5);   // 외부향으로 셸보다 약간 더 띄움
@@ -231,10 +233,10 @@ public static class TankSceneBuilder
                 if (layers.AreaFills)
                 {
                     var (fillC, lineC) = TankViewModel.StatusColors(input.WorkItemStatusOf(a.AreaId));
-                    scene.Faces.Add(new Face3(pts3d, fillC, null, Shade: false));
-                    AddClosedOutline(scene, pts3d, lineC, 2.0);
+                    scene.Faces.Add(new Face3(pts3d, fillC.MutedIf(muted), null, Shade: false));
+                    AddClosedOutline(scene, pts3d, lineC.MutedIf(muted), 2.0);
                 }
-                if (layers.AreaLabels) scene.Labels.Add(new Label3(Centroid(pts3d), a.Name, LabelWhite, 12));
+                if (layers.AreaLabels) scene.Labels.Add(new Label3(Centroid(pts3d), a.Name, LabelWhite.MutedIf(muted), 12));
             }
 
             if (!anyTask) continue;
@@ -242,7 +244,7 @@ public static class TankSceneBuilder
             {
                 if (!TankShape.TryPoint(wall, t.StartU, t.StartV, out var s) || !TankShape.TryPoint(wall, t.EndU, t.EndV, out var e)) continue;
                 s += off; e += off;
-                var color = TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId));
+                var color = TankViewModel.WeldLineColor(input.TaskStatusOf(t.TaskId)).MutedIf(muted);
                 var kind = SeamGlyph.KindOf(t.SeamType);
                 string badge = SeamGlyph.Badge(t, BadgeStyle.NoScreen);   // 3D는 시점이 돌아가므로 화면 방향 없음
 
@@ -257,9 +259,9 @@ public static class TankSceneBuilder
                             bool stem = kind == SeamKind.Cross3 && i == 0;
                             scene.Segments.Add(new Segment3(s, arm + off, color, stem ? 5.5 : 3.0));
                         }
-                        scene.Markers.Add(new Marker3(s, color, RadiusPx: 5.5, Stroke: LabelWhite));
+                        scene.Markers.Add(new Marker3(s, color, RadiusPx: 5.5, Stroke: LabelWhite.MutedIf(muted)));
                     }
-                    if (layers.TaskSeq) scene.Labels.Add(new Label3(s, badge, LabelWheat, 11));
+                    if (layers.TaskSeq) scene.Labels.Add(new Label3(s, badge, LabelWheat.MutedIf(muted), 11));
                     continue;
                 }
 
@@ -267,10 +269,10 @@ public static class TankSceneBuilder
                     scene.Segments.Add(new Segment3(s, e, color, 3.0));
                 if (layers.WeldEndpoints && kind == SeamKind.Line)
                 {
-                    scene.Markers.Add(new Marker3(s, WeldStart, RadiusPx: 5.5));
-                    scene.Markers.Add(new Marker3(e, WeldEnd, RadiusPx: 5.5));
+                    scene.Markers.Add(new Marker3(s, WeldStart.MutedIf(muted), RadiusPx: 5.5));
+                    scene.Markers.Add(new Marker3(e, WeldEnd.MutedIf(muted), RadiusPx: 5.5));
                 }
-                if (layers.TaskSeq) scene.Labels.Add(new Label3((s + e) * 0.5, badge, LabelWheat, 11));
+                if (layers.TaskSeq) scene.Labels.Add(new Label3((s + e) * 0.5, badge, LabelWheat.MutedIf(muted), 11));
             }
         }
     }

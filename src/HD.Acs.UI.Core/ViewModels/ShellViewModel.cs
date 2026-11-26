@@ -125,6 +125,10 @@ public sealed partial class ShellViewModel : ObservableObject
                 ToLastWins(Mission.WorkItems.SelectMany(w => w.Tasks).Select(t => (t.TaskId, t.Status))),
                 partialAreas: Mission.CurrentRun?.IsRepair == true);   // 리페어 run은 영역의 용접선 일부만 검사
 
+        // 미션 강조 보기의 기준 영역(진행 중 run 또는 선택 시나리오) → 3D·전개도 강조/흑백
+        Mission.MissionScopeChanged += (_, _) => Tank.SetMissionScope(Mission.MissionScope);
+        Tank.SetMissionScope(Mission.MissionScope);
+
         // run 시작·종료·전환 → 선창 누적 검사 기록(용접선별 최근 결과)을 다시 읽어 지난 run의 결과를 도면에 남긴다
         Mission.PropertyChanged += (_, e) =>
         {

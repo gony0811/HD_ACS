@@ -4,6 +4,23 @@
              x:Class="HD.Acs.UI.Desktop.Views.TankView">
     <!-- DataContext = TankViewModel. 3D 뷰=소프트웨어 투영 렌더러(Tank3DControl), 전개도 탭=면별 2D 캔버스. -->
     <DockPanel TextBlock.Foreground="{DynamicResource AppTextBrush}">
+        <!-- 보기: 미션 강조(선택 미션 대상 강조·나머지 흑백) / 전체 현황(종전 — 선창 전체 진행·누적 기록) -->
+        <Border DockPanel.Dock="Top" Padding="8,6" Background="{DynamicResource AppHeaderBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="0">
+                <TextBlock Text="보기" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ToggleButton x:Name="MissionViewButton" Content="미션 강조" Padding="10,3" CornerRadius="3,0,0,3"
+                              IsChecked="{Binding IsMissionView, Mode=OneWay}" Command="{Binding ShowMissionViewCommand}"
+                              ToolTip.Tip="선택한 미션(진행 중이면 그 미션, 아니면 선택한 시나리오)의 검사 대상 영역을 노랑으로 강조하고, 대상이 아닌 영역은 흑백으로 낮춥니다. 검사 중·완료·실패 색은 그대로입니다." />
+                <ToggleButton x:Name="OverviewButton" Content="전체 현황" Padding="10,3" CornerRadius="0,3,3,0"
+                              IsChecked="{Binding IsOverviewView, Mode=OneWay}" Command="{Binding ShowOverviewCommand}"
+                              ToolTip.Tip="선창 전체 영역의 진행 상태와 누적 검사 기록을 색으로 봅니다." />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           Text="{Binding MissionViewSummary}" />
+            </StackPanel>
+        </Border>
+
         <!-- 뷰 모드(전체/L1~L4) + 오버레이·수동 이동 토글 + 로봇 위치 -->
         <Border DockPanel.Dock="Top" Padding="8" Background="{DynamicResource AppHeaderBrush}">
             <StackPanel Orientation="Horizontal">
@@ -46,7 +63,7 @@
         </Border>
 
         <!-- 진행 색 범례 — run 진행 표시 중에만. 색 정본 = TankViewModel.StatusColors -->
-        <Border DockPanel.Dock="Bottom" Padding="8,4" IsVisible="{Binding HasRunStatuses}" Background="{DynamicResource AppHeaderBrush}">
+        <Border DockPanel.Dock="Bottom" Padding="8,4" IsVisible="{Binding ShowLegend}" Background="{DynamicResource AppHeaderBrush}">
             <StackPanel x:Name="StatusLegend" Orientation="Horizontal">
                 <StackPanel.Styles>
                     <Style Selector="TextBlock"><Setter Property="FontSize" Value="11" /><Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Margin" Value="4,0,12,0" /></Style>
@@ -60,10 +77,12 @@
                 <Rectangle Fill="#2ECC71" /><TextBlock Text="성공" />
                 <Rectangle Fill="#E74C3C" /><TextBlock Text="실패" />
                 <TextBlock Text="영역" FontWeight="Bold" Margin="12,0,12,0" />
+                <Border Background="#33F4D03F" BorderBrush="#F4D03F" IsVisible="{Binding MissionFocusActive}" /><TextBlock Text="미션 대상 (차례 전)" IsVisible="{Binding MissionFocusActive}" />
                 <Border Background="#802ECC71" BorderBrush="#2ECC71" /><TextBlock Text="성공 (용접선 전부 성공)" />
                 <Border Background="#38E74C3C" BorderBrush="#E74C3C" /><TextBlock Text="실패" />
                 <Border Background="#382E86DE" BorderBrush="#2E86DE" /><TextBlock Text="검사 중" />
                 <Border Background="#26808A94" BorderBrush="#808A94" /><TextBlock Text="대기" />
+                <Border Background="#0F3A3A3A" BorderBrush="#5F5F5F" IsVisible="{Binding MissionFocusActive}" /><TextBlock Text="미션 대상 아님 (흑백)" IsVisible="{Binding MissionFocusActive}" />
             </StackPanel>
         </Border>
 
