@@ -995,6 +995,12 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = $"CROSS4 좌우 판정 실패: {ex.Message}"; }
     }
 
+    /// <summary>
+    /// 다른 화면(리치·간섭의 정차점 최적화 적용·영역 분리·격자 재분할·정차 묶음 적용)이 영역을 바꾼 뒤 목록을 다시 받는다 —
+    /// 선택 영역은 유지되고, 저장된 정차가 바뀌었으면 폼도 새 값으로 다시 채운다(<see cref="OnSelectedAreaChanged"/>).
+    /// </summary>
+    public Task ReloadAreasAsync() => RefreshAreasAsync();
+
     private async Task RefreshAreasAsync(Guid? select = null)
     {
         // 그 면의 **모든 층** 영역을 로드(_allAreas, 면-전체 v — 전개도가 타 층을 회색으로 표시).

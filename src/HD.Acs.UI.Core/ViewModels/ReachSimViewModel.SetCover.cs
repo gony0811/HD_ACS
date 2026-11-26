@@ -62,6 +62,7 @@ public sealed partial class ReachSimViewModel
             SetCoverSummary = $"적용함 — {LevelLabel.Of(r.Level)} {r.WallCode} 영역 {stations}곳" + (xs > 0 ? $" + X 영역 {xs}곳" : "")
                               + $" (영역 ID 물려받음 {r.Areas.Count(a => a.Inherited)} · 지운 기존 영역 {r.DeletedAreas} · 옮긴 작업 {r.TasksMoved}"
                               + (r.ScenarioLinksAdded > 0 ? $" · 시나리오 연결 추가 {r.ScenarioLinksAdded}" : "") + "). 파일 ▸ 저장으로 .hdacs 에 반영하세요.";
+            NotifyAreasChanged();
             try { ApplyAreaWalls(await _api.GetAreasAsync(TankId)); } catch { /* 면 목록은 그대로 */ }
             await SurveyAsync();
         }

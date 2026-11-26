@@ -110,6 +110,8 @@ public sealed partial class ShellViewModel : ObservableObject
                 Mission.IsGasTank = AreaPlanning.InspectionKindCode == HD.Acs.UI.Models.InspectionKindOption.Gas;
         };
 
+        // 리치·간섭에서 정차·영역을 적용하면 계획 ▸ 영역·작업 목록을 다시 받는다 — 안 받으면 적용 전 정차가 그대로 보인다
+        ReachSim.AreasChanged += (_, _) => _ = AreaPlanning.ReloadAreasAsync();
         // 2D "영역·작업 관리"에서 등록/삭제 시 3D 도면 오버레이 자동 동기화
         AreaPlanning.PlanningChanged += (_, _) => _ = Tank.LoadOverlaysAsync();
         // 영역 수정 → 로봇 상태 카드의 "계획 정차점까지 거리" 즉시 재계산

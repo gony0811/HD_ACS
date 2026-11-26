@@ -104,6 +104,12 @@ public sealed partial class ReachSimViewModel : ObservableObject
     public event EventHandler? SceneChanged;
     /// <summary>정차가 바뀌어 카메라를 다시 맞춰야 함.</summary>
     public event EventHandler? ViewReset;
+    /// <summary>
+    /// 영역 데이터(정차·리프트·영역 구성)를 서버에 저장함 — 계획 ▸ 영역·작업이 목록을 다시 받아야 한다.
+    /// 안 받으면 그 화면이 적용 전 정차를 계속 보여 주고, 그 폼으로 [선택 영역 수정]을 누르면 적용한 정차를 옛 값으로 덮어쓴다.
+    /// </summary>
+    public event EventHandler? AreasChanged;
+    private void NotifyAreasChanged() => AreasChanged?.Invoke(this, EventArgs.Empty);
 
     public bool HasYawChoice => YawOptions.Count > 1;
 
@@ -877,6 +883,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         }
         catch (Exception ex) { StatusMessage = $"정차 적용 실패({done}개 적용 후): {ex.Message}"; }
         finally { IsBusy = false; }
+        if (done > 0) NotifyAreasChanged();
         await SurveyAsync();
     }
 
@@ -927,6 +934,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
         }
         catch (Exception ex) { SplitPlanText = $"영역 분리 적용 실패(DB 변경 없음): {ex.Message}"; return; }
         finally { IsSplitting = false; }
+        NotifyAreasChanged();
         ClearOptima();
         await SurveyAsync();
     }
@@ -958,6 +966,7 @@ public sealed partial class ReachSimViewModel : ObservableObject
             StatusMessage = $"{a.Area.Name} 정차 덮어쓰기 해제 — 다시 조사합니다.";
         }
         catch (Exception ex) { StatusMessage = $"덮어쓰기 해제 실패: {ex.Message}"; return; }
+        NotifyAreasChanged();
         await SurveyAsync();
     }
 

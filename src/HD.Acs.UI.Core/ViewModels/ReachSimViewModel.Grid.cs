@@ -85,6 +85,7 @@ public sealed partial class ReachSimViewModel
         finally { IsGridding = false; }
         if (!applied) return;
 
+        NotifyAreasChanged();
         ClearOptima();
         try { ApplyAreaWalls(await _api.GetAreasAsync(TankId)); } catch { /* 면 목록은 그대로 */ }
         await SurveyAsync();

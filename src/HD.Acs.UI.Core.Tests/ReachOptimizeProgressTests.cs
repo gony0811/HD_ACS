@@ -26,8 +26,12 @@ public class ReachOptimizeProgressTests
             nameof(IAcsApiClient.GetAreasAsync) => Task.FromResult<IReadOnlyList<AreaDto>>(
                 Areas.Where(a => a.WallCode == (string?)args![1] && a.Level == (int?)args[2]).ToList()),
             nameof(IAcsApiClient.GetStationOptimaAsync) => Optimize((Guid?)args![3], (CancellationToken)args[4]!),
+            nameof(IAcsApiClient.SetAreaStationAsync) => SetStation((Guid)args![0]),
             _ => m.ReturnType == typeof(Task) ? Task.CompletedTask : null,
         };
+
+        public List<Guid> StationSaves { get; } = new();
+        private Task SetStation(Guid areaId) { lock (StationSaves) StationSaves.Add(areaId); return Task.CompletedTask; }
 
         private async Task<IReadOnlyList<ReachStationOptimumDto>?> Optimize(Guid? areaId, CancellationToken ct)
         {
@@ -62,6 +66,23 @@ public class ReachOptimizeProgressTests
         fake.Areas = areas.ToList();
         var vm = new ReachSimViewModel(api) { TankId = "CT1", SelectedLevel = 4, SelectedWall = "PU" };
         return (vm, fake);
+    }
+
+    /// <summary>찾은 정차를 적용하면 계획 ▸ 영역·작업이 목록을 다시 받도록 알린다(2026-11-25 — 적용 전 정차가 그대로 보이던 문제).</summary>
+    [Fact]
+    public async Task 정차_적용은_영역_변경을_알린다()
+    {
+        var (vm, api) = Setup(Area("L4-R02C05", 5), Area("L4-R02C06", 5));
+        var notified = 0;
+        vm.AreasChanged += (_, _) => notified++;
+
+        await vm.OptimizeStationsCommand.ExecuteAsync(null);
+        Assert.Equal(0, notified);                                  // 계산만으로는 알리지 않는다
+
+        vm.SelectedOptimum = vm.Optima[0];
+        await vm.ApplyOptimumCommand.ExecuteAsync(null);
+        Assert.Single(api.StationSaves);
+        Assert.Equal(1, notified);
     }
 
     [Fact]

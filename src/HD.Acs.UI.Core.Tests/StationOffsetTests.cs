@@ -188,6 +188,29 @@ public class StationOffsetTests
         Assert.Equal(SuCy + 1.10, vm.StationY, 6);
     }
 
+    /// <summary>
+    /// 2026-11-25 현장(SU L3=내부 L4 R02C05·C06) — 리치·간섭에서 정차점 최적화를 적용한 뒤 영역·작업 탭으로 돌아오면 목록이 적용 전 것이라
+    /// 자동 정차점(기본 이격 0.8 m)이 그대로 보였다. 리치 화면이 알리면 <see cref="AreaPlanningViewModel.ReloadAreasAsync"/> 가 목록을 다시 받아
+    /// 같은 영역 선택을 유지한 채 폼을 저장된 정차로 다시 채운다.
+    /// </summary>
+    [Fact]
+    public async Task ReloadAreas_AfterOptimizeApply_ShowsSavedStation()
+    {
+        var (vm, server) = await BuildAsync(WallSu(), SuArea(null, null, standoff: null));   // 적용 전 — 덮어쓰기 없음
+        Assert.False(vm.StationOverride);
+        Assert.Equal(SuCy + 0.8, vm.StationY, 6);                                            // 자동 정차점(기본 0.8)
+
+        server.AreaJson = SuArea(SuCx - 0.1, SuCy + 1.3995, standoff: 1.3995);               // 리치 화면에서 최적화 적용
+        Assert.Equal(SuCy + 0.8, vm.StationY, 6);                                            // 목록을 다시 받기 전에는 옛 값
+
+        await vm.ReloadAreasAsync();
+        Assert.Equal(Area, vm.SelectedArea?.AreaId);                                         // 선택 유지
+        Assert.True(vm.StationOverride);
+        Assert.Equal(SuCx - 0.1, vm.StationX, 6);
+        Assert.Equal(SuCy + 1.3995, vm.StationY, 6);
+        Assert.Equal(1.3995, vm.StationStandoffM!.Value, 6);
+    }
+
     private static object PmArea() => new
     {
         areaId = Area, tankId = "CT1", wallCode = "PM", level = 2, name = "PM-L2-01",
