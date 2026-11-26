@@ -138,13 +138,44 @@ public sealed partial class MissionViewModel : ObservableObject
     }
 
     // ── 부분 검사 계획 (계획 ▸ 시나리오 — 검사 대상 영역 편집: 좌 풀[+] / 우 대상[−]) ──
-    /// <summary>선창 영역 풀(아직 대상이 아닌 영역).</summary>
+    // 원본 목록(_poolAll·_chosenAll)이 정본이고, 화면 목록(AvailableAreas·SelectedAreas)은 층·면·이름 필터를 건 결과다.
+    // 저장은 항상 원본 대상 목록 전체 — 필터로 가려진 대상도 빠지지 않는다.
+    private readonly List<ScenarioAreaPick> _poolAll = new();
+    private readonly List<ScenarioAreaPick> _chosenAll = new();
+
+    /// <summary>선창 영역 풀(아직 대상이 아닌 영역) — 필터 적용 결과.</summary>
     public ObservableCollection<ScenarioAreaPick> AvailableAreas { get; } = new();
-    /// <summary>검사 대상 목록. 0개 = 선창 전체 검사(하위호환).</summary>
+    /// <summary>검사 대상 목록 — 필터 적용 결과. 전체 대상 0개 = 선창 전체 검사(하위호환).</summary>
     public ObservableCollection<ScenarioAreaPick> SelectedAreas { get; } = new();
     [ObservableProperty] private string _scenarioAreaSummary = "";
+    /// <summary>검사 대상의 층·면별 개수 — 잘못 넣은 층·면을 한눈에 보게.</summary>
+    [ObservableProperty] private string _scenarioAreaBreakdown = "";
+    [ObservableProperty] private string _availableAreasHeader = "선창 영역";
+    [ObservableProperty] private string _selectedAreasHeader = "검사 대상";
 
+    /// <summary>층 필터 선택지 — "전체 층" + 영역이 있는 층.</summary>
+    public ObservableCollection<AreaFilterOption> LevelFilterOptions { get; } = new();
+    /// <summary>면 필터 선택지 — "전체 면" + 영역이 있는 면(선택 층 기준).</summary>
+    public ObservableCollection<AreaFilterOption> WallFilterOptions { get; } = new();
+    [ObservableProperty] private AreaFilterOption? _levelFilter;
+    [ObservableProperty] private AreaFilterOption? _wallFilter;
+    /// <summary>영역 이름 검색(부분 일치, 대소문자 무시).</summary>
+    [ObservableProperty] private string _areaNameFilter = "";
+
+    private bool _rebuildingFilters;
     private int _areasLoadSeq;   // 재진입 가드 — 시나리오 연속 선택/저장 재로드 시 교차 방지(중복 추가 버그)
+
+    /// <summary>면 필터·표시 순서(바닥 → 우현 → 좌현 → 천장 → 격벽).</summary>
+    private static readonly string[] WallFilterOrder = { "B", "SL", "SM", "SU", "PL", "PM", "PU", "T", "F", "A" };
+
+    partial void OnLevelFilterChanged(AreaFilterOption? value)
+    {
+        if (_rebuildingFilters) return;
+        RebuildWallFilterOptions();
+        ApplyAreaFilter();
+    }
+    partial void OnWallFilterChanged(AreaFilterOption? value) { if (!_rebuildingFilters) ApplyAreaFilter(); }
+    partial void OnAreaNameFilterChanged(string value) => ApplyAreaFilter();
 
     private async Task LoadScenarioAreasAsync()
     {
@@ -152,7 +183,8 @@ public sealed partial class MissionViewModel : ObservableObject
         var sc = SelectedScenario;
         if (sc is null)
         {
-            AvailableAreas.Clear(); SelectedAreas.Clear(); ScenarioAreaSummary = "";
+            _poolAll.Clear(); _chosenAll.Clear();
+            RebuildLevelFilterOptions(); ApplyAreaFilter();
             return;
         }
         try
@@ -162,15 +194,13 @@ public sealed partial class MissionViewModel : ObservableObject
             if (seq != _areasLoadSeq) return;   // 그 사이 다른 로드가 시작됨 — 이 결과는 폐기
 
             // 임시 리스트에 구성 후 한 번에 교체 — await 교차로 인한 중복 원천 차단
-            var pool = new List<ScenarioAreaPick>();
-            var chosen = new List<ScenarioAreaPick>();
+            _poolAll.Clear(); _chosenAll.Clear();
             foreach (var a in all.OrderBy(x => x.Level).ThenBy(x => x.WallCode).ThenBy(x => x.Name))
-                (linked.Contains(a.AreaId) ? chosen : pool)
+                (linked.Contains(a.AreaId) ? _chosenAll : _poolAll)
                     .Add(new ScenarioAreaPick(a.AreaId, a.WallCode, a.Level, a.Name));
 
-            AvailableAreas.Clear(); foreach (var p in pool) AvailableAreas.Add(p);
-            SelectedAreas.Clear(); foreach (var p in chosen) SelectedAreas.Add(p);
-            UpdateScenarioAreaSummary();
+            RebuildLevelFilterOptions();   // 필터 선택은 값으로 유지(다른 시나리오로 바꿔도 같은 층·면)
+            ApplyAreaFilter();
         }
         catch (Exception ex)
         {
@@ -178,30 +208,145 @@ public sealed partial class MissionViewModel : ObservableObject
         }
     }
 
-    private void UpdateScenarioAreaSummary() =>
-        ScenarioAreaSummary = SelectedAreas.Count == 0
-            ? $"대상 0개 — 선창 전체 검사 (풀 {AvailableAreas.Count}개)"
-            : $"대상 {SelectedAreas.Count}개 — 부분 검사";
+    private void RebuildLevelFilterOptions()
+    {
+        var keep = LevelFilter?.Level;
+        _rebuildingFilters = true;
+        try
+        {
+            LevelFilterOptions.Clear();
+            LevelFilterOptions.Add(new AreaFilterOption("전체 층", null, null));
+            foreach (var lv in _poolAll.Concat(_chosenAll).Select(p => p.Level).Distinct().Order())
+                LevelFilterOptions.Add(new AreaFilterOption(LevelLabel.Of(lv), lv, null));
+            LevelFilter = LevelFilterOptions.FirstOrDefault(o => o.Level == keep) ?? LevelFilterOptions[0];
+        }
+        finally { _rebuildingFilters = false; }
+        RebuildWallFilterOptions();
+    }
+
+    private void RebuildWallFilterOptions()
+    {
+        var keep = WallFilter?.Wall;
+        var lv = LevelFilter?.Level;
+        _rebuildingFilters = true;
+        try
+        {
+            WallFilterOptions.Clear();
+            WallFilterOptions.Add(new AreaFilterOption("전체 면", null, null));
+            var walls = _poolAll.Concat(_chosenAll)
+                .Where(p => lv is null || p.Level == lv)
+                .Select(p => p.WallCode).Distinct()
+                .OrderBy(w => Array.IndexOf(WallFilterOrder, w) is var i && i >= 0 ? i : int.MaxValue).ThenBy(w => w);
+            foreach (var w in walls)
+            {
+                var name = TankLayout.Walls.FirstOrDefault(x => x.Code == w)?.Name;
+                WallFilterOptions.Add(new AreaFilterOption(name is null ? w : $"{w} · {name}", null, w));
+            }
+            // 선택했던 면이 이 층에 없으면 "전체 면"으로 — 보이지 않는 면 필터로 목록이 비어 보이지 않게
+            WallFilter = WallFilterOptions.FirstOrDefault(o => o.Wall == keep) ?? WallFilterOptions[0];
+        }
+        finally { _rebuildingFilters = false; }
+    }
+
+    private bool PassesAreaFilter(ScenarioAreaPick p)
+    {
+        if (LevelFilter?.Level is int lv && p.Level != lv) return false;
+        if (WallFilter?.Wall is string w && !string.Equals(p.WallCode, w, StringComparison.OrdinalIgnoreCase)) return false;
+        var q = AreaNameFilter?.Trim();
+        return string.IsNullOrEmpty(q) || p.Name.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>필터가 하나라도 걸려 있는지.</summary>
+    public bool IsAreaFilterActive =>
+        LevelFilter?.Level is not null || WallFilter?.Wall is not null || !string.IsNullOrWhiteSpace(AreaNameFilter);
+
+    private void ApplyAreaFilter()
+    {
+        AvailableAreas.Clear(); foreach (var p in _poolAll.Where(PassesAreaFilter)) AvailableAreas.Add(p);
+        SelectedAreas.Clear(); foreach (var p in _chosenAll.Where(PassesAreaFilter)) SelectedAreas.Add(p);
+        OnPropertyChanged(nameof(IsAreaFilterActive));
+        AddFilteredAreasCommand.NotifyCanExecuteChanged();
+        RemoveFilteredAreasCommand.NotifyCanExecuteChanged();
+        UpdateScenarioAreaSummary();
+    }
+
+    private void UpdateScenarioAreaSummary()
+    {
+        if (SelectedScenario is null)
+        {
+            ScenarioAreaSummary = ""; ScenarioAreaBreakdown = "";
+            AvailableAreasHeader = "선창 영역"; SelectedAreasHeader = "검사 대상";
+            return;
+        }
+        ScenarioAreaSummary = _chosenAll.Count == 0
+            ? $"대상 0개 — 선창 전체 검사 (풀 {_poolAll.Count}개)"
+            : $"대상 {_chosenAll.Count}개 — 부분 검사";
+        ScenarioAreaBreakdown = _chosenAll.Count == 0 ? "" : string.Join(" · ",
+            _chosenAll.GroupBy(p => (p.Level, p.WallCode))
+                .OrderBy(g => g.Key.Level).ThenBy(g => Array.IndexOf(WallFilterOrder, g.Key.WallCode))
+                .Select(g => $"{LevelLabel.Of(g.Key.Level)} {g.Key.WallCode} {g.Count()}"));
+        bool f = IsAreaFilterActive;
+        AvailableAreasHeader = f ? $"선창 영역 (표시 {AvailableAreas.Count} / {_poolAll.Count})" : $"선창 영역 ({_poolAll.Count})";
+        SelectedAreasHeader = f ? $"검사 대상 (표시 {SelectedAreas.Count} / {_chosenAll.Count})" : $"검사 대상 ({_chosenAll.Count})";
+    }
 
     /// <summary>풀 → 대상 (정렬 위치 유지 삽입).</summary>
     [RelayCommand]
     private void AddScenarioArea(ScenarioAreaPick? pick)
     {
-        if (pick is null || !AvailableAreas.Remove(pick)) return;
-        InsertSorted(SelectedAreas, pick);
-        UpdateScenarioAreaSummary();
+        if (pick is null || !_poolAll.Remove(pick)) return;
+        InsertSorted(_chosenAll, pick);
+        ApplyAreaFilter();
     }
 
     /// <summary>대상 → 풀.</summary>
     [RelayCommand]
     private void RemoveScenarioArea(ScenarioAreaPick? pick)
     {
-        if (pick is null || !SelectedAreas.Remove(pick)) return;
-        InsertSorted(AvailableAreas, pick);
-        UpdateScenarioAreaSummary();
+        if (pick is null || !_chosenAll.Remove(pick)) return;
+        InsertSorted(_poolAll, pick);
+        ApplyAreaFilter();
     }
 
-    private static void InsertSorted(ObservableCollection<ScenarioAreaPick> list, ScenarioAreaPick pick)
+    /// <summary>지금 화면에 보이는 풀 영역을 모두 대상으로 (필터로 고른 층·면만 한 번에).</summary>
+    [RelayCommand(CanExecute = nameof(CanAddFiltered))]
+    private void AddFilteredAreas()
+    {
+        var picks = AvailableAreas.ToList();
+        foreach (var p in picks) { _poolAll.Remove(p); InsertSorted(_chosenAll, p); }
+        ApplyAreaFilter();
+        StatusMessage = $"검사 대상에 {picks.Count}개 추가 — 저장해야 반영됩니다.";
+    }
+    private bool CanAddFiltered() => AvailableAreas.Count > 0;
+
+    /// <summary>지금 화면에 보이는 대상을 모두 풀로.</summary>
+    [RelayCommand(CanExecute = nameof(CanRemoveFiltered))]
+    private void RemoveFilteredAreas()
+    {
+        var picks = SelectedAreas.ToList();
+        foreach (var p in picks) { _chosenAll.Remove(p); InsertSorted(_poolAll, p); }
+        ApplyAreaFilter();
+        StatusMessage = $"검사 대상에서 {picks.Count}개 제거 — 저장해야 반영됩니다.";
+    }
+    private bool CanRemoveFiltered() => SelectedAreas.Count > 0;
+
+    /// <summary>층·면·이름 필터 해제.</summary>
+    [RelayCommand]
+    private void ClearAreaFilter()
+    {
+        _rebuildingFilters = true;
+        try
+        {
+            LevelFilter = LevelFilterOptions.FirstOrDefault();
+            AreaNameFilter = "";
+        }
+        finally { _rebuildingFilters = false; }
+        RebuildWallFilterOptions();
+        WallFilter = WallFilterOptions.FirstOrDefault();
+        ApplyAreaFilter();
+    }
+
+    private static void InsertSorted(List<ScenarioAreaPick> list, ScenarioAreaPick pick)
     {
         int i = 0;
         while (i < list.Count &&
@@ -210,7 +355,7 @@ public sealed partial class MissionViewModel : ObservableObject
         list.Insert(i, pick);
     }
 
-    /// <summary>대상 목록을 시나리오에 저장 (0개 = 전체 검사로 복귀).</summary>
+    /// <summary>대상 목록을 시나리오에 저장 (0개 = 전체 검사로 복귀). 필터와 무관하게 전체 대상을 저장한다.</summary>
     [RelayCommand]
     private async Task SaveScenarioAreasAsync()
     {
@@ -218,7 +363,7 @@ public sealed partial class MissionViewModel : ObservableObject
         if (sc is null) { StatusMessage = "시나리오를 먼저 선택하세요."; return; }
         try
         {
-            var ids = SelectedAreas.Select(p => p.AreaId).ToList();
+            var ids = _chosenAll.Select(p => p.AreaId).ToList();
             await _api.SetScenarioAreasAsync(sc.ScenarioId, ids);
             StatusMessage = ids.Count == 0
                 ? $"'{sc.Name}' 검사 대상 저장 — 선창 전체 검사"
@@ -795,6 +940,12 @@ public static class WorkOutcome
 public sealed record ScenarioAreaPick(Guid AreaId, string WallCode, int Level, string Name)
 {
     public string LevelText => LevelLabel.Of(Level);
+}
+
+/// <summary>검사 대상 영역 필터 선택지 — Level·Wall 이 null 이면 "전체".</summary>
+public sealed record AreaFilterOption(string Label, int? Level, string? Wall)
+{
+    public override string ToString() => Label;
 }
 
 /// <summary>용접라인(액션) 행. Status: PLANNED(미배차) | WAITING | RUNNING | FINISHED | FAILED.</summary>

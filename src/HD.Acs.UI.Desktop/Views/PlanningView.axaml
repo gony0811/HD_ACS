@@ -52,17 +52,46 @@
                 <Border Grid.Row="0" Grid.RowSpan="4" Grid.Column="1" Margin="12,0,0,0"
                         Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="10">
-                    <Grid RowDefinitions="Auto,Auto,*,Auto">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
                         <TextBlock Grid.Row="0" Text="검사 대상 영역 (부분 검사 계획)" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" />
-                        <TextBlock Grid.Row="1" Margin="0,0,0,6" FontSize="11.5"
+                        <TextBlock Grid.Row="1" Margin="0,0,0,2" FontSize="11.5"
                                    Foreground="{DynamicResource AppMutedTextBrush}"
                                    Text="{Binding Mission.ScenarioAreaSummary}" />
+                        <TextBlock Grid.Row="2" Margin="0,0,0,6" FontSize="11" TextWrapping="Wrap"
+                                   ToolTip.Tip="검사 대상의 층·면별 개수 — 의도하지 않은 층·면이 섞였는지 확인"
+                                   Text="{Binding Mission.ScenarioAreaBreakdown}" />
+                        <!-- 필터: 양쪽 목록에 함께 걸린다. 저장은 필터와 무관하게 전체 대상 -->
+                        <Grid Grid.Row="3" ColumnDefinitions="*,6,*" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
+                            <ComboBox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Stretch" MinHeight="28"
+                                      ToolTip.Tip="층 필터"
+                                      ItemsSource="{Binding Mission.LevelFilterOptions}"
+                                      SelectedItem="{Binding Mission.LevelFilter}" />
+                            <ComboBox Grid.Row="0" Grid.Column="2" HorizontalAlignment="Stretch" MinHeight="28"
+                                      ToolTip.Tip="면 필터 (선택 층에 영역이 있는 면만)"
+                                      ItemsSource="{Binding Mission.WallFilterOptions}"
+                                      SelectedItem="{Binding Mission.WallFilter}" />
+                            <TextBox Grid.Row="1" Grid.Column="0" MinHeight="28" Margin="0,6,0,0"
+                                     Watermark="영역 이름 검색" VerticalContentAlignment="Center"
+                                     Text="{Binding Mission.AreaNameFilter}" />
+                            <Button Grid.Row="1" Grid.Column="2" Content="필터 해제" MinHeight="28" Margin="0,6,0,0"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    IsEnabled="{Binding Mission.IsAreaFilterActive}"
+                                    Command="{Binding Mission.ClearAreaFilterCommand}" />
+                        </Grid>
                         <!-- 좌: 선창 영역 풀 [+] / 우: 검사 대상 [−] -->
-                        <Grid Grid.Row="2" ColumnDefinitions="*,8,*" RowDefinitions="Auto,*">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="선창 영역" FontSize="11" FontWeight="Bold"
+                        <Grid Grid.Row="4" ColumnDefinitions="*,8,*" RowDefinitions="Auto,*,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Mission.AvailableAreasHeader}" FontSize="11" FontWeight="Bold"
                                        Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
-                            <TextBlock Grid.Row="0" Grid.Column="2" Text="검사 대상" FontSize="11" FontWeight="Bold"
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Mission.SelectedAreasHeader}" FontSize="11" FontWeight="Bold"
                                        Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,3" />
+                            <Button Grid.Row="2" Grid.Column="0" Content="보이는 영역 모두 추가 ▶" MinHeight="26" Margin="0,6,0,0"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    ToolTip.Tip="지금 필터로 보이는 선창 영역만 검사 대상으로 옮깁니다"
+                                    Command="{Binding Mission.AddFilteredAreasCommand}" />
+                            <Button Grid.Row="2" Grid.Column="2" Content="◀ 보이는 대상 모두 제거" MinHeight="26" Margin="0,6,0,0"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    ToolTip.Tip="지금 필터로 보이는 검사 대상만 풀로 되돌립니다"
+                                    Command="{Binding Mission.RemoveFilteredAreasCommand}" />
                             <ScrollViewer Grid.Row="1" Grid.Column="0" VerticalScrollBarVisibility="Auto">
                                 <ItemsControl ItemsSource="{Binding Mission.AvailableAreas}">
                                     <ItemsControl.ItemTemplate>
@@ -102,7 +131,7 @@
                                 </ItemsControl>
                             </ScrollViewer>
                         </Grid>
-                        <Button Grid.Row="3" Content="대상 저장" MinHeight="30" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="110"
+                        <Button Grid.Row="5" Content="대상 저장" MinHeight="30" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="110"
                                 ToolTip.Tip="대상 목록만 검사(run 시작 시 전개). 대상 0개 = 선창 전체 검사"
                                 Command="{Binding Mission.SaveScenarioAreasCommand}" />
                     </Grid>
