@@ -220,13 +220,13 @@ public static class InspectionProfileService
                 : new SeamScanProfile(e.Name, e.Version, wps.Select(w => new ScanWaypoint(w.X, w.Y, w.Z, w.RxDeg, w.Theta, w.RzDeg)).ToList());
         }
         var map = rows.ToDictionary(r => (r.SeamType, r.WallCode, r.Direction), r => Scan(r.AmrProfileId));
-        // CROSS4_L·CROSS4_R 은 그 이름의 지정이 없으면 접미 없는 CROSS4 지정으로(AMR 이 아직 좌우를 나눠 보내지 않을 때)
+        // CROSS4_T1~T4 는 그 이름의 지정이 없으면 접미 없는 CROSS4 지정으로(AMR 이 아직 좌우를 나눠 보내지 않을 때)
         return (seamType, wallCode, direction) =>
         {
             var st = AreaTaskRules.Normalize(seamType);
             var wall = wallCode.ToUpperInvariant();
             if (map.TryGetValue((st, wall, direction), out var p)) return p;
-            return st is Cross4Side.Left or Cross4Side.Right && map.TryGetValue(("CROSS4", wall, direction), out var q) ? q : null;
+            return Cross4Side.IsTyped(st) && map.TryGetValue(("CROSS4", wall, direction), out var q) ? q : null;
         };
     }
 

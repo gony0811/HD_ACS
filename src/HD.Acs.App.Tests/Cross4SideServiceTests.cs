@@ -52,7 +52,7 @@ public class Cross4SideServiceTests
             Task("pmMidLine", pm, 7, "LINE", 4.18, 1.18, 4.18, 1.54),
             Task("pmMid", pm, 8, "CROSS4", 4.0, 1.0, 4.36, 1.0),
             // 이미 정한 값은 overwrite 가 아니면 건드리지 않는다
-            Task("pmFixed", pm, 6, "CROSS4_L", 1.36, 0.5, 1.72, 0.5));
+            Task("pmFixed", pm, 6, "CROSS4_T1", 1.36, 0.5, 1.72, 0.5));
         await db.SaveChangesAsync();
         return (new Cross4SideService(db, NullLogger<Cross4SideService>.Instance), db, ids);
     }
@@ -78,10 +78,10 @@ public class Cross4SideServiceTests
         var applied = await svc.ClassifyAsync("CT1", apply: true, overwrite: false, "tester");
         Assert.True(applied.Applied);
         var types = await db.AreaTasks.AsNoTracking().ToDictionaryAsync(t => t.TaskId, t => t.SeamType);
-        Assert.Equal("CROSS4_R", types[ids["pmCross"]]);
-        Assert.Equal("CROSS4_L", types[ids["smCross"]]);
+        Assert.Equal("CROSS4_T2", types[ids["pmCross"]]);
+        Assert.Equal("CROSS4_T1", types[ids["smCross"]]);
         Assert.Equal("CROSS4", types[ids["pmVert"]]);
-        Assert.Equal("CROSS4_L", types[ids["pmFixed"]]);
+        Assert.Equal("CROSS4_T1", types[ids["pmFixed"]]);
         Assert.Contains(await db.AuditLogs.ToListAsync(), a => a.Action == "CROSS4_SIDE_APPLY");
 
         // 다시 돌리면 정할 것이 남지 않는다(판정 불가 작업만)
@@ -98,7 +98,7 @@ public class Cross4SideServiceTests
         var r = await svc.ClassifyAsync("CT1", apply: true, overwrite: true, "tester");
         Assert.Equal(8, r.Total);
         Assert.Null(r.Rows.Single(x => x.TaskId == ids["pmFixed"]).After);
-        Assert.Equal("CROSS4_L", (await db.AreaTasks.FindAsync(ids["pmFixed"]))!.SeamType);
+        Assert.Equal("CROSS4_T1", (await db.AreaTasks.FindAsync(ids["pmFixed"]))!.SeamType);
     }
 
     [Fact]

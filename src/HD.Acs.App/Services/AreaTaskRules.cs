@@ -9,7 +9,7 @@ namespace HD.Acs.App.Services;
 public static class AreaTaskRules
 {
     /// <summary>
-    /// seamType = 용접라인 형태 카탈로그(VDA §8.2/§8.5.1, [협의 N13]) — canonical 8종:
+    /// seamType = 용접라인 형태 카탈로그(VDA §8.2/§8.5.1, [협의 N13]) — canonical 12종:
     /// LINE(직선) · CROSS3_R0/R90/R180/R270(T자 3갈래 회전 4종·면 자세 무관, 2026-10-07 개정)
     /// · CROSS4(4갈래 十자 교차) · CORNER2(2면 코너) · CORNER3(3면 코너).
     /// POLYLINE 등 그 외 값은 거부(꺾인 용접선은 세그먼트별 LINE으로 등록 — 같은 영역=정렬 공유).
@@ -17,12 +17,12 @@ public static class AreaTaskRules
     /// 동일해야 한다(VDA §8.2). 사양서 개정 시 세 곳 + UI <c>AreaPlanningViewModel.SeamTypes</c> 를 함께 갱신할 것.
     /// </summary>
     public static readonly string[] SeamTypes =
-        { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3" };
+        { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_T1", "CROSS4_T2", "CROSS4_T3", "CROSS4_T4", "CORNER2", "CORNER3" };
 
     /// <summary>
     /// 입력 seamType 을 저장용 canonical 값으로 정규화한다(저장은 항상 canonical — 발행 시 param_schema enum 통과용).
     /// null → LINE(POST 기본). 대문자화 + legacy 별칭 매핑(AMR 파서와 동일, VDA §8.5.1 전환 유예):
-    /// CROSS→CROSS4 · CORNER→CORNER3 · bare CROSS3→CROSS3_R0. 그 밖의 값은 그대로(검증에서 걸러짐).
+    /// CROSS→CROSS4 · CROSS4_L→T1 · CROSS4_R→T2 · CORNER→CORNER3 · bare CROSS3→CROSS3_R0. 그 밖의 값은 그대로(검증에서 걸러짐).
     /// </summary>
     public static string Normalize(string? seamType)
     {
@@ -31,6 +31,8 @@ public static class AreaTaskRules
         return s switch
         {
             "CROSS"  => "CROSS4",
+            "CROSS4_L" => "CROSS4_T1",   // 구 좌/우 → T1/T2 [VDA 1.23]
+            "CROSS4_R" => "CROSS4_T2",
             "CORNER" => "CORNER3",
             "CROSS3" => "CROSS3_R0",
             _ => s,

@@ -15,7 +15,7 @@ public sealed record Cross4SideResult(string TankId, bool Applied, int Total, in
     IReadOnlyList<Cross4SideRow> Rows);
 
 /// <summary>
-/// 선창의 CROSS4 작업에 정면 기준 좌우(CROSS4_L / CROSS4_R)를 정한다 [VDA §8.2 · 1.22].
+/// 선창의 CROSS4 작업에 정면 기준 좌우(CROSS4_T1 / CROSS4_T2)를 정한다 [VDA §8.2 · 1.22].
 /// 가로지르는 수직 용접선은 같은 면의 세로 작업에서 찾고(<see cref="Cross4Side.CrossingVerticalU"/>), 그 선이 작업 가운데에서
 /// 정면 기준 어느 쪽으로 치우쳤는지로 정한다(<see cref="Cross4Side.SideOfVertical"/>, 1 cm 미만이면 판정 불가).
 /// 정하지 못하는 것(세로 작업·바닥/천장·가지를 그린 교차·이웃으로 끝을 가를 수 없음)은 그대로 둔다 — 운영자가 계획 화면에서 고른다.
@@ -25,7 +25,7 @@ public sealed class Cross4SideService(AcsDbContext db, ILogger<Cross4SideService
     public sealed class NotFoundException(string m) : Exception(m);
 
     /// <param name="apply">true 면 바뀐 작업의 seamType 을 저장한다(false = 미리보기).</param>
-    /// <param name="overwrite">true 면 이미 CROSS4_L/R 인 작업도 다시 정한다(false = 접미 없는 CROSS4 만).</param>
+    /// <param name="overwrite">true 면 이미 CROSS4_T1/T2 인 작업도 다시 정한다(false = 접미 없는 CROSS4 만). T3·T4 는 자동 판정 대상이 아니라 항상 건너뛴다.</param>
     public async Task<Cross4SideResult> ClassifyAsync(string tankId, bool apply, bool overwrite, string? userId, CancellationToken ct = default)
     {
         if (!await db.TankGeometries.AnyAsync(g => g.TankId == tankId, ct))
@@ -49,7 +49,9 @@ public sealed class Cross4SideService(AcsDbContext db, ILogger<Cross4SideService
         {
             var a = areas[t.AreaId];
             var before = t.SeamType;
-            if (!overwrite && before is Cross4Side.Left or Cross4Side.Right) continue;
+            var typed = Cross4Side.NormalizeLegacy(before);
+            if (typed is Cross4Side.T3 or Cross4Side.T4) continue;            // 신규 형상 — 운영자 지정
+            if (!overwrite && typed is Cross4Side.T1 or Cross4Side.T2) continue;
 
             string? after = null, reason = null, dir = null;
             if (!walls.TryGetValue(a.WallCode, out var w))

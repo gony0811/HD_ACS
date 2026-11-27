@@ -30,9 +30,9 @@
                             <Button x:Name="RenameTankButton" Content="변경" Margin="6,0,0,0" Command="{Binding RenameTankCommand}"
                                     ToolTip.Tip="진행 중인 run 이 있으면 바꿀 수 없습니다. 변경 뒤 [파일 ▸ 저장]을 하세요." />
                         </StackPanel>
-                        <Button x:Name="ClassifyCross4Button" Content="CROSS4 좌우 자동 판정 (CROSS4_L / R)" Margin="0,8,0,0"
+                        <Button x:Name="ClassifyCross4Button" Content="CROSS4 좌우 자동 판정 (CROSS4_T1 / T2)" Margin="0,8,0,0"
                                 Command="{Binding ClassifyCross4SidesCommand}"
-                                ToolTip.Tip="면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 CROSS4_L, 오른쪽에 있으면 CROSS4_R. 미리보기 후 확인하면 적용합니다." />
+                                ToolTip.Tip="면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 CROSS4_T1, 오른쪽에 있으면 CROSS4_T2. T3·T4 는 유형 선택에서 직접 고릅니다. 미리보기 후 확인하면 적용합니다." />
                         <TextBlock Text="세이지 조회 주소의 tankId 가 바뀝니다. 변경 뒤 [파일 ▸ 저장] — 옛 프로젝트 파일을 열면 옛 ID 로 다시 등록됩니다." FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>

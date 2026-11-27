@@ -12,7 +12,7 @@ public class AreaTaskRulesTests
     [Theory]
     [InlineData("LINE")]
     [InlineData("CROSS3_R0")] [InlineData("CROSS3_R90")] [InlineData("CROSS3_R180")] [InlineData("CROSS3_R270")]
-    [InlineData("CROSS4")] [InlineData("CROSS4_L")] [InlineData("cross4_r")] [InlineData("CORNER2")] [InlineData("CORNER3")]
+    [InlineData("CROSS4")] [InlineData("CROSS4_T1")] [InlineData("cross4_t2")] [InlineData("CROSS4_T3")] [InlineData("CROSS4_T4")] [InlineData("CROSS4_L")] [InlineData("cross4_r")] [InlineData("CORNER2")] [InlineData("CORNER3")]
     [InlineData("line")]          // 대소문자 무시 수용(저장 시 canonical 정규화)
     [InlineData("CROSS")]         // legacy 별칭 → CROSS4 (§8.5.1 전환 유예)
     [InlineData("CORNER")]        // legacy 별칭 → CORNER3
@@ -29,7 +29,7 @@ public class AreaTaskRulesTests
     [Theory]
     [InlineData("CROSS", "CROSS4")]
     [InlineData("CORNER", "CORNER3")]
-    [InlineData("CROSS3", "CROSS3_R0")]
+    [InlineData("CROSS3", "CROSS3_R0")] [InlineData("CROSS4_L", "CROSS4_T1")] [InlineData("cross4_r", "CROSS4_T2")] [InlineData("CROSS4_T3", "CROSS4_T3")]
     [InlineData("cross3_r90", "CROSS3_R90")]
     [InlineData("line", "LINE")]
     [InlineData(null, "LINE")]

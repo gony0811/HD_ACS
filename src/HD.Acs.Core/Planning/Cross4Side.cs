@@ -3,8 +3,9 @@ using HD.Acs.Core.Geometry;
 namespace HD.Acs.Core.Planning;
 
 /// <summary>
-/// CROSS4 좌우 구분 [VDA §8.2 · 1.22] — 면을 정면으로 마주 봤을 때(로봇·카메라 시점) 十자의 수직 용접선이
-/// 작업(가로 top–top 한 칸)의 왼쪽에 있으면 <c>CROSS4_L</c>, 오른쪽에 있으면 <c>CROSS4_R</c>.
+/// CROSS4 4유형 [VDA §8.2 · 1.23] — <c>CROSS4_T1</c>~<c>CROSS4_T4</c>. 기존 좌/우(<c>CROSS4_L</c>=T1, <c>CROSS4_R</c>=T2)를 흡수했다.
+/// T1·T2 는 면을 정면으로 마주 봤을 때(로봇·카메라 시점) 十자의 수직 용접선이 작업(가로 top–top 한 칸)의
+/// 왼쪽(T1)·오른쪽(T2)에 있는 형상 — 자동 판정(<see cref="SideOfVertical"/>)은 이 두 값만 낸다. T3·T4 는 신규 형상으로 운영자가 지정한다.
 /// ⚠️ CT1 도면 데이터는 수직선이 모두 작업 정가운데(치우침 0)라 도면만으로는 정해지지 않는다 — 실물 치우침(수 mm)은 도면에 없다.
 /// **작업 시작점/끝점 기준이 아니다** — ACS 는 정면 기준 값만 보내고, 용접선 시작→끝 방향이 교시와 반대인 경우의
 /// 보정(L/R 바꿔 고르기)은 HD_AMR 이 한다(2026-11-17 협의).
@@ -12,12 +13,32 @@ namespace HD.Acs.Core.Planning;
 /// </summary>
 public static class Cross4Side
 {
-    public const string Left = "CROSS4_L";
-    public const string Right = "CROSS4_R";
+    public const string T1 = "CROSS4_T1";
+    public const string T2 = "CROSS4_T2";
+    public const string T3 = "CROSS4_T3";
+    public const string T4 = "CROSS4_T4";
 
-    /// <summary>CROSS4 계열인가(CROSS4·CROSS4_L·CROSS4_R, legacy CROSS).</summary>
+    /// <summary>정면 왼쪽 = T1 (구 CROSS4_L).</summary>
+    public const string Left = T1;
+    /// <summary>정면 오른쪽 = T2 (구 CROSS4_R).</summary>
+    public const string Right = T2;
+
+    /// <summary>4유형 canonical 값(T1~T4).</summary>
+    public static readonly string[] Types = { T1, T2, T3, T4 };
+
+    /// <summary>구 표기 → 신 표기: CROSS4_L→T1, CROSS4_R→T2. 그 외(대문자화만)는 그대로.</summary>
+    public static string NormalizeLegacy(string? seamType)
+    {
+        var s = (seamType ?? "").Trim().ToUpperInvariant();
+        return s switch { "CROSS4_L" => T1, "CROSS4_R" => T2, _ => s };
+    }
+
+    /// <summary>T1~T4 중 하나인가(구 L/R 도 인정).</summary>
+    public static bool IsTyped(string? seamType) => Array.IndexOf(Types, NormalizeLegacy(seamType)) >= 0;
+
+    /// <summary>CROSS4 계열인가(CROSS4·T1~T4·구 L/R, legacy CROSS).</summary>
     public static bool IsCross4(string? seamType) =>
-        (seamType ?? "").Trim().ToUpperInvariant() is "CROSS4" or Left or Right or "CROSS";
+        NormalizeLegacy(seamType) is "CROSS4" or "CROSS" || IsTyped(seamType);
 
     /// <summary>
     /// 면 정면 기준 "왼쪽" 수평 단위벡터(도면 좌표). 법선 <paramref name="inwardNormal"/>은 면 → 선창 안쪽(로봇 쪽).

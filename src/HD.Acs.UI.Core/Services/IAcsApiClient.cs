@@ -184,7 +184,7 @@ public interface IAcsApiClient
     Task<bool> RenameTankAsync(string tankId, string newTankId, string userId, CancellationToken ct = default) =>
         Task.FromResult(false);
     /// <summary>
-    /// CROSS4 작업의 정면 좌우(CROSS4_L/R) 판정 [VDA §8.2 · 1.22]. apply=false = 미리보기, true = 바뀐 작업 저장.
+    /// CROSS4 작업의 정면 좌우(CROSS4_T1/T2) 판정 [VDA §8.2 · 1.22]. apply=false = 미리보기, true = 바뀐 작업 저장.
     /// null = 서버 미지원(구빌드).
     /// </summary>
     Task<Cross4SideResultDto?> ClassifyCross4SidesAsync(string tankId, bool apply, string userId, CancellationToken ct = default) =>

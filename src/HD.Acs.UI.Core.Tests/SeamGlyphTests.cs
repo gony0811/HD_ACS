@@ -27,8 +27,8 @@ public class SeamGlyphTests
     [InlineData("CROSS3_R90", SeamKind.Cross3)]
     [InlineData("cross3", SeamKind.Cross3)]
     [InlineData("CROSS4", SeamKind.Cross4)]
-    [InlineData("CROSS4_L", SeamKind.Cross4)]
-    [InlineData("CROSS4_R", SeamKind.Cross4)]
+    [InlineData("CROSS4_T1", SeamKind.Cross4)]
+    [InlineData("CROSS4_T2", SeamKind.Cross4)] [InlineData("CROSS4_T3", SeamKind.Cross4)] [InlineData("CROSS4_T4", SeamKind.Cross4)] [InlineData("CROSS4_L", SeamKind.Cross4)] [InlineData("CROSS4_R", SeamKind.Cross4)]
     [InlineData("CROSS", SeamKind.Cross4)]     // legacy 별칭
     [InlineData("CORNER2", SeamKind.Line)]
     [InlineData(null, SeamKind.Line)]
@@ -51,8 +51,8 @@ public class SeamGlyphTests
 
         Assert.Equal("3T 가지 미지정", SeamGlyph.Badge(Task("CROSS3_R0", 1, 1, null), BadgeStyle.Full));
         Assert.Equal("5+ ?", SeamGlyph.Badge(Task("CROSS4", 1, 1, null, seq: 5), BadgeStyle.Compact));
-        Assert.Equal("5+L ?", SeamGlyph.Badge(Task("CROSS4_L", 1, 1, null, seq: 5), BadgeStyle.Compact));   // 정면 좌우 표기
-        Assert.Equal("5+R", SeamGlyph.Badge(Task("CROSS4_R", 5, 5, new[] { new[] { 6.0, 5 }, new[] { 5.0, 6 }, new[] { 4.0, 5 }, new[] { 5.0, 4 } }, seq: 5), BadgeStyle.Compact));
+        Assert.Equal("5+T1 ?", SeamGlyph.Badge(Task("CROSS4_T1", 1, 1, null, seq: 5), BadgeStyle.Compact));   // 정면 좌우 표기
+        Assert.Equal("5+T2", SeamGlyph.Badge(Task("CROSS4_T2", 5, 5, new[] { new[] { 6.0, 5 }, new[] { 5.0, 6 }, new[] { 4.0, 5 }, new[] { 5.0, 4 } }, seq: 5), BadgeStyle.Compact));
         Assert.Equal("3T R0 (화면 ↓)", SeamGlyph.Badge(Task("CROSS3", 5, 5, new[] { new[] { 5.0, 4 }, new[] { 4.0, 5 }, new[] { 6.0, 5 } }), BadgeStyle.Full));
     }
 

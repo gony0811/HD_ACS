@@ -40,7 +40,7 @@ public static class SeamGlyph
     {
         var st = (seamType ?? "").Trim().ToUpperInvariant();
         if (st.StartsWith("CROSS3", StringComparison.Ordinal)) return SeamKind.Cross3;
-        if (st is "CROSS4" or "CROSS4_L" or "CROSS4_R" or "CROSS") return SeamKind.Cross4;   // CROSS = legacy 별칭(서버가 CROSS4로 정규화)
+        if (st is "CROSS4" or "CROSS" or "CROSS4_T1" or "CROSS4_T2" or "CROSS4_T3" or "CROSS4_T4" or "CROSS4_L" or "CROSS4_R")  return SeamKind.Cross4;   // CROSS = legacy 별칭, _L/_R = 구 표기(T1/T2)(서버가 CROSS4로 정규화)
         return SeamKind.Line;
     }
 
@@ -61,11 +61,13 @@ public static class SeamGlyph
         return i >= 0 && i + 1 < st.Length ? st[(i + 1)..] : "R0";
     }
 
-    /// <summary>CROSS4 정면 좌우 표기 — CROSS4_L="L", CROSS4_R="R", 그 외(접미 없음 포함) "".</summary>
+    /// <summary>CROSS4 유형 표기 — CROSS4_T1~T4="T1"~"T4"(구 L/R 은 T1/T2), 그 외(접미 없음 포함) "".</summary>
     public static string Cross4SideLabel(string? seamType) => (seamType ?? "").Trim().ToUpperInvariant() switch
     {
-        "CROSS4_L" => "L",
-        "CROSS4_R" => "R",
+        "CROSS4_T1" or "CROSS4_L" => "T1",
+        "CROSS4_T2" or "CROSS4_R" => "T2",
+        "CROSS4_T3" => "T3",
+        "CROSS4_T4" => "T4",
         _ => "",
     };
 

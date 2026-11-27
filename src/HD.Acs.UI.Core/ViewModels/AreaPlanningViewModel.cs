@@ -293,7 +293,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     // CROSS3*/CROSS4/CORNER* 는 HD_AMR 실행 게이트 OFF([협의 N13])라 실제 검사는 미동작 — 계획 데이터로 저장·전달만.
     // ⚠️ CROSS3/4 는 시작·끝점 2점만으로 교차 형상을 정의할 수 없다 — 교차 중심+가지 입력은 후속(제안: 데이터 모델 points 확장).
     public IReadOnlyList<string> SeamTypes { get; } =
-        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_L", "CROSS4_R", "CORNER2", "CORNER3" };
+        new[] { "LINE", "CROSS3_R0", "CROSS3_R90", "CROSS3_R180", "CROSS3_R270", "CROSS4", "CROSS4_T1", "CROSS4_T2", "CROSS4_T3", "CROSS4_T4", "CORNER2", "CORNER3" };
     [ObservableProperty] private string _selectedSeamType = "LINE";
 
     // ── CROSS3/4 교차 그리기 [VDA §8.5.1, N13] — 중심+가지 클릭, 회전은 서버가 자동 유도·표시 ──
@@ -960,7 +960,7 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
     partial void OnTankIdChanged(string value) => RenameTankCommand.NotifyCanExecuteChanged();
 
     /// <summary>
-    /// CROSS4 정면 좌우 자동 판정 [VDA §8.2 · 1.22] — 선창의 접미 없는 CROSS4 작업에 CROSS4_L/R 을 정한다.
+    /// CROSS4 정면 좌우 자동 판정 [VDA §8.2 · 1.23] — 선창의 접미 없는 CROSS4 작업에 CROSS4_T1/T2(정면 왼쪽/오른쪽)를 정한다.
     /// 서버가 먼저 미리보기로 계산하고, 확인하면 적용한다. 정하지 못한 작업(세로·바닥/천장·가지를 그린 교차 등)은 그대로 —
     /// 작업 목록에서 유형을 직접 고른다.
     /// </summary>
@@ -981,9 +981,9 @@ public sealed partial class AreaPlanningViewModel : ObservableObject
             }
             if (ConfirmAsync is not null && !await ConfirmAsync(
                     $"CROSS4 작업 {preview.Total}개 중 {preview.Changed}개의 유형을 정면 기준 좌우로 바꿉니다.\n" +
-                    $"  CROSS4_L {preview.Left}개 · CROSS4_R {preview.Right}개 · 판정 불가 {preview.Undecided}개\n" +
+                    $"  CROSS4_T1 {preview.Left}개 · CROSS4_T2 {preview.Right}개 · 판정 불가 {preview.Undecided}개\n" +
                     (preview.Undecided > 0 ? string.Join("\n", undecided) + "\n" : "") +
-                    "\n기준: 면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 L, 오른쪽에 있으면 R.\n" +
+                    "\n기준: 면을 정면으로 마주 봤을 때 十자의 수직 용접선이 작업 가운데에서 왼쪽에 있으면 T1, 오른쪽에 있으면 T2.\n" +
                     "판정 불가 작업은 그대로 둡니다(작업 목록에서 직접 고르세요). 변경 뒤 [파일 ▸ 저장]을 하세요.\n\n계속하시겠습니까?",
                     "CROSS4 좌우 판정"))
                 return;

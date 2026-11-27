@@ -83,7 +83,7 @@ public class Cross4SideTests
     }
 
     [Theory]
-    [InlineData("CROSS4", true)] [InlineData("cross4_l", true)] [InlineData("CROSS4_R", true)] [InlineData("CROSS", true)]
+    [InlineData("CROSS4", true)] [InlineData("cross4_t1", true)] [InlineData("CROSS4_T2", true)] [InlineData("CROSS", true)] [InlineData("CROSS4_T3", true)] [InlineData("CROSS4_T4", true)] [InlineData("CROSS4_L", true)] [InlineData("CROSS4_X", false)]
     [InlineData("CROSS3_R0", false)] [InlineData("LINE", false)] [InlineData(null, false)]
     public void IsCross4(string? st, bool expected) => Assert.Equal(expected, Cross4Side.IsCross4(st));
 }
